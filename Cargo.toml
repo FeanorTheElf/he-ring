@@ -1,0 +1,30 @@
+[package]
+name = "he-ring"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["rlib"]
+bench = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+feanor-math = { version = "1.5.2", features = ["generic_tests"] }
+rand = "0.8.5"
+rand_distr = "0.4.3"
+
+[features]
+record_timings = []
+
+[profile.profiling]
+inherits = "bench"
+debug = true
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
