@@ -74,6 +74,15 @@ pub trait GeneralizedFFT {
     }
 }
 
+///
+/// Used as a marker that indicates whether the ring structure induced by two [`GeneralizedFFT`]s
+/// is the same. Note that this should not consider the modulus, so really considers the number rings
+/// `Z[X]/(f(X))` without the reduction modulo `q`.
+/// 
+/// The latter is important, since it is common in HE to switch the modulus, e.g. by "rescaling".
+/// 
+/// Note that whenever `a.is_isomorphic(b)` is true, it is necessary that also `a.rank() == b.rank()`.
+/// 
 pub trait GeneralizedFFTIso<F: GeneralizedFFT>: GeneralizedFFT {
 
     fn is_isomorphic(&self, other: &F) -> bool;

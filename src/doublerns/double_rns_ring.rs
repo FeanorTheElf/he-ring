@@ -18,6 +18,24 @@ use feanor_math::primitive_int::*;
 use crate::complexfft::complex_fft_ring;
 use crate::rnsconv::*;
 
+///
+/// The conversion from and to double-RNS-representation, as required for double-RNS-based rings.
+/// Usually used to build a double-RNS-based ring via [`DoubleRNSRing`].
+/// 
+/// Concretely, we consider a ring `Z[X]/(f(X), q)` to have a double-RNS-representation, if it 
+/// decomposes into a product of prime rings, which is equivalent to `f(X)` splitting completely
+/// in `Zq` (and `q` being square-free). In this case, the map
+/// ```text
+/// Z[X]/(f(X), q) -> Zq x ... x Zq,    g -> (g(x))_x where f(x) = 0
+/// ```
+/// is a generalization of the number-theoretic transform (NTT). When a ring element is stored
+/// by the values in `Zq` corresponding to the right-hand side, we call this the double-RNS-representation,
+/// and it can be used to efficiently compute arithmetic. This trait now encapsulates this map and
+/// its inverse. In particular, this map is what [`GeneralizedFFT::fft_forward()`] must compute.
+/// 
+/// Note that this is most useful, if the map can be computed in time `o(deg(f)^2)`, which usually means
+/// that fast fourier-transform techniques are used for the evaluation.
+/// 
 pub trait GeneralizedFFT {
 
     type BaseRingBase: ?Sized + ZnRing;
@@ -27,22 +45,52 @@ pub trait GeneralizedFFT {
 
     fn rank(&self) -> usize;
 
+    ///
+    /// Computes the map
+    /// ```text
+    /// Z[X]/(f(X), q) -> Zq x ... x Zq,    g -> (g(x))_x where f(x) = 0
+    /// ```
+    /// For a more detailed explanation, see the trait-level doc [`GeneralizedFFT`].
+    /// 
     fn fft_forward<S, M>(&self, data: &mut [El<S>], ring: &S, memory_provider: &M)
         where S: ZnRingStore,
             S::Type: ZnRing + CanonicalIso<Self::BaseRingBase>,
             M: MemoryProvider<El<S>>;
 
+    ///
+    /// Computes the inverse of [`GeneralizedFFT::fft_forward()`].
+    /// 
     fn fft_backward<S, M>(&self, data: &mut [El<S>], ring: &S, memory_provider: &M)
         where S: ZnRingStore,
             S::Type: ZnRing + CanonicalIso<Self::BaseRingBase>,
             M: MemoryProvider<El<S>>;
 }
 
+///
+/// Used as a marker that indicates whether the ring structure induced by two [`GeneralizedFFT`]s
+/// is the same. Note that this should not consider the modulus, so really considers the number rings
+/// `Z[X]/(f(X))` without the reduction modulo `q`.
+/// 
+/// The latter is important, since it is common in HE to switch the modulus, e.g. by "rescaling".
+/// 
+/// Note that whenever `a.is_isomorphic(b)` is true, it is necessary that also `a.rank() == b.rank()`.
+/// 
 pub trait GeneralizedFFTIso<F: GeneralizedFFT>: GeneralizedFFT {
 
     fn is_isomorphic(&self, other: &F) -> bool;
 }
 
+///
+/// Used as a marker that indicates whether the ring structure induced by two `GeneralizedFFT`s
+/// is the same. Note that this should not consider the modulus, so really considers the number rings
+/// `Z[X]/(f(X))` without the reduction modulo `q`.
+/// 
+/// As opposed to [`GeneralizedFFTIso`], this refers to the relationship between a [`crate::doublerns::double_rns_ring::GeneralizedFFT`]
+/// and a [`crate::complexfft::complex_fft_ring::GeneralizedFFT`]. Since (apart from the underlying implementation), the 
+/// only formal differences are the modulus, this notion still makes sense.
+/// 
+/// See also [`GeneralizedFFTIso`].
+/// 
 pub trait GeneralizedFFTCrossIso<F: complex_fft_ring::GeneralizedFFT>: GeneralizedFFT {
 
     fn is_isomorphic(&self, other: &F) -> bool;

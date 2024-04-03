@@ -22,7 +22,8 @@ use super::RNSOperation;
 /// 
 /// # Implementation
 /// 
-/// The implementation is based on eprint.iacr.org/2016/510.pdf.
+/// The implementation is based on ["A Full RNS Variant of FV like Somewhat
+/// Homomorphic Encryption Schemes"](eprint.iacr.org/2016/510.pdf).
 /// 
 /// The basic idea is to perform a fast base conversion to `{ to_summands, m }`
 /// with a helper prime m. Furthermore, we can do this in a way to get the result

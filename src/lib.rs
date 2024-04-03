@@ -36,5 +36,13 @@ pub mod cyclotomic;
 /// Implementation of rings using complex-valued fast fourier transforms for efficient arithmetic.
 /// 
 pub mod complexfft;
+
+///
+/// Implementation of rings using double-RNS representation.
+/// 
 pub mod doublerns;
+
+///
+/// Implementation of fast RNS conversion algorithms.
+/// 
 pub mod rnsconv;
