@@ -24,14 +24,18 @@ use crate::rnsconv::*;
 /// 
 /// Concretely, we consider a ring `Z[X]/(f(X), q)` to have a double-RNS-representation, if it 
 /// decomposes into a product of prime rings, which is equivalent to `f(X)` splitting completely
-/// in `Zq` (and `q` being square-free). In this case, the map
+/// in `Zq` and `q = p1 ... pr` being square-free. In this case, the map
 /// ```text
 /// Z[X]/(f(X), q) -> Zq x ... x Zq,    g -> (g(x))_x where f(x) = 0
 /// ```
-/// is a generalization of the number-theoretic transform (NTT). When a ring element is stored
-/// by the values in `Zq` corresponding to the right-hand side, we call this the double-RNS-representation,
-/// and it can be used to efficiently compute arithmetic. This trait now encapsulates this map and
-/// its inverse. In particular, this map is what [`GeneralizedFFT::fft_forward()`] must compute.
+/// is a generalization of the number-theoretic transform (NTT). Furthermore, each `Zq` decomposes
+/// as `Zp1 x ... x Zpr`, and we arrive at a product of prime fields.
+/// 
+/// When a ring element is stored using the values in `Zq` corresponding to the right-hand side, 
+/// we call this the double-RNS-representation and the values the "double-RNS coefficients".
+/// This representation can be used to efficiently compute arithmetic operations. 
+/// This trait now encapsulates this isomorphism and its inverse. In particular, the isomorphism is 
+/// what [`GeneralizedFFT::fft_forward()`] must compute.
 /// 
 /// Note that this is most useful, if the map can be computed in time `o(deg(f)^2)`, which usually means
 /// that fast fourier-transform techniques are used for the evaluation.
@@ -182,6 +186,22 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
         &el.data[i * self.rank() + j]
     }
 
+    ///
+    /// Returns the `(i, j)`-th component of the element in double-RNS-representation. 
+    /// 
+    /// Note that strictly speaking, these components are indexed by prime divisors `p | q` and
+    /// `k in (Z/nZ)*` (assuming a root of unity `zeta` in `Zq` is fixed). Then, the `(p, k)`-th double-RNS
+    /// components of a ring element `a` would be `a mod (p, X - zeta^k) in Fp`. However, for easier 
+    /// handling in the program, we index all prime divisors `p | q` by `i` and all `k in (Z/nZ)*` by `j`.
+    /// 
+    /// The indexing of the primes is consistent with the order of the primes in the base ring (of type
+    /// [`zn_rns::Zn`]). The indexing of the `k` is quite unpredictable, as it depends on the implementation
+    /// of the underlying [`GeneralizedFFT`] (in particular, if it is implemented using standard FFTs, then
+    /// that in turn depends on the ordering used by [`feanor_math::algorithms::fft::FFTTable::unordered_fft()`]).
+    /// Therefore, you should not rely on any specific relationship between `j` and `k`, except that it will
+    /// remain constant during the lifetime of the ring. Note also that changing the order corresponds to an
+    /// automorphism of the ring.
+    /// 
     pub fn fourier_coefficient<'a>(&self, i: usize, j: usize, el: &'a DoubleRNSEl<R, F, M>) -> &'a El<R> {
         &el.data[i * self.rank() + j]
     }
@@ -190,6 +210,22 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
         &mut el.data[i * self.rank() + j]
     }
 
+    ///
+    /// Returns the `(i, j)`-th component of the element in double-RNS-representation. 
+    /// 
+    /// Note that strictly speaking, these components are indexed by prime divisors `p | q` and
+    /// `k in (Z/nZ)*` (assuming a root of unity `zeta` in `Zq` is fixed). Then, the `(p, k)`-th double-RNS
+    /// components of a ring element `a` would be `a mod (p, X - zeta^k) in Fp`. However, for easier 
+    /// handling in the program, we index all prime divisors `p | q` by `i` and all `k in (Z/nZ)*` by `j`.
+    /// 
+    /// The indexing of the primes is consistent with the order of the primes in the base ring (of type
+    /// [`zn_rns::Zn`]). The indexing of the `k` is quite unpredictable, as it depends on the implementation
+    /// of the underlying [`GeneralizedFFT`] (in particular, if it is implemented using standard FFTs, then
+    /// that in turn depends on the ordering used by [`feanor_math::algorithms::fft::FFTTable::unordered_fft()`]).
+    /// Therefore, you should not rely on any specific relationship between `j` and `k`, except that it will
+    /// remain constant during the lifetime of the ring. Note also that changing the order corresponds to an
+    /// automorphism of the ring.
+    /// 
     pub fn fourier_coefficient_mut<'a>(&self, i: usize, j: usize, el: &'a mut DoubleRNSEl<R, F, M>) -> &'a mut El<R> {
         &mut el.data[i * self.rank() + j]
     }
