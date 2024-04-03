@@ -1,13 +1,18 @@
 [package]
 name = "he-ring"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
+
+repository = "https://github.com/FeanorTheElf/he-ring"
+homepage = "https://github.com/FeanorTheElf/he-ring"
+keywords = ["cryptography", "homomorphic encryption"]
+readme = "Readme.md"
+description = "A library that provides fast implementations of rings commonly used in homomorphic encryption, built on feanor-math."
+license = "MIT"
 
 [lib]
 crate-type = ["rlib"]
 bench = true
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 feanor-math = { version = "1.5.2", features = ["generic_tests"] }
