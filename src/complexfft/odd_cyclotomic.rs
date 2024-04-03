@@ -21,10 +21,50 @@ use crate::cyclotomic::*;
 const CC: Complex64 = Complex64::RING;
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
 
+///
+/// Euler's totient function
+/// 
 fn phi(factorization: &Vec<(i64, usize)>) -> i64 {
     ZZ.prod(factorization.iter().map(|(p, e)| (p - 1) * ZZ.pow(*p, e - 1)))
 }
 
+///
+/// A [`GeneralizedFFT`] for odd-conductor cyclotomic rings, i.e. `Z[X]/(Phi_n(X), q)` for
+/// `n` an odd integer. Usually, this will only be used together with [`ComplexFFTBasedRing`].
+/// 
+/// # See also
+/// 
+/// [`super::pow2_cyclotomic::Pow2CyclotomicFFT`] in the case that the cyclotomic conductor is a power of
+/// two instead.
+/// 
+/// # Example
+/// 
+/// ```
+/// # use feanor_math::ring::*;
+/// # use feanor_math::rings::zn::*;
+/// # use feanor_math::rings::zn::zn_64::*;
+/// # use feanor_math::primitive_int::StaticRing;
+/// # use feanor_math::integer::*;
+/// # use feanor_math::mempool::DefaultMemoryProvider;
+/// # use feanor_math::algorithms::fft::*;
+/// # use feanor_math::{default_memory_provider, assert_el_eq};
+/// # use feanor_math::homomorphism::Homomorphism;
+/// # use feanor_math::rings::float_complex::Complex64;
+/// # use feanor_math::rings::extension::FreeAlgebra;
+/// # use feanor_math::rings::extension::FreeAlgebraStore;
+/// # use he_ring::complexfft::complex_fft_ring::*;
+/// # use he_ring::cyclotomic::*;
+/// # use he_ring::complexfft::odd_cyclotomic::OddCyclotomicFFT;
+/// type TheRing = ComplexFFTBasedRing<OddCyclotomicFFT<Zn, bluestein::FFTTableBluestein<Complex64>>, DefaultMemoryProvider, DefaultMemoryProvider>;
+/// 
+/// // the ring `F7[X]/(Phi_15(X)) = F7[X]/(X^8 - X^7 + X^5 - X^4 + X^3 - X + 1)`
+/// let R = <TheRing as RingStore>::Type::new(Zn::new(7), 15, default_memory_provider!(), default_memory_provider!());
+/// let root_of_unity = R.canonical_gen();
+/// assert_eq!(8, R.rank());
+/// assert_eq!(15, R.n());
+/// assert_el_eq!(&R, &R.one(), &R.pow(root_of_unity, 15));
+/// ```
+/// 
 pub struct OddCyclotomicFFT<R: ZnRingStore, F: FFTTable<Ring = Complex64> + ErrorEstimate> 
     where R::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>
 {
@@ -38,6 +78,13 @@ pub struct OddCyclotomicFFT<R: ZnRingStore, F: FFTTable<Ring = Complex64> + Erro
 impl<R: ZnRingStore, F: FFTTable<Ring = Complex64> + ErrorEstimate> OddCyclotomicFFT<R, F> 
     where R::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>
 {
+    ///
+    /// Computing this "generalized FFT" requires evaluating a polynomial at all primitive
+    /// `n`-th roots of unity. However, the base FFT will compute the evaluation at all `n`-th
+    /// roots of unity. This function gives an iterator over the indices (indices into the output of
+    /// the base FFT) that correspond to the primitive roots. Note that the base FFT is used via
+    /// [`FFTTable::unordered_fft()`], so this is nontrivial.
+    /// 
     fn fft_output_indices<'a>(&'a self) -> impl 'a + Iterator<Item = usize> {
         (0..self.rank()).scan(-1, move |state: &mut i64, _| {
             *state += 1;

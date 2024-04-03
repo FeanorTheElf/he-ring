@@ -26,7 +26,15 @@ extern crate test;
 
 #[macro_use]
 pub mod profiling;
+
+///
+/// Defines the trait [`cyclotomic::CyclotomicRing`] for rings of the form `R[X]/(Phi_n)`, where `R` is any base ring.
+/// 
 pub mod cyclotomic;
-pub mod doublerns;
+
+///
+/// Implementation of rings using complex-valued fast fourier transforms for efficient arithmetic.
+/// 
 pub mod complexfft;
+pub mod doublerns;
 pub mod rnsconv;

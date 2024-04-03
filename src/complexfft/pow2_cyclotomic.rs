@@ -8,11 +8,23 @@ use feanor_math::rings::zn::{ZnRing, ZnRingStore};
 use feanor_math::rings::extension::*;
 use feanor_math::integer::*;
 
-use super::complex_fft_ring::{GeneralizedFFT, ComplexFFTBasedRingBase, GeneralizedFFTIso};
+use super::complex_fft_ring::*;
 use crate::cyclotomic::*;
 
 const CC: Complex64 = Complex64::RING;
 
+///
+/// A [`GeneralizedFFT`] for power-of-two cyclotomic rings, i.e. `Z[X]/(X^(n/2) + 1, q)` for
+/// `n` a power of two.
+/// 
+/// Usually, this will only be used together with [`ComplexFFTBasedRing`]. See that doc for a usage
+/// example.
+/// 
+/// # See also
+/// 
+/// [`super::odd_cyclotomic::OddCyclotomicFFT`] in the case that the cyclotomic conductor is odd instead
+/// of a power of two.
+/// 
 pub struct Pow2CyclotomicFFT<R: ZnRingStore, F: FFTTable<Ring = Complex64> + ErrorEstimate> 
     where R::Type: ZnRing
 {
@@ -97,12 +109,12 @@ impl<R: ZnRingStore, M_Zn, M_CC> ComplexFFTBasedRingBase<Pow2CyclotomicFFT<R, co
         M_Zn: MemoryProvider<El<R>>,
         M_CC: MemoryProvider<Complex64El>
 {
-    pub fn new(base_ring: R, log2_n: usize, memory_provider_zn: M_Zn, memory_provider_cc: M_CC) -> RingValue<Self> {
+    pub fn new(base_ring: R, log2_ring_degree: usize, memory_provider_zn: M_Zn, memory_provider_cc: M_CC) -> RingValue<Self> {
         RingValue::from(
             Self::from_generalized_fft(
                 Pow2CyclotomicFFT::create(
                     base_ring, 
-                    cooley_tuckey::FFTTableCooleyTuckey::for_complex(Complex64::RING, log2_n)
+                    cooley_tuckey::FFTTableCooleyTuckey::for_complex(Complex64::RING, log2_ring_degree)
                 ), 
                 memory_provider_zn, 
                 memory_provider_cc

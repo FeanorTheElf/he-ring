@@ -3,10 +3,9 @@ use feanor_math::delegate;
 use feanor_math::rings::extension::*;
 
 ///
-/// Trait for rings `R[X]/(Phi_n)`, for a base ring `R`.
-/// Note that `Phi_n` is allowed to factor in `R`, hence this ring
-/// might not be integral. Furthermore, the residue class of `X`, i.e.
-/// the root of unity, is given by [`feanor_math::rings::extension::FreeAlgebra::canonical_gen()`].
+/// Trait for rings `R[X]/(Phi_n)`, for a base ring `R`. Note that `Phi_n` is allowed to factor in `R`, hence this ring
+/// might not be integral. Furthermore, the residue class of `X`, i.e. the root of unity, must be given by 
+/// [`feanor_math::rings::extension::FreeAlgebra::canonical_gen()`].
 /// 
 /// # Nontrivial automorphisms
 /// 
@@ -17,7 +16,7 @@ use feanor_math::rings::extension::*;
 /// instances `R, S: RingType` with `RingType: CyclotomicRing` we have `R.has_canonical_hom(S).is_some()`.
 /// Naturally, it is always required that `R.has_canonical_iso(R).is_some()`.
 /// 
-/// # Ambiguity for some implementations
+/// # Ambiguity in some situations
 /// 
 /// There is some ambiguity, as for `m` odd, we have `R[X]/(Phi_m) ~ R[X]/(Phi_(2m))` are isomorphic.
 /// It is up to implementations which of these representations should be exposed via this trait.
@@ -34,6 +33,9 @@ pub trait CyclotomicRing: FreeAlgebra {
     fn n(&self) -> usize;
 }
 
+///
+/// The [`RingStore`] belonging to [`CyclotomicRing`]
+/// 
 pub trait CyclotomicRingStore: RingStore
     where Self::Type: CyclotomicRing
 {

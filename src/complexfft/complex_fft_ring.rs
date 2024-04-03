@@ -32,7 +32,7 @@ const CC: Complex64 = Complex64::RING;
 /// and `fft_backward` should naturally compute the inverse map.
 /// 
 /// In practice, this is only sensible if `fft_forward` and `fft_backward` can be computed in 
-/// time `o(deg(f)^2)`, so if some FFT-techniques can be applied.
+/// time `o(deg(f)^2)`, which would usually be the case if some FFT-techniques can be applied.
 /// 
 pub trait GeneralizedFFT {
 
@@ -43,10 +43,27 @@ pub trait GeneralizedFFT {
 
     fn rank(&self) -> usize;
 
-    fn fft_forward<M: MemoryProvider<Complex64El>>(&self, data: &[El<Self::BaseRingStore>], destination: &mut [Complex64El], memory_provider: &M);
+    ///
+    /// Computes the map
+    /// ```text
+    ///     Fp[X]/(f) -> C^deg(f),  g -> (lift(g)(x))_x where f(x) = 0
+    /// ```
+    /// For more detail, see the trait-level doc of [`GeneralizedFFT`].
+    /// 
+    fn fft_forward<M: MemoryProvider<Complex64El>>(&self, input: &[El<Self::BaseRingStore>], destination: &mut [Complex64El], memory_provider: &M);
 
-    fn fft_backward<M_Zn: MemoryProvider<El<Self::BaseRingStore>>, M_CC: MemoryProvider<Complex64El>>(&self, data: &mut [Complex64El], destination: &mut [El<Self::BaseRingStore>], memory_provider_zn: &M_Zn, memory_provider_cc: &M_CC);
+    ///
+    /// Computes the inverse of [`fft_forward()`].
+    /// 
+    /// As opposed to [`fft_forward()`], this function is allowed to arbitrarily change the value
+    /// stored in `input`, should that enable a more efficient implementation.
+    /// 
+    fn fft_backward<M_Zn: MemoryProvider<El<Self::BaseRingStore>>, M_CC: MemoryProvider<Complex64El>>(&self, input: &mut [Complex64El], destination: &mut [El<Self::BaseRingStore>], memory_provider_zn: &M_Zn, memory_provider_cc: &M_CC);
 
+    ///
+    /// Computes the product of `lhs` and `rhs`, and stores it in `lhs`. Note that `lhs` here is
+    /// given in coefficient-representation and `rhs` is given in (complex-valued) FFT representation.
+    /// 
     fn mul_assign_fft<M_Zn: MemoryProvider<El<Self::BaseRingStore>>, M_CC: MemoryProvider<Complex64El>>(&self, lhs: &mut [El<Self::BaseRingStore>], rhs: &[Complex64El], memory_provider_zn: &M_Zn, memory_provider_cc: &M_CC) {
         let mut tmp = memory_provider_cc.get_new_init(self.rank(), |_| CC.zero());
         self.fft_forward(&lhs, &mut tmp, memory_provider_cc);
@@ -66,12 +83,61 @@ pub trait GeneralizedFFTSelfIso: Sized + GeneralizedFFTIso<Self> {}
 
 impl<F: GeneralizedFFT + GeneralizedFFTIso<F>> GeneralizedFFTSelfIso for F {}
 
+///
+/// Implementation of rings `Z[X]/(f(X), q)` that uses a [`GeneralizedFFT`] for fast arithmetic.
+/// 
+/// The concrete ring (i.e. the polynomial `f`) is determined by the used [`GeneralizedFFT`].
+/// In the most general case, you can use [`ComplexFFTBasedRingBase::from_generalized_fft()`] to 
+/// create an instance for any `f`, but in the case of cyclotomics (e.g. when using [`crate::complexfft::pow2_cyclotomic::Pow2CyclotomicFFT`]),
+/// simpler creation functions are provided.
+/// 
+/// # Example
+/// 
+/// ```
+/// # use feanor_math::ring::*;
+/// # use feanor_math::rings::zn::*;
+/// # use feanor_math::rings::zn::zn_64::*;
+/// # use feanor_math::primitive_int::StaticRing;
+/// # use feanor_math::integer::*;
+/// # use feanor_math::mempool::DefaultMemoryProvider;
+/// # use feanor_math::algorithms::fft::*;
+/// # use feanor_math::{default_memory_provider, assert_el_eq};
+/// # use feanor_math::homomorphism::Homomorphism;
+/// # use feanor_math::rings::float_complex::Complex64;
+/// # use feanor_math::rings::extension::FreeAlgebra;
+/// # use feanor_math::rings::extension::FreeAlgebraStore;
+/// # use he_ring::complexfft::complex_fft_ring::*;
+/// # use he_ring::cyclotomic::*;
+/// # use he_ring::complexfft::pow2_cyclotomic::Pow2CyclotomicFFT;
+/// type TheRing = ComplexFFTBasedRing<Pow2CyclotomicFFT<Zn, cooley_tuckey::FFTTableCooleyTuckey<Complex64>>, DefaultMemoryProvider, DefaultMemoryProvider>;
+/// 
+/// // the ring `F7[X]/(X^8 + 1)`
+/// let R = <TheRing as RingStore>::Type::new(Zn::new(7), 3, default_memory_provider!(), default_memory_provider!());
+/// let root_of_unity = R.canonical_gen();
+/// assert_eq!(8, R.rank());
+/// assert_eq!(16, R.n());
+/// assert_el_eq!(&R, &R.neg_one(), &R.pow(root_of_unity, 8));
+/// 
+/// // instead of this, we can also explicity create the `GeneralizedFFT`
+/// let generalized_fft: Pow2CyclotomicFFT<Zn, cooley_tuckey::FFTTableCooleyTuckey<Complex64>> = Pow2CyclotomicFFT::create(
+///     Zn::new(7),
+///     cooley_tuckey::FFTTableCooleyTuckey::for_complex(Complex64::RING, 3)
+/// );
+/// let R = RingValue::from(<TheRing as RingStore>::Type::from_generalized_fft(generalized_fft, default_memory_provider!(), default_memory_provider!()));
+/// assert_eq!(8, R.rank());
+/// assert_eq!(16, R.n());
+/// assert_el_eq!(&R, &R.neg_one(), &R.pow(R.canonical_gen(), 8));
+/// ```
+/// 
 pub struct ComplexFFTBasedRingBase<F: GeneralizedFFT + GeneralizedFFTSelfIso, M_Zn: MemoryProvider<El<F::BaseRingStore>>, M_CC: MemoryProvider<Complex64El>> {
     data: F,
     memory_provider_zn: M_Zn,
     memory_provider_cc: M_CC
 }
 
+///
+/// The [`RingStore`] corresponding to [`ComplexFFTBasedRingBase`].
+/// 
 pub type ComplexFFTBasedRing<F, M_Zn, M_CC> = RingValue<ComplexFFTBasedRingBase<F, M_Zn, M_CC>>;
 
 impl<F: GeneralizedFFT + GeneralizedFFTSelfIso, M_Zn: MemoryProvider<El<F::BaseRingStore>>, M_CC: MemoryProvider<Complex64El>> ComplexFFTBasedRingBase<F, M_Zn, M_CC> {
