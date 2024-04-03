@@ -5,7 +5,7 @@ edition = "2021"
 
 repository = "https://github.com/FeanorTheElf/he-ring"
 homepage = "https://github.com/FeanorTheElf/he-ring"
-keywords = ["cryptography", "homomorphic encryption"]
+keywords = ["cryptography", "encryption", "fhe", "homomorphic", "fhe"]
 readme = "Readme.md"
 description = "A library that provides fast implementations of rings commonly used in homomorphic encryption, built on feanor-math."
 license = "MIT"
