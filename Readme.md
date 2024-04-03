@@ -91,18 +91,8 @@ pub fn create_ciphertext_rings(log2_ring_degree: usize, ciphertext_moduli_count:
         default_memory_provider!()
     );
 
-    let C = <CiphertextRing as RingStore>::Type::new(
-        rns_base.clone(), 
-        rns_base.get_ring().iter().map(|R| ZnFastmul::new(R.clone())).collect(), 
-        log2_ring_degree,
-        default_memory_provider!()
-    );
-    let C_mul = <CiphertextRing as RingStore>::Type::new(
-        rns_base_mul.clone(), 
-        rns_base_mul.get_ring().iter().map(|R| ZnFastmul::new(R.clone())).collect(), 
-        log2_ring_degree,
-        default_memory_provider!()
-    );
+    let C = <CiphertextRing as RingStore>::Type::new(rns_base.clone(), rns_base.get_ring().iter().cloned().map(ZnFastmul::new).collect(), log2_ring_degree,default_memory_provider!());
+    let C_mul = <CiphertextRing as RingStore>::Type::new(rns_base_mul.clone(), rns_base_mul.get_ring().iter().cloned().map(ZnFastmul::new).collect(), log2_ring_degree,default_memory_provider!());
     return (C, C_mul);
 }
 
@@ -156,16 +146,12 @@ pub fn dec(P: &PlaintextRing, C: &CiphertextRing, ct: &Ciphertext, sk: &SecretKe
     let (c0, c1) = ct;
     let noisy_m = C.add_ref_fst(c0, C.mul_ref(c1, sk));
     let coefficients = C.wrt_canonical_basis(&noisy_m);
-    let poly_ring = DensePolyRing::new(ZZbig, "X");
     let Delta = ZZbig.rounded_div(
         ZZbig.clone_el(C.base_ring().modulus()), 
         &int_cast(*P.base_ring().modulus() as i32, &ZZbig, &StaticRing::<i32>::RING)
     );
-    return P.coerce(
-        &poly_ring, 
-        poly_ring.from_terms((0..coefficients.len()).map(|i| (ZZbig.rounded_div(C.base_ring().smallest_lift(coefficients.at(i)), &Delta), i)))
-    );
-    
+    let modulo = P.base_ring().can_hom(&ZZbig).unwrap();
+    return P.from_canonical_basis((0..coefficients.len()).map(|i| modulo.map(ZZbig.rounded_div(C.base_ring().smallest_lift(coefficients.at(i)), &Delta))));
 }
 
 pub fn hom_add(C: &CiphertextRing, lhs: &Ciphertext, rhs: &Ciphertext) -> Ciphertext {
@@ -183,7 +169,7 @@ pub fn hom_add_plain(P: &PlaintextRing, C: &CiphertextRing, m: &El<PlaintextRing
     C.inclusion().mul_assign_map_ref(&mut m, &Delta);
     let (c0, c1) = ct;
     return (C.add(c0, m), c1);
-    
+
 }
 
 pub fn hom_mul_plain(P: &PlaintextRing, C: &CiphertextRing, m: &El<PlaintextRing>, ct: Ciphertext) -> Ciphertext {
@@ -225,10 +211,9 @@ pub fn gen_switch_key<R: Rng + CryptoRng>(C: &CiphertextRing, mut rng: R, old_sk
     let mut res_1 = C.get_ring().external_product_rhs_zero();
     for i in 0..C.get_ring().rns_base().len() {
         let (c0, c1) = enc_sym_zero(C, &mut rng, new_sk);
-        let factor = C.base_ring().get_ring().from_congruence((0..C.get_ring().rns_base().len()).map(|i2| if i2 == i { 
-            C.get_ring().rns_base().at(i2).one() 
-        } else { 
-            C.get_ring().rns_base().at(i2).zero() 
+        let factor = C.base_ring().get_ring().from_congruence((0..C.get_ring().rns_base().len()).map(|i2| {
+            let Fp = C.get_ring().rns_base().at(i2);
+            if i2 == i { Fp.one() } else { Fp.zero() } 
         }));
         let mut payload = C.clone_el(old_sk);
         C.inclusion().mul_assign_map_ref(&mut payload, &factor);
@@ -236,7 +221,6 @@ pub fn gen_switch_key<R: Rng + CryptoRng>(C: &CiphertextRing, mut rng: R, old_sk
         res_1.set_rns_factor(i, c1);
     }
     return (res_0, res_1);
-    
 }
 
 pub fn key_switch(C: &CiphertextRing, ct: &Ciphertext, switch_key: &KeySwitchKey) -> Ciphertext {
