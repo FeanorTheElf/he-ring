@@ -168,7 +168,7 @@ impl<R1, F1, F2> GeneralizedFFTCrossIso<complexfft::odd_cyclotomic::OddCyclotomi
 
 impl<R, F, M> CyclotomicRing for DoubleRNSRingBase<R, OddCyclotomicFFT<F>, M>
     where R: ZnRingStore,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanonicalIso<<F::Ring as RingStore>::Type>,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanIsoFromTo<<F::Ring as RingStore>::Type>,
         F: FFTTable,
         F::Ring: Sized + ZnRingStore,
         <F::Ring as RingStore>::Type: ZnRing + CanHomFrom<BigIntRingBase>,
@@ -184,7 +184,7 @@ impl<R_main, R_fft, M> DoubleRNSRingBase<R_main, OddCyclotomicFFT<bluestein::FFT
         R_main::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         R_fft: ZnRingStore,
         R_fft::Type: ZnRing + CanHomFrom<BigIntRingBase>,
-        R_main::Type: CanonicalIso<R_fft::Type> + CanHomFrom<BigIntRingBase>,
+        R_main::Type: CanIsoFromTo<R_fft::Type> + CanHomFrom<BigIntRingBase>,
         M: MemoryProvider<El<R_main>>
 {
     pub fn new(base_ring: zn_rns::Zn<R_main, BigIntRing>, fft_rings: Vec<R_fft>, n: usize, memory_provider: M) -> RingValue<Self> {
@@ -205,7 +205,7 @@ impl<R_main, R_fft, M> DoubleRNSRingBase<R_main, OddCyclotomicFFT<factor_fft::FF
     where R_main: ZnRingStore,
         R_fft: ZnRingStore + Clone,
         R_fft::Type: ZnRing + CanHomFrom<BigIntRingBase>,
-        R_main::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanonicalIso<R_fft::Type> + CanHomFrom<BigIntRingBase>,
+        R_main::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanIsoFromTo<R_fft::Type> + CanHomFrom<BigIntRingBase>,
         M: MemoryProvider<El<R_main>>
 {
     pub fn new(base_ring: zn_rns::Zn<R_main, BigIntRing>, fft_rings: Vec<R_fft>, n: (i64, i64), memory_provider: M) -> RingValue<Self> {

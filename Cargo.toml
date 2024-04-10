@@ -15,7 +15,7 @@ crate-type = ["rlib"]
 bench = true
 
 [dependencies]
-feanor-math = { version = "1.5.2", features = ["generic_tests"] }
+feanor-math = { version = "1.6.0", features = ["generic_tests"] }
 rand = "0.8.5"
 rand_distr = "0.4.3"
 

@@ -121,7 +121,7 @@ impl<R1, F1, F2> GeneralizedFFTCrossIso<complexfft::pow2_cyclotomic::Pow2Cycloto
 
 impl<R, F, M> CyclotomicRing for DoubleRNSRingBase<R, Pow2CyclotomicFFT<F>, M>
     where R: ZnRingStore,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanonicalIso<<F::Ring as RingStore>::Type>,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanIsoFromTo<<F::Ring as RingStore>::Type>,
         F: FFTTable,
         F::Ring: Sized + ZnRingStore,
         <F::Ring as RingStore>::Type: ZnRing + CanHomFrom<BigIntRingBase>,
@@ -136,7 +136,7 @@ impl<R_main, R_fft, M> DoubleRNSRingBase<R_main, Pow2CyclotomicFFT<cooley_tuckey
     where R_main: ZnRingStore,
         R_fft: ZnRingStore,
         R_fft::Type: ZnRing + CanHomFrom<BigIntRingBase>,
-        R_main::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanonicalIso<R_fft::Type> + CanHomFrom<BigIntRingBase>,
+        R_main::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanIsoFromTo<R_fft::Type> + CanHomFrom<BigIntRingBase>,
         M: MemoryProvider<El<R_main>>
 {
     pub fn new(base_ring: zn_rns::Zn<R_main, BigIntRing>, fft_rings: Vec<R_fft>, log2_n: usize, memory_provider: M) -> RingValue<Self> {

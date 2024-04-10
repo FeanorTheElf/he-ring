@@ -10,7 +10,7 @@ use super::double_rns_ring::*;
 
 pub struct ExternalProductRhsOperand<R, F, M> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanonicalIso<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
         F: GeneralizedFFT + GeneralizedFFTSelfIso,
         M: MemoryProvider<El<R>>
 {
@@ -19,7 +19,7 @@ pub struct ExternalProductRhsOperand<R, F, M>
 
 impl<R, F, M> ExternalProductRhsOperand<R, F, M>
     where R: ZnRingStore,
-        R::Type: ZnRing + CanonicalIso<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
         F: GeneralizedFFT + GeneralizedFFTSelfIso,
         M: MemoryProvider<El<R>>
 {
@@ -30,7 +30,7 @@ impl<R, F, M> ExternalProductRhsOperand<R, F, M>
 
 pub struct ExternalProductLhsOperand<R, F, M> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanonicalIso<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
         F: GeneralizedFFT + GeneralizedFFTSelfIso,
         M: MemoryProvider<El<R>>
 {
@@ -39,7 +39,7 @@ pub struct ExternalProductLhsOperand<R, F, M>
 
 impl<R, F, M> DoubleRNSRingBase<R, F, M>
     where R: ZnRingStore,
-        R::Type: ZnRing + CanonicalIso<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
         F: GeneralizedFFT + GeneralizedFFTSelfIso,
         M: MemoryProvider<El<R>>
 {

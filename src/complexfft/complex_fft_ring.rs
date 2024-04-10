@@ -419,17 +419,17 @@ impl<F1, F2, M1_Zn, M2_Zn, M1_CC, M2_CC> CanHomFrom<ComplexFFTBasedRingBase<F2, 
     }
 }
 
-impl<F1, F2, M1_Zn, M2_Zn, M1_CC, M2_CC> CanonicalIso<ComplexFFTBasedRingBase<F2, M2_Zn, M2_CC>> for ComplexFFTBasedRingBase<F1, M1_Zn, M1_CC>
+impl<F1, F2, M1_Zn, M2_Zn, M1_CC, M2_CC> CanIsoFromTo<ComplexFFTBasedRingBase<F2, M2_Zn, M2_CC>> for ComplexFFTBasedRingBase<F1, M1_Zn, M1_CC>
     where F1: GeneralizedFFT + GeneralizedFFTSelfIso, 
         F2: GeneralizedFFT + GeneralizedFFTSelfIso, 
         M1_Zn: MemoryProvider<El<F1::BaseRingStore>>, 
         M1_CC: MemoryProvider<Complex64El>, 
         M2_Zn: MemoryProvider<El<F2::BaseRingStore>>, 
         M2_CC: MemoryProvider<Complex64El>,
-        F1::BaseRingBase: CanonicalIso<F2::BaseRingBase>, 
+        F1::BaseRingBase: CanIsoFromTo<F2::BaseRingBase>, 
         F1: GeneralizedFFTIso<F2>
 {
-    type Isomorphism = <F1::BaseRingBase as CanonicalIso<F2::BaseRingBase>>::Isomorphism;
+    type Isomorphism = <F1::BaseRingBase as CanIsoFromTo<F2::BaseRingBase>>::Isomorphism;
 
     fn has_canonical_iso(&self, from: &ComplexFFTBasedRingBase<F2, M2_Zn, M2_CC>) -> Option<Self::Isomorphism> {
         if self.data.is_isomorphic(&from.data) {

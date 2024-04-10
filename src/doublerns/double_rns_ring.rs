@@ -58,7 +58,7 @@ pub trait GeneralizedFFT {
     /// 
     fn fft_forward<S, M>(&self, data: &mut [El<S>], ring: &S, memory_provider: &M)
         where S: ZnRingStore,
-            S::Type: ZnRing + CanonicalIso<Self::BaseRingBase>,
+            S::Type: ZnRing + CanIsoFromTo<Self::BaseRingBase>,
             M: MemoryProvider<El<S>>;
 
     ///
@@ -66,7 +66,7 @@ pub trait GeneralizedFFT {
     /// 
     fn fft_backward<S, M>(&self, data: &mut [El<S>], ring: &S, memory_provider: &M)
         where S: ZnRingStore,
-            S::Type: ZnRing + CanonicalIso<Self::BaseRingBase>,
+            S::Type: ZnRing + CanIsoFromTo<Self::BaseRingBase>,
             M: MemoryProvider<El<S>>;
 }
 
@@ -104,9 +104,17 @@ pub trait GeneralizedFFTSelfIso: Sized + GeneralizedFFTIso<Self> {}
 
 impl<F: GeneralizedFFT + GeneralizedFFTIso<F>> GeneralizedFFTSelfIso for F {}
 
+///
+/// The ring specified by a [`GeneralizedFFT`]. Elements are stored in double-RNS-representation
+/// for efficient arithmetic.
+/// 
+/// When necessary, it is also possible by using [`DoubleRNSRingBase::do_fft()`] and
+/// [`DoubleRNSRingBase::undo_fft()`] to work with ring elements not in double-RNS-representation,
+/// but note that arithmetic operations are not available for those.
+/// 
 pub struct DoubleRNSRingBase<R, F, M> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanonicalIso<F::BaseRingBase>,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanIsoFromTo<F::BaseRingBase>,
         F: GeneralizedFFT + GeneralizedFFTSelfIso,
         M: MemoryProvider<El<R>>
 {
@@ -119,7 +127,7 @@ pub type DoubleRNSRing<R, F, M> = RingValue<DoubleRNSRingBase<R, F, M>>;
 
 pub struct DoubleRNSEl<R, F, M> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanonicalIso<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
         F: GeneralizedFFT + GeneralizedFFTSelfIso,
         M: MemoryProvider<El<R>>
 {
@@ -130,7 +138,7 @@ pub struct DoubleRNSEl<R, F, M>
 
 pub struct DoubleRNSNonFFTEl<R, F, M> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanonicalIso<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
         F: GeneralizedFFT + GeneralizedFFTSelfIso,
         M: MemoryProvider<El<R>>
 {
@@ -141,7 +149,7 @@ pub struct DoubleRNSNonFFTEl<R, F, M>
 
 impl<R, F, M> DoubleRNSRingBase<R, F, M> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanonicalIso<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
         F: GeneralizedFFT + GeneralizedFFTSelfIso,
         M: MemoryProvider<El<R>>
 {
@@ -158,7 +166,7 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
 
 impl<R, F, M> DoubleRNSRingBase<R, F, M> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanonicalIso<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
         F: GeneralizedFFT + GeneralizedFFTSelfIso,
         M: MemoryProvider<El<R>>
 {
@@ -182,6 +190,12 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
         SubmatrixMut::<AsFirstElement<_>, _>::new(&mut element.data, self.rns_base().len(), self.rank())
     }
 
+    ///
+    /// Returns `a mod pi` where `a` is the coefficient belonging to `X^j` of the given element.
+    /// 
+    /// Here `pi` is the `i`-th prime divisor of the base ring (using the order exposed by
+    /// [`zn_rns::ZnBase`]).
+    /// 
     pub fn at<'a>(&self, i: usize, j: usize, el: &'a DoubleRNSNonFFTEl<R, F, M>) -> &'a El<R> {
         &el.data[i * self.rank() + j]
     }
@@ -195,7 +209,7 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
     /// handling in the program, we index all prime divisors `p | q` by `i` and all `k in (Z/nZ)*` by `j`.
     /// 
     /// The indexing of the primes is consistent with the order of the primes in the base ring (of type
-    /// [`zn_rns::Zn`]). The indexing of the `k` is quite unpredictable, as it depends on the implementation
+    /// [`zn_rns::ZnBase`]). The indexing of the `k` is quite unpredictable, as it depends on the implementation
     /// of the underlying [`GeneralizedFFT`] (in particular, if it is implemented using standard FFTs, then
     /// that in turn depends on the ordering used by [`feanor_math::algorithms::fft::FFTTable::unordered_fft()`]).
     /// Therefore, you should not rely on any specific relationship between `j` and `k`, except that it will
@@ -206,6 +220,11 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
         &el.data[i * self.rank() + j]
     }
 
+    /// 
+    /// Returns `a mod pi` where `a` is the coefficient belonging to `X^j` of the given element.
+    /// 
+    /// See [`Self::at()`] for details.
+    /// 
     pub fn at_mut<'a>(&self, i: usize, j: usize, el: &'a mut DoubleRNSNonFFTEl<R, F, M>) -> &'a mut El<R> {
         &mut el.data[i * self.rank() + j]
     }
@@ -213,18 +232,7 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
     ///
     /// Returns the `(i, j)`-th component of the element in double-RNS-representation. 
     /// 
-    /// Note that strictly speaking, these components are indexed by prime divisors `p | q` and
-    /// `k in (Z/nZ)*` (assuming a root of unity `zeta` in `Zq` is fixed). Then, the `(p, k)`-th double-RNS
-    /// components of a ring element `a` would be `a mod (p, X - zeta^k) in Fp`. However, for easier 
-    /// handling in the program, we index all prime divisors `p | q` by `i` and all `k in (Z/nZ)*` by `j`.
-    /// 
-    /// The indexing of the primes is consistent with the order of the primes in the base ring (of type
-    /// [`zn_rns::Zn`]). The indexing of the `k` is quite unpredictable, as it depends on the implementation
-    /// of the underlying [`GeneralizedFFT`] (in particular, if it is implemented using standard FFTs, then
-    /// that in turn depends on the ordering used by [`feanor_math::algorithms::fft::FFTTable::unordered_fft()`]).
-    /// Therefore, you should not rely on any specific relationship between `j` and `k`, except that it will
-    /// remain constant during the lifetime of the ring. Note also that changing the order corresponds to an
-    /// automorphism of the ring.
+    /// See [`Self::fourier_coefficient()`] for details.
     /// 
     pub fn fourier_coefficient_mut<'a>(&self, i: usize, j: usize, el: &'a mut DoubleRNSEl<R, F, M>) -> &'a mut El<R> {
         &mut el.data[i * self.rank() + j]
@@ -279,7 +287,7 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
         where F: GeneralizedFFTIso<F2>,
             // the constraings for DoubleRNSRingBase<R2, F2, M2> 
             R2: ZnRingStore<Type = R::Type>,
-            R::Type: CanonicalIso<F2::BaseRingBase>,
+            R::Type: CanIsoFromTo<F2::BaseRingBase>,
             F2: GeneralizedFFT + GeneralizedFFTSelfIso,
             M2: MemoryProvider<El<R2>>,
             // constraints for Op
@@ -393,7 +401,7 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
 
 impl<R, F, M> PartialEq for DoubleRNSRingBase<R, F, M> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanonicalIso<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
         F: GeneralizedFFT + GeneralizedFFTSelfIso,
         M: MemoryProvider<El<R>>
 {
@@ -404,7 +412,7 @@ impl<R, F, M> PartialEq for DoubleRNSRingBase<R, F, M>
 
 impl<R, F, M> RingBase for DoubleRNSRingBase<R, F, M> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanonicalIso<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
         F: GeneralizedFFT + GeneralizedFFTSelfIso,
         M: MemoryProvider<El<R>>
 {
@@ -509,7 +517,7 @@ impl<R, F, M> RingBase for DoubleRNSRingBase<R, F, M>
 
 pub struct DoubleRNSRingBaseElVectorRepresentation<'a, R, F, M> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanonicalIso<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
         F: GeneralizedFFT + GeneralizedFFTSelfIso,
         M: MemoryProvider<El<R>>
 {
@@ -519,7 +527,7 @@ pub struct DoubleRNSRingBaseElVectorRepresentation<'a, R, F, M>
 
 impl<'a, R, F, M> VectorFn<El<zn_rns::Zn<R, BigIntRing>>> for DoubleRNSRingBaseElVectorRepresentation<'a, R, F, M> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanonicalIso<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
         F: GeneralizedFFT + GeneralizedFFTSelfIso,
         M: MemoryProvider<El<R>>
 {
@@ -534,7 +542,7 @@ impl<'a, R, F, M> VectorFn<El<zn_rns::Zn<R, BigIntRing>>> for DoubleRNSRingBaseE
 
 impl<R, F, M> FreeAlgebra for DoubleRNSRingBase<R, F, M> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanonicalIso<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
         F: GeneralizedFFT + GeneralizedFFTSelfIso,
         M: MemoryProvider<El<R>>
 {
@@ -589,7 +597,7 @@ impl<R, F, M> FreeAlgebra for DoubleRNSRingBase<R, F, M>
 
 impl<R, F, M> RingExtension for DoubleRNSRingBase<R, F, M> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanonicalIso<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
         F: GeneralizedFFT + GeneralizedFFTSelfIso,
         M: MemoryProvider<El<R>>
 {
@@ -624,12 +632,12 @@ impl<R, F, M> RingExtension for DoubleRNSRingBase<R, F, M>
 
 impl<R1, R2, F1, F2, M1, M2> CanHomFrom<DoubleRNSRingBase<R2, F2, M2>> for DoubleRNSRingBase<R1, F1, M1>
     where R1: ZnRingStore,
-        R1::Type: ZnRing + CanonicalIso<F1::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        R1::Type: ZnRing + CanIsoFromTo<F1::BaseRingBase> + CanHomFrom<BigIntRingBase>,
         F1: GeneralizedFFT + GeneralizedFFTSelfIso,
         M1: MemoryProvider<El<R1>>,
 
         R2: ZnRingStore,
-        R2::Type: ZnRing + CanonicalIso<F2::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        R2::Type: ZnRing + CanIsoFromTo<F2::BaseRingBase> + CanHomFrom<BigIntRingBase>,
         F2: GeneralizedFFT + GeneralizedFFTSelfIso,
         M2: MemoryProvider<El<R2>>,
 
@@ -664,21 +672,21 @@ impl<R1, R2, F1, F2, M1, M2> CanHomFrom<DoubleRNSRingBase<R2, F2, M2>> for Doubl
     }
 }
 
-impl<R1, R2, F1, F2, M1, M2> CanonicalIso<DoubleRNSRingBase<R2, F2, M2>> for DoubleRNSRingBase<R1, F1, M1>
+impl<R1, R2, F1, F2, M1, M2> CanIsoFromTo<DoubleRNSRingBase<R2, F2, M2>> for DoubleRNSRingBase<R1, F1, M1>
     where R1: ZnRingStore,
-        R1::Type: ZnRing + CanonicalIso<F1::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        R1::Type: ZnRing + CanIsoFromTo<F1::BaseRingBase> + CanHomFrom<BigIntRingBase>,
         F1: GeneralizedFFT + GeneralizedFFTSelfIso,
         M1: MemoryProvider<El<R1>>,
 
         R2: ZnRingStore,
-        R2::Type: ZnRing + CanonicalIso<F2::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        R2::Type: ZnRing + CanIsoFromTo<F2::BaseRingBase> + CanHomFrom<BigIntRingBase>,
         F2: GeneralizedFFT + GeneralizedFFTSelfIso,
         M2: MemoryProvider<El<R2>>,
 
-        R1::Type: CanonicalIso<R2::Type>,
+        R1::Type: CanIsoFromTo<R2::Type>,
         F1: GeneralizedFFTIso<F2>
 {
-    type Isomorphism = Vec<<R1::Type as CanonicalIso<R2::Type>>::Isomorphism>;
+    type Isomorphism = Vec<<R1::Type as CanIsoFromTo<R2::Type>>::Isomorphism>;
 
     fn has_canonical_iso(&self, from: &DoubleRNSRingBase<R2, F2, M2>) -> Option<Self::Isomorphism> {
         if self.rns_base().len() == from.rns_base().len() && self.data[0].is_isomorphic(&from.data[0]) {
