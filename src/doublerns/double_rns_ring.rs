@@ -1,5 +1,6 @@
 use std::marker::PhantomData;
 
+use feanor_math::divisibility::*;
 use feanor_math::integer::*;
 use feanor_math::matrix::submatrix::AsFirstElement;
 use feanor_math::matrix::submatrix::Submatrix;
@@ -512,6 +513,28 @@ impl<R, F, M> RingBase for DoubleRNSRingBase<R, F, M>
         where I::Type: IntegerRing
     {
         self.base_ring().characteristic(ZZ)     
+    }
+}
+
+impl<R, F, M> DivisibilityRing for DoubleRNSRingBase<R, F, M> 
+    where R: ZnRingStore,
+        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase> + DivisibilityRing,
+        F: GeneralizedFFT + GeneralizedFFTSelfIso,
+        M: MemoryProvider<El<R>>
+{
+    fn checked_left_div(&self, lhs: &Self::Element, rhs: &Self::Element) -> Option<Self::Element> {
+        self.memory_provider.try_get_new_init(self.element_len(), |index| {
+            let i = index / self.rank();
+            if let Some(quo) = self.rns_base().at(i).checked_div(&lhs.data[index], &rhs.data[index]) {
+                return Ok(quo);
+            } else {
+                return Err(());
+            }
+        }).ok().map(|data| DoubleRNSEl { data: data, generalized_fft: PhantomData, memory_provider: PhantomData })
+    }
+
+    fn is_unit(&self, x: &Self::Element) -> bool {
+        x.data.iter().enumerate().all(|(index, c)| self.rns_base().at(index / self.rank()).is_unit(c))
     }
 }
 

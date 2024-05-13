@@ -165,20 +165,45 @@ use feanor_math::vector::*;
 #[cfg(test)]
 use feanor_math::default_memory_provider;
 
-#[test]
-fn test_ring_axioms() {
-    let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING, default_memory_provider!());
-    let fft_rings = rns_base.get_ring().iter().cloned().collect();
-    let R = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<cooley_tuckey::FFTTableCooleyTuckey<_>>, _>::new(rns_base, fft_rings, 3, default_memory_provider!());
-    feanor_math::ring::generic_tests::test_ring_axioms(&R, [
+#[cfg(test)]
+fn edge_case_elements<'a, R, F, M>(R: &'a DoubleRNSRing<R, F, M>) -> impl 'a + Iterator<Item = El<DoubleRNSRing<R, F, M>>>
+    where R: ZnRingStore,
+        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        F: GeneralizedFFT + GeneralizedFFTSelfIso,
+        M: MemoryProvider<El<R>>
+{
+    assert_eq!(2, R.get_ring().rns_base().len());
+    assert_eq!(17, int_cast(R.get_ring().rns_base().at(0).integer_ring().clone_el(R.get_ring().rns_base().at(0).modulus()), StaticRing::<i64>::RING, R.get_ring().rns_base().at(0).integer_ring()));
+    assert_eq!(8, R.rank());
+    [
         ring_literal!(&R, [0, 0, 0, 0, 0, 0, 0, 0]),
         ring_literal!(&R, [1, 0, 0, 0, 0, 0, 0, 0]),
         ring_literal!(&R, [-1, 0, 0, 0, 0, 0, 0, 0]),
         ring_literal!(&R, [0, 0, 0, 0, 0, 0, 0, 1]),
         ring_literal!(&R, [0, 0, 0, 0, 0, 0, 0, -1]),
         ring_literal!(&R, [1, 1, 1, 1, 1, 1, 1, 1]),
-        ring_literal!(&R, [1, -1, 0, 0, 0, 0, 0, 0])
-    ].into_iter());
+        ring_literal!(&R, [1, -1, 0, 0, 0, 0, 0, 0]),
+        // these elements are non-invertible, but in the same prime ideal `(X + 3)`
+        ring_literal!(&R, [15, 8, 1, 0, 0, 0, 0, 0]),
+        ring_literal!(&R, [3, 1, 0, 0, 0, 0, 0, 0]),
+        ring_literal!(&R, [0, 15, 8, 1, 0, 0, 0, 0])
+    ].into_iter()
+}
+
+#[test]
+fn test_ring_axioms() {
+    let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING, default_memory_provider!());
+    let fft_rings = rns_base.get_ring().iter().cloned().collect();
+    let R = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<cooley_tuckey::FFTTableCooleyTuckey<_>>, _>::new(rns_base, fft_rings, 3, default_memory_provider!());
+    feanor_math::ring::generic_tests::test_ring_axioms(&R, edge_case_elements(&R));
+}
+
+#[test]
+fn test_divisibility_axioms() {
+    let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING, default_memory_provider!());
+    let fft_rings = rns_base.get_ring().iter().cloned().collect();
+    let R = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<cooley_tuckey::FFTTableCooleyTuckey<_>>, _>::new(rns_base, fft_rings, 3, default_memory_provider!());
+    feanor_math::divisibility::generic_tests::test_divisibility_axioms(&R, edge_case_elements(&R));
 }
 
 #[test]

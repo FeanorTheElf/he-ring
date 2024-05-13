@@ -247,6 +247,33 @@ use feanor_math::{assert_el_eq, default_memory_provider};
 use feanor_math::rings::extension::generic_test_free_algebra_axioms;
 #[cfg(test)]
 use feanor_math::rings::zn::zn_42::Zn;
+#[cfg(test)]
+use crate::feanor_math::rings::extension::FreeAlgebraStore;
+
+#[cfg(test)]
+fn edge_case_elements<'a, R, F, M>(R: &'a DoubleRNSRing<R, F, M>) -> impl 'a + Iterator<Item = El<DoubleRNSRing<R, F, M>>>
+    where R: ZnRingStore,
+        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        F: GeneralizedFFT + GeneralizedFFTSelfIso,
+        M: MemoryProvider<El<R>>
+{
+    assert_eq!(2, R.get_ring().rns_base().len());
+    assert_eq!(577, int_cast(R.get_ring().rns_base().at(0).integer_ring().clone_el(R.get_ring().rns_base().at(0).modulus()), StaticRing::<i64>::RING, R.get_ring().rns_base().at(0).integer_ring()));
+    assert_eq!(6, R.rank());
+    [
+        ring_literal!(&R, [0, 0, 0, 0, 0, 0]),
+        ring_literal!(&R, [1, 0, 0, 0, 0, 0]),
+        ring_literal!(&R, [-1, 0, 0, 0, 0, 0]),
+        ring_literal!(&R, [0, 0, 0, 0, 0, 1]),
+        ring_literal!(&R, [0, 0, 0, 0, 0, -1]),
+        ring_literal!(&R, [1, 1, 1, 1, 1, 1]),
+        ring_literal!(&R, [1, -1, 0, 0, 0, 0]),
+        // these elements are non-invertible, in the same prime ideal `(X + 256)`
+        ring_literal!(&R, [435, 287, 1, 0, 0, 0]),
+        ring_literal!(&R, [256, 1, 0, 0, 0, 0]),
+        ring_literal!(&R, [0, 435, 287, 1, 0, 0]),
+    ].into_iter()
+}
 
 #[test]
 fn test_odd_cyclotomic_fft_factor_fft() {
@@ -274,15 +301,15 @@ fn test_ring_axioms() {
     let rns_base = zn_rns::Zn::new(vec![Zn::new(577), Zn::new(1153)], BigIntRing::RING, default_memory_provider!());
     let fft_rings = rns_base.get_ring().iter().cloned().collect();
     let R = DoubleRNSRingBase::<_, OddCyclotomicFFT<bluestein::FFTTableBluestein<_>>, _>::new(rns_base, fft_rings, 9, default_memory_provider!());
-    feanor_math::ring::generic_tests::test_ring_axioms(&R, [
-        ring_literal!(&R, [0, 0, 0, 0, 0, 0]),
-        ring_literal!(&R, [1, 0, 0, 0, 0, 0]),
-        ring_literal!(&R, [-1, 0, 0, 0, 0, 0]),
-        ring_literal!(&R, [0, 0, 0, 0, 0, 1]),
-        ring_literal!(&R, [0, 0, 0, 0, 0, -1]),
-        ring_literal!(&R, [1, 1, 1, 1, 1, 1]),
-        ring_literal!(&R, [1, -1, 0, 0, 0, 0])
-    ].into_iter());
+    feanor_math::ring::generic_tests::test_ring_axioms(&R, edge_case_elements(&R));
+}
+
+#[test]
+fn test_divisibility_axioms() {
+    let rns_base = zn_rns::Zn::new(vec![Zn::new(577), Zn::new(1153)], BigIntRing::RING, default_memory_provider!());
+    let fft_rings = rns_base.get_ring().iter().cloned().collect();
+    let R = DoubleRNSRingBase::<_, OddCyclotomicFFT<bluestein::FFTTableBluestein<_>>, _>::new(rns_base, fft_rings, 9, default_memory_provider!());
+    feanor_math::divisibility::generic_tests::test_divisibility_axioms(&R, edge_case_elements(&R));
 }
 
 #[test]
