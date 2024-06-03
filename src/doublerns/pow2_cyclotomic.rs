@@ -15,6 +15,23 @@ use crate::complexfft;
 use crate::cyclotomic::*;
 use super::double_rns_ring::*;
 
+///
+/// [`GeneralizedFFT`] corresponding to the evaluation at all primitive `2n`-th roots of unity,
+/// for `n` a power of two. 
+/// 
+/// More concretely, when `p = 1 mod 2n` there is a primitive `2n`-th root of unity `z` in `Fp` and
+/// we have the isomorphism
+/// ```text
+///   Fp[X]/(X^n + 1) -> Fp^n,  f -> (z^i)
+/// ```
+/// where `i` runs through `Z/2nZ*`. This map and its inverse are stored by this object, and can
+/// be used to construct a [`DoubleRNSRing`]. The map is computed using the underlying Fast
+/// Fourier-Transform, so usually in time `O(n log(n))`.
+/// 
+/// Note that it would be possible to merge the multiplication with twiddle factors into the actual
+/// FFT, thus saving a few multiplications on each execution. However, for the sake of modularity,
+/// we currently don't do this and use the underlying FFT as a black box.
+/// 
 pub struct Pow2CyclotomicFFT<F> 
     where F: FFTTable,
         F::Ring: Sized + ZnRingStore,
@@ -220,5 +237,4 @@ fn test_cyclotomic_ring_axioms() {
     let fft_rings = rns_base.get_ring().iter().cloned().collect();
     let R = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<cooley_tuckey::FFTTableCooleyTuckey<_>>, _>::new(rns_base, fft_rings, 3, default_memory_provider!());
     generic_test_cyclotomic_ring_axioms(R);
-
 }

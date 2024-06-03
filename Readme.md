@@ -1,7 +1,8 @@
 # he-ring
 
 Building on [feanor-math](https://crates.io/crates/feanor-math), this library provides efficient implementations of rings that are commonly used in homomorphic encryption (HE).
-In particular, this means cyclotomic rings modulo an integer `R_q = Z[X]/(Phi_n(X), q)`.
+Our focus lies on providing the building blocks for second-generation HE schemes like BGV or BFV, however most building blocks are also used in other schemes like FHEW/TFHE.
+In particular, the core component are cyclotomic rings modulo an integer `R_q = Z[X]/(Phi_n(X), q)`.
 For both `q`, there are two settings of relevance.
  - `q` is a relatively small integer, used as "plaintext modulus" in schemes and often denoted by `t`. For large `n`, the fastest way to implement arithmetic in these rings is by using a discrete Fourier transform (DFT) over the complex numbers (using floating-point numbers).
  - `q` is a product of moderately large primes that split completely in `R = Z[X]/(Phi_n(X))`. This means that `R_q` has a decomposition into prime fields, where arithmetic operations are performed component-wise, thus very efficiently (this is called "double-RNS-representation"). In this setting, ring elements are usually stored in double-RNS-representation, and only converted back to standard-resp. coefficient-representation when necessary. Such conversions require a number-theoretic transform (NTT) and a implementation of the Chinese Remainder theorem.
@@ -52,9 +53,9 @@ pub type CiphertextRing = doublerns::double_rns_ring::DoubleRNSRing<Zn, FFTTable
 
 pub type Ciphertext = (El<CiphertextRing>, El<CiphertextRing>);
 pub type SecretKey = El<CiphertextRing>;
-pub type ExtProdOperand = doublerns::external_product::ExternalProductRhsOperand<Zn, FFTTable, DefaultMemoryProvider>;
-pub type KeySwitchKey = (ExtProdOperand, ExtProdOperand);
-pub type RelinKey = (ExtProdOperand, ExtProdOperand);
+pub type GadgetProductOperand = doublerns::gadget_product::GadgetProductRhsOperand<Zn, FFTTable, DefaultMemoryProvider>;
+pub type KeySwitchKey = (GadgetProductOperand, GadgetProductOperand);
+pub type RelinKey = (GadgetProductOperand, GadgetProductOperand);
 
 //
 // During BFV multiplication, we need a "rescaling operation" that computes `round(x * t / q)`. Doing
@@ -197,18 +198,18 @@ pub fn hom_mul(C: &CiphertextRing, C_mul: &CiphertextRing, lhs: &Ciphertext, rhs
     let res1 = C.get_ring().do_fft(scale_down(lifted1));
     let res2 = scale_down(lifted2);
     
-    let op = C.get_ring().to_external_product_lhs(res2);
+    let op = C.get_ring().to_gadget_product_lhs(res2);
     let (s0, s1) = rk;
     return (
-        C.add(res0, C.get_ring().external_product(&op, s0)), 
-        C.add(res1, C.get_ring().external_product(&op, s1))
+        C.add(res0, C.get_ring().gadget_product(&op, s0)), 
+        C.add(res1, C.get_ring().gadget_product(&op, s1))
     );
     
 }
 
 pub fn gen_switch_key<R: Rng + CryptoRng>(C: &CiphertextRing, mut rng: R, old_sk: &SecretKey, new_sk: &SecretKey) -> KeySwitchKey {
-    let mut res_0 = C.get_ring().external_product_rhs_zero();
-    let mut res_1 = C.get_ring().external_product_rhs_zero();
+    let mut res_0 = C.get_ring().gadget_product_rhs_zero();
+    let mut res_1 = C.get_ring().gadget_product_rhs_zero();
     for i in 0..C.get_ring().rns_base().len() {
         let (c0, c1) = enc_sym_zero(C, &mut rng, new_sk);
         let factor = C.base_ring().get_ring().from_congruence((0..C.get_ring().rns_base().len()).map(|i2| {
@@ -226,8 +227,8 @@ pub fn gen_switch_key<R: Rng + CryptoRng>(C: &CiphertextRing, mut rng: R, old_sk
 pub fn key_switch(C: &CiphertextRing, ct: &Ciphertext, switch_key: &KeySwitchKey) -> Ciphertext {
     let (c0, c1) = ct;
     let (s0, s1) = switch_key;
-    let op = C.get_ring().to_external_product_lhs(C.get_ring().undo_fft(C.clone_el(c1)));
-    return (C.add_ref_fst(c0, C.get_ring().external_product(&op, s0)), C.get_ring().external_product(&op, s1));
+    let op = C.get_ring().to_gadget_product_lhs(C.get_ring().undo_fft(C.clone_el(c1)));
+    return (C.add_ref_fst(c0, C.get_ring().gadget_product(&op, s0)), C.get_ring().gadget_product(&op, s1));
 }
 
 let mut rng = thread_rng();

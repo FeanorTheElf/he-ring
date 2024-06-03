@@ -18,4 +18,4 @@ pub mod odd_cyclotomic;
 ///
 /// Contains an implementation of "external products". For details, see [`DoubleRNSRingBase::external_product()`].
 /// 
-pub mod external_product;
+pub mod gadget_product;
