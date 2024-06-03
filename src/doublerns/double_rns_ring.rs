@@ -743,18 +743,20 @@ use crate::rnsconv::lift::*;
 use crate::doublerns::pow2_cyclotomic::Pow2CyclotomicFFT;
 #[cfg(test)]
 use crate::complexfft::complex_fft_ring::ComplexFFTBasedRingBase;
+#[cfg(test)]
+use crate::feanor_math::rings::zn::zn_64::Zn;
 
 #[test]
 fn test_almost_exact_convert_from() {
-    let rns_base1 = zn_rns::Zn::new(vec![zn_42::Zn::new(17), zn_42::Zn::new(97)], BigIntRing::RING, default_memory_provider!());
+    let rns_base1 = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING, default_memory_provider!());
     let fft_rings1 = rns_base1.get_ring().iter().cloned().collect();
     let R1 = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<_>, _>::new(rns_base1, fft_rings1, 3, default_memory_provider!());
 
-    let rns_base2 = zn_rns::Zn::new(vec![zn_42::Zn::new(17), zn_42::Zn::new(113)], BigIntRing::RING, default_memory_provider!());
+    let rns_base2 = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(113)], BigIntRing::RING, default_memory_provider!());
     let fft_rings2 = rns_base2.get_ring().iter().cloned().collect();
     let R2 = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<_>, _>::new(rns_base2, fft_rings2, 3, default_memory_provider!());
 
-    let converter = AlmostExactBaseConversion::new(R1.base_ring().get_ring(), R2.base_ring().get_ring(), zn_42::Zn::new(7), default_memory_provider!(), default_memory_provider!());
+    let converter = AlmostExactBaseConversion::new(R1.base_ring().get_ring(), R2.base_ring().get_ring(), Zn::new(7), default_memory_provider!(), default_memory_provider!());
 
     assert_el_eq!(&R2, &R2.canonical_gen(), &R2.get_ring().do_fft(R2.get_ring().perform_rns_op_from(R1.get_ring(), &R1.get_ring().undo_fft(R1.canonical_gen()), &converter)));
     for i in (-4 * 97)..=(4 * 97) {
@@ -764,13 +766,13 @@ fn test_almost_exact_convert_from() {
 
 #[test]
 fn test_almost_exact_convert_to_cfft() {
-    let rns_base1 = zn_rns::Zn::new(vec![zn_42::Zn::new(17), zn_42::Zn::new(97)], BigIntRing::RING, default_memory_provider!());
+    let rns_base1 = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING, default_memory_provider!());
     let fft_rings1 = rns_base1.get_ring().iter().cloned().collect();
     let R1 = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<_>, _>::new(rns_base1, fft_rings1, 3, default_memory_provider!());
 
-    let R2 = ComplexFFTBasedRingBase::<complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<_, _>, _, _>::new(zn_42::Zn::new(7), 3, default_memory_provider!(), default_memory_provider!());
+    let R2 = ComplexFFTBasedRingBase::<complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<_, _>, _, _>::new(Zn::new(7), 3, default_memory_provider!(), default_memory_provider!());
 
-    let converter = AlmostExactBaseConversion::new(R1.base_ring().get_ring(), [R2.base_ring().clone()], zn_42::Zn::new(11), default_memory_provider!(), default_memory_provider!());
+    let converter = AlmostExactBaseConversion::new(R1.base_ring().get_ring(), [R2.base_ring().clone()], Zn::new(11), default_memory_provider!(), default_memory_provider!());
 
     assert_el_eq!(&R2, &R2.canonical_gen(), &R1.get_ring().perform_rns_op_to_cfft(R2.get_ring(), &R1.get_ring().undo_fft(R1.canonical_gen()), &converter));
     for i in (-4 * 97)..=(4 * 97) {

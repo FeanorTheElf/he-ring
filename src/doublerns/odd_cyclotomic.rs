@@ -246,7 +246,7 @@ use feanor_math::{assert_el_eq, default_memory_provider};
 #[cfg(test)]
 use feanor_math::rings::extension::generic_test_free_algebra_axioms;
 #[cfg(test)]
-use feanor_math::rings::zn::zn_42::Zn;
+use feanor_math::rings::zn::zn_64::Zn;
 #[cfg(test)]
 use crate::feanor_math::rings::extension::FreeAlgebraStore;
 

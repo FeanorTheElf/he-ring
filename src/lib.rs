@@ -21,7 +21,6 @@ macro_rules! ring_literal {
 }
 
 extern crate feanor_math;
-extern crate rand;
 extern crate test;
 
 #[macro_use]

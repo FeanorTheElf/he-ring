@@ -317,7 +317,7 @@ impl<V, R, R_intermediate, M_Zn, M_Int> RNSOperation for AlmostExactRescaling<V,
 }
 
 #[cfg(test)]
-use feanor_math::rings::zn::zn_42::*;
+use feanor_math::rings::zn::zn_64::*;
 #[cfg(test)]
 use feanor_math::{assert_el_eq, default_memory_provider};
 

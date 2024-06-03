@@ -159,7 +159,7 @@ impl<R_main, R_fft, M> DoubleRNSRingBase<R_main, Pow2CyclotomicFFT<cooley_tuckey
 #[cfg(test)]
 use feanor_math::rings::extension::generic_test_free_algebra_axioms;
 #[cfg(test)]
-use feanor_math::rings::zn::zn_42::Zn;
+use feanor_math::rings::zn::zn_64::Zn;
 #[cfg(test)]
 use feanor_math::vector::*;
 #[cfg(test)]

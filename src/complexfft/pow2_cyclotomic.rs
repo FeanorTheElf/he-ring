@@ -126,7 +126,7 @@ impl<R: ZnRingStore, M_Zn, M_CC> ComplexFFTBasedRingBase<Pow2CyclotomicFFT<R, co
 #[cfg(test)]
 use feanor_math::rings::extension::generic_test_free_algebra_axioms;
 #[cfg(test)]
-use feanor_math::rings::zn::zn_42::Zn;
+use feanor_math::rings::zn::zn_64::Zn;
 #[cfg(test)]
 use feanor_math::default_memory_provider;
 
