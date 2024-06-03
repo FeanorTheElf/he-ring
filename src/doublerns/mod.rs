@@ -16,6 +16,6 @@ pub mod pow2_cyclotomic;
 pub mod odd_cyclotomic;
 
 ///
-/// Contains an implementation of "external products". For details, see [`DoubleRNSRingBase::external_product()`].
+/// Contains an implementation of "gadget products". For details, see [`double_rns_ring::DoubleRNSRingBase::gadget_product()`].
 /// 
 pub mod gadget_product;
