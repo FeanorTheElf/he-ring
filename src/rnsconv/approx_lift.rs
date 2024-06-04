@@ -1,3 +1,4 @@
+use caching::CachingMemoryProvider;
 use feanor_math::integer::*;
 use feanor_math::matrix::submatrix::*;
 use feanor_math::mempool::*;
@@ -7,6 +8,8 @@ use feanor_math::rings::zn::{ZnRingStore, ZnRing};
 use feanor_math::divisibility::DivisibilityRingStore;
 use feanor_math::primitive_int::*;
 use feanor_math::ring::*;
+
+use crate::profiling::print_all_timings;
 
 use super::RNSOperation;
 
@@ -106,7 +109,7 @@ impl<R, R_base, M_Int, M_Zn> AlmostExactBaseConversion<R, R_base, M_Int, M_Zn>
 
         Self {
             Q_over_q: memory_provider_zn.get_new_init(in_rings.len() * out_rings.len(), |idx| 
-                out_rings_base.at(idx % out_rings.len()).coerce(&ZZbig, ZZbig.checked_div(&Q, &int_cast(ZZ.clone_el(in_rings.at(idx / out_rings.len()).modulus()), ZZbig, ZZ)).unwrap())
+                out_rings_base.at(idx / in_rings.len()).coerce(&ZZbig, ZZbig.checked_div(&Q, &int_cast(ZZ.clone_el(in_rings.at(idx % in_rings.len()).modulus()), ZZbig, ZZ)).unwrap())
             ),
             Q_over_q_int: memory_provider_int.get_new_init(in_rings.len(), |i| 
                 int_cast(ZZbig.rounded_div(ZZbig.clone_el(&Q), &ZZbig.mul(int_cast(ZZ.clone_el(in_rings.at(i).modulus()), ZZbig, ZZ), ZZbig.power_of_two(drop_bits))), ZZ, ZZbig)
@@ -156,11 +159,11 @@ impl<R, R_base, M_Int, M_Zn> RNSOperation for AlmostExactBaseConversion<R, R_bas
     /// Furthermore, if the shortest lift of the input is bounded by `Q/4`,
     /// then the result is guaranteed to be exact.
     /// 
+    #[inline(never)]
     fn apply<V1, V2>(&self, input: Submatrix<V1, El<Self::Ring>>, mut output: SubmatrixMut<V2, El<Self::Ring>>)
         where V1: AsPointerToSlice<El<Self::Ring>>,
             V2: AsPointerToSlice<El<Self::Ring>>
     {
-        timed!("AlmostExactBaseConversion::apply", || {
             assert_eq!(input.row_count(), self.input_rings().len());
             assert_eq!(output.row_count(), self.output_rings().len());
             assert_eq!(input.col_count(), output.col_count());
@@ -171,42 +174,32 @@ impl<R, R_base, M_Int, M_Zn> RNSOperation for AlmostExactBaseConversion<R, R_bas
 
             let col_count = input.col_count();
 
-            let mut approx_result = self.memory_provider_int.get_new_init(col_count, |_| ZZ.zero());
-            for i in 0..output.row_count() {
-                for j in 0..col_count {
-                    *output.at(i, j) = self.output_rings().at(i).zero();
-                }
-            }
-
-            let lifts = self.memory_provider_int.get_new_init(col_count * input.row_count(), |idx| {
-                let i = idx / col_count;
-                let j = idx % col_count;
+            let lifts = timed!("AlmostExactBaseConversion::apply::lift", || self.memory_provider_int.get_new_init(col_count * input.row_count(), |idx| {
+                let i = idx % input.row_count();
+                let j = idx / input.row_count();
                 self.from_homs[i].codomain().smallest_lift(self.from_homs[i].mul_ref_map(input.at(i, j), self.q_over_Q.at(i)))
-            });
-            
-            for j in 0..col_count {
-                for k in 0..output.row_count() {
-                    *output.at(k, j) = self.output_rings().at(k).sum((0..input.row_count()).map(|i| {
-                        let lifted_red = int_to_homs[k].map_ref(&lifts[i * col_count + j]);
-                        let factor = self.Q_over_q.at(i * self.output_rings().len() + k);
-                        self.to_homs[k].mul_ref_snd_map(lifted_red, factor)
-                    }));
-                }
-            }
+            }));
 
-            for i in 0..input.row_count() {
+            timed!("AlmostExactBaseConversion::apply::product", || {
                 for j in 0..col_count {
-                    ZZ.add_assign(&mut approx_result[j], ZZ.mul_ref(&lifts[i * col_count + j], self.Q_over_q_int.at(i)));
+                    for k in 0..output.row_count() {
+                        *output.at(k, j) = <_ as RingStore>::sum(self.output_rings().at(k), (0..input.row_count()).map(|i| {
+                            let lifted_red = int_to_homs[k].map_ref(&lifts[i + j * input.row_count()]);
+                            let factor = self.Q_over_q.at(i + self.input_rings().len() * k);
+                            self.to_homs[k].mul_ref_snd_map(lifted_red, factor)
+                        }));
+                    }
                 }
-            }
+            });
 
-            for j in 0..col_count {
-                let correction = ZZ.rounded_div(ZZ.clone_el(approx_result.at(j)), &self.Q_dropped_bits);
-                for i in 0..output.row_count() {
-                    self.output_rings().at(i).sub_assign(output.at(i, j), self.to_homs[i].mul_ref_snd_map(int_to_homs[i].map_ref(&correction), &self.Q_mod_q[i]));
+            timed!("AlmostExactBaseConversion::apply::correction", || {
+                for j in 0..col_count {
+                    let correction = ZZ.rounded_div(<_ as RingStore>::sum(&ZZ, (0..input.row_count()).map(|i| ZZ.mul_ref(&lifts[i + input.row_count() * j], self.Q_over_q_int.at(i)))), &self.Q_dropped_bits);
+                    for i in 0..output.row_count() {
+                        self.output_rings().at(i).sub_assign(output.at(i, j), self.to_homs[i].mul_ref_snd_map(int_to_homs[i].map_ref(&correction), &self.Q_mod_q[i]));
+                    }
                 }
-            }
-        });
+            });
     }
 }
 
@@ -333,13 +326,16 @@ fn test_rns_base_conversion_coprime() {
 
 #[bench]
 fn bench_rns_base_conversion(bencher: &mut Bencher) {
-    let in_moduli_count = 40;
-    let out_moduli_count = 20;
+    let in_moduli_count = 80;
+    let out_moduli_count = 50;
     let cols = 1000;
     let mut primes = (1000..).map(|k| 1024 * k + 1).filter(|p| is_prime(&StaticRing::<i64>::RING, p, 10)).map(|p| Zn::new(p as u64));
     let in_moduli = primes.by_ref().take(in_moduli_count).collect::<Vec<_>>();
     let out_moduli = primes.take(out_moduli_count).collect::<Vec<_>>();
-    let conv = AlmostExactBaseConversion::new(&in_moduli, &out_moduli, default_memory_provider!(), default_memory_provider!());
+    let fastmul_in_moduli = in_moduli.iter().map(|Fp| (*Fp)).collect();
+    let fastmul_out_moduli = out_moduli.iter().map(|Fp| (*Fp)).collect();
+    let conv = AlmostExactBaseConversion::new_generic(in_moduli.clone(), fastmul_in_moduli, out_moduli.clone(), fastmul_out_moduli, CachingMemoryProvider::new(1), default_memory_provider!());
+    
     let mut rng = oorandom::Rand64::new(1);
     let mut in_data = (0..(in_moduli_count * cols)).map(|idx| in_moduli[idx / cols].zero()).collect::<Vec<_>>();
     let mut in_matrix = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut in_data, in_moduli_count, cols);
@@ -359,4 +355,6 @@ fn bench_rns_base_conversion(bencher: &mut Bencher) {
             }
         }
     });
+
+    print_all_timings();
 }
