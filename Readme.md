@@ -62,8 +62,8 @@ pub type RelinKey<'a> = (GadgetProductOperand<'a>, GadgetProductOperand<'a>);
 // this in a fast-RNS-conversion manner requires precomputing all kinds of data, encapsulated by `MulConversionData`.
 //
 pub struct MulConversionData {
-    to_C_mul: rnsconv::approx_lift::AlmostExactBaseConversion<Vec<Zn>, Vec<Zn>, Zn, Zn, DefaultMemoryProvider, DefaultMemoryProvider>,
-    scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert<Vec<Zn>, Zn, Zn, DefaultMemoryProvider, DefaultMemoryProvider>
+    to_C_mul: rnsconv::approx_lift::AlmostExactBaseConversion<Zn, DefaultMemoryProvider, DefaultMemoryProvider>,
+    scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert<Zn, DefaultMemoryProvider, DefaultMemoryProvider>
 };
 
 const ZZbig: BigIntRing = BigIntRing::RING;
@@ -106,12 +106,10 @@ pub fn create_plaintext_ring(log2_ring_degree: usize, plaintext_modulus: i64) ->
 // fast-RNS-conversion manner.
 //
 pub fn create_multiplication_rescale(P: &PlaintextRing, C: &CiphertextRing, C_mul: &CiphertextRing) -> MulConversionData {
-    let intermediate = Zn::new(65539);
     MulConversionData {
         to_C_mul: rnsconv::approx_lift::AlmostExactBaseConversion::new(
             C.get_ring().rns_base().iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
             C_mul.get_ring().rns_base().iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
-            intermediate,
             default_memory_provider!(),
             default_memory_provider!()
         ),
@@ -119,7 +117,6 @@ pub fn create_multiplication_rescale(P: &PlaintextRing, C: &CiphertextRing, C_mu
             C_mul.get_ring().rns_base().iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
             Some(P.base_ring()).into_iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
             C.get_ring().rns_base().len(), 
-            intermediate,
             default_memory_provider!(),
             default_memory_provider!()
         )

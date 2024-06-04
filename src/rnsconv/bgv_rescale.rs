@@ -28,18 +28,17 @@ const ZZbig: BigIntRing = BigIntRing::RING;
 /// This means that the "closest integer" above might only be the second-closest when there is
 /// almost a tie.
 /// 
-pub struct CongruencePreservingRescaling<V, R, R_intermediate, M_Zn, M_Int>
-    where V: VectorView<R>,
-        R: ZnRingStore, R_intermediate: ZnRingStore<Type = R::Type>,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanHomFrom<StaticRingBase<i32>>,
+pub struct CongruencePreservingRescaling<R, M_Zn, M_Int>
+    where R: ZnRingStore + Clone,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanHomFrom<StaticRingBase<i32>> + SelfIso,
         M_Zn: MemoryProvider<El<R>>,
         M_Int: MemoryProvider<El<<R::Type as ZnRing>::Integers>>
 {
     b_moduli_count: usize,
     q_moduli_count: usize,
     /// contains all the moduli, in the order: moduli of `q` first, then moduli of `q'`
-    b_to_aq_lift: AlmostExactBaseConversion<Subvector<R, V>, V, R, R_intermediate, M_Zn, M_Int>,
-    aq_to_t_conv: AlmostExactBaseConversion<V, [R; 1], R, R_intermediate, M_Zn, M_Int>,
+    b_to_aq_lift: AlmostExactBaseConversion<R, M_Int, M_Zn>,
+    aq_to_t_conv: AlmostExactBaseConversion<R, M_Int, M_Zn>,
     memory_provider: M_Zn,
     /// `a` as an element of each modulus of `q`
     a: Vec<El<R>>,
@@ -49,18 +48,17 @@ pub struct CongruencePreservingRescaling<V, R, R_intermediate, M_Zn, M_Int>
     b_inv_mod_t: El<R>
 }
 
-impl<R, R_intermediate, M_Zn, M_Int> CongruencePreservingRescaling<Vec<R>, R, R_intermediate, M_Zn, M_Int>
+impl<R, M_Zn, M_Int> CongruencePreservingRescaling<R, M_Zn, M_Int>
     where R: ZnRingStore + Clone, 
-        R_intermediate: ZnRingStore<Type = R::Type> + Clone,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanHomFrom<StaticRingBase<i32>>,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanHomFrom<StaticRingBase<i32>> + SelfIso,
         M_Zn: MemoryProvider<El<R>> + Clone,
         M_Int: MemoryProvider<El<<R::Type as ZnRing>::Integers>> + Clone
 {
-    pub fn scale_down(q_moduli: Vec<R>, drop_moduli: usize, plaintext_modulus: R, Zm_intermediate: R_intermediate, memory_provider: M_Zn, memory_provider_int: M_Int) -> Self {
-        Self::new(q_moduli, Vec::new(), drop_moduli, plaintext_modulus, Zm_intermediate, memory_provider, memory_provider_int)
+    pub fn scale_down(q_moduli: Vec<R>, drop_moduli: usize, plaintext_modulus: R, memory_provider: M_Zn, memory_provider_int: M_Int) -> Self {
+        Self::new(q_moduli, Vec::new(), drop_moduli, plaintext_modulus, memory_provider, memory_provider_int)
     }
 
-    pub fn new(in_moduli: Vec<R>, num_moduli: Vec<R>, denominator_count: usize, plaintext_modulus: R, Zm_intermediate: R_intermediate, memory_provider: M_Zn, memory_provider_int: M_Int) -> Self {
+    pub fn new(in_moduli: Vec<R>, num_moduli: Vec<R>, denominator_count: usize, plaintext_modulus: R, memory_provider: M_Zn, memory_provider_int: M_Int) -> Self {
         let a = ZZbig.prod(num_moduli.iter().map(|R| int_cast(R.integer_ring().clone_el(R.modulus()), &ZZbig, R.integer_ring())));
         let b = ZZbig.prod(in_moduli.iter().take(denominator_count).map(|R| int_cast(R.integer_ring().clone_el(R.modulus()), &ZZbig, R.integer_ring())));
         
@@ -75,29 +73,28 @@ impl<R, R_intermediate, M_Zn, M_Int> CongruencePreservingRescaling<Vec<R>, R, R_
             a: a_mod,
             b_inv: b_inv_mod,
             b_inv_mod_t: plaintext_modulus.invert(&plaintext_modulus.coerce(&ZZbig, b)).unwrap(),
-            b_to_aq_lift: AlmostExactBaseConversion::new(Subvector::new(b_moduli), aq_moduli.clone(), Zm_intermediate.clone(), memory_provider_int.clone(), memory_provider.clone()),
-            aq_to_t_conv: AlmostExactBaseConversion::new(aq_moduli, [plaintext_modulus], Zm_intermediate, memory_provider_int, memory_provider.clone()),
+            b_to_aq_lift: AlmostExactBaseConversion::new(&b_moduli, &aq_moduli, memory_provider_int.clone(), memory_provider.clone()),
+            aq_to_t_conv: AlmostExactBaseConversion::new(&aq_moduli, &[plaintext_modulus], memory_provider_int, memory_provider.clone()),
             memory_provider: memory_provider
         }
     }
 }
 
-impl<V, R, R_intermediate, M_Zn, M_Int> CongruencePreservingRescaling<V, R, R_intermediate, M_Zn, M_Int>
-    where V: VectorView<R>,
-        R: ZnRingStore, R_intermediate: ZnRingStore<Type = R::Type>,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanHomFrom<StaticRingBase<i32>>,
+impl<R, M_Zn, M_Int> CongruencePreservingRescaling<R, M_Zn, M_Int>
+    where R: ZnRingStore + Clone,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanHomFrom<StaticRingBase<i32>> + SelfIso,
         M_Zn: MemoryProvider<El<R>>,
         M_Int: MemoryProvider<El<<R::Type as ZnRing>::Integers>>
 {
-    fn q_moduli<'a>(&'a self) -> Subvector<R, &'a V> {
-        Subvector::new(self.aq_to_t_conv.input_rings()).subvector(..self.q_moduli_count)
+    fn q_moduli<'a>(&'a self) -> &'a [R] {
+        &self.aq_to_t_conv.input_rings()[..self.q_moduli_count]
     }
 
-    fn aq_over_b_moduli<'a>(&'a self) -> Subvector<R, &'a V> {
-        Subvector::new(self.aq_to_t_conv.input_rings()).subvector(self.b_moduli_count..)
+    fn aq_over_b_moduli<'a>(&'a self) -> &'a [R] {
+        &self.aq_to_t_conv.input_rings()[self.b_moduli_count..]
     }
 
-    fn aq_moduli<'a>(&'a self) -> &'a V {
+    fn aq_moduli<'a>(&'a self) -> &'a [R] {
         self.aq_to_t_conv.input_rings()
     }
 
@@ -106,10 +103,9 @@ impl<V, R, R_intermediate, M_Zn, M_Int> CongruencePreservingRescaling<V, R, R_in
     }
 }
 
-impl<V, R, R_intermediate, M_Zn, M_Int> RNSOperation for CongruencePreservingRescaling<V, R, R_intermediate, M_Zn, M_Int>
-    where V: VectorView<R>,
-        R: ZnRingStore, R_intermediate: ZnRingStore<Type = R::Type>,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanHomFrom<StaticRingBase<i32>>,
+impl<R, M_Zn, M_Int> RNSOperation for CongruencePreservingRescaling<R, M_Zn, M_Int>
+    where R: ZnRingStore + Clone,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanHomFrom<StaticRingBase<i32>> + SelfIso,
         M_Zn: MemoryProvider<El<R>>,
         M_Int: MemoryProvider<<<<R as RingStore>::Type as ZnRing>::IntegerRingBase as RingBase>::Element>
 {
@@ -117,17 +113,11 @@ impl<V, R, R_intermediate, M_Zn, M_Int> RNSOperation for CongruencePreservingRes
 
     type RingType = R::Type;
 
-    type InRings<'a> = Subvector<R, &'a V>
-        where Self: 'a;
-
-    type OutRings<'a> = Subvector<R, &'a V>
-        where Self: 'a;
-
-    fn input_rings<'a>(&'a self) -> Self::InRings<'a> {
+    fn input_rings<'a>(&'a self) -> &'a [R] {
         self.q_moduli()
     }
 
-    fn output_rings<'a>(&'a self) -> Self::OutRings<'a> {
+    fn output_rings<'a>(&'a self) -> &'a [R] {
         self.aq_over_b_moduli()
     }
 
@@ -216,13 +206,12 @@ fn test_rescale() {
         to.clone(), 
         3,
         Zt.clone(), 
-        Zn::new(65537), 
         default_memory_provider!(), 
         default_memory_provider!()
     );
 
     let ZZ_to_Zt = Zt.int_hom();
-    // since Zm_intermediate has a very large modulus, we can ignore the `+/- 1` error here at the moment (I think)
+    
     for i in -(q/2)..=(q/2) {
         let input = i;
         let rescaled = (input as f64 * qprime as f64 / q as f64).round() as i32;
@@ -240,7 +229,11 @@ fn test_rescale() {
         rescaling.apply(Submatrix::<AsFirstElement<_>, _>::new(&input, 3, 1), SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 2, 1));
 
         for j in 0..output.len() {
-            assert_el_eq!(to.at(j), output.at(j), actual.at(j));
+            assert!(
+                to.at(j).eq_el(output.at(j), actual.at(j)) ||
+                to.at(j).eq_el(&to.at(j).add_ref_fst(output.at(j), to.at(j).int_hom().map(5)), actual.at(j)) ||
+                to.at(j).eq_el(&to.at(j).sub_ref_fst(output.at(j), to.at(j).int_hom().map(5)), actual.at(j))
+            );
         }        
     }
 }
@@ -257,12 +250,12 @@ fn test_rescale_down() {
         from.clone(), 
         1,
         Zt.clone(), 
-        Zn::new(65537), 
         default_memory_provider!(), 
         default_memory_provider!()
     );
 
     let ZZ_to_Zt = Zt.int_hom();
+
     for i in -(q/2)..=(q/2) {
         let input = i;
         let rescaled = (input as f64 * qprime as f64 / q as f64).round() as i32;
@@ -280,6 +273,7 @@ fn test_rescale_down() {
         rescaling.apply(Submatrix::<AsFirstElement<_>, _>::new(&input, 3, 1), SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 2, 1));
 
         for j in 0..output.len() {
+            // we currently assume no error happens
             assert_el_eq!(to.at(j), output.at(j), actual.at(j));
         }        
     }

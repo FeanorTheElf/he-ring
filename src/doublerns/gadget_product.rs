@@ -26,7 +26,7 @@ use crate::rnsconv::*;
 /// 
 pub enum GadgetProductRhsOperand<'a, R, F, M> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase> + SelfIso,
         F: GeneralizedFFT + GeneralizedFFTSelfIso,
         M: MemoryProvider<El<R>>
 {
@@ -36,19 +36,19 @@ pub enum GadgetProductRhsOperand<'a, R, F, M>
 
 pub struct LKSSGadgetProductRhsOperand<'a, R, F, M> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase> + SelfIso,
         F: GeneralizedFFT + GeneralizedFFTSelfIso,
         M: MemoryProvider<El<R>>
 {
     shortened_rns_base: zn_rns::Zn<&'a R, BigIntRing>,
     ring: &'a DoubleRNSRingBase<R, F, M>,
     operands: Vec<Vec<M::Object>>,
-    conversions: Vec<AlmostExactBaseConversion<zn_rns::ZnBase<&'a R, BigIntRing>, [&'a R; 1], &'a R, &'a R, DefaultMemoryProvider, DefaultMemoryProvider>>
+    conversions: Vec<AlmostExactBaseConversion<&'a R, DefaultMemoryProvider, DefaultMemoryProvider>>
 }
 
 impl<'a, R, F, M> LKSSGadgetProductRhsOperand<'a, R, F, M>
     where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase> + SelfIso,
         F: GeneralizedFFT + GeneralizedFFTSelfIso,
         M: MemoryProvider<El<R>>
 {
@@ -67,7 +67,7 @@ impl<'a, R, F, M> LKSSGadgetProductRhsOperand<'a, R, F, M>
 
 impl<'a, R, F, M> GadgetProductRhsOperand<'a, R, F, M>
     where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase> + SelfIso,
         F: GeneralizedFFT + GeneralizedFFTSelfIso,
         M: MemoryProvider<El<R>>
 {
@@ -87,7 +87,7 @@ impl<'a, R, F, M> GadgetProductRhsOperand<'a, R, F, M>
 /// 
 pub enum GadgetProductLhsOperand<'a, R, F, M> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase> + SelfIso,
         F: GeneralizedFFT + GeneralizedFFTSelfIso,
         M: MemoryProvider<El<R>>
 {
@@ -108,7 +108,7 @@ pub struct LKSSGadgetProductLhsOperand<'a, R, F, M>
 
 impl<R, F, M> DoubleRNSRingBase<R, F, M>
     where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase> + SelfIso,
         F: GeneralizedFFT + GeneralizedFFTSelfIso,
         M: MemoryProvider<El<R>>
 {
@@ -206,13 +206,8 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
                     self.rns_base().at(self.rns_base().len() - output_moduli_count + k).zero()
                 })).collect()).collect(),
                 conversions: (0..self.rns_base().len()).map(|i| AlmostExactBaseConversion::new(
-                    shortened_rns_base.get_ring().clone(), 
-                    [self.rns_base().at(i)], 
-                    if i != self.rns_base().len() - output_moduli_count - 1 { 
-                        self.rns_base().at(self.rns_base().len() - output_moduli_count - 1)
-                    } else {
-                        self.rns_base().at(self.rns_base().len() - output_moduli_count - 2)
-                    },
+                    shortened_rns_base.get_ring(), 
+                    &[self.rns_base().at(i)], 
                     default_memory_provider!(),
                     default_memory_provider!()
                 )).collect::<Vec<_>>(),

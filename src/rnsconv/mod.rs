@@ -33,15 +33,9 @@ pub trait RNSOperation {
     
     type RingType: ?Sized + ZnRing;
 
-    type InRings<'a>: 'a + VectorView<Self::Ring>
-        where Self: 'a;
+    fn input_rings<'a>(&'a self) -> &'a [Self::Ring];
 
-    type OutRings<'a>: 'a + VectorView<Self::Ring>
-        where Self: 'a;
-
-    fn input_rings<'a>(&'a self) -> Self::InRings<'a>;
-
-    fn output_rings<'a>(&'a self) -> Self::OutRings<'a>;
+    fn output_rings<'a>(&'a self) -> &'a [Self::Ring];
 
     ///
     /// Applies the RNS operation to each column of the given matrix, and writes the results to the columns
