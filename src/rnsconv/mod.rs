@@ -1,14 +1,10 @@
-use feanor_math::homomorphism::CanHomFrom;
-use feanor_math::integer::IntegerRing;
-use feanor_math::mempool::MemoryProvider;
 use feanor_math::ring::*;
 use feanor_math::rings::zn::{ZnRing, ZnRingStore};
 use feanor_math::matrix::submatrix::*;
-use feanor_math::vector::VectorView;
 
 pub mod approx_lift;
-// pub mod bfv_rescale;
-// pub mod bgv_rescale;
+pub mod bfv_rescale;
+pub mod bgv_rescale;
 
 ///
 /// Trait for any map `Zq -> Zq'` for (usually composite) `q, q'`.
@@ -45,14 +41,7 @@ pub trait RNSOperation {
     /// of `output`. The entries of the `i`-th row are considered to be elements of `self.input_rings().at(i)`
     /// resp. `self.output_rings().at(i)`.
     ///
-    fn apply<W1, W2, V1, V2, S1, S2, M_Int, M_Zn>(&self, input: Submatrix<V1, El<S1>>, output: SubmatrixMut<V2, El<S2>>, input_rings: W1, output_rings: W2, memory_provider_int: M_Int, memory_provider_zn: M_Zn)
-        where V1: AsPointerToSlice<El<S1>>,
-            V2: AsPointerToSlice<El<S2>>,
-            S1: RingStore,
-            S1::Type: ZnRing + CanHomFrom<Self::RingType>,
-            S2: RingStore<Type = S1::Type>,
-            W1: VectorView<S1>,
-            W2: VectorView<S2>,
-            M_Int: MemoryProvider<El<<S1::Type as ZnRing>::Integers>>,
-            M_Zn: MemoryProvider<El<S1>>;
+    fn apply<V1, V2>(&self, input: Submatrix<V1, El<Self::Ring>>, output: SubmatrixMut<V2, El<Self::Ring>>)
+        where V1: AsPointerToSlice<El<Self::Ring>>,
+            V2: AsPointerToSlice<El<Self::Ring>>;
 }

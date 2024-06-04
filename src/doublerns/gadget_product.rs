@@ -335,11 +335,7 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
                 timed!("gadget_product_lkss::lifting", || {
                     rhs.conversions[j].apply(
                         Submatrix::<AsFirstElement<_>, _>::new(&summand, shortened_rns_base.len(), self.rank()),
-                        self.as_matrix_mut(&mut result).restrict_rows(j..(j + 1)),
-                        &shortened_rns_base,
-                        [&self.rns_base().at(j)],
-                        default_memory_provider!(),
-                        default_memory_provider!()
+                        self.as_matrix_mut(&mut result).restrict_rows(j..(j + 1))
                     );
                 });
             }

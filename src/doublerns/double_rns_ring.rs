@@ -311,7 +311,7 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
             assert!(self.rns_base().at(i).get_ring() == op.output_rings().at(i).get_ring());
         }
         let mut result = self.non_fft_zero();
-        op.apply(from.as_matrix(el), self.as_matrix_mut(&mut result), from.rns_base(), self.rns_base(), default_memory_provider!(), default_memory_provider!());
+        op.apply(from.as_matrix(el), self.as_matrix_mut(&mut result));
         return result;
     }
 
@@ -370,7 +370,7 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
         
         let mut result = to.zero();
         let result_matrix = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut result, 1, to.rank());
-        op.apply(self.as_matrix(element), result_matrix, self.rns_base(), op.output_rings(), default_memory_provider!(), default_memory_provider!());
+        op.apply(self.as_matrix(element), result_matrix);
         return result;
     }
 

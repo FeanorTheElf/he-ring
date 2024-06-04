@@ -5,6 +5,7 @@ use feanor_math::mempool::*;
 use feanor_math::primitive_int::*;
 use feanor_math::rings::zn::*;
 use feanor_math::integer::int_cast;
+use feanor_math::default_memory_provider;
 use feanor_math::integer::*;
 use feanor_math::ring::*;
 use feanor_math::vector::*;
@@ -77,24 +78,32 @@ impl<R, M_Zn, M_Int> CongruencePreservingRescaling<R, M_Zn, M_Int>
             memory_provider: memory_provider
         }
     }
+
+    fn t_modulus(&self) -> &R {
+        &self.aq_to_t_conv.output_rings()[0]
+    }
+
+    fn aq_moduli(&self) -> &[R] {
+        &self.b_to_aq_lift.output_rings()
+    }
 }
 
 impl<R, M_Zn, M_Int> RNSOperation for CongruencePreservingRescaling<R, M_Zn, M_Int>
     where R: ZnRingStore + Clone,
         R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanHomFrom<StaticRingBase<i32>> + SelfIso,
-        M_Zn: MemoryProvider<El<R>>,
-        M_Int: MemoryProvider<<<<R as RingStore>::Type as ZnRing>::IntegerRingBase as RingBase>::Element>
+        M_Zn: MemoryProvider<El<R>> + Clone,
+        M_Int: MemoryProvider<<<<R as RingStore>::Type as ZnRing>::IntegerRingBase as RingBase>::Element> + Clone
 {
     type Ring = R;
 
     type RingType = R::Type;
 
     fn input_rings<'a>(&'a self) -> &'a [R] {
-        self.q_moduli()
+        &self.aq_moduli()[..self.q_moduli_count]
     }
 
     fn output_rings<'a>(&'a self) -> &'a [R] {
-        self.aq_over_b_moduli()
+        &self.aq_moduli()[self.b_moduli_count..]
     }
 
     ///
@@ -107,29 +116,20 @@ impl<R, M_Zn, M_Int> RNSOperation for CongruencePreservingRescaling<R, M_Zn, M_I
     /// if we used [`crate::rnsconv::bfv_rescale::AlmostExactRescaling`]. Also, we currently lift to `aq`
     /// instead of `aq/b`, but I am not sure if that is really necessary.
     /// 
-    fn apply<W1, W2, V1, V2, S1, S2, M_Int2, M_Zn2>(&self, input: Submatrix<V1, El<S1>>, output: SubmatrixMut<V2, El<S2>>, input_rings: W1, output_rings: W2, memory_provider_int: M_Int2, memory_provider_zn: M_Zn2)
-        where V1: AsPointerToSlice<El<S1>>,
-            V2: AsPointerToSlice<El<S2>>,
-            S1: RingStore,
-            S1::Type: ZnRing + CanHomFrom<Self::RingType>,
-            S2: RingStore<Type = S1::Type>,
-            W1: VectorView<S1>,
-            W2: VectorView<S2>,
-            M_Int2: MemoryProvider<El<<S1::Type as ZnRing>::Integers>>,
-            M_Zn2: MemoryProvider<El<S1>> 
+    fn apply<V1, V2>(&self, input: Submatrix<V1, El<Self::Ring>>, mut output: SubmatrixMut<V2, El<Self::Ring>>)
+        where V1: AsPointerToSlice<El<Self::Ring>>,
+            V2: AsPointerToSlice<El<Self::Ring>>
     {
-        assert_eq!(input.row_count(), input_rings.len());
-        assert_eq!(self.input_rings().len(), input_rings.len());
-        assert_eq!(output.row_count(), output_rings.len());
-        assert_eq!(self.output_rings().len(), output_rings.len());
+        assert_eq!(input.row_count(), self.input_rings().len());
+        assert_eq!(output.row_count(), self.output_rings().len());
         assert_eq!(input.col_count(), output.col_count());
 
         // Compute `x := el * a`
-        let mut x = memory_provider_zn.get_new_init(self.aq_moduli().len() * input.col_count(), |idx| {
+        let mut x = default_memory_provider!().get_new_init(self.aq_moduli().len() * input.col_count(), |idx| {
             let i = idx / input.col_count();
             let j = idx % input.col_count();
-            if i < self.q_moduli().len() {
-                self.q_moduli().at(i).mul_ref(input.at(i, j), &self.a.at(i))
+            if i < self.input_rings().len() {
+                self.input_rings().at(i).mul_ref(input.at(i, j), &self.a.at(i))
             } else {
                 self.aq_moduli().at(i).zero()
             }
@@ -160,7 +160,7 @@ impl<R, M_Zn, M_Int> RNSOperation for CongruencePreservingRescaling<R, M_Zn, M_I
         }
 
         // this is now `round((aq/b) * el / q)`, possibly `+/- 1`
-        for (i, Zk) in self.aq_over_b_moduli().iter().enumerate() {
+        for (i, Zk) in self.output_rings().iter().enumerate() {
             let modulo = Zk.can_hom(self.t_modulus().integer_ring()).unwrap();
             debug_assert!(Zk.integer_ring().get_ring() == self.t_modulus().integer_ring().get_ring());
             for j in 0..input.col_count() {
@@ -176,7 +176,7 @@ impl<R, M_Zn, M_Int> RNSOperation for CongruencePreservingRescaling<R, M_Zn, M_I
 #[cfg(test)]
 use feanor_math::rings::zn::zn_64::*;
 #[cfg(test)]
-use feanor_math::{assert_el_eq, default_memory_provider};
+use feanor_math::assert_el_eq;
 
 #[test]
 fn test_rescale() {
