@@ -26,6 +26,8 @@ extern crate test;
 #[macro_use]
 pub mod profiling;
 
+pub mod matmul;
+
 ///
 /// Defines the trait [`cyclotomic::CyclotomicRing`] for rings of the form `R[X]/(Phi_n)`, where `R` is any base ring.
 /// 

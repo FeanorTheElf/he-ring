@@ -3,7 +3,7 @@ use feanor_math::rings::zn::{ZnRing, ZnRingStore};
 use feanor_math::vector::*;
 use feanor_math::matrix::submatrix::*;
 
-pub mod lift;
+pub mod approx_lift;
 pub mod bfv_rescale;
 pub mod bgv_rescale;
 

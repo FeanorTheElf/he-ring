@@ -136,9 +136,9 @@ pub struct DoubleRNSEl<R, F, M>
         F: GeneralizedFFT + GeneralizedFFTSelfIso,
         M: MemoryProvider<El<R>>
 {
-    generalized_fft: PhantomData<F>,
-    memory_provider: PhantomData<M>,
-    data: M::Object
+    pub(super) generalized_fft: PhantomData<F>,
+    pub(super) memory_provider: PhantomData<M>,
+    pub(super) data: M::Object
 }
 
 pub struct DoubleRNSNonFFTEl<R, F, M> 
@@ -187,11 +187,11 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
         self.rank() * self.rns_base().len()
     }
 
-    fn as_matrix<'a>(&self, element: &'a DoubleRNSNonFFTEl<R, F, M>) -> Submatrix<'a, AsFirstElement<El<R>>, El<R>> {
+    pub fn as_matrix<'a>(&self, element: &'a DoubleRNSNonFFTEl<R, F, M>) -> Submatrix<'a, AsFirstElement<El<R>>, El<R>> {
         Submatrix::<AsFirstElement<_>, _>::new(&element.data, self.rns_base().len(), self.rank())
     }
 
-    fn as_matrix_mut<'a>(&self, element: &'a mut DoubleRNSNonFFTEl<R, F, M>) -> SubmatrixMut<'a, AsFirstElement<El<R>>, El<R>> {
+    pub fn as_matrix_mut<'a>(&self, element: &'a mut DoubleRNSNonFFTEl<R, F, M>) -> SubmatrixMut<'a, AsFirstElement<El<R>>, El<R>> {
         SubmatrixMut::<AsFirstElement<_>, _>::new(&mut element.data, self.rns_base().len(), self.rank())
     }
 
@@ -830,7 +830,7 @@ use feanor_math::{assert_el_eq, default_memory_provider};
 #[cfg(test)]
 use crate::complexfft;
 #[cfg(test)]
-use crate::rnsconv::lift::*;
+use crate::rnsconv::approx_lift::*;
 #[cfg(test)]
 use crate::doublerns::pow2_cyclotomic::Pow2CyclotomicFFT;
 #[cfg(test)]

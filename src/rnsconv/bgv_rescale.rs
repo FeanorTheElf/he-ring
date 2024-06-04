@@ -10,7 +10,7 @@ use feanor_math::ring::*;
 use feanor_math::vector::subvector::*;
 use feanor_math::vector::*;
 
-use crate::rnsconv::lift::AlmostExactBaseConversion;
+use crate::rnsconv::approx_lift::AlmostExactBaseConversion;
 
 use super::RNSOperation;
 
