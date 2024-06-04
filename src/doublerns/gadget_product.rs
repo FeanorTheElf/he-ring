@@ -10,7 +10,7 @@ use super::double_rns_ring::*;
 
 ///
 /// Right-hand side operand of an "RNS-gadget product", hence this struct stores
-/// noisy approximations to `q/pi * x`, where `q = p1 * ... * pm` is the ring modulus.
+/// noisy approximations to `lift((q / pi)^-1 mod pi) * q / pi * x`, where `q = p1 * ... * pm` is the ring modulus.
 /// For more details, see [`DoubleRNSRingBase::gadget_product()`].
 /// 
 pub struct GadgetProductRhsOperand<R, F, M> 
@@ -36,7 +36,7 @@ impl<R, F, M> GadgetProductRhsOperand<R, F, M>
 ///
 /// Left-hand side operand of an "RNS-gadget product", hence this struct stores
 /// the gadget decomposition of a ring element `y`, w.r.t. the RNS gadget vector
-/// `(q/p1, ..., q/pm)` where `q = p1 * ... * pm` is the ring modulus.
+/// `(lift((q / pi)^-1 mod pi) * q / pi)_i` where `q = p1 * ... * pm` is the ring modulus.
 /// For more details, see [`DoubleRNSRingBase::gadget_product()`].
 /// 
 pub struct GadgetProductLhsOperand<R, F, M> 
@@ -106,8 +106,9 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
     /// computing a gadget-decomposition `y = g1 * y1 + ... + gm * ym` for small values `yi` and
     /// then setting `xy ~ y1 (g1 * x + e1) + ... + ym (gm * x + em)`.
     /// 
-    /// The gadget vector used for this "RNS-gadget product" is the one given by `gi = q / pi`
-    /// where `q = p1 * ... * pm` is the prime factorization of `q`.
+    /// The gadget vector used for this "RNS-gadget product" is the one given by the RNS basis or
+    /// CRT unit vectors, i.e. `gi = lift((q / pi)^-1 mod pi) * q / pi` where `q = p1 * ... * pm` 
+    /// is the prime factorization of `q`.
     /// 
     pub fn gadget_product(&self, lhs: &GadgetProductLhsOperand<R, F, M>, rhs: &GadgetProductRhsOperand<R, F, M>) -> <Self as RingBase>::Element {
         <_ as RingBase>::sum(self, lhs.operands.iter().zip(rhs.operands.iter()).map(|(l, r)| self.mul_ref(l, r)))
@@ -128,6 +129,14 @@ use feanor_math::integer::BigIntRing;
 use feanor_math::ordered::OrderedRingStore;
 #[cfg(test)]
 use vec_fn::VectorFn;
+#[cfg(test)]
+use test::Bencher;
+#[cfg(test)]
+use feanor_math::algorithms::miller_rabin::is_prime;
+#[cfg(test)]
+use feanor_math::rings::finite::FiniteRingStore;
+#[cfg(test)]
+use feanor_math::primitive_int::StaticRing;
 
 #[test]
 fn test_gadget_product() {
@@ -149,4 +158,40 @@ fn test_gadget_product() {
     for i in 0..8 {
         assert!(ZZbig.is_leq(&ring.base_ring().smallest_lift(result_error_vec.at(i)), &ZZbig.int_hom().map(error_bound)));
     }
+}
+
+#[bench]
+fn bench_gadget_product(bencher: &mut Bencher) {
+    const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
+    const ZZbig: BigIntRing = BigIntRing::RING;
+    let log2_n = 14;
+    let rns_base_len = 16;
+    let rns_base: Vec<_> = (1..).map(|i| (i << (log2_n + 1)) + 1).filter(|p| is_prime(ZZ, &(*p as i64), 10)).map(Zn::new).take(rns_base_len).collect();
+    let error_bound = ZZbig.can_hom(&ZZ).unwrap().map((rns_base.len() as i64 * *rns_base.last().unwrap().modulus() as i64) << log2_n);
+    let ring = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<FFTTableCooleyTuckey<Zn>>, _>::new(zn_rns::Zn::new(rns_base.clone(), ZZbig, default_memory_provider!()), rns_base, log2_n, default_memory_provider!());
+
+    let mut rng = oorandom::Rand64::new(1);
+    let rhs = ring.random_element(|| rng.rand_u64());
+    let mut rhs_op = ring.get_ring().gadget_product_rhs_zero();
+    let gadget_vec = |i: usize| ring.base_ring().get_ring().from_congruence((0..rns_base_len).map(|j| if i == j {
+        ring.base_ring().get_ring().at(j).one()
+    } else {
+        ring.base_ring().get_ring().at(j).zero()
+    }));
+    for i in 0..rns_base_len {
+        let error = ring.get_ring().sample_from_coefficient_distribution(|| (rng.rand_u64() % 3) as i32 - 1);
+        rhs_op.set_rns_factor(i, ring.add(ring.inclusion().mul_ref_fst_map(&rhs, gadget_vec(i)), error));
+    }
+
+    bencher.iter(|| {
+        let lhs = ring.random_element(|| rng.rand_u64());
+        let expected_result = ring.mul_ref(&lhs, &rhs);
+        let lhs_op = ring.get_ring().to_gadget_product_lhs(ring.get_ring().undo_fft(lhs));
+        let result = ring.get_ring().gadget_product(&lhs_op, &rhs_op);
+        let error = ring.sub(expected_result, result);
+        let error_vec = ring.wrt_canonical_basis(&error);
+        for i in 0..error_vec.len() {
+            assert!(ZZbig.is_leq(&ZZbig.abs(ring.base_ring().smallest_lift(error_vec.at(i))), &error_bound));
+        }
+    });
 }

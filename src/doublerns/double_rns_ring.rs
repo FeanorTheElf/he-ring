@@ -2,11 +2,15 @@ use std::marker::PhantomData;
 
 use feanor_math::divisibility::*;
 use feanor_math::integer::*;
+use feanor_math::iters::multi_cartesian_product;
+use feanor_math::iters::MultiProduct;
+use feanor_math::iters::RingElementClone;
 use feanor_math::matrix::submatrix::AsFirstElement;
 use feanor_math::matrix::submatrix::Submatrix;
 use feanor_math::matrix::submatrix::SubmatrixMut;
 use feanor_math::rings::extension::*;
 use feanor_math::mempool::*;
+use feanor_math::rings::finite::*;
 use feanor_math::ring::*;
 use feanor_math::rings::float_complex::Complex64El;
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
@@ -650,6 +654,94 @@ impl<R, F, M> RingExtension for DoubleRNSRingBase<R, F, M>
             generalized_fft: PhantomData,
             memory_provider: PhantomData
         });
+    }
+}
+
+pub struct WRTCanonicalBasisElementCreator<'a, R, F, M>
+    where R: ZnRingStore,
+        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        F: GeneralizedFFT + GeneralizedFFTSelfIso,
+        M: MemoryProvider<El<R>>
+{
+    ring: &'a DoubleRNSRingBase<R, F, M>
+}
+
+impl<'a, 'b, R, F, M> Clone for WRTCanonicalBasisElementCreator<'a, R, F, M>
+    where R: ZnRingStore,
+        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        F: GeneralizedFFT + GeneralizedFFTSelfIso,
+        M: MemoryProvider<El<R>>
+{
+    fn clone(&self) -> Self {
+        Self { ring: self.ring }
+    }
+}
+
+impl<'a, 'b, R, F, M> Fn<(&'b [El<zn_rns::Zn<R, BigIntRing>>],)> for WRTCanonicalBasisElementCreator<'a, R, F, M>
+    where R: ZnRingStore,
+        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        F: GeneralizedFFT + GeneralizedFFTSelfIso,
+        M: MemoryProvider<El<R>>
+{
+    extern "rust-call" fn call(&self, args: (&'b [El<zn_rns::Zn<R, BigIntRing>>],)) -> Self::Output {
+        self.ring.from_canonical_basis(args.0.iter().map(|x| self.ring.base_ring().clone_el(x)))
+    }
+}
+
+impl<'a, 'b, R, F, M> FnMut<(&'b [El<zn_rns::Zn<R, BigIntRing>>],)> for WRTCanonicalBasisElementCreator<'a, R, F, M>
+    where R: ZnRingStore,
+        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        F: GeneralizedFFT + GeneralizedFFTSelfIso,
+        M: MemoryProvider<El<R>>
+{
+    extern "rust-call" fn call_mut(&mut self, args: (&'b [El<zn_rns::Zn<R, BigIntRing>>],)) -> Self::Output {
+        self.call(args)
+    }
+}
+
+impl<'a, 'b, R, F, M> FnOnce<(&'b [El<zn_rns::Zn<R, BigIntRing>>],)> for WRTCanonicalBasisElementCreator<'a, R, F, M>
+    where R: ZnRingStore,
+        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        F: GeneralizedFFT + GeneralizedFFTSelfIso,
+        M: MemoryProvider<El<R>>
+{
+    type Output = El<DoubleRNSRing<R, F, M>>;
+
+    extern "rust-call" fn call_once(self, args: (&'b [El<zn_rns::Zn<R, BigIntRing>>],)) -> Self::Output {
+        self.call(args)
+    }
+}
+
+impl<R, F, M> FiniteRing for DoubleRNSRingBase<R, F, M> 
+    where R: ZnRingStore,
+        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
+        F: GeneralizedFFT + GeneralizedFFTSelfIso,
+        M: MemoryProvider<El<R>>
+{
+    type ElementsIter<'a> = MultiProduct<
+        <zn_rns::ZnBase<R, BigIntRing> as FiniteRing>::ElementsIter<'a>, 
+        WRTCanonicalBasisElementCreator<'a, R, F, M>, 
+        RingElementClone<'a, zn_rns::ZnBase<R, BigIntRing>>,
+        El<DoubleRNSRing<R, F, M>>
+    > where Self: 'a;
+
+    fn elements<'a>(&'a self) -> Self::ElementsIter<'a> {
+        multi_cartesian_product((0..self.rank()).map(|_| self.base_ring().elements()), WRTCanonicalBasisElementCreator { ring: self }, RingElementClone::new(self.base_ring().get_ring()))
+    }
+
+    fn size<I: IntegerRingStore>(&self, ZZ: &I) -> Option<El<I>>
+        where I::Type: IntegerRing
+    {
+        let modulus = self.base_ring().size(ZZ)?;
+        if ZZ.get_ring().representable_bits().is_none() || ZZ.get_ring().representable_bits().unwrap() >= self.rank() * ZZ.abs_log2_ceil(&modulus).unwrap() {
+            Some(ZZ.pow(modulus, self.rank()))
+        } else {
+            None
+        }
+    }
+
+    fn random_element<G: FnMut() -> u64>(&self, rng: G) -> <Self as RingBase>::Element {
+        self.sample_uniform(rng)
     }
 }
 
