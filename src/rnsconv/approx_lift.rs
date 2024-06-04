@@ -2,6 +2,7 @@ use feanor_math::integer::*;
 use feanor_math::matrix::submatrix::*;
 use feanor_math::mempool::*;
 use feanor_math::homomorphism::*;
+use feanor_math::rings::finite::FiniteRingStore;
 use feanor_math::vector::VectorView;
 use feanor_math::ordered::OrderedRingStore;
 use feanor_math::rings::zn::{ZnRingStore, ZnRing};
@@ -269,6 +270,12 @@ impl<V_from, V_to, R, R_intermediate, M_Zn, M_Int> RNSOperation for AlmostExactB
 use feanor_math::rings::zn::zn_64::*;
 #[cfg(test)]
 use feanor_math::{assert_el_eq, default_memory_provider};
+#[cfg(test)]
+use test::Bencher;
+#[cfg(test)]
+use feanor_math::algorithms::miller_rabin::is_prime;
+#[cfg(test)]
+use feanor_math::primitive_int::StaticRing;
 
 #[test]
 fn test_rns_base_conversion() {
@@ -344,4 +351,34 @@ fn test_rns_base_conversion_coprime() {
             assert!(to[i].eq_el(&y[i], actual.at(i)));
         }
     }
+}
+
+#[bench]
+fn bench_rns_base_conversion(bencher: &mut Bencher) {
+    let in_moduli_count = 40;
+    let out_moduli_count = 20;
+    let cols = 1000;
+    let mut primes = (1000..).map(|k| 1024 * k + 1).filter(|p| is_prime(&StaticRing::<i64>::RING, p, 10)).map(|p| Zn::new(p as u64));
+    let in_moduli = primes.by_ref().take(in_moduli_count).collect::<Vec<_>>();
+    let out_moduli = primes.take(out_moduli_count).collect::<Vec<_>>();
+    let conv = AlmostExactBaseConversion::new(&in_moduli, &out_moduli, Zn::new(257), default_memory_provider!(), default_memory_provider!());
+    let mut rng = oorandom::Rand64::new(1);
+    let mut in_data = (0..(in_moduli_count * cols)).map(|idx| in_moduli[idx / cols].zero()).collect::<Vec<_>>();
+    let mut in_matrix = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut in_data, in_moduli_count, cols);
+    let mut out_data = (0..(out_moduli_count * cols)).map(|idx| out_moduli[idx / cols].zero()).collect::<Vec<_>>();
+    let mut out_matrix = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut out_data, out_moduli_count, cols);
+
+    bencher.iter(|| {
+        for i in 0..in_moduli_count {
+            for j in 0..cols {
+                *in_matrix.at(i, j) = in_moduli[i].random_element(|| rng.rand_u64());
+            }
+        }
+        conv.apply(in_matrix.as_const(), out_matrix.reborrow());
+        for i in 0..out_moduli_count {
+            for j in 0..cols {
+                std::hint::black_box(out_matrix.at(i, j));
+            }
+        }
+    });
 }

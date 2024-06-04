@@ -53,16 +53,16 @@ pub type CiphertextRing = doublerns::double_rns_ring::DoubleRNSRing<Zn, FFTTable
 
 pub type Ciphertext = (El<CiphertextRing>, El<CiphertextRing>);
 pub type SecretKey = El<CiphertextRing>;
-pub type GadgetProductOperand = doublerns::gadget_product::GadgetProductRhsOperand<Zn, FFTTable, DefaultMemoryProvider>;
-pub type KeySwitchKey = (GadgetProductOperand, GadgetProductOperand);
-pub type RelinKey = (GadgetProductOperand, GadgetProductOperand);
+pub type GadgetProductOperand<'a> = doublerns::gadget_product::GadgetProductRhsOperand<'a, Zn, FFTTable, DefaultMemoryProvider>;
+pub type KeySwitchKey<'a> = (GadgetProductOperand<'a>, GadgetProductOperand<'a>);
+pub type RelinKey<'a> = (GadgetProductOperand<'a>, GadgetProductOperand<'a>);
 
 //
 // During BFV multiplication, we need a "rescaling operation" that computes `round(x * t / q)`. Doing
 // this in a fast-RNS-conversion manner requires precomputing all kinds of data, encapsulated by `MulConversionData`.
 //
 pub struct MulConversionData {
-    to_C_mul: rnsconv::lift::AlmostExactBaseConversion<Vec<Zn>, Vec<Zn>, Zn, Zn, DefaultMemoryProvider, DefaultMemoryProvider>,
+    to_C_mul: rnsconv::approx_lift::AlmostExactBaseConversion<Vec<Zn>, Vec<Zn>, Zn, Zn, DefaultMemoryProvider, DefaultMemoryProvider>,
     scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert<Vec<Zn>, Zn, Zn, DefaultMemoryProvider, DefaultMemoryProvider>
 };
 
@@ -108,7 +108,7 @@ pub fn create_plaintext_ring(log2_ring_degree: usize, plaintext_modulus: i64) ->
 pub fn create_multiplication_rescale(P: &PlaintextRing, C: &CiphertextRing, C_mul: &CiphertextRing) -> MulConversionData {
     let intermediate = Zn::new(65539);
     MulConversionData {
-        to_C_mul: rnsconv::lift::AlmostExactBaseConversion::new(
+        to_C_mul: rnsconv::approx_lift::AlmostExactBaseConversion::new(
             C.get_ring().rns_base().iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
             C_mul.get_ring().rns_base().iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
             intermediate,
@@ -179,7 +179,7 @@ pub fn hom_mul_plain(P: &PlaintextRing, C: &CiphertextRing, m: &El<PlaintextRing
     return (C.mul_ref_snd(c0, &m), C.mul(c1, m));
 }
 
-pub fn gen_rk<R: Rng + CryptoRng>(C: &CiphertextRing, rng: R, sk: &SecretKey) -> RelinKey {
+pub fn gen_rk<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing, rng: R, sk: &SecretKey) -> RelinKey<'a> {
     gen_switch_key(C, rng, &C.pow(C.clone_el(sk), 2), sk)
 }
 
@@ -207,7 +207,7 @@ pub fn hom_mul(C: &CiphertextRing, C_mul: &CiphertextRing, lhs: &Ciphertext, rhs
     
 }
 
-pub fn gen_switch_key<R: Rng + CryptoRng>(C: &CiphertextRing, mut rng: R, old_sk: &SecretKey, new_sk: &SecretKey) -> KeySwitchKey {
+pub fn gen_switch_key<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing, mut rng: R, old_sk: &SecretKey, new_sk: &SecretKey) -> KeySwitchKey<'a> {
     let mut res_0 = C.get_ring().gadget_product_rhs_zero();
     let mut res_1 = C.get_ring().gadget_product_rhs_zero();
     for i in 0..C.get_ring().rns_base().len() {
