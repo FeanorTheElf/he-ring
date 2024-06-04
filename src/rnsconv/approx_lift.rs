@@ -6,7 +6,6 @@ use feanor_math::vector::VectorView;
 use feanor_math::rings::zn::{ZnRingStore, ZnRing};
 use feanor_math::divisibility::DivisibilityRingStore;
 use feanor_math::primitive_int::*;
-use feanor_math::default_memory_provider;
 use feanor_math::ring::*;
 
 use super::RNSOperation;
@@ -30,14 +29,18 @@ use super::RNSOperation;
 /// ```
 /// modulo some `q'`.
 /// 
-pub struct AlmostExactBaseConversion<R, M_Int, M_Zn>
+pub struct AlmostExactBaseConversion<R, R_base, M_Int, M_Zn>
     where R: ZnRingStore,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        R_base: ZnRingStore,
+        R_base::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanHomFrom<R_base::Type>,
         M_Int: MemoryProvider<<<R::Type as ZnRing>::IntegerRingBase as RingBase>::Element>,
-        M_Zn: MemoryProvider<El<R>>
+        M_Zn: MemoryProvider<El<R_base>>
 {
     from_summands: Vec<R>,
+    from_summands_base: Vec<R_base>,
     to_summands: Vec<R>,
+    to_summands_base: Vec<R_base>,
     /// the values `q/Q mod q` for each RNS factor q dividing Q
     q_over_Q: M_Zn::Object,
     /// the values `Q/q mod q'` for each RNS factor q dividing Q and q' dividing Q'
@@ -53,16 +56,29 @@ pub struct AlmostExactBaseConversion<R, M_Int, M_Zn>
 
 const ZZbig: BigIntRing = BigIntRing::RING;
 
-impl<R, M_Int, M_Zn> AlmostExactBaseConversion<R, M_Int, M_Zn> 
+impl<R, M_Int, M_Zn> AlmostExactBaseConversion<R, R, M_Int, M_Zn> 
     where R: ZnRingStore + Clone,
         R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanHomFrom<R::Type>,
         M_Int: MemoryProvider<<<R::Type as ZnRing>::IntegerRingBase as RingBase>::Element>,
         M_Zn: MemoryProvider<El<R>>
 {
-    pub fn new<V1, V2>(in_rings: V1, out_rings: V2, memory_provider_int: M_Int, memory_provider_zn: M_Zn) -> Self
+    pub fn new<V1, V2>(in_rings: V1, out_rings: V2, mem_provider_int: M_Int, mem_provider_zn: M_Zn) -> Self
         where V1: VectorView<R>,
             V2: VectorView<R>
     {
+        Self::new_generic(in_rings.iter().cloned().collect(), in_rings.iter().cloned().collect(), out_rings.iter().cloned().collect(), out_rings.iter().cloned().collect(), mem_provider_int, mem_provider_zn)
+    }
+}
+
+impl<R, R_base, M_Int, M_Zn> AlmostExactBaseConversion<R, R_base, M_Int, M_Zn> 
+    where R: ZnRingStore + Clone,
+        R_base: ZnRingStore,
+        R_base::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanHomFrom<R_base::Type>,
+        M_Int: MemoryProvider<<<R::Type as ZnRing>::IntegerRingBase as RingBase>::Element>,
+        M_Zn: MemoryProvider<El<R_base>>
+{
+    pub fn new_generic(in_rings: Vec<R>, in_rings_base: Vec<R_base>, out_rings: Vec<R>, out_rings_base: Vec<R_base>, memory_provider_int: M_Int, memory_provider_zn: M_Zn) -> Self {
         let ZZ = in_rings.at(0).integer_ring();
         for i in 0..in_rings.len() {
             assert!(in_rings.at(i).integer_ring().get_ring() == ZZ.get_ring());
@@ -83,29 +99,33 @@ impl<R, M_Int, M_Zn> AlmostExactBaseConversion<R, M_Int, M_Zn>
 
         Self {
             Q_over_q: memory_provider_zn.get_new_init(in_rings.len() * out_rings.len(), |idx| 
-                out_rings.at(idx % out_rings.len()).coerce(&ZZbig, ZZbig.checked_div(&Q, &int_cast(ZZ.clone_el(in_rings.at(idx / out_rings.len()).modulus()), ZZbig, ZZ)).unwrap())
+                out_rings_base.at(idx % out_rings.len()).coerce(&ZZbig, ZZbig.checked_div(&Q, &int_cast(ZZ.clone_el(in_rings.at(idx / out_rings.len()).modulus()), ZZbig, ZZ)).unwrap())
             ),
             Q_over_q_int: memory_provider_int.get_new_init(in_rings.len(), |i| 
                 int_cast(ZZbig.rounded_div(ZZbig.clone_el(&Q), &ZZbig.mul(int_cast(ZZ.clone_el(in_rings.at(i).modulus()), ZZbig, ZZ), ZZbig.power_of_two(drop_bits))), ZZ, ZZbig)
             ),
             q_over_Q: memory_provider_zn.get_new_init(in_rings.len(), |i| 
-                in_rings.at(i).invert(&in_rings.at(i).coerce(&ZZbig, ZZbig.checked_div(&Q, &int_cast(ZZ.clone_el(in_rings.at(i).modulus()), ZZbig, ZZ)).unwrap())).unwrap()
+                in_rings_base.at(i).invert(&in_rings_base.at(i).coerce(&ZZbig, ZZbig.checked_div(&Q, &int_cast(ZZ.clone_el(in_rings.at(i).modulus()), ZZbig, ZZ)).unwrap())).unwrap()
             ),
-            Q_mod_q: memory_provider_zn.get_new_init(out_rings.len(), |i| out_rings.at(i).coerce(&ZZbig, ZZbig.clone_el(&Q))),
+            Q_mod_q: memory_provider_zn.get_new_init(out_rings.len(), |i| out_rings_base.at(i).coerce(&ZZbig, ZZbig.clone_el(&Q))),
             Q_dropped_bits: int_cast(ZZbig.rounded_div(Q, &ZZbig.power_of_two(drop_bits)), ZZ, ZZbig),
             memory_provider_int: memory_provider_int,
             _memory_provider_zn: memory_provider_zn,
-            from_summands: in_rings.iter().cloned().collect::<Vec<_>>(),
-            to_summands: out_rings.iter().cloned().collect::<Vec<_>>()
+            from_summands: in_rings,
+            to_summands: out_rings,
+            from_summands_base: in_rings_base,
+            to_summands_base: out_rings_base
         }
     }
 }
 
-impl<R, M_Int, M_Zn> RNSOperation for AlmostExactBaseConversion<R, M_Int, M_Zn> 
-    where R: ZnRingStore,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+impl<R, R_base, M_Int, M_Zn> RNSOperation for AlmostExactBaseConversion<R, R_base, M_Int, M_Zn> 
+    where R: ZnRingStore + Clone,
+        R_base: ZnRingStore,
+        R_base::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanHomFrom<R_base::Type>,
         M_Int: MemoryProvider<<<R::Type as ZnRing>::IntegerRingBase as RingBase>::Element>,
-        M_Zn: MemoryProvider<El<R>>
+        M_Zn: MemoryProvider<El<R_base>>
 {
     type Ring = R;
 
@@ -140,10 +160,13 @@ impl<R, M_Int, M_Zn> RNSOperation for AlmostExactBaseConversion<R, M_Int, M_Zn>
 
             let ZZ = self.output_rings().at(0).integer_ring();
 
-            let col_count = input.col_count();
-            let ZZ_to_homs = (0..self.output_rings().len()).map(|k| self.output_rings().at(k).can_hom(&ZZ).unwrap()).collect::<Vec<_>>();
+            let from_homs = (0..self.input_rings().len()).map(|i| self.from_summands.at(i).can_hom(self.from_summands_base.at(i)).unwrap()).collect::<Vec<_>>();
+            let to_homs = (0..self.output_rings().len()).map(|i| self.to_summands.at(i).can_hom(self.to_summands_base.at(i)).unwrap()).collect::<Vec<_>>();
+            let int_to_homs = (0..self.output_rings().len()).map(|k| self.output_rings().at(k).can_hom(&ZZ).unwrap()).collect::<Vec<_>>();
 
-            let mut approx_result = default_memory_provider!().get_new_init(col_count, |_| ZZ.zero());
+            let col_count = input.col_count();
+
+            let mut approx_result = self.memory_provider_int.get_new_init(col_count, |_| ZZ.zero());
             for i in 0..output.row_count() {
                 for j in 0..col_count {
                     *output.at(i, j) = self.output_rings().at(i).zero();
@@ -153,10 +176,10 @@ impl<R, M_Int, M_Zn> RNSOperation for AlmostExactBaseConversion<R, M_Int, M_Zn>
             for i in 0..input.row_count() {
                 let from = self.input_rings().at(i);
                 for j in 0..col_count {
-                    let lifted = from.smallest_lift(from.identity().mul_ref_map(input.at(i, j), self.q_over_Q.at(i)));
+                    let lifted = from.smallest_lift(from_homs[i].mul_ref_map(input.at(i, j), self.q_over_Q.at(i)));
                     ZZ.add_assign(&mut approx_result[j], ZZ.mul_ref(&lifted, self.Q_over_q_int.at(i)));
                     for k in 0..output.row_count() {
-                        self.output_rings().at(k).add_assign(output.at(k, j), self.output_rings().at(k).identity().mul_ref_snd_map(ZZ_to_homs[k].map_ref(&lifted), self.Q_over_q.at(i * self.output_rings().len() + k)));
+                        self.output_rings().at(k).add_assign(output.at(k, j), to_homs[k].mul_ref_snd_map(int_to_homs[k].map_ref(&lifted), self.Q_over_q.at(i * self.output_rings().len() + k)));
                     }
                 }
             }
@@ -164,7 +187,7 @@ impl<R, M_Int, M_Zn> RNSOperation for AlmostExactBaseConversion<R, M_Int, M_Zn>
             for j in 0..col_count {
                 let correction = ZZ.rounded_div(ZZ.clone_el(approx_result.at(j)), &self.Q_dropped_bits);
                 for i in 0..output.row_count() {
-                    self.output_rings().at(i).sub_assign(output.at(i, j), self.output_rings().at(i).identity().mul_ref_snd_map(ZZ_to_homs[i].map_ref(&correction), &self.Q_mod_q[i]));
+                    self.output_rings().at(i).sub_assign(output.at(i, j), to_homs[i].mul_ref_snd_map(int_to_homs[i].map_ref(&correction), &self.Q_mod_q[i]));
                 }
             }
         });
@@ -181,6 +204,8 @@ use test::Bencher;
 use feanor_math::algorithms::miller_rabin::is_prime;
 #[cfg(test)]
 use feanor_math::rings::finite::FiniteRingStore;
+#[cfg(test)]
+use feanor_math::default_memory_provider;
 
 #[test]
 fn test_rns_base_conversion() {

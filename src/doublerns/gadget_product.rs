@@ -43,7 +43,7 @@ pub struct LKSSGadgetProductRhsOperand<'a, R, F, M>
     shortened_rns_base: zn_rns::Zn<&'a R, BigIntRing>,
     ring: &'a DoubleRNSRingBase<R, F, M>,
     operands: Vec<Vec<M::Object>>,
-    conversions: Vec<AlmostExactBaseConversion<&'a R, DefaultMemoryProvider, DefaultMemoryProvider>>
+    conversions: Vec<AlmostExactBaseConversion<&'a R, &'a R, DefaultMemoryProvider, DefaultMemoryProvider>>
 }
 
 impl<'a, R, F, M> LKSSGadgetProductRhsOperand<'a, R, F, M>

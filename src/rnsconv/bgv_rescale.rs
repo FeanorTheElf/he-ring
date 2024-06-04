@@ -5,7 +5,6 @@ use feanor_math::mempool::*;
 use feanor_math::primitive_int::*;
 use feanor_math::rings::zn::*;
 use feanor_math::integer::int_cast;
-use feanor_math::default_memory_provider;
 use feanor_math::integer::*;
 use feanor_math::ring::*;
 use feanor_math::vector::*;
@@ -37,8 +36,8 @@ pub struct CongruencePreservingRescaling<R, M_Zn, M_Int>
     b_moduli_count: usize,
     q_moduli_count: usize,
     /// contains all the moduli, in the order: moduli of `q` first, then moduli of `q'`
-    b_to_aq_lift: AlmostExactBaseConversion<R, M_Int, M_Zn>,
-    aq_to_t_conv: AlmostExactBaseConversion<R, M_Int, M_Zn>,
+    b_to_aq_lift: AlmostExactBaseConversion<R, R, M_Int, M_Zn>,
+    aq_to_t_conv: AlmostExactBaseConversion<R, R, M_Int, M_Zn>,
     memory_provider: M_Zn,
     /// `a` as an element of each modulus of `q`
     a: Vec<El<R>>,
@@ -125,7 +124,7 @@ impl<R, M_Zn, M_Int> RNSOperation for CongruencePreservingRescaling<R, M_Zn, M_I
         assert_eq!(input.col_count(), output.col_count());
 
         // Compute `x := el * a`
-        let mut x = default_memory_provider!().get_new_init(self.aq_moduli().len() * input.col_count(), |idx| {
+        let mut x = self.memory_provider.get_new_init(self.aq_moduli().len() * input.col_count(), |idx| {
             let i = idx / input.col_count();
             let j = idx % input.col_count();
             if i < self.input_rings().len() {
@@ -175,6 +174,8 @@ impl<R, M_Zn, M_Int> RNSOperation for CongruencePreservingRescaling<R, M_Zn, M_I
 
 #[cfg(test)]
 use feanor_math::rings::zn::zn_64::*;
+#[cfg(test)]
+use feanor_math::default_memory_provider;
 #[cfg(test)]
 use feanor_math::assert_el_eq;
 

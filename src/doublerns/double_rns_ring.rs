@@ -15,7 +15,6 @@ use feanor_math::ring::*;
 use feanor_math::rings::float_complex::Complex64El;
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
 use feanor_math::rings::zn::*;
-use feanor_math::default_memory_provider;
 use feanor_math::vector::*;
 use feanor_math::homomorphism::*;
 use feanor_math::vector::vec_fn::VectorFn;
@@ -829,6 +828,8 @@ impl<R1, R2, F1, F2, M1, M2> CanIsoFromTo<DoubleRNSRingBase<R2, F2, M2>> for Dou
 
 #[cfg(test)]
 use feanor_math::assert_el_eq;
+#[cfg(test)]
+use feanor_math::default_memory_provider;
 #[cfg(test)]
 use crate::complexfft;
 #[cfg(test)]

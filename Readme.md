@@ -62,7 +62,7 @@ pub type RelinKey<'a> = (GadgetProductOperand<'a>, GadgetProductOperand<'a>);
 // this in a fast-RNS-conversion manner requires precomputing all kinds of data, encapsulated by `MulConversionData`.
 //
 pub struct MulConversionData {
-    to_C_mul: rnsconv::approx_lift::AlmostExactBaseConversion<Zn, DefaultMemoryProvider, DefaultMemoryProvider>,
+    to_C_mul: rnsconv::approx_lift::AlmostExactBaseConversion<Zn, Zn, DefaultMemoryProvider, DefaultMemoryProvider>,
     scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert<Zn, DefaultMemoryProvider, DefaultMemoryProvider>
 };
 

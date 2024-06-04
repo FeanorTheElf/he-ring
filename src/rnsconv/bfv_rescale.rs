@@ -41,7 +41,7 @@ pub struct AlmostExactRescalingConvert<R, M_Zn, M_Int>
     // rescale `Z/qZ -> Z/(aq/b)Z`
     rescaling: AlmostExactRescaling<R, M_Zn, M_Int>,
     // convert `Z/(aq/b)Z -> Z/bZ`
-    convert: AlmostExactBaseConversion<R, M_Int, M_Zn>
+    convert: AlmostExactBaseConversion<R, R, M_Int, M_Zn>
 }
 
 impl<'a, R, M_Zn, M_Int> AlmostExactRescalingConvert<R, M_Zn, M_Int>
@@ -143,7 +143,7 @@ pub struct AlmostExactRescaling<R, M_Zn, M_Int>
 {
     a_moduli_count: usize,
     // contains the moduli of `q` and then the moduli of `a`
-    b_to_aq_over_b_lift: AlmostExactBaseConversion<R, M_Int, M_Zn>,
+    b_to_aq_over_b_lift: AlmostExactBaseConversion<R, R, M_Int, M_Zn>,
     // a as element of each modulus of `q`
     a: Vec<El<R>>,
     // 1/b as element of each modulus of `aq/b`
@@ -215,11 +215,6 @@ impl<R, M_Zn, M_Int> AlmostExactRescaling<R, M_Zn, M_Int>
 
     fn aq_over_b_moduli<'a>(&'a self) -> &'a [R] {
         self.b_to_aq_over_b_lift.output_rings()
-    }
-
-    #[allow(unused)]
-    fn aq_moduli<'a>(&'a self) -> impl 'a + VectorView<R> {
-        self.b_moduli().chain(self.aq_over_b_moduli())
     }
 }
 
