@@ -110,6 +110,76 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
     /// CRT unit vectors, i.e. `gi = lift((q / pi)^-1 mod pi) * q / pi` where `q = p1 * ... * pm` 
     /// is the prime factorization of `q`.
     /// 
+    /// # Example
+    /// ```
+    /// # use feanor_math::ring::*;
+    /// # use feanor_math::assert_el_eq;
+    /// # use feanor_math::default_memory_provider;
+    /// # use feanor_math::homomorphism::*;
+    /// # use feanor_math::rings::zn::*;
+    /// # use feanor_math::rings::zn::zn_64::Zn;
+    /// # use feanor_math::integer::BigIntRing;
+    /// # use feanor_math::algorithms::fft::cooley_tuckey::FFTTableCooleyTuckey;
+    /// # use he_ring::doublerns::double_rns_ring::DoubleRNSRingBase;
+    /// # use he_ring::doublerns::pow2_cyclotomic::Pow2CyclotomicFFT;
+    /// # use feanor_math::rings::extension::FreeAlgebraStore;
+    /// # use feanor_math::vector::VectorView;
+    /// // Set up the double-RNS ring
+    /// let rns_base = vec![Zn::new(17), Zn::new(97), Zn::new(113)];
+    /// let ring = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<FFTTableCooleyTuckey<_>>, _>::new(zn_rns::Zn::new(rns_base.clone(), BigIntRing::RING, default_memory_provider!()), rns_base, 3, default_memory_provider!());
+    /// 
+    /// // Create the right-hand operand; this is usually considered to be constant
+    /// let rhs = ring.from_canonical_basis([0, 1000, 1200, 1, 600, 1600, 0, 800].into_iter().map(|x| ring.base_ring().int_hom().map(x)));
+    /// let mut rhs_op = ring.get_ring().gadget_product_rhs_zero();
+    /// let gadget_vector = |i: usize| ring.base_ring().get_ring().from_congruence((0..3).map(|j| ring.base_ring().get_ring().at(j).int_hom().map(if i == j { 1 } else { 0 })));
+    /// for i in 0..3 {
+    ///     // here we might include a small error (after scaling), and then get an approximate result; See next example 
+    ///     rhs_op.set_rns_factor(i, ring.inclusion().mul_ref_map(&rhs, &gadget_vector(i)));
+    /// }
+    /// 
+    /// let lhs = ring.from_canonical_basis([0, 10, 100, 1000, 50, 500, 800, 1].into_iter().map(|x| ring.base_ring().int_hom().map(x)));
+    /// assert_el_eq!(&ring, &ring.mul_ref(&lhs, &rhs), &ring.get_ring().gadget_product(&ring.get_ring().to_gadget_product_lhs(ring.get_ring().undo_fft(lhs)), &rhs_op));
+    /// ```
+    /// To demonstrate how this keeps small error terms small, consider the following variation of the previous example:
+    /// 
+    /// ```
+    /// # use feanor_math::ring::*;
+    /// # use feanor_math::assert_el_eq;
+    /// # use feanor_math::default_memory_provider;
+    /// # use feanor_math::homomorphism::*;
+    /// # use feanor_math::rings::zn::*;
+    /// # use feanor_math::rings::zn::zn_64::Zn;
+    /// # use feanor_math::algorithms::fft::cooley_tuckey::FFTTableCooleyTuckey;
+    /// # use he_ring::doublerns::double_rns_ring::DoubleRNSRingBase;
+    /// # use he_ring::doublerns::pow2_cyclotomic::Pow2CyclotomicFFT;
+    /// # use feanor_math::rings::extension::FreeAlgebraStore;
+    /// # use feanor_math::vector::VectorView;
+    /// # use feanor_math::integer::BigIntRing;
+    /// # use feanor_math::integer::int_cast;
+    /// # use feanor_math::primitive_int::StaticRing;
+    /// # use feanor_math::vector::vec_fn::VectorFn;
+    /// let rns_base = vec![Zn::new(17), Zn::new(97), Zn::new(113)];
+    /// let ring = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<FFTTableCooleyTuckey<_>>, _>::new(zn_rns::Zn::new(rns_base.clone(), BigIntRing::RING, default_memory_provider!()), rns_base, 3, default_memory_provider!());
+    /// 
+    /// let mut rng = oorandom::Rand64::new(1);
+    /// let mut error = || ring.get_ring().sample_from_coefficient_distribution(|| (rng.rand_u64() % 3) as i32 - 1);
+    /// 
+    /// let rhs = ring.from_canonical_basis([0, 1000, 1200, 1, 600, 1600, 0, 800].into_iter().map(|x| ring.base_ring().int_hom().map(x)));
+    /// let mut rhs_op = ring.get_ring().gadget_product_rhs_zero();
+    /// let gadget_vector = |i: usize| ring.base_ring().get_ring().from_congruence((0..3).map(|j| ring.base_ring().get_ring().at(j).int_hom().map(if i == j { 1 } else { 0 })));
+    /// for i in 0..3 {
+    ///     rhs_op.set_rns_factor(i, ring.add(ring.inclusion().mul_ref_map(&rhs, &gadget_vector(i)), error()));
+    /// }
+    /// 
+    /// let lhs = ring.from_canonical_basis([0, 10, 100, 1000, 50, 500, 800, 1].into_iter().map(|x| ring.base_ring().int_hom().map(x)));
+    /// let expected = ring.mul_ref(&lhs, &rhs);
+    /// let actual = ring.get_ring().gadget_product(&ring.get_ring().to_gadget_product_lhs(ring.get_ring().undo_fft(lhs)), &rhs_op);
+    /// let error = ring.sub(expected, actual);
+    /// let error_coefficients = ring.wrt_canonical_basis(&error);
+    /// let max_allowed_error = (113 / 2) * 8 * 3;
+    /// assert!((0..8).all(|i| int_cast(ring.base_ring().smallest_lift(error_coefficients.at(i)), StaticRing::<i64>::RING, BigIntRing::RING).abs() <= max_allowed_error));
+    /// ```
+    /// 
     pub fn gadget_product(&self, lhs: &GadgetProductLhsOperand<R, F, M>, rhs: &GadgetProductRhsOperand<R, F, M>) -> <Self as RingBase>::Element {
         <_ as RingBase>::sum(self, lhs.operands.iter().zip(rhs.operands.iter()).map(|(l, r)| self.mul_ref(l, r)))
     }
