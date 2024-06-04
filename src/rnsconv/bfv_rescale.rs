@@ -136,7 +136,7 @@ impl<R, M_Zn, M_Int> RNSOperation for AlmostExactRescalingConvert<R, M_Zn, M_Int
 /// ```
 /// 
 pub struct AlmostExactRescaling<R, M_Zn, M_Int>
-    where R: ZnRingStore,
+    where R: ZnRingStore + Clone,
         R::Type: ZnRing + CanHomFrom<BigIntRingBase> + SelfIso,
         M_Zn: MemoryProvider<El<R>>,
         M_Int: MemoryProvider<El<<R::Type as ZnRing>::Integers>>
