@@ -7,7 +7,6 @@ use feanor_math::rings::zn::*;
 use feanor_math::integer::int_cast;
 use feanor_math::integer::*;
 use feanor_math::ring::*;
-use feanor_math::vector::subvector::*;
 use feanor_math::vector::*;
 
 use crate::rnsconv::approx_lift::AlmostExactBaseConversion;
@@ -80,29 +79,6 @@ impl<R, M_Zn, M_Int> CongruencePreservingRescaling<R, M_Zn, M_Int>
     }
 }
 
-impl<R, M_Zn, M_Int> CongruencePreservingRescaling<R, M_Zn, M_Int>
-    where R: ZnRingStore + Clone,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanHomFrom<StaticRingBase<i32>> + SelfIso,
-        M_Zn: MemoryProvider<El<R>>,
-        M_Int: MemoryProvider<El<<R::Type as ZnRing>::Integers>>
-{
-    fn q_moduli<'a>(&'a self) -> &'a [R] {
-        &self.aq_to_t_conv.input_rings()[..self.q_moduli_count]
-    }
-
-    fn aq_over_b_moduli<'a>(&'a self) -> &'a [R] {
-        &self.aq_to_t_conv.input_rings()[self.b_moduli_count..]
-    }
-
-    fn aq_moduli<'a>(&'a self) -> &'a [R] {
-        self.aq_to_t_conv.input_rings()
-    }
-
-    fn t_modulus<'a>(&'a self) -> &'a R {
-        self.aq_to_t_conv.output_rings().at(0)
-    }
-}
-
 impl<R, M_Zn, M_Int> RNSOperation for CongruencePreservingRescaling<R, M_Zn, M_Int>
     where R: ZnRingStore + Clone,
         R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanHomFrom<StaticRingBase<i32>> + SelfIso,
@@ -130,17 +106,26 @@ impl<R, M_Zn, M_Int> RNSOperation for CongruencePreservingRescaling<R, M_Zn, M_I
     /// In particular, we later refer to `x_mod_b_lift` again, which would not be accessible
     /// if we used [`crate::rnsconv::bfv_rescale::AlmostExactRescaling`]. Also, we currently lift to `aq`
     /// instead of `aq/b`, but I am not sure if that is really necessary.
-    ///  
-    fn apply<V1, V2>(&self, input: Submatrix<V1, El<Self::Ring>>, mut output: SubmatrixMut<V2, El<Self::Ring>>)
-            where V1: AsPointerToSlice<El<Self::Ring>>,
-                V2: AsPointerToSlice<El<Self::Ring>>
+    /// 
+    fn apply<W1, W2, V1, V2, S1, S2, M_Int2, M_Zn2>(&self, input: Submatrix<V1, El<S1>>, output: SubmatrixMut<V2, El<S2>>, input_rings: W1, output_rings: W2, memory_provider_int: M_Int2, memory_provider_zn: M_Zn2)
+        where V1: AsPointerToSlice<El<S1>>,
+            V2: AsPointerToSlice<El<S2>>,
+            S1: RingStore,
+            S1::Type: ZnRing + CanHomFrom<Self::RingType>,
+            S2: RingStore<Type = S1::Type>,
+            W1: VectorView<S1>,
+            W2: VectorView<S2>,
+            M_Int2: MemoryProvider<El<<S1::Type as ZnRing>::Integers>>,
+            M_Zn2: MemoryProvider<El<S1>> 
     {
-        assert_eq!(input.row_count(), self.input_rings().len());
-        assert_eq!(output.row_count(), self.output_rings().len());
+        assert_eq!(input.row_count(), input_rings.len());
+        assert_eq!(self.input_rings().len(), input_rings.len());
+        assert_eq!(output.row_count(), output_rings.len());
+        assert_eq!(self.output_rings().len(), output_rings.len());
         assert_eq!(input.col_count(), output.col_count());
 
         // Compute `x := el * a`
-        let mut x = self.memory_provider.get_new_init(self.aq_moduli().len() * input.col_count(), |idx| {
+        let mut x = memory_provider_zn.get_new_init(self.aq_moduli().len() * input.col_count(), |idx| {
             let i = idx / input.col_count();
             let j = idx % input.col_count();
             if i < self.q_moduli().len() {

@@ -15,6 +15,7 @@ use feanor_math::ring::*;
 use feanor_math::rings::float_complex::Complex64El;
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
 use feanor_math::rings::zn::*;
+use feanor_math::default_memory_provider;
 use feanor_math::vector::*;
 use feanor_math::homomorphism::*;
 use feanor_math::vector::vec_fn::VectorFn;
@@ -292,7 +293,7 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
         where F: GeneralizedFFTIso<F2>,
             // the constraings for DoubleRNSRingBase<R2, F2, M2> 
             R2: ZnRingStore<Type = R::Type>,
-            R::Type: CanIsoFromTo<F2::BaseRingBase>,
+            R::Type: CanIsoFromTo<F2::BaseRingBase> + SelfIso,
             F2: GeneralizedFFT + GeneralizedFFTSelfIso,
             M2: MemoryProvider<El<R2>>,
             // constraints for Op
@@ -310,7 +311,7 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
             assert!(self.rns_base().at(i).get_ring() == op.output_rings().at(i).get_ring());
         }
         let mut result = self.non_fft_zero();
-        op.apply(from.as_matrix(el), self.as_matrix_mut(&mut result));
+        op.apply(from.as_matrix(el), self.as_matrix_mut(&mut result), from.rns_base(), self.rns_base(), default_memory_provider!(), default_memory_provider!());
         return result;
     }
 
@@ -350,6 +351,7 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
         op: &Op
     ) -> <complex_fft_ring::ComplexFFTBasedRingBase<F2, M2_Zn, M2_CC> as RingBase>::Element 
         where F: GeneralizedFFTCrossIso<F2>,
+            R::Type: SelfIso,
             // the constraings for DoubleRNSRingBase<F2, M2>
             F2: complex_fft_ring::GeneralizedFFT<BaseRingBase = R::Type> + complex_fft_ring::GeneralizedFFTSelfIso,
             M2_Zn: MemoryProvider<El<F2::BaseRingStore>>,
@@ -368,7 +370,7 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
         
         let mut result = to.zero();
         let result_matrix = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut result, 1, to.rank());
-        op.apply(self.as_matrix(element), result_matrix);
+        op.apply(self.as_matrix(element), result_matrix, self.rns_base(), op.output_rings(), default_memory_provider!(), default_memory_provider!());
         return result;
     }
 
@@ -826,7 +828,7 @@ impl<R1, R2, F1, F2, M1, M2> CanIsoFromTo<DoubleRNSRingBase<R2, F2, M2>> for Dou
 }
 
 #[cfg(test)]
-use feanor_math::{assert_el_eq, default_memory_provider};
+use feanor_math::assert_el_eq;
 #[cfg(test)]
 use crate::complexfft;
 #[cfg(test)]

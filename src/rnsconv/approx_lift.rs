@@ -128,38 +128,56 @@ impl<R, M_Int, M_Zn> RNSOperation for AlmostExactBaseConversion<R, M_Int, M_Zn>
     /// Furthermore, if the shortest lift of the input is bounded by `Q/4`,
     /// then the result is guaranteed to be exact.
     /// 
-    fn apply<V1, V2>(&self, input: Submatrix<V1, El<Self::Ring>>, mut output: SubmatrixMut<V2, El<Self::Ring>>)
-        where V1: AsPointerToSlice<El<Self::Ring>>,
-            V2: AsPointerToSlice<El<Self::Ring>> 
+    fn apply<W1, W2, V1, V2, S1, S2, M_Int2, M_Zn2>(&self, input: Submatrix<V1, El<S1>>, mut output: SubmatrixMut<V2, El<S2>>, input_rings: W1, output_rings: W2, memory_provider_int: M_Int2, memory_provider_zn: M_Zn2)
+        where V1: AsPointerToSlice<El<S1>>,
+            V2: AsPointerToSlice<El<S2>>,
+            S1: RingStore,
+            S1::Type: ZnRing + CanHomFrom<Self::RingType>,
+            S2: RingStore<Type = S1::Type>,
+            W1: VectorView<S1>,
+            W2: VectorView<S2>,
+            M_Int2: MemoryProvider<El<<S1::Type as ZnRing>::Integers>>,
+            M_Zn2: MemoryProvider<El<S1>>
     {
         timed!("AlmostExactBaseConversion::apply", || {
+            assert_eq!(input.row_count(), input_rings.len());
+            assert_eq!(self.input_rings().len(), input_rings.len());
+            assert_eq!(output.row_count(), output_rings.len());
+            assert_eq!(self.output_rings().len(), output_rings.len());
             assert_eq!(input.col_count(), output.col_count());
-            let ZZ = self.input_rings().at(0).integer_ring();
-            let col_count = input.col_count();
-            let homs = (0..output.row_count()).map(|k| self.output_rings().at(k).can_hom(&ZZ).unwrap()).collect::<Vec<_>>();
 
-            let mut approx_result = self.memory_provider_int.get_new_init(col_count, |_| ZZ.zero());
+            let ZZ = input_rings.at(0).integer_ring();
+            assert!((0..input_rings.len()).all(|i| input_rings.at(i).integer_ring().get_ring() == ZZ.get_ring()));
+            assert!((0..output_rings.len()).all(|i| output_rings.at(i).integer_ring().get_ring() == ZZ.get_ring()));
+            let ZZbase = self.input_rings().at(0).integer_ring();
+
+            let col_count = input.col_count();
+            let from_homs = (0..input_rings.len()).map(|k| input_rings.at(k).can_hom(self.input_rings().at(k)).unwrap()).collect::<Vec<_>>();
+            let to_homs = (0..output_rings.len()).map(|k| output_rings.at(k).can_hom(self.output_rings().at(k)).unwrap()).collect::<Vec<_>>();
+            let ZZ_to_homs = (0..output_rings.len()).map(|k| output_rings.at(k).can_hom(&ZZ).unwrap()).collect::<Vec<_>>();
+
+            let mut approx_result = memory_provider_int.get_new_init(col_count, |_| ZZ.zero());
             for i in 0..output.row_count() {
                 for j in 0..col_count {
-                    *output.at(i, j) = self.output_rings().at(i).zero();
+                    *output.at(i, j) = output_rings.at(i).zero();
                 }
             }
 
             for i in 0..input.row_count() {
-                let in_Fp = self.input_rings().at(i);
+                let from = input_rings.at(i);
                 for j in 0..col_count {
-                    let lifted = in_Fp.smallest_lift(in_Fp.mul_ref(input.at(i, j), self.q_over_Q.at(i)));
-                    ZZ.add_assign(&mut approx_result[j], ZZ.mul_ref(&lifted, self.Q_over_q_int.at(i)));
+                    let lifted = from.smallest_lift(from_homs[i].mul_ref_map(input.at(i, j), self.q_over_Q.at(i)));
+                    ZZ.add_assign(&mut approx_result[j], ZZ.mul_ref_fst(&lifted, int_cast(ZZbase.clone_el(self.Q_over_q_int.at(i)), ZZ, ZZbase)));
                     for k in 0..output.row_count() {
-                        homs[k].codomain().add_assign(output.at(k, j), homs[k].mul_ref_map(self.Q_over_q.at(i * self.output_rings().len() + k), &lifted));
+                        output_rings.at(k).add_assign(output.at(k, j), to_homs[k].mul_ref_snd_map(ZZ_to_homs[k].map_ref(&lifted), self.Q_over_q.at(i * self.output_rings().len() + k)));
                     }
                 }
             }
 
             for j in 0..col_count {
-                let correction = ZZ.rounded_div(ZZ.clone_el(approx_result.at(j)), &self.Q_dropped_bits);
+                let correction = ZZ.rounded_div(ZZ.clone_el(approx_result.at(j)), &int_cast(ZZbase.clone_el(&self.Q_dropped_bits), ZZ, ZZbase));
                 for i in 0..output.row_count() {
-                    self.output_rings().at(i).sub_assign(output.at(i, j), homs[i].mul_ref_map(&self.Q_mod_q[i], &correction));
+                    output_rings.at(i).sub_assign(output.at(i, j), to_homs[i].mul_ref_snd_map(ZZ_to_homs[i].map_ref(&correction), &self.Q_mod_q[i]));
                 }
             }
         });
@@ -190,7 +208,11 @@ fn test_rns_base_conversion() {
         let expected = to.iter().map(|R| R.int_hom().map(k)).collect::<Vec<_>>();
         let mut actual = to.iter().map(|R| R.int_hom().map(k)).collect::<Vec<_>>();
 
-        table.apply(Submatrix::<AsFirstElement<_>, _>::new(&input, 2, 1), SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 4, 1));
+        table.apply(
+            Submatrix::<AsFirstElement<_>, _>::new(&input, 2, 1), 
+            SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 4, 1),
+            &from, &to, default_memory_provider!(), default_memory_provider!()
+        );
 
         for j in 0..to.len() {
             assert_el_eq!(to.at(j), expected.at(j), actual.at(j));
@@ -202,7 +224,11 @@ fn test_rns_base_conversion() {
         let expected = to.iter().map(|R| R.int_hom().map(k)).collect::<Vec<_>>();
         let mut actual = to.iter().map(|R| R.int_hom().map(k)).collect::<Vec<_>>();
 
-        table.apply(Submatrix::<AsFirstElement<_>, _>::new(&input, 2, 1), SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 4, 1));
+        table.apply(
+            Submatrix::<AsFirstElement<_>, _>::new(&input, 2, 1), 
+            SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 4, 1),
+            &from, &to, default_memory_provider!(), default_memory_provider!()
+        );
 
         for j in 0..to.len() {
             assert!(
@@ -222,7 +248,11 @@ fn test_rns_base_conversion_small() {
     
     for k in 0..291 {
         let mut actual = to.iter().map(|R| R.int_hom().map(k)).collect::<Vec<_>>();
-        table.apply(Submatrix::<AsFirstElement<_>, _>::new(&[from[0].int_hom().map(k), from[1].int_hom().map(k)], 2, 1), SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 1, 1));
+        table.apply(
+            Submatrix::<AsFirstElement<_>, _>::new(&[from[0].int_hom().map(k), from[1].int_hom().map(k)], 2, 1), 
+            SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 1, 1),
+            &from, &to, default_memory_provider!(), default_memory_provider!()
+        );
 
         assert!(
             to[0].eq_el(&to[0].int_hom().map(k), actual.at(0)) ||
@@ -243,7 +273,11 @@ fn test_rns_base_conversion_not_coprime() {
         let y = to.iter().map(|R| R.int_hom().map(*k)).collect::<Vec<_>>();
         let mut actual = to.iter().map(|R| R.int_hom().map(*k)).collect::<Vec<_>>();
 
-        table.apply(Submatrix::<AsFirstElement<_>, _>::new(&x, 3, 1), SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 4, 1));
+        table.apply(
+            Submatrix::<AsFirstElement<_>, _>::new(&x, 3, 1), 
+            SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 4, 1),
+            &from, &to, default_memory_provider!(), default_memory_provider!()
+        );
         
         for i in 0..y.len() {
             assert!(to[i].eq_el(&y[i], actual.at(i)));
@@ -262,7 +296,11 @@ fn test_rns_base_conversion_coprime() {
         let y = to.iter().map(|R| R.int_hom().map(*k)).collect::<Vec<_>>();
         let mut actual = to.iter().map(|R| R.int_hom().map(*k)).collect::<Vec<_>>();
 
-        table.apply(Submatrix::<AsFirstElement<_>, _>::new(&x, 3, 1), SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 3, 1));
+        table.apply(
+            Submatrix::<AsFirstElement<_>, _>::new(&x, 3, 1), 
+            SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 3, 1),
+            &from, &to, default_memory_provider!(), default_memory_provider!()
+        );
         
         for i in 0..y.len() {
             assert!(to[i].eq_el(&y[i], actual.at(i)));
@@ -291,7 +329,7 @@ fn bench_rns_base_conversion(bencher: &mut Bencher) {
                 *in_matrix.at(i, j) = in_moduli[i].random_element(|| rng.rand_u64());
             }
         }
-        conv.apply(in_matrix.as_const(), out_matrix.reborrow());
+        conv.apply(in_matrix.as_const(), out_matrix.reborrow(), &in_moduli, &out_moduli, default_memory_provider!(), default_memory_provider!());
         for i in 0..out_moduli_count {
             for j in 0..cols {
                 std::hint::black_box(out_matrix.at(i, j));
