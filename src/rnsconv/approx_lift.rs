@@ -1,4 +1,3 @@
-use caching::CachingMemoryProvider;
 use feanor_math::integer::*;
 use feanor_math::matrix::submatrix::*;
 use feanor_math::mempool::*;
@@ -8,8 +7,6 @@ use feanor_math::rings::zn::{ZnRingStore, ZnRing};
 use feanor_math::divisibility::DivisibilityRingStore;
 use feanor_math::primitive_int::*;
 use feanor_math::ring::*;
-
-use crate::profiling::print_all_timings;
 
 use super::RNSOperation;
 
@@ -215,6 +212,8 @@ use feanor_math::algorithms::miller_rabin::is_prime;
 use feanor_math::rings::finite::FiniteRingStore;
 #[cfg(test)]
 use feanor_math::default_memory_provider;
+#[cfg(test)]
+use caching::CachingMemoryProvider;
 
 #[test]
 fn test_rns_base_conversion() {
@@ -355,6 +354,4 @@ fn bench_rns_base_conversion(bencher: &mut Bencher) {
             }
         }
     });
-
-    print_all_timings();
 }
