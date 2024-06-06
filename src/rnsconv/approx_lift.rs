@@ -1,3 +1,4 @@
+use feanor_math::algorithms::matmul::InnerProductComputation;
 use feanor_math::integer::*;
 use feanor_math::matrix::submatrix::*;
 use feanor_math::mempool::*;
@@ -171,32 +172,28 @@ impl<R, R_base, M_Int, M_Zn> RNSOperation for AlmostExactBaseConversion<R, R_bas
 
             let col_count = input.col_count();
 
-            let lifts = timed!("AlmostExactBaseConversion::apply::lift", || self.memory_provider_int.get_new_init(col_count * input.row_count(), |idx| {
+            let lifts = self.memory_provider_int.get_new_init(col_count * input.row_count(), |idx| {
                 let i = idx % input.row_count();
                 let j = idx / input.row_count();
                 self.from_homs[i].codomain().smallest_lift(self.from_homs[i].mul_ref_map(input.at(i, j), self.q_over_Q.at(i)))
-            }));
-
-            timed!("AlmostExactBaseConversion::apply::product", || {
-                for j in 0..col_count {
-                    for k in 0..output.row_count() {
-                        *output.at(k, j) = <_ as RingStore>::sum(self.output_rings().at(k), (0..input.row_count()).map(|i| {
-                            let lifted_red = int_to_homs[k].map_ref(&lifts[i + j * input.row_count()]);
-                            let factor = self.Q_over_q.at(i + self.input_rings().len() * k);
-                            self.to_homs[k].mul_ref_snd_map(lifted_red, factor)
-                        }));
-                    }
-                }
             });
 
-            timed!("AlmostExactBaseConversion::apply::correction", || {
-                for j in 0..col_count {
-                    let correction = ZZ.rounded_div(<_ as RingStore>::sum(&ZZ, (0..input.row_count()).map(|i| ZZ.mul_ref(&lifts[i + input.row_count() * j], self.Q_over_q_int.at(i)))), &self.Q_dropped_bits);
-                    for i in 0..output.row_count() {
-                        self.output_rings().at(i).sub_assign(output.at(i, j), self.to_homs[i].mul_ref_snd_map(int_to_homs[i].map_ref(&correction), &self.Q_mod_q[i]));
-                    }
+            for j in 0..col_count {
+                for k in 0..output.row_count() {
+                    *output.at(k, j) = <_ as InnerProductComputation>::inner_product(self.output_rings().at(k).get_ring(), (0..input.row_count()).map(|i| {
+                        (int_to_homs[k].map_ref(&lifts[i + j * input.row_count()]), self.to_homs[k].map_ref(self.Q_over_q.at(i + self.input_rings().len() * k)))
+                    }));
                 }
-            });
+            }
+
+            for j in 0..col_count {
+                let correction = ZZ.rounded_div(<_ as InnerProductComputation>::inner_product_ref(ZZ.get_ring(), 
+                    (0..input.row_count()).map(|i| (&lifts[i + input.row_count() * j], self.Q_over_q_int.at(i)))
+                ), &self.Q_dropped_bits);
+                for i in 0..output.row_count() {
+                    self.output_rings().at(i).sub_assign(output.at(i, j), self.to_homs[i].mul_ref_snd_map(int_to_homs[i].map_ref(&correction), &self.Q_mod_q[i]));
+                }
+            }
     }
 }
 

@@ -16,9 +16,9 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
 name = "feanor-math"
-version = "1.7.1"
+version = "1.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "232662c876d3c1c1ac3c6e92b8fb0548dc2afc06d71962d7d2089163d17da62e"
+checksum = "17523c1a9eb91540d12ec15f39a73f323c0b26d0ba5ea98d3f27462f652158a3"
 dependencies = [
  "libc",
  "oorandom",
@@ -37,7 +37,7 @@ dependencies = [
 
 [[package]]
 name = "he-ring"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "feanor-math",
  "oorandom",

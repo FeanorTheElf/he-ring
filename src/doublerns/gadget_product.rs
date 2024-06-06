@@ -9,6 +9,7 @@ use feanor_math::vector::*;
 use feanor_math::default_memory_provider;
 use feanor_math::integer::BigIntRing;
 use feanor_math::primitive_int::StaticRing;
+use feanor_math::algorithms::matmul::InnerProductComputation;
 use feanor_math::matrix::submatrix::*;
 
 use std::marker::PhantomData;
@@ -325,7 +326,7 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
                     let k = idx / self.rank();
                     let l = idx % self.rank();
                     let Fp = shortened_rns_base.at(k);
-                    <_ as RingStore>::sum(&Fp, (0..self.rns_base().len()).map(|i| Fp.mul_ref(&lhs.operands[i][k * self.rank() + l], &rhs.at(i, j, k, l))))
+                    <_ as InnerProductComputation>::inner_product_ref(Fp.get_ring(), (0..self.rns_base().len()).map(|i| (&lhs.operands[i][k * self.rank() + l], rhs.at(i, j, k, l))))
                 }));
                 timed!("gadget_product_lkss::ffts", || {
                     for k in 0..output_moduli_count {
@@ -460,7 +461,7 @@ fn bench_gadget_product(bencher: &mut Bencher) {
     const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
     const ZZbig: BigIntRing = BigIntRing::RING;
     let log2_n = 10;
-    let rns_base_len = 16;
+    let rns_base_len = 32;
     let rns_base: Vec<_> = (0..).map(|i| (i << (log2_n + 1)) + 1).filter(|p| is_prime(ZZ, &(*p as i64), 10)).map(Zn::new).take(rns_base_len).collect();
     let error_bound = ZZbig.can_hom(&ZZ).unwrap().map((rns_base.len() as i64 * *rns_base.last().unwrap().modulus() as i64) << log2_n);
     let ring = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<FFTTableCooleyTuckey<Zn>>, _>::new(zn_rns::Zn::new(rns_base.clone(), ZZbig, default_memory_provider!()), rns_base, log2_n, default_memory_provider!());
@@ -478,16 +479,17 @@ fn bench_gadget_product(bencher: &mut Bencher) {
         rhs_op.set_rns_factor(i, ring.add(ring.inclusion().mul_ref_fst_map(&rhs, gadget_vec(i)), error));
     }
 
+    let lhs = ring.random_element(|| rng.rand_u64());
+    let expected_result = ring.get_ring().undo_fft(ring.mul_ref(&lhs, &rhs));
+
     bencher.iter(|| {
-        let lhs = ring.random_element(|| rng.rand_u64());
-        let expected_result = ring.mul_ref(&lhs, &rhs);
-        let lhs_op = ring.get_ring().to_gadget_product_lhs(ring.get_ring().undo_fft(lhs));
-        let result = ring.get_ring().gadget_product(&lhs_op, &rhs_op);
-        let error = ring.sub(expected_result, result);
-        let error_vec = ring.wrt_canonical_basis(&error);
-        for i in 0..error_vec.len() {
-            assert!(ZZbig.is_leq(&ZZbig.abs(ring.base_ring().smallest_lift(error_vec.at(i))), &error_bound));
-        }
+        let lhs_op = ring.get_ring().to_gadget_product_lhs(ring.get_ring().undo_fft(ring.clone_el(&lhs)));
+        let result = ring.get_ring().gadget_product_base(&lhs_op, &rhs_op);
+        let mut error = result;
+        ring.get_ring().sub_assign_non_fft(&mut error, &expected_result);
+        let error_vec = ring.get_ring().wrt_canonical_basis_non_fft(&error);
+        // only check one random coordinate, otherwise this skews the performance completely
+        assert!(ZZbig.is_leq(&ZZbig.abs(ring.base_ring().smallest_lift(error_vec.at(0))), &error_bound));
     });
 
     print_all_timings();

@@ -1,6 +1,6 @@
 [package]
 name = "he-ring"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 
 repository = "https://github.com/FeanorTheElf/he-ring"
@@ -15,7 +15,7 @@ crate-type = ["rlib"]
 bench = true
 
 [dependencies]
-feanor-math = { version = "1.7.1", features = ["generic_tests"] }
+feanor-math = { version = "1.7.3", features = ["generic_tests"] }
 
 [dev-dependencies]
 rand = "0.8.5"

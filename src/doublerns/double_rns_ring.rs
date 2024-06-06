@@ -303,15 +303,17 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
         assert_eq!(self.rns_base().len(), op.output_rings().len());
         assert_eq!(from.rns_base().len(), op.input_rings().len());
 
-        for i in 0..from.rns_base().len() {
-            assert!(from.rns_base().at(i).get_ring() == op.input_rings().at(i).get_ring());
-        }
-        for i in 0..self.rns_base().len() {
-            assert!(self.rns_base().at(i).get_ring() == op.output_rings().at(i).get_ring());
-        }
-        let mut result = self.non_fft_zero();
-        op.apply(from.as_matrix(el), self.as_matrix_mut(&mut result));
-        return result;
+        timed!("perform_rns_op_from", || {
+            for i in 0..from.rns_base().len() {
+                assert!(from.rns_base().at(i).get_ring() == op.input_rings().at(i).get_ring());
+            }
+            for i in 0..self.rns_base().len() {
+                assert!(self.rns_base().at(i).get_ring() == op.output_rings().at(i).get_ring());
+            }
+            let mut result = self.non_fft_zero();
+            op.apply(from.as_matrix(el), self.as_matrix_mut(&mut result));
+            return result;
+        })
     }
 
     pub fn exact_convert_from_cfft<F2, M2_Zn, M2_CC>(
@@ -362,15 +364,17 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
         assert_eq!(self.rns_base().len(), op.input_rings().len());
         assert_eq!(1, op.output_rings().len());
 
-        for i in 0..self.rns_base().len() {
-            assert!(self.rns_base().at(i).get_ring() == op.input_rings().at(i).get_ring());
-        }
-        assert!(to.base_ring().get_ring() == op.output_rings().at(0).get_ring());
-        
-        let mut result = to.zero();
-        let result_matrix = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut result, 1, to.rank());
-        op.apply(self.as_matrix(element), result_matrix);
-        return result;
+        timed!("perform_rns_op_to_cfft", || {
+            for i in 0..self.rns_base().len() {
+                assert!(self.rns_base().at(i).get_ring() == op.input_rings().at(i).get_ring());
+            }
+            assert!(to.base_ring().get_ring() == op.output_rings().at(0).get_ring());
+            
+            let mut result = to.zero();
+            let result_matrix = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut result, 1, to.rank());
+            op.apply(self.as_matrix(element), result_matrix);
+            return result;
+        })
     }
 
     pub fn sample_from_coefficient_distribution<G: FnMut() -> i32>(&self, mut distribution: G) -> <Self as RingBase>::Element {
@@ -402,6 +406,32 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
             generalized_fft: PhantomData,
             memory_provider: PhantomData
         };
+    }
+
+    pub fn clone_el_non_fft(&self, val: &DoubleRNSNonFFTEl<R, F, M>) -> DoubleRNSNonFFTEl<R, F, M> {
+        assert_eq!(self.element_len(), val.data.len());
+        DoubleRNSNonFFTEl {
+            data: self.memory_provider.get_new_init(self.element_len(), |i| self.rns_base().at(i / self.rank()).clone_el(&val.data[i])),
+            generalized_fft: PhantomData,
+            memory_provider: PhantomData
+        }
+    }
+
+    pub fn sub_assign_non_fft(&self, lhs: &mut DoubleRNSNonFFTEl<R, F, M>, rhs: &DoubleRNSNonFFTEl<R, F, M>) {
+        assert_eq!(self.element_len(), lhs.data.len());
+        assert_eq!(self.element_len(), rhs.data.len());
+        for i in 0..self.rns_base().len() {
+            for j in 0..self.rank() {
+                self.rns_base().at(i).sub_assign_ref(&mut lhs.data[i * self.rank() + j], &rhs.data[i * self.rank() + j]);
+            }
+        }
+    }
+
+    pub fn wrt_canonical_basis_non_fft<'a>(&'a self, el: &'a DoubleRNSNonFFTEl<R, F, M>) -> DoubleRNSRingBaseElVectorRepresentation<'a, R, F, M> {
+        DoubleRNSRingBaseElVectorRepresentation {
+            ring: self,
+            inv_fft_data: self.clone_el_non_fft(el)
+        }
     }
 }
 
