@@ -15,6 +15,7 @@ crate-type = ["rlib"]
 bench = true
 
 [dependencies]
+bytemuck = "1.16.0"
 feanor-math = { version = "1.7.4", features = ["generic_tests"] }
 
 [dev-dependencies]

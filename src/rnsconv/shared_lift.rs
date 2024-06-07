@@ -1,4 +1,5 @@
 use feanor_math::matrix::submatrix::*;
+use feanor_math::primitive_int::StaticRingBase;
 use feanor_math::rings::zn::*;
 use feanor_math::ring::*;
 use feanor_math::homomorphism::*;
@@ -6,8 +7,9 @@ use feanor_math::integer::*;
 use feanor_math::mempool::*;
 use feanor_math::vector::VectorView;
 
-use super::approx_lift::*;
 use super::RNSOperation;
+
+type UsedBaseConversion<R, M_Zn, M_Int> = super::lift::AlmostExactBaseConversion<R, M_Int, M_Zn>;
 
 ///
 /// Computes almost exact base conversion with a shared factor.
@@ -24,24 +26,26 @@ use super::RNSOperation;
 /// 
 pub struct AlmostExactSharedBaseConversion<R, M_Zn, M_Int>
     where R: ZnRingStore + Clone,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanHomFrom<StaticRingBase<i128>>,
+        // M_Int: MemoryProvider<i64>,
         M_Int: MemoryProvider<<<R::Type as ZnRing>::IntegerRingBase as RingBase>::Element>,
         M_Zn: MemoryProvider<El<R>>
 {
-    conversion: AlmostExactBaseConversion<R, M_Int, M_Zn>,
+    conversion: UsedBaseConversion<R, M_Zn, M_Int>,
     out_moduli: Vec<R>
 }
 
 impl<R, M_Zn, M_Int> AlmostExactSharedBaseConversion<R, M_Zn, M_Int>
     where R: ZnRingStore + Clone,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanHomFrom<StaticRingBase<i128>>,
+        // M_Int: MemoryProvider<i64>,
         M_Int: MemoryProvider<<<R::Type as ZnRing>::IntegerRingBase as RingBase>::Element>,
         M_Zn: MemoryProvider<El<R>>
 {
     pub fn new(shared_moduli: Vec<R>, additional_in_moduli: Vec<R>, additional_out_moduli: Vec<R>, memory_provider: M_Zn, memory_provider_int: M_Int) -> Self {
         let in_moduli = shared_moduli.iter().cloned().chain(additional_in_moduli.into_iter()).collect::<Vec<_>>();
         let out_moduli = shared_moduli.into_iter().chain(additional_out_moduli.iter().cloned()).collect::<Vec<_>>();
-        let conversion = AlmostExactBaseConversion::new_base(in_moduli, additional_out_moduli, memory_provider_int, memory_provider);
+        let conversion = UsedBaseConversion::new(in_moduli, additional_out_moduli, memory_provider_int, memory_provider);
         Self {
             out_moduli: out_moduli,
             conversion: conversion
@@ -55,7 +59,8 @@ impl<R, M_Zn, M_Int> AlmostExactSharedBaseConversion<R, M_Zn, M_Int>
 
 impl<R, M_Zn, M_Int> RNSOperation for AlmostExactSharedBaseConversion<R, M_Zn, M_Int>
     where R: ZnRingStore + Clone,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanHomFrom<StaticRingBase<i128>>,
+        // M_Int: MemoryProvider<i64>,
         M_Int: MemoryProvider<<<R::Type as ZnRing>::IntegerRingBase as RingBase>::Element>,
         M_Zn: MemoryProvider<El<R>>
 {

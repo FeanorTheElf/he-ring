@@ -2,10 +2,11 @@ use feanor_math::ring::*;
 use feanor_math::rings::zn::{ZnRing, ZnRingStore};
 use feanor_math::matrix::submatrix::*;
 
-pub mod approx_lift;
+pub mod lift;
 pub mod bfv_rescale;
 pub mod bgv_rescale;
 pub mod shared_lift;
+pub mod matrix_lift;
 
 ///
 /// Trait for any map `Zq -> Zq'` for (usually composite) `q, q'`.

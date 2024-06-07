@@ -8,7 +8,7 @@ use feanor_math::ring::*;
 use feanor_math::vector::*;
 use feanor_math::ordered::OrderedRingStore;
 
-use super::approx_lift::AlmostExactBaseConversion;
+use super::lift::AlmostExactBaseConversion;
 
 use super::sort_unstable_permutation;
 use super::RNSOperation;
@@ -62,8 +62,8 @@ impl<'a, R, M_Zn, M_Int> AlmostExactRescalingConvert<R, M_Zn, M_Int>
     pub fn new(in_moduli: Vec<R>, num_moduli: Vec<R>, den_moduli_count: usize, memory_provider: M_Zn, memory_provider_int: M_Int) -> Self {
         let rescaling = AlmostExactRescaling::new(in_moduli.clone(), num_moduli, den_moduli_count, memory_provider.clone(), memory_provider_int.clone());
         let convert = AlmostExactBaseConversion::new(
-            rescaling.output_rings(),
-            &in_moduli[..den_moduli_count],
+            rescaling.output_rings().iter().cloned().collect(),
+            in_moduli[..den_moduli_count].iter().cloned().collect(),
             memory_provider_int,
             memory_provider
         );
@@ -197,14 +197,14 @@ impl<'a, R, M_Zn, M_Int> AlmostExactRescaling<R, M_Zn, M_Int>
         q_over_b_to_aq_over_b_permutation.truncate(aq_over_b_moduli.len() - a_moduli_count);
 
         let b_to_aq_over_b_lift = AlmostExactBaseConversion::new(
-            &b_moduli,
-            &aq_over_b_moduli,
+            b_moduli,
+            aq_over_b_moduli,
             memory_provider_int,
             memory_provider.clone()
         );
         let inv_b = b_to_aq_over_b_lift.output_rings()
             .iter()
-            .map(|R| R.invert(&R.coerce(&ZZbig, ZZbig.clone_el(&b))).unwrap())
+            .map(|ring: &R| ring.invert(&ring.coerce(&ZZbig, ZZbig.clone_el(&b))).unwrap())
             .collect();
 
         AlmostExactRescaling {

@@ -59,25 +59,6 @@ const ZZbig: BigIntRing = BigIntRing::RING;
 
 impl<R, M_Int, M_Zn> AlmostExactBaseConversion<R, M_Int, M_Zn> 
     where R: ZnRingStore + Clone,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanHomFrom<R::Type>,
-        M_Int: MemoryProvider<<<R::Type as ZnRing>::IntegerRingBase as RingBase>::Element>,
-        M_Zn: MemoryProvider<El<R>>
-{
-    pub fn new<V1, V2>(in_rings: V1, out_rings: V2, mem_provider_int: M_Int, mem_provider_zn: M_Zn) -> Self
-        where V1: VectorView<R>,
-            V2: VectorView<R>
-    {
-        Self::new_base(
-            in_rings.iter().cloned().collect(), 
-            out_rings.iter().cloned().collect(), 
-            mem_provider_int, 
-            mem_provider_zn
-        )
-    }
-}
-
-impl<R, M_Int, M_Zn> AlmostExactBaseConversion<R, M_Int, M_Zn> 
-    where R: ZnRingStore + Clone,
         R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         M_Int: MemoryProvider<<<R::Type as ZnRing>::IntegerRingBase as RingBase>::Element>,
         M_Zn: MemoryProvider<El<R>>
@@ -86,7 +67,7 @@ impl<R, M_Int, M_Zn> AlmostExactBaseConversion<R, M_Int, M_Zn>
     /// Creates a new [`AlmostExactBaseConversion`] from `q` to `q'`. The moduli belonging to `q'`
     /// are expected to be sorted.
     /// 
-    pub fn new_base(in_rings: Vec<R>, out_rings: Vec<R>, memory_provider_int: M_Int, memory_provider_zn: M_Zn) -> Self {
+    pub fn new(in_rings: Vec<R>, out_rings: Vec<R>, memory_provider_int: M_Int, memory_provider_zn: M_Zn) -> Self {
         let ZZ = in_rings.at(0).integer_ring();
         for i in 0..in_rings.len() {
             assert!(in_rings.at(i).integer_ring().get_ring() == ZZ.get_ring());
@@ -236,7 +217,7 @@ fn test_rns_base_conversion() {
     let from = vec![Zn::new(17), Zn::new(97)];
     let to = vec![Zn::new(17), Zn::new(97), Zn::new(113), Zn::new(257)];
 
-    let table = AlmostExactBaseConversion::new(&from, &to, default_memory_provider!(), default_memory_provider!());
+    let table = AlmostExactBaseConversion::new(from.clone(), to.clone(), default_memory_provider!(), default_memory_provider!());
 
     // within this area, we guarantee that no error occurs
     for k in -(17 * 97 / 4)..=(17 * 97 / 4) {
@@ -278,7 +259,7 @@ fn test_rns_base_conversion() {
 fn test_rns_base_conversion_small() {
     let from = vec![Zn::new(3), Zn::new(97)];
     let to = vec![Zn::new(17)];
-    let table = AlmostExactBaseConversion::new(&from, &to, default_memory_provider!(), default_memory_provider!());
+    let table = AlmostExactBaseConversion::new(from.clone(), to.clone(), default_memory_provider!(), default_memory_provider!());
     
     for k in -(97 * 3 / 2)..(97 * 3 / 2) {
         let mut actual = to.iter().map(|R| R.int_hom().map(k)).collect::<Vec<_>>();
@@ -299,7 +280,7 @@ fn test_rns_base_conversion_small() {
 fn test_rns_base_conversion_not_coprime() {
     let from = vec![Zn::new(17), Zn::new(97), Zn::new(113)];
     let to = vec![Zn::new(17), Zn::new(97), Zn::new(113), Zn::new(257)];
-    let table = AlmostExactBaseConversion::new(&from, &to, default_memory_provider!(), default_memory_provider!());
+    let table = AlmostExactBaseConversion::new(from.clone(), to.clone(), default_memory_provider!(), default_memory_provider!());
 
     for k in -(17 * 97 * 113 / 4)..=(17 * 97 * 113 / 4) {
         let x = from.iter().map(|R| R.int_hom().map(k)).collect::<Vec<_>>();
@@ -321,7 +302,7 @@ fn test_rns_base_conversion_not_coprime() {
 fn test_rns_base_conversion_not_coprime_permuted() {
     let from = vec![Zn::new(113), Zn::new(17), Zn::new(97)];
     let to = vec![Zn::new(17), Zn::new(97), Zn::new(113), Zn::new(257)];
-    let table = AlmostExactBaseConversion::new(&from, &to, default_memory_provider!(), default_memory_provider!());
+    let table = AlmostExactBaseConversion::new(from.clone(), to.clone(), default_memory_provider!(), default_memory_provider!());
 
     for k in -(17 * 97 * 113 / 4)..=(17 * 97 * 113 / 4) {
         let x = from.iter().map(|R| R.int_hom().map(k)).collect::<Vec<_>>();
@@ -343,7 +324,7 @@ fn test_rns_base_conversion_not_coprime_permuted() {
 fn test_rns_base_conversion_coprime() {
     let from = vec![Zn::new(17), Zn::new(97), Zn::new(113)];
     let to = vec![Zn::new(19), Zn::new(23), Zn::new(257)];
-    let table = AlmostExactBaseConversion::new(&from, &to, default_memory_provider!(), default_memory_provider!());
+    let table = AlmostExactBaseConversion::new(from.clone(), to.clone(), default_memory_provider!(), default_memory_provider!());
 
     for k in -(17 * 97 * 113 / 4)..=(17 * 97 * 113 / 4) {
         let x = from.iter().map(|R| R.int_hom().map(k)).collect::<Vec<_>>();
@@ -369,7 +350,7 @@ fn bench_rns_base_conversion(bencher: &mut Bencher) {
     let mut primes = ((1 << 30)..).map(|k| (1 << 10) * k + 1).filter(|p| is_prime(&StaticRing::<i64>::RING, p, 10)).map(|p| Zn::new(p as u64));
     let in_moduli = primes.by_ref().take(in_moduli_count).collect::<Vec<_>>();
     let out_moduli = primes.take(out_moduli_count).collect::<Vec<_>>();
-    let conv = AlmostExactBaseConversion::new_base(in_moduli.clone(), out_moduli.clone(), CachingMemoryProvider::new(1), default_memory_provider!());
+    let conv = AlmostExactBaseConversion::new(in_moduli.clone(), out_moduli.clone(), CachingMemoryProvider::new(1), default_memory_provider!());
     
     let mut rng = oorandom::Rand64::new(1);
     let mut in_data = (0..(in_moduli_count * cols)).map(|idx| in_moduli[idx / cols].zero()).collect::<Vec<_>>();

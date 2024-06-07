@@ -15,7 +15,7 @@ use feanor_math::matrix::submatrix::*;
 use std::marker::PhantomData;
 
 use super::double_rns_ring::*;
-use crate::rnsconv::approx_lift::AlmostExactBaseConversion;
+use crate::rnsconv::lift::AlmostExactBaseConversion;
 use crate::rnsconv::*;
 
 ///
@@ -207,8 +207,8 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
                     self.rns_base().at(self.rns_base().len() - output_moduli_count + k).zero()
                 })).collect()).collect(),
                 conversions: (0..self.rns_base().len()).map(|i| AlmostExactBaseConversion::new(
-                    shortened_rns_base.get_ring(), 
-                    &[self.rns_base().at(i)], 
+                    shortened_rns_base.get_ring().iter().cloned().collect(), 
+                    vec![self.rns_base().at(i)], 
                     default_memory_provider!(),
                     default_memory_provider!()
                 )).collect::<Vec<_>>(),

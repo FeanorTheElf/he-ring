@@ -10,7 +10,7 @@ use feanor_math::ring::*;
 use feanor_math::ordered::OrderedRingStore;
 use feanor_math::vector::*;
 
-use crate::rnsconv::approx_lift::AlmostExactBaseConversion;
+use crate::rnsconv::lift::AlmostExactBaseConversion;
 
 use super::sort_unstable_permutation;
 use super::RNSOperation;
@@ -95,8 +95,8 @@ impl<R, M_Zn, M_Int> CongruencePreservingRescaling<R, M_Zn, M_Int>
             aq_moduli: aq_moduli,
             aq_permutation: aq_permutation,
             b_inv_mod_t: plaintext_modulus.invert(&plaintext_modulus.coerce(&ZZbig, b)).unwrap(),
-            b_to_aq_lift: AlmostExactBaseConversion::new(&b_moduli, &aq_moduli_sorted, memory_provider_int.clone(), memory_provider.clone()),
-            aq_to_t_conv: AlmostExactBaseConversion::new(&aq_moduli_sorted, &[plaintext_modulus], memory_provider_int, memory_provider.clone()),
+            b_to_aq_lift: AlmostExactBaseConversion::new(b_moduli, aq_moduli_sorted.iter().cloned().collect(), memory_provider_int.clone(), memory_provider.clone()),
+            aq_to_t_conv: AlmostExactBaseConversion::new(aq_moduli_sorted, vec![plaintext_modulus], memory_provider_int, memory_provider.clone()),
             memory_provider: memory_provider
         }
     }

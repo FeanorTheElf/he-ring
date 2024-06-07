@@ -3,12 +3,12 @@
 use std::sync::Mutex;
 
 #[cfg(feature = "record_timings")]
-pub static PRINT_TIMINGS: Mutex<Vec<Box<dyn 'static + Send + Fn()>>> = Mutex::new(Vec::new());
+pub static PRINT_TIMINGS: Mutex<Vec<(&'static std::sync::atomic::AtomicBool, Box<dyn 'static + Send + Fn()>)>> = Mutex::new(Vec::new());
 
 #[cfg(feature = "record_timings")]
 pub fn print_all_timings() {
     let locked = PRINT_TIMINGS.lock().unwrap();
-    for f in locked.iter() {
+    for (_, f) in locked.iter() {
         f();
     }
 }
@@ -19,7 +19,7 @@ pub fn print_all_timings() {}
 #[cfg(feature = "record_timings")]
 pub fn clear_all_timings() {
     let mut locked = PRINT_TIMINGS.lock().unwrap();
-    locked.drain(..);
+    locked.drain(..).for_each(|(registered, _)| registered.store(false, std::sync::atomic::Ordering::SeqCst));
 }
 
 #[cfg(not(feature = "record_timings"))]
@@ -37,9 +37,9 @@ macro_rules! timed {
                 static REGISTERED: AtomicBool = AtomicBool::new(false);
                 if !REGISTERED.swap(true, Ordering::SeqCst) {
                     let mut locked = PRINT_TIMINGS.lock().unwrap();
-                    locked.push(Box::new(|| {
+                    locked.push((&REGISTERED, Box::new(|| {
                         println!("{}: {} ms", $name, COUNTER.load(Ordering::SeqCst) / 1000000);
-                    }));
+                    })));
                 }
 
                 #[inline(never)]
