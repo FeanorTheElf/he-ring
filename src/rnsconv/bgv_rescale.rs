@@ -62,7 +62,14 @@ impl<R, M_Zn, M_Int> CongruencePreservingRescaling<R, M_Zn, M_Int>
         Self::new(q_moduli, Vec::new(), den_moduli_count, plaintext_modulus, memory_provider, memory_provider_int)
     }
 
-    pub fn new(in_moduli: Vec<R>, num_moduli: Vec<R>, denominator_count: usize, plaintext_modulus: R, memory_provider: M_Zn, memory_provider_int: M_Int) -> Self {
+    ///
+    /// Creates a new [`CongruencePreservingRescaling`], where
+    ///  - `q` is the product of `in_moduli`
+    ///  - `a` is the product of `num_moduli`
+    ///  - `b` is the product of the first `den_moduli_count` elements of `in_moduli`
+    /// At least the moduli belonging to `b` are expected to be sorted.
+    /// 
+    pub fn new(in_moduli: Vec<R>, num_moduli: Vec<R>, den_moduli_count: usize, plaintext_modulus: R, memory_provider: M_Zn, memory_provider_int: M_Int) -> Self {
         let ZZ = plaintext_modulus.integer_ring();
         for ring in &in_moduli {
             assert!(ring.integer_ring().get_ring() == ZZ.get_ring());
@@ -72,17 +79,17 @@ impl<R, M_Zn, M_Int> CongruencePreservingRescaling<R, M_Zn, M_Int>
         }
         
         let a = ZZbig.prod(num_moduli.iter().map(|R| int_cast(R.integer_ring().clone_el(R.modulus()), &ZZbig, R.integer_ring())));
-        let b = ZZbig.prod(in_moduli.iter().take(denominator_count).map(|R| int_cast(R.integer_ring().clone_el(R.modulus()), &ZZbig, R.integer_ring())));
+        let b = ZZbig.prod(in_moduli.iter().take(den_moduli_count).map(|R| int_cast(R.integer_ring().clone_el(R.modulus()), &ZZbig, R.integer_ring())));
         
         let a_mod: Vec<_> = in_moduli.iter().map(|R| R.coerce(&ZZbig, ZZbig.clone_el(&a))).collect();
-        let b_inv_mod = in_moduli.iter().skip(denominator_count).chain(num_moduli.iter()).map(|R| R.invert(&R.coerce(&ZZbig, ZZbig.clone_el(&b))).unwrap()).collect();
+        let b_inv_mod = in_moduli.iter().skip(den_moduli_count).chain(num_moduli.iter()).map(|R| R.invert(&R.coerce(&ZZbig, ZZbig.clone_el(&b))).unwrap()).collect();
 
-        let b_moduli = in_moduli.iter().cloned().take(denominator_count).collect::<Vec<_>>();
+        let b_moduli = in_moduli.iter().cloned().take(den_moduli_count).collect::<Vec<_>>();
         let aq_moduli = in_moduli.into_iter().chain(num_moduli.into_iter()).collect::<Vec<_>>();
         let (aq_moduli_sorted, aq_permutation) = sort_unstable_permutation(aq_moduli.clone(), |ring_l, ring_r| ZZ.cmp(ring_l.modulus(), ring_r.modulus()));
         Self {
             q_moduli_count: a_mod.len(),
-            b_moduli_count: denominator_count,
+            b_moduli_count: den_moduli_count,
             a: a_mod,
             b_inv: b_inv_mod,
             aq_moduli: aq_moduli,

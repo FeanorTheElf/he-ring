@@ -303,13 +303,13 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
         assert_eq!(self.rns_base().len(), op.output_rings().len());
         assert_eq!(from.rns_base().len(), op.input_rings().len());
 
+        for i in 0..from.rns_base().len() {
+            assert!(from.rns_base().at(i).get_ring() == op.input_rings().at(i).get_ring());
+        }
+        for i in 0..self.rns_base().len() {
+            assert!(self.rns_base().at(i).get_ring() == op.output_rings().at(i).get_ring());
+        }
         timed!("perform_rns_op_from", || {
-            for i in 0..from.rns_base().len() {
-                assert!(from.rns_base().at(i).get_ring() == op.input_rings().at(i).get_ring());
-            }
-            for i in 0..self.rns_base().len() {
-                assert!(self.rns_base().at(i).get_ring() == op.output_rings().at(i).get_ring());
-            }
             let mut result = self.non_fft_zero();
             op.apply(from.as_matrix(el), self.as_matrix_mut(&mut result));
             return result;

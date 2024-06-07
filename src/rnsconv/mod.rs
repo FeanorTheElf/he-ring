@@ -5,6 +5,7 @@ use feanor_math::matrix::submatrix::*;
 pub mod approx_lift;
 pub mod bfv_rescale;
 pub mod bgv_rescale;
+pub mod shared_lift;
 
 ///
 /// Trait for any map `Zq -> Zq'` for (usually composite) `q, q'`.

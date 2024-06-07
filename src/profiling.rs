@@ -16,6 +16,15 @@ pub fn print_all_timings() {
 #[cfg(not(feature = "record_timings"))]
 pub fn print_all_timings() {}
 
+#[cfg(feature = "record_timings")]
+pub fn clear_all_timings() {
+    let mut locked = PRINT_TIMINGS.lock().unwrap();
+    locked.drain(..);
+}
+
+#[cfg(not(feature = "record_timings"))]
+pub fn clear_all_timings() {}
+
 macro_rules! timed {
     ($name:literal, $fn:expr) => {
         {
@@ -29,13 +38,19 @@ macro_rules! timed {
                 if !REGISTERED.swap(true, Ordering::SeqCst) {
                     let mut locked = PRINT_TIMINGS.lock().unwrap();
                     locked.push(Box::new(|| {
-                        println!("{}: {} ms", $name, COUNTER.load(Ordering::SeqCst) / 1000);
+                        println!("{}: {} ms", $name, COUNTER.load(Ordering::SeqCst) / 1000000);
                     }));
                 }
+
+                #[inline(never)]
+                fn prevent_inline<T, F: FnOnce() -> T>(f: F) -> T {
+                    f()
+                }
+
                 let start = Instant::now();
-                let result = ($fn)();
+                let result = prevent_inline($fn);
                 let end = Instant::now();
-                COUNTER.fetch_add((end - start).as_micros() as u64 + 1, Ordering::SeqCst);
+                COUNTER.fetch_add((end - start).as_nanos() as u64 + 1, Ordering::SeqCst);
                 result
             }
             #[cfg(not(feature = "record_timings"))] {

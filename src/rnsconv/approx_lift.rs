@@ -67,7 +67,7 @@ impl<R, M_Int, M_Zn> AlmostExactBaseConversion<R, M_Int, M_Zn>
         where V1: VectorView<R>,
             V2: VectorView<R>
     {
-        Self::new_generic(
+        Self::new_base(
             in_rings.iter().cloned().collect(), 
             out_rings.iter().cloned().collect(), 
             mem_provider_int, 
@@ -82,7 +82,11 @@ impl<R, M_Int, M_Zn> AlmostExactBaseConversion<R, M_Int, M_Zn>
         M_Int: MemoryProvider<<<R::Type as ZnRing>::IntegerRingBase as RingBase>::Element>,
         M_Zn: MemoryProvider<El<R>>
 {
-    pub fn new_generic(in_rings: Vec<R>, out_rings: Vec<R>, memory_provider_int: M_Int, memory_provider_zn: M_Zn) -> Self {
+    ///
+    /// Creates a new [`AlmostExactBaseConversion`] from `q` to `q'`. The moduli belonging to `q'`
+    /// are expected to be sorted.
+    /// 
+    pub fn new_base(in_rings: Vec<R>, out_rings: Vec<R>, memory_provider_int: M_Int, memory_provider_zn: M_Zn) -> Self {
         let ZZ = in_rings.at(0).integer_ring();
         for i in 0..in_rings.len() {
             assert!(in_rings.at(i).integer_ring().get_ring() == ZZ.get_ring());
@@ -155,7 +159,6 @@ impl<R, M_Int, M_Zn> RNSOperation for AlmostExactBaseConversion<R, M_Int, M_Zn>
     /// Furthermore, if the shortest lift of the input is bounded by `Q/4`,
     /// then the result is guaranteed to be exact.
     /// 
-    #[inline(never)]
     fn apply<V1, V2>(&self, input: Submatrix<V1, El<Self::Ring>>, mut output: SubmatrixMut<V2, El<Self::Ring>>)
         where V1: AsPointerToSlice<El<Self::Ring>>,
             V2: AsPointerToSlice<El<Self::Ring>>
@@ -163,12 +166,12 @@ impl<R, M_Int, M_Zn> RNSOperation for AlmostExactBaseConversion<R, M_Int, M_Zn>
         assert_eq!(input.row_count(), self.input_rings().len());
         assert_eq!(output.row_count(), self.output_rings().len());
         assert_eq!(input.col_count(), output.col_count());
+
         let in_len = input.row_count();
         let col_count = input.col_count();
 
         let ZZ = self.output_rings().at(0).integer_ring();
         let int_to_homs = (0..self.output_rings().len()).map(|k| self.output_rings().at(k).can_hom(&ZZ).unwrap()).collect::<Vec<_>>();
-
 
         let mut lifts = self.memory_provider_int.get_new_init(col_count * in_len, |_| ZZ.zero());
         for i in 0..in_len {
@@ -179,7 +182,13 @@ impl<R, M_Int, M_Zn> RNSOperation for AlmostExactBaseConversion<R, M_Int, M_Zn>
 
         for k in 0..output.row_count() {
             let no_red_steps = (0..in_len).take_while(|i| ZZ.is_gt(self.output_rings().at(k).modulus(), self.from_summands_ordered.at(*i).modulus())).count();
-            if no_red_steps == in_len {
+            if cfg!(feature = "force_rns_conv_reduction") {
+                for j in 0..col_count {
+                    *output.at(k, j) = <_ as InnerProductComputation>::inner_product_ref_fst(self.output_rings().at(k).get_ring(), (0..in_len).map(|i| {
+                        (self.Q_over_q.at(i + in_len * k), int_to_homs[k].map_ref(&lifts[i + j * in_len]))
+                    }));
+                }
+            } else if no_red_steps == in_len {
                 for j in 0..col_count {
                     *output.at(k, j) = <_ as InnerProductComputation>::inner_product_ref_fst(self.output_rings().at(k).get_ring(), (0..no_red_steps).map(|i| {
                         (self.Q_over_q.at(i + in_len * k), self.output_rings().at(k).get_ring().from_int_promise_reduced(ZZ.clone_el(&lifts[i + j * in_len])))
@@ -354,13 +363,13 @@ fn test_rns_base_conversion_coprime() {
 
 #[bench]
 fn bench_rns_base_conversion(bencher: &mut Bencher) {
-    let in_moduli_count = 80;
-    let out_moduli_count = 50;
+    let in_moduli_count = 20;
+    let out_moduli_count = 40;
     let cols = 1000;
-    let mut primes = (1000..).map(|k| 1024 * k + 1).filter(|p| is_prime(&StaticRing::<i64>::RING, p, 10)).map(|p| Zn::new(p as u64));
+    let mut primes = ((1 << 30)..).map(|k| (1 << 10) * k + 1).filter(|p| is_prime(&StaticRing::<i64>::RING, p, 10)).map(|p| Zn::new(p as u64));
     let in_moduli = primes.by_ref().take(in_moduli_count).collect::<Vec<_>>();
     let out_moduli = primes.take(out_moduli_count).collect::<Vec<_>>();
-    let conv = AlmostExactBaseConversion::new_generic(in_moduli.clone(), out_moduli.clone(), CachingMemoryProvider::new(1), default_memory_provider!());
+    let conv = AlmostExactBaseConversion::new_base(in_moduli.clone(), out_moduli.clone(), CachingMemoryProvider::new(1), default_memory_provider!());
     
     let mut rng = oorandom::Rand64::new(1);
     let mut in_data = (0..(in_moduli_count * cols)).map(|idx| in_moduli[idx / cols].zero()).collect::<Vec<_>>();

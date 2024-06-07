@@ -25,6 +25,7 @@ oorandom = "11.1.3"
 [features]
 record_timings = []
 force_naive_gadget_product = []
+force_rns_conv_reduction = []
 
 [profile.profiling]
 inherits = "bench"
