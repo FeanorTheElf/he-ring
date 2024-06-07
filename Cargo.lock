@@ -16,9 +16,9 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
 name = "feanor-math"
-version = "1.7.3"
+version = "1.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17523c1a9eb91540d12ec15f39a73f323c0b26d0ba5ea98d3f27462f652158a3"
+checksum = "a4b7157affee6c313f3740950ca1db34b88ef7e62e90faaabe5354eca773a2e0"
 dependencies = [
  "libc",
  "oorandom",

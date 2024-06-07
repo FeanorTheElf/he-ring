@@ -47,3 +47,6 @@ pub mod doublerns;
 /// Implementation of fast RNS conversion algorithms.
 /// 
 pub mod rnsconv;
+
+#[cfg(test)]
+pub mod bfv;

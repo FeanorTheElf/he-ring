@@ -45,3 +45,22 @@ pub trait RNSOperation {
         where V1: AsPointerToSlice<El<Self::Ring>>,
             V2: AsPointerToSlice<El<Self::Ring>>;
 }
+
+///
+/// Returns `(data_sorted, perm)` such that `data_sorted` is the (ascending)
+/// unstable sorting of `data`, and `data[i] = data_sorted[perm[i]]`.
+/// 
+pub(self) fn sort_unstable_permutation<T, F>(data: Vec<T>, mut sort_by: F) -> (Vec<T>, Vec<usize>)
+    where F: FnMut(&T, &T) -> std::cmp::Ordering
+{
+    let len = data.len();
+    let mut enumerated = data.into_iter().enumerate().collect::<Vec<_>>();
+    enumerated.sort_unstable_by(|(_, x), (_, y)| sort_by(x, y));
+    let mut perm = (0..len).map(|_| 0).collect::<Vec<_>>();
+    let mut data_sorted = Vec::with_capacity(len);
+    for (j, (i, x)) in enumerated.into_iter().enumerate() {
+        data_sorted.push(x);
+        perm[i] = j;
+    }
+    return (data_sorted, perm);
+}

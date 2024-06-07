@@ -1,52 +1,28 @@
-# he-ring
+#![allow(non_snake_case)]
+#![allow(non_upper_case_globals)]
 
-Building on [feanor-math](https://crates.io/crates/feanor-math), this library provides efficient implementations of rings that are commonly used in homomorphic encryption (HE).
-Our focus lies on providing the building blocks for second-generation HE schemes like BGV or BFV, however most building blocks are also used in other schemes like FHEW/TFHE.
-In particular, the core component are cyclotomic rings modulo an integer `R_q = Z[X]/(Phi_n(X), q)`.
-For both `q`, there are two settings of relevance.
- - `q` is a relatively small integer, used as "plaintext modulus" in schemes and often denoted by `t`. For large `n`, the fastest way to implement arithmetic in these rings is by using a discrete Fourier transform (DFT) over the complex numbers (using floating-point numbers).
- - `q` is a product of moderately large primes that split completely in `R = Z[X]/(Phi_n(X))`. This means that `R_q` has a decomposition into prime fields, where arithmetic operations are performed component-wise, thus very efficiently (this is called "double-RNS-representation"). In this setting, ring elements are usually stored in double-RNS-representation, and only converted back to standard-resp. coefficient-representation when necessary. Such conversions require a number-theoretic transform (NTT) and a implementation of the Chinese Remainder theorem.
-
-Both of these settings are implemented in this library, a general implementation and a specialized one for the case `n = 2^k` is a power-of-two.
-In the latter case, the DFTs/NTTs are cheaper, which makes power-of-two cyclotomic rings the most common choice for applications.
-
-Finally, the library also contains an implementation of various fast RNS-conversions.
-This refers to algorithms that perform non-arithmetic operations (usually variants of rounding) on the double-RNS-representation, thus avoiding conversions.
-
-## Disclaimer
-
-This library has been designed for research on homomorphic encryption.
-I did not have practical considerations (like side-channel resistance) in mind, and advise against using using it in production.
-
-## Example
-
-To demonstrate the use of this library, we give an example implementation of the BFV fully homomorphic encryption scheme.
-```rust
+use std::time::Instant;
 use feanor_math::ring::*;
 use feanor_math::rings::zn::*;
 use feanor_math::rings::zn::zn_64::*;
 use feanor_math::primitive_int::StaticRing;
 use feanor_math::integer::*;
-use feanor_math::rings::poly::dense_poly::DensePolyRing;
-use feanor_math::rings::poly::*;
 use feanor_math::algorithms::miller_rabin::is_prime;
 use feanor_math::mempool::DefaultMemoryProvider;
 use feanor_math::algorithms::fft::*;
-use feanor_math::{default_memory_provider, assert_el_eq};
+use feanor_math::default_memory_provider;
 use feanor_math::homomorphism::Homomorphism;
 use feanor_math::vector::VectorView;
 use feanor_math::rings::extension::FreeAlgebraStore;
 use feanor_math::vector::vec_fn::VectorFn;
 use feanor_math::rings::float_complex::Complex64;
 
-use he_ring::*;
+use super::*;
 
 use rand::thread_rng;
 use rand::{Rng, CryptoRng};
 use rand_distr::StandardNormal;
 
-// in the spirit of feanor-math, all rings are highly generic and extensible using the type system.
-// here we define the ring types we will use to implement the scheme. 
 pub type PlaintextRing = complexfft::complex_fft_ring::ComplexFFTBasedRing<complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<Zn, cooley_tuckey::FFTTableCooleyTuckey<Complex64>>, DefaultMemoryProvider, DefaultMemoryProvider>;
 pub type FFTTable = doublerns::pow2_cyclotomic::Pow2CyclotomicFFT<cooley_tuckey::FFTTableCooleyTuckey<ZnFastmul>>;
 pub type CiphertextRing = doublerns::double_rns_ring::DoubleRNSRing<Zn, FFTTable, DefaultMemoryProvider>;
@@ -57,43 +33,51 @@ pub type GadgetProductOperand<'a> = doublerns::gadget_product::GadgetProductRhsO
 pub type KeySwitchKey<'a> = (GadgetProductOperand<'a>, GadgetProductOperand<'a>);
 pub type RelinKey<'a> = (GadgetProductOperand<'a>, GadgetProductOperand<'a>);
 
-//
-// During BFV multiplication, we need a "rescaling operation" that computes `round(x * t / q)`. Doing
-// this in a fast-RNS-conversion manner requires precomputing all kinds of data, encapsulated by `MulConversionData`.
-//
 pub struct MulConversionData {
-    to_C_mul: rnsconv::approx_lift::AlmostExactBaseConversion<Zn, DefaultMemoryProvider, DefaultMemoryProvider>,
+    lift_to_C_mul: rnsconv::approx_lift::AlmostExactBaseConversion<Zn, DefaultMemoryProvider, DefaultMemoryProvider>,
     scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert<Zn, DefaultMemoryProvider, DefaultMemoryProvider>
-};
+}
 
 const ZZbig: BigIntRing = BigIntRing::RING;
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
 
-pub fn sample_primes_in_arithmetic_progression(n: u64) -> impl Iterator<Item = u64> {
-    (1..).map(move |i| i * n + 1).filter(|p| is_prime(&ZZ, &(*p as i64), 8))
-}
+pub fn create_ciphertext_rings(log2_ring_degree: usize, q_min_bits: usize, q_max_bits: usize) -> (CiphertextRing, CiphertextRing) {
+    let start_moduli_size = (1 << 40) + 1;
+    let mut primes = (0..)
+        .map(|k| start_moduli_size - (k << (log2_ring_degree + 1)))
+        .filter(|p| is_prime(ZZ, &(*p as i64), 10));
 
-//
-// BFV requires arithmetic in two different "ciphertext rings":
-//  - the standard ring `R_q` containing all ciphertexts
-//  - an "extended" ciphertext ring `R_Q` used during multiplication (where `q` divides `Q` and `Q > q^2`)
-// This function creates both of them
-//
-pub fn create_ciphertext_rings(log2_ring_degree: usize, ciphertext_moduli_count: usize) -> (CiphertextRing, CiphertextRing) {
-    let mut primes = sample_primes_in_arithmetic_progression(2 << log2_ring_degree).map(|p| p as u64);
-
-    let rns_base = zn_rns::Zn::new(primes.by_ref().take(ciphertext_moduli_count).map(Zn::new).collect(), ZZbig ,default_memory_provider!());
+    let mut current_bits = 0.;
+    let rns_base = zn_rns::Zn::new(
+        primes.by_ref()
+            .take_while(|p| if current_bits >= q_min_bits as f64 {
+                false
+            } else {
+                current_bits += (*p as f64).log2();
+                true
+            })
+            .map(Zn::new).collect(), 
+        ZZbig, 
+        default_memory_provider!()
+    );
+    assert!(current_bits <= q_max_bits as f64, "Failed to find a suitable ciphertext modulus within the given range");
     
+    let mut current_mul_bits = 0.;
     let rns_base_mul = zn_rns::Zn::new(
-        rns_base.get_ring().iter().map(|R| *R.modulus() as u64).chain(
-            primes.take(ciphertext_moduli_count)
+        rns_base.get_ring().iter().map(|R: &RingValue<ZnBase>| *R.modulus() as u64).chain(
+            primes.take_while(|p| if current_mul_bits >= current_bits as f64 {
+                false
+            } else {
+                current_mul_bits += (*p as f64).log2();
+                true
+            })
         ).map(Zn::new).collect(), 
         ZZbig, 
         default_memory_provider!()
     );
 
-    let C = <CiphertextRing as RingStore>::Type::new(rns_base.clone(), rns_base.get_ring().iter().cloned().map(ZnFastmul::new).collect(), log2_ring_degree,default_memory_provider!());
-    let C_mul = <CiphertextRing as RingStore>::Type::new(rns_base_mul.clone(), rns_base_mul.get_ring().iter().cloned().map(ZnFastmul::new).collect(), log2_ring_degree,default_memory_provider!());
+    let C = <CiphertextRing as RingStore>::Type::new(rns_base.clone(), rns_base.get_ring().iter().cloned().map(ZnFastmul::new).collect(), log2_ring_degree, default_memory_provider!());
+    let C_mul = <CiphertextRing as RingStore>::Type::new(rns_base_mul.clone(), rns_base_mul.get_ring().iter().cloned().map(ZnFastmul::new).collect(), log2_ring_degree, default_memory_provider!());
     return (C, C_mul);
 }
 
@@ -101,13 +85,9 @@ pub fn create_plaintext_ring(log2_ring_degree: usize, plaintext_modulus: i64) ->
     return <PlaintextRing as RingStore>::Type::new(Zn::new(plaintext_modulus as u64), log2_ring_degree, default_memory_provider!(), default_memory_provider!());
 }
 
-//
-// Creates the `MulConversionData` required to perform the rescaling during BFV multiplication in a
-// fast-RNS-conversion manner.
-//
 pub fn create_multiplication_rescale(P: &PlaintextRing, C: &CiphertextRing, C_mul: &CiphertextRing) -> MulConversionData {
     MulConversionData {
-        to_C_mul: rnsconv::approx_lift::AlmostExactBaseConversion::new(
+        lift_to_C_mul: rnsconv::approx_lift::AlmostExactBaseConversion::new(
             C.get_ring().rns_base().iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
             C_mul.get_ring().rns_base().iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
             default_memory_provider!(),
@@ -183,7 +163,7 @@ pub fn gen_rk<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing, rng: R, sk: &Secret
 pub fn hom_mul(C: &CiphertextRing, C_mul: &CiphertextRing, lhs: &Ciphertext, rhs: &Ciphertext, rk: &RelinKey, conv_data: &MulConversionData) -> Ciphertext {
     let (c00, c01) = lhs;
     let (c10, c11) = rhs;
-    let lift = |c: El<CiphertextRing>| C_mul.get_ring().do_fft(C_mul.get_ring().perform_rns_op_from(C.get_ring(), &C.get_ring().undo_fft(c), &conv_data.to_C_mul));
+    let lift = |c: El<CiphertextRing>| C_mul.get_ring().do_fft(C_mul.get_ring().perform_rns_op_from(C.get_ring(), &C.get_ring().undo_fft(c), &conv_data.lift_to_C_mul));
 
     let lifted0 = C_mul.mul(lift(C.clone_el(c00)), lift(C.clone_el(c10)));
     let lifted1 = C_mul.add(C_mul.mul(lift(C.clone_el(c00)), lift(C.clone_el(c11))), C_mul.mul(lift(C.clone_el(c01)), lift(C.clone_el(c10))));
@@ -201,7 +181,6 @@ pub fn hom_mul(C: &CiphertextRing, C_mul: &CiphertextRing, lhs: &Ciphertext, rhs
         C.add(res0, C.get_ring().gadget_product(&op, s0)), 
         C.add(res1, C.get_ring().gadget_product(&op, s1))
     );
-    
 }
 
 pub fn gen_switch_key<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing, mut rng: R, old_sk: &SecretKey, new_sk: &SecretKey) -> KeySwitchKey<'a> {
@@ -228,26 +207,33 @@ pub fn key_switch(C: &CiphertextRing, ct: &Ciphertext, switch_key: &KeySwitchKey
     return (C.add_ref_fst(c0, C.get_ring().gadget_product(&op, s0)), C.get_ring().gadget_product(&op, s1));
 }
 
-let mut rng = thread_rng();
+#[test]
+#[ignore]
+fn run_bfv() {
+    let mut rng = thread_rng();
+    
+    let log2_ring_degree = 15;
+    let q_bitlength = 800;
+    let plaintext_modulus = 3;
+    
+    let P = create_plaintext_ring(log2_ring_degree, plaintext_modulus);
+    let (C, C_mul) = create_ciphertext_rings(log2_ring_degree, q_bitlength - 50, q_bitlength);
+    println!("Created rings, RNS base length is {}", C.base_ring().get_ring().len());
+    
+    let sk = gen_sk(&C, &mut rng);
+    
+    let m = P.int_hom().map(2);
+    let ct = enc_sym(&P, &C, &mut rng, &m, &sk);
+    println!("Encrypted message");
+    
+    let mul_rescale_data = create_multiplication_rescale(&P, &C, &C_mul);
+    let relin_key = gen_rk(&C, &mut rng, &sk);
+    println!("Created relin key");
+    let start = Instant::now();
+    let ct_sqr = hom_mul(&C, &C_mul, &ct, &ct, &relin_key, &mul_rescale_data);
+    let end = Instant::now();
+    println!("Performed multiplication in {} ms", (end - start).as_millis());
 
-// not a secure choice of parameters
-let log2_ring_degree = 7;
-let plaintext_modulus = 3;
-let ciphertext_moduli_count = 5;
-
-let P = create_plaintext_ring(log2_ring_degree, plaintext_modulus);
-let (C, C_mul) = create_ciphertext_rings(log2_ring_degree, ciphertext_moduli_count);
-
-let sk = gen_sk(&C, &mut rng);
-
-// for simplicity, we encrypt only a scalar
-let m = P.int_hom().map(2);
-let ct = enc_sym(&P, &C, &mut rng, &m, &sk);
-
-let mul_rescale_data = create_multiplication_rescale(&P, &C, &C_mul);
-let relin_key = gen_rk(&C, &mut rng, &sk);
-let ct_sqr = hom_mul(&C, &C_mul, &ct, &ct, &relin_key, &mul_rescale_data);
-
-let m_sqr = dec(&P, &C, &ct_sqr, &sk);
-assert_el_eq!(&P, &P.int_hom().map(1), &m_sqr);
-```
+    let m_sqr = dec(&P, &C, &ct_sqr, &sk);
+    P.println(&m_sqr);
+}
