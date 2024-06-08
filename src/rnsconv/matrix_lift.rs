@@ -2,7 +2,6 @@ use feanor_math::algorithms::matmul::InnerProductComputation;
 use feanor_math::integer::*;
 use feanor_math::matrix::submatrix::*;
 use feanor_math::mempool::*;
-use feanor_math::mempool::caching::*;
 use feanor_math::homomorphism::*;
 use feanor_math::vector::VectorView;
 use feanor_math::rings::zn::*;
@@ -32,7 +31,7 @@ use super::RNSOperation;
 /// implementation makes some assumptions on the sizes of the moduli, which allows
 /// to use a matrix multiplication for the performance-critical section.
 /// 
-pub struct AlmostExactMatrixBaseConversion<M_Zn = DefaultMemoryProvider, M_Int = Rc<CachingMemoryProvider<i64>>>
+pub struct AlmostExactMatrixBaseConversion<M_Zn = DefaultMemoryProvider, M_Int = Rc<caching::CachingMemoryProvider<i64>>>
     where M_Int: MemoryProvider<i64>,
         M_Zn: MemoryProvider<ZnEl>
 {
@@ -189,8 +188,6 @@ impl<M_Zn, M_Int> RNSOperation for AlmostExactMatrixBaseConversion<M_Zn, M_Int>
     }
 }
 
-#[cfg(test)]
-use feanor_math::rings::zn::zn_64::*;
 #[cfg(test)]
 use feanor_math::assert_el_eq;
 #[cfg(test)]

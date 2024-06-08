@@ -1,6 +1,5 @@
 use std::rc::Rc;
 
-use caching::CachingMemoryProvider;
 use feanor_math::matrix::submatrix::*;
 use feanor_math::primitive_int::StaticRingBase;
 use feanor_math::rings::zn::*;
@@ -9,12 +8,11 @@ use feanor_math::ring::*;
 use feanor_math::homomorphism::*;
 use feanor_math::integer::*;
 use feanor_math::mempool::*;
-use feanor_math::mempool::caching::*;
 use feanor_math::vector::VectorView;
 
 use super::RNSOperation;
 
-type UsedBaseConversion<M_Zn, M_Int> = super::lift::AlmostExactBaseConversion<M_Zn, M_Int>;
+type UsedBaseConversion<M_Zn, M_Int> = super::matrix_lift::AlmostExactMatrixBaseConversion<M_Zn, M_Int>;
 
 ///
 /// Computes almost exact base conversion with a shared factor.
@@ -29,7 +27,7 @@ type UsedBaseConversion<M_Zn, M_Int> = super::lift::AlmostExactBaseConversion<M_
 /// The functionality is exactly as for [`AlmostExactBaseConversion`],
 /// except that it might be faster by reusing the shared factor `a`.
 /// 
-pub struct AlmostExactSharedBaseConversion<M_Zn = DefaultMemoryProvider, M_Int = Rc<CachingMemoryProvider<i64>>>
+pub struct AlmostExactSharedBaseConversion<M_Zn = DefaultMemoryProvider, M_Int = Rc<caching::CachingMemoryProvider<i64>>>
     where M_Zn: MemoryProvider<ZnEl>,
         M_Int: MemoryProvider<i64>
 {
@@ -88,8 +86,6 @@ impl<M_Zn, M_Int> RNSOperation for AlmostExactSharedBaseConversion<M_Zn, M_Int>
     }
 }
 
-#[cfg(test)]
-use feanor_math::rings::zn::zn_64::*;
 #[cfg(test)]
 use feanor_math::default_memory_provider;
 

@@ -3,7 +3,6 @@ use feanor_math::homomorphism::*;
 use feanor_math::matrix::submatrix::*;
 use feanor_math::mempool::*;
 use feanor_math::mempool::caching::*;
-use feanor_math::primitive_int::*;
 use feanor_math::rings::zn::*;
 use feanor_math::rings::zn::zn_64::*;
 use feanor_math::integer::int_cast;
@@ -192,8 +191,6 @@ impl<M_Zn, M_Int> RNSOperation for CongruencePreservingRescaling<M_Zn, M_Int>
     }
 }
 
-#[cfg(test)]
-use feanor_math::rings::zn::zn_64::*;
 #[cfg(test)]
 use feanor_math::default_memory_provider;
 #[cfg(test)]

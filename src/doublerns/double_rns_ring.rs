@@ -377,7 +377,7 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
         })
     }
 
-    pub fn sample_from_coefficient_distribution<G: FnMut() -> i32>(&self, mut distribution: G) -> <Self as RingBase>::Element {
+    pub fn sample_from_coefficient_distribution<G: FnMut() -> i32>(&self, mut distribution: G) -> DoubleRNSNonFFTEl<R, F, M> {
         let mut result = self.memory_provider.get_new_init(self.element_len(), |i| self.rns_base().at(i / self.rank()).zero());
         let mut data = Vec::new();
         for j in 0..self.rank() {
@@ -387,11 +387,11 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
                 result[j + i * self.rank()] = self.rns_base().at(i).int_hom().map(c);
             }
         }
-        return self.do_fft(DoubleRNSNonFFTEl {
+        return DoubleRNSNonFFTEl {
             data: result,
             generalized_fft: PhantomData,
             memory_provider: PhantomData
-        });
+        };
     }
 
     pub fn sample_uniform<G: FnMut() -> u64>(&self, mut rng: G) -> <Self as RingBase>::Element {
@@ -423,6 +423,25 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
         for i in 0..self.rns_base().len() {
             for j in 0..self.rank() {
                 self.rns_base().at(i).sub_assign_ref(&mut lhs.data[i * self.rank() + j], &rhs.data[i * self.rank() + j]);
+            }
+        }
+    }
+
+    pub fn mul_scalar_assign_non_fft(&self, lhs: &mut DoubleRNSNonFFTEl<R, F, M>, rhs: &El<zn_rns::Zn<R, BigIntRing, DefaultMemoryProvider>>) {
+        assert_eq!(self.element_len(), lhs.data.len());
+        for i in 0..self.rns_base().len() {
+            for j in 0..self.rank() {
+                self.rns_base().at(i).mul_assign_ref(&mut lhs.data[i * self.rank() + j], self.rns_base().get_congruence(rhs).at(i));
+            }
+        }
+    }
+
+    pub fn add_assign_non_fft(&self, lhs: &mut DoubleRNSNonFFTEl<R, F, M>, rhs: &DoubleRNSNonFFTEl<R, F, M>) {
+        assert_eq!(self.element_len(), lhs.data.len());
+        assert_eq!(self.element_len(), rhs.data.len());
+        for i in 0..self.rns_base().len() {
+            for j in 0..self.rank() {
+                self.rns_base().at(i).add_assign_ref(&mut lhs.data[i * self.rank() + j], &rhs.data[i * self.rank() + j]);
             }
         }
     }

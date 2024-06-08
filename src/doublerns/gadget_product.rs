@@ -1,7 +1,5 @@
-use feanor_math::integer::int_cast;
-use feanor_math::integer::BigIntRingBase;
+use feanor_math::integer::*;
 use feanor_math::mempool::*;
-use feanor_math::mempool::caching::*;
 use feanor_math::ring::*;
 use feanor_math::homomorphism::*;
 use feanor_math::rings::zn::*;
@@ -33,7 +31,7 @@ pub enum GadgetProductRhsOperand<'a, F, M>
         M: MemoryProvider<ZnEl>
 {
     LKSSStyle(LKSSGadgetProductRhsOperand<'a, F, M>),
-    Naive(Vec<El<DoubleRNSRing<Zn, F, M>>>)
+    Naive(&'a DoubleRNSRingBase<Zn, F, M>, Vec<El<DoubleRNSRing<Zn, F, M>>>)
 }
 
 pub struct LKSSGadgetProductRhsOperand<'a, F, M> 
@@ -60,8 +58,8 @@ impl<'a, F, M> LKSSGadgetProductRhsOperand<'a, F, M>
         &self.operands[i][j][k * self.ring.rank() + l]
     }
 
-    fn set_rns_factor(&mut self, i: usize, el: <DoubleRNSRingBase<Zn, F, M> as RingBase>::Element) {
-        self.operands[i] = self.ring.gadget_decompose(self.ring.undo_fft(el), self.shortened_rns_base.get_ring().len());
+    fn set_rns_factor(&mut self, i: usize, el: DoubleRNSNonFFTEl<Zn, F, M>) {
+        self.operands[i] = self.ring.gadget_decompose(el, self.shortened_rns_base.get_ring().len());
     }
 }
 
@@ -70,10 +68,10 @@ impl<'a, F, M> GadgetProductRhsOperand<'a, F, M>
         ZnBase: CanIsoFromTo<F::BaseRingBase>,
         M: MemoryProvider<ZnEl>
 {
-    pub fn set_rns_factor(&mut self, i: usize, el: <DoubleRNSRingBase<Zn, F, M> as RingBase>::Element) {
+    pub fn set_rns_factor(&mut self, i: usize, el: DoubleRNSNonFFTEl<Zn, F, M>) {
         match self {
             GadgetProductRhsOperand::LKSSStyle(op) => op.set_rns_factor(i, el),
-            GadgetProductRhsOperand::Naive(op) => op[i] = el
+            GadgetProductRhsOperand::Naive(ring, op) => op[i] = ring.do_fft(el)
         }
     }
 }
@@ -209,7 +207,7 @@ impl<F, M> DoubleRNSRingBase<Zn, F, M>
                 shortened_rns_base: shortened_rns_base
             })
         } else {
-            GadgetProductRhsOperand::Naive((0..self.rns_base().len()).map(|_| self.zero()).collect())
+            GadgetProductRhsOperand::Naive(self, (0..self.rns_base().len()).map(|_| self.zero()).collect())
         }
     }
 
@@ -355,7 +353,7 @@ impl<F, M> DoubleRNSRingBase<Zn, F, M>
     pub fn gadget_product_base(&self, lhs: &GadgetProductLhsOperand<F, M>, rhs: &GadgetProductRhsOperand<F, M>) -> DoubleRNSNonFFTEl<Zn, F, M> {
         match (lhs, rhs) {
             (GadgetProductLhsOperand::LKSSStyle(lhs), GadgetProductRhsOperand::LKSSStyle(rhs)) => self.gadget_product_lkss(lhs, rhs),
-            (GadgetProductLhsOperand::Naive(lhs), GadgetProductRhsOperand::Naive(rhs)) => timed!("gadget_product_base::naive", || {
+            (GadgetProductLhsOperand::Naive(lhs), GadgetProductRhsOperand::Naive(_, rhs)) => timed!("gadget_product_base::naive", || {
                 self.undo_fft(<_ as RingBase>::sum(self, lhs.iter().zip(rhs.iter()).map(|(l, r)| self.mul_ref(l, r))))
             }),
             _ => panic!("Illegal combination of GadgetProductOperands; Maybe they were created by different rings?")
@@ -405,7 +403,7 @@ fn test_gadget_product() {
         ];
         for i in 0..ring.base_ring().get_ring().len() {
             let gadget_vector_i = ring.base_ring().get_ring().from_congruence((0..ring.base_ring().get_ring().len()).map(|j| ring.base_ring().get_ring().at(j).int_hom().map(if j == i { 1 } else { 0 })));
-            rhs_op.set_rns_factor(i, ring.add_ref_snd(ring.inclusion().mul_ref_fst_map(&rhs, gadget_vector_i), &errors[i]));
+            rhs_op.set_rns_factor(i, ring.get_ring().undo_fft(ring.add_ref_snd(ring.inclusion().mul_ref_fst_map(&rhs, gadget_vector_i), &errors[i])));
         }
 
         let lhs_factor = ring_literal!(&ring, [0, 1000, 10000, 100000, 5000, 50000, 80000, 100]);
@@ -424,8 +422,8 @@ fn test_gadget_product() {
         let mut rhs_op = ring.get_ring().gadget_product_rhs_zero();
         let error1 = ring_literal!(&ring, [1, 0, 0, -1, 0, 1, 1, 0]);
         let error2 = ring_literal!(&ring, [1, 1, 0, -1, 0, 0, -1, 0]);
-        rhs_op.set_rns_factor(0, ring.add(ring.int_hom().mul_ref_fst_map(&rhs_factor, 97), error1));
-        rhs_op.set_rns_factor(0, ring.add(ring.int_hom().mul_ref_fst_map(&rhs_factor, 17), error2));
+        rhs_op.set_rns_factor(0, ring.get_ring().undo_fft(ring.add(ring.int_hom().mul_ref_fst_map(&rhs_factor, 97), error1)));
+        rhs_op.set_rns_factor(0, ring.get_ring().undo_fft(ring.add(ring.int_hom().mul_ref_fst_map(&rhs_factor, 17), error2)));
 
         let lhs_factor = ring_literal!(&ring, [0, 10, 100, 1000, 50, 500, 800, 1]);
         let result_error = ring.sub(ring.mul_ref(&lhs_factor, &rhs_factor), ring.get_ring().gadget_product(&ring.get_ring().to_gadget_product_lhs(ring.get_ring().undo_fft(lhs_factor)), &rhs_op));
@@ -484,7 +482,9 @@ fn bench_gadget_product(bencher: &mut Bencher) {
     }));
     for i in 0..rns_base_len {
         let error = ring.get_ring().sample_from_coefficient_distribution(|| (rng.rand_u64() % 3) as i32 - 1);
-        rhs_op.set_rns_factor(i, ring.add(ring.inclusion().mul_ref_fst_map(&rhs, gadget_vec(i)), error));
+        let mut rns_factor = ring.get_ring().undo_fft(ring.inclusion().mul_ref_fst_map(&rhs, gadget_vec(i)));
+        ring.get_ring().add_assign_non_fft(&mut rns_factor, &error);
+        rhs_op.set_rns_factor(i, rns_factor);
     }
 
     let lhs = ring.random_element(|| rng.rand_u64());
