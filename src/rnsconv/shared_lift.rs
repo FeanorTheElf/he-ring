@@ -1,15 +1,20 @@
+use std::rc::Rc;
+
+use caching::CachingMemoryProvider;
 use feanor_math::matrix::submatrix::*;
 use feanor_math::primitive_int::StaticRingBase;
 use feanor_math::rings::zn::*;
+use feanor_math::rings::zn::zn_64::*;
 use feanor_math::ring::*;
 use feanor_math::homomorphism::*;
 use feanor_math::integer::*;
 use feanor_math::mempool::*;
+use feanor_math::mempool::caching::*;
 use feanor_math::vector::VectorView;
 
 use super::RNSOperation;
 
-type UsedBaseConversion<R, M_Zn, M_Int> = super::lift::AlmostExactBaseConversion<R, M_Int, M_Zn>;
+type UsedBaseConversion<M_Zn, M_Int> = super::lift::AlmostExactBaseConversion<M_Zn, M_Int>;
 
 ///
 /// Computes almost exact base conversion with a shared factor.
@@ -24,28 +29,22 @@ type UsedBaseConversion<R, M_Zn, M_Int> = super::lift::AlmostExactBaseConversion
 /// The functionality is exactly as for [`AlmostExactBaseConversion`],
 /// except that it might be faster by reusing the shared factor `a`.
 /// 
-pub struct AlmostExactSharedBaseConversion<R, M_Zn, M_Int>
-    where R: ZnRingStore + Clone,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanHomFrom<StaticRingBase<i128>>,
-        // M_Int: MemoryProvider<i64>,
-        M_Int: MemoryProvider<<<R::Type as ZnRing>::IntegerRingBase as RingBase>::Element>,
-        M_Zn: MemoryProvider<El<R>>
+pub struct AlmostExactSharedBaseConversion<M_Zn = DefaultMemoryProvider, M_Int = Rc<CachingMemoryProvider<i64>>>
+    where M_Zn: MemoryProvider<ZnEl>,
+        M_Int: MemoryProvider<i64>
 {
-    conversion: UsedBaseConversion<R, M_Zn, M_Int>,
-    out_moduli: Vec<R>
+    conversion: UsedBaseConversion<M_Zn, M_Int>,
+    out_moduli: Vec<Zn>
 }
 
-impl<R, M_Zn, M_Int> AlmostExactSharedBaseConversion<R, M_Zn, M_Int>
-    where R: ZnRingStore + Clone,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanHomFrom<StaticRingBase<i128>>,
-        // M_Int: MemoryProvider<i64>,
-        M_Int: MemoryProvider<<<R::Type as ZnRing>::IntegerRingBase as RingBase>::Element>,
-        M_Zn: MemoryProvider<El<R>>
+impl<M_Zn, M_Int> AlmostExactSharedBaseConversion<M_Zn, M_Int>
+    where M_Zn: MemoryProvider<ZnEl>,
+        M_Int: MemoryProvider<i64>
 {
-    pub fn new(shared_moduli: Vec<R>, additional_in_moduli: Vec<R>, additional_out_moduli: Vec<R>, memory_provider: M_Zn, memory_provider_int: M_Int) -> Self {
+    pub fn new(shared_moduli: Vec<Zn>, additional_in_moduli: Vec<Zn>, additional_out_moduli: Vec<Zn>, memory_provider: M_Zn, memory_provider_int: M_Int) -> Self {
         let in_moduli = shared_moduli.iter().cloned().chain(additional_in_moduli.into_iter()).collect::<Vec<_>>();
         let out_moduli = shared_moduli.into_iter().chain(additional_out_moduli.iter().cloned()).collect::<Vec<_>>();
-        let conversion = UsedBaseConversion::new(in_moduli, additional_out_moduli, memory_provider_int, memory_provider);
+        let conversion = UsedBaseConversion::new(in_moduli, additional_out_moduli, memory_provider, memory_provider_int);
         Self {
             out_moduli: out_moduli,
             conversion: conversion
@@ -57,15 +56,12 @@ impl<R, M_Zn, M_Int> AlmostExactSharedBaseConversion<R, M_Zn, M_Int>
     }
 }
 
-impl<R, M_Zn, M_Int> RNSOperation for AlmostExactSharedBaseConversion<R, M_Zn, M_Int>
-    where R: ZnRingStore + Clone,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanHomFrom<StaticRingBase<i128>>,
-        // M_Int: MemoryProvider<i64>,
-        M_Int: MemoryProvider<<<R::Type as ZnRing>::IntegerRingBase as RingBase>::Element>,
-        M_Zn: MemoryProvider<El<R>>
+impl<M_Zn, M_Int> RNSOperation for AlmostExactSharedBaseConversion<M_Zn, M_Int>
+    where M_Zn: MemoryProvider<ZnEl>,
+        M_Int: MemoryProvider<i64>
 {
-    type Ring = R;
-    type RingType = R::Type;
+    type Ring = Zn;
+    type RingType = ZnBase;
 
     fn input_rings<'a>(&'a self) -> &'a [Self::Ring] {
         self.conversion.input_rings()
@@ -104,9 +100,9 @@ fn test_rns_shared_base_conversion() {
     let table = AlmostExactSharedBaseConversion::new(from.clone(), Vec::new(), vec![to[3]], default_memory_provider!(), default_memory_provider!());
 
     for k in -(17 * 97 * 113 / 4)..=(17 * 97 * 113 / 4) {
-        let x = from.iter().map(|R| R.int_hom().map(k)).collect::<Vec<_>>();
-        let y = to.iter().map(|R| R.int_hom().map(k)).collect::<Vec<_>>();
-        let mut actual = to.iter().map(|R| R.int_hom().map(k)).collect::<Vec<_>>();
+        let x = from.iter().map(|Zn| Zn.int_hom().map(k)).collect::<Vec<_>>();
+        let y = to.iter().map(|Zn| Zn.int_hom().map(k)).collect::<Vec<_>>();
+        let mut actual = to.iter().map(|Zn| Zn.int_hom().map(k)).collect::<Vec<_>>();
 
         table.apply(
             Submatrix::<AsFirstElement<_>, _>::new(&x, 3, 1), 

@@ -2,8 +2,10 @@ use feanor_math::divisibility::DivisibilityRingStore;
 use feanor_math::homomorphism::*;
 use feanor_math::matrix::submatrix::*;
 use feanor_math::mempool::*;
+use feanor_math::mempool::caching::*;
 use feanor_math::primitive_int::*;
 use feanor_math::rings::zn::*;
+use feanor_math::rings::zn::zn_64::*;
 use feanor_math::integer::int_cast;
 use feanor_math::integer::*;
 use feanor_math::ring::*;
@@ -29,36 +31,32 @@ const ZZbig: BigIntRing = BigIntRing::RING;
 /// This means that the "closest integer" above might only be the second-closest when there is
 /// almost a tie.
 /// 
-pub struct CongruencePreservingRescaling<R, M_Zn, M_Int>
-    where R: ZnRingStore + Clone,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanHomFrom<StaticRingBase<i32>> + SelfIso,
-        M_Zn: MemoryProvider<El<R>>,
-        M_Int: MemoryProvider<El<<R::Type as ZnRing>::Integers>>
+pub struct CongruencePreservingRescaling<M_Zn, M_Int>
+    where M_Zn: MemoryProvider<ZnEl>,
+        M_Int: MemoryProvider<i64>
 {
-    aq_moduli: Vec<R>,
+    aq_moduli: Vec<Zn>,
     b_moduli_count: usize,
     q_moduli_count: usize,
     /// `aq_moduli[i] = aq_moduli_sorted[aq_permutation[i]]`
     aq_permutation: Vec<usize>,
     /// contains all the moduli, but sorted
-    b_to_aq_lift: AlmostExactBaseConversion<R, M_Int, M_Zn>,
-    aq_to_t_conv: AlmostExactBaseConversion<R, M_Int, M_Zn>,
+    b_to_aq_lift: AlmostExactBaseConversion<M_Zn, M_Int>,
+    aq_to_t_conv: AlmostExactBaseConversion<M_Zn, M_Int>,
     memory_provider: M_Zn,
     /// `a` as an element of each modulus of `q`
-    a: Vec<El<R>>,
+    a: Vec<El<Zn>>,
     /// `b^-1` as an element of each modulus of `aq/b`
-    b_inv: Vec<El<R>>,
+    b_inv: Vec<El<Zn>>,
     /// `b^-1` as an element of `Z/tZ`
-    b_inv_mod_t: El<R>
+    b_inv_mod_t: El<Zn>
 }
 
-impl<R, M_Zn, M_Int> CongruencePreservingRescaling<R, M_Zn, M_Int>
-    where R: ZnRingStore + Clone, 
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanHomFrom<StaticRingBase<i32>> + SelfIso,
-        M_Zn: MemoryProvider<El<R>> + Clone,
-        M_Int: MemoryProvider<El<<R::Type as ZnRing>::Integers>> + Clone
+impl<M_Zn, M_Int> CongruencePreservingRescaling<M_Zn, M_Int>
+    where M_Zn: MemoryProvider<ZnEl> + Clone,
+        M_Int: MemoryProvider<i64> + Clone
 {
-    pub fn scale_down(q_moduli: Vec<R>, den_moduli_count: usize, plaintext_modulus: R, memory_provider: M_Zn, memory_provider_int: M_Int) -> Self {
+    pub fn scale_down(q_moduli: Vec<Zn>, den_moduli_count: usize, plaintext_modulus: Zn, memory_provider: M_Zn, memory_provider_int: M_Int) -> Self {
         Self::new(q_moduli, Vec::new(), den_moduli_count, plaintext_modulus, memory_provider, memory_provider_int)
     }
 
@@ -69,7 +67,7 @@ impl<R, M_Zn, M_Int> CongruencePreservingRescaling<R, M_Zn, M_Int>
     ///  - `b` is the product of the first `den_moduli_count` elements of `in_moduli`
     /// At least the moduli belonging to `b` are expected to be sorted.
     /// 
-    pub fn new(in_moduli: Vec<R>, num_moduli: Vec<R>, den_moduli_count: usize, plaintext_modulus: R, memory_provider: M_Zn, memory_provider_int: M_Int) -> Self {
+    pub fn new(in_moduli: Vec<Zn>, num_moduli: Vec<Zn>, den_moduli_count: usize, plaintext_modulus: Zn, memory_provider: M_Zn, memory_provider_int: M_Int) -> Self {
         let ZZ = plaintext_modulus.integer_ring();
         for ring in &in_moduli {
             assert!(ring.integer_ring().get_ring() == ZZ.get_ring());
@@ -78,11 +76,11 @@ impl<R, M_Zn, M_Int> CongruencePreservingRescaling<R, M_Zn, M_Int>
             assert!(ring.integer_ring().get_ring() == ZZ.get_ring());
         }
         
-        let a = ZZbig.prod(num_moduli.iter().map(|R| int_cast(R.integer_ring().clone_el(R.modulus()), &ZZbig, R.integer_ring())));
-        let b = ZZbig.prod(in_moduli.iter().take(den_moduli_count).map(|R| int_cast(R.integer_ring().clone_el(R.modulus()), &ZZbig, R.integer_ring())));
+        let a = ZZbig.prod(num_moduli.iter().map(|Zn| int_cast(Zn.integer_ring().clone_el(Zn.modulus()), &ZZbig, Zn.integer_ring())));
+        let b = ZZbig.prod(in_moduli.iter().take(den_moduli_count).map(|Zn| int_cast(Zn.integer_ring().clone_el(Zn.modulus()), &ZZbig, Zn.integer_ring())));
         
-        let a_mod: Vec<_> = in_moduli.iter().map(|R| R.coerce(&ZZbig, ZZbig.clone_el(&a))).collect();
-        let b_inv_mod = in_moduli.iter().skip(den_moduli_count).chain(num_moduli.iter()).map(|R| R.invert(&R.coerce(&ZZbig, ZZbig.clone_el(&b))).unwrap()).collect();
+        let a_mod: Vec<_> = in_moduli.iter().map(|Zn| Zn.coerce(&ZZbig, ZZbig.clone_el(&a))).collect();
+        let b_inv_mod = in_moduli.iter().skip(den_moduli_count).chain(num_moduli.iter()).map(|Zn| Zn.invert(&Zn.coerce(&ZZbig, ZZbig.clone_el(&b))).unwrap()).collect();
 
         let b_moduli = in_moduli.iter().cloned().take(den_moduli_count).collect::<Vec<_>>();
         let aq_moduli = in_moduli.into_iter().chain(num_moduli.into_iter()).collect::<Vec<_>>();
@@ -95,36 +93,34 @@ impl<R, M_Zn, M_Int> CongruencePreservingRescaling<R, M_Zn, M_Int>
             aq_moduli: aq_moduli,
             aq_permutation: aq_permutation,
             b_inv_mod_t: plaintext_modulus.invert(&plaintext_modulus.coerce(&ZZbig, b)).unwrap(),
-            b_to_aq_lift: AlmostExactBaseConversion::new(b_moduli, aq_moduli_sorted.iter().cloned().collect(), memory_provider_int.clone(), memory_provider.clone()),
-            aq_to_t_conv: AlmostExactBaseConversion::new(aq_moduli_sorted, vec![plaintext_modulus], memory_provider_int, memory_provider.clone()),
+            b_to_aq_lift: AlmostExactBaseConversion::new(b_moduli, aq_moduli_sorted.iter().cloned().collect(), memory_provider.clone(), memory_provider_int.clone()),
+            aq_to_t_conv: AlmostExactBaseConversion::new(aq_moduli_sorted, vec![plaintext_modulus], memory_provider.clone(), memory_provider_int),
             memory_provider: memory_provider
         }
     }
 
-    fn t_modulus(&self) -> &R {
+    fn t_modulus(&self) -> &Zn {
         &self.aq_to_t_conv.output_rings()[0]
     }
 
-    fn aq_moduli(&self) -> &[R] {
+    fn aq_moduli(&self) -> &[Zn] {
         &self.aq_moduli
     }
 }
 
-impl<R, M_Zn, M_Int> RNSOperation for CongruencePreservingRescaling<R, M_Zn, M_Int>
-    where R: ZnRingStore + Clone,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanHomFrom<StaticRingBase<i32>> + SelfIso,
-        M_Zn: MemoryProvider<El<R>> + Clone,
-        M_Int: MemoryProvider<<<<R as RingStore>::Type as ZnRing>::IntegerRingBase as RingBase>::Element> + Clone
+impl<M_Zn, M_Int> RNSOperation for CongruencePreservingRescaling<M_Zn, M_Int>
+    where M_Zn: MemoryProvider<ZnEl> + Clone,
+        M_Int: MemoryProvider<i64> + Clone
 {
-    type Ring = R;
+    type Ring = Zn;
 
-    type RingType = R::Type;
+    type RingType = ZnBase;
 
-    fn input_rings<'a>(&'a self) -> &'a [R] {
+    fn input_rings<'a>(&'a self) -> &'a [Zn] {
         &self.aq_moduli()[..self.q_moduli_count]
     }
 
-    fn output_rings<'a>(&'a self) -> &'a [R] {
+    fn output_rings<'a>(&'a self) -> &'a [Zn] {
         &self.aq_moduli()[self.b_moduli_count..]
     }
 
@@ -232,9 +228,9 @@ fn test_rescale() {
 
         assert!(Zt.is_zero(&ZZ_to_Zt.map(input * qprime - output * q)));
 
-        let input = from.iter().map(|R| R.int_hom().map(input)).collect::<Vec<_>>();
-        let output = to.iter().map(|R| R.int_hom().map(output)).collect::<Vec<_>>();
-        let mut actual = to.iter().map(|R| R.zero()).collect::<Vec<_>>();
+        let input = from.iter().map(|Zn| Zn.int_hom().map(input)).collect::<Vec<_>>();
+        let output = to.iter().map(|Zn| Zn.int_hom().map(output)).collect::<Vec<_>>();
+        let mut actual = to.iter().map(|Zn| Zn.zero()).collect::<Vec<_>>();
 
         rescaling.apply(Submatrix::<AsFirstElement<_>, _>::new(&input, 3, 1), SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 2, 1));
 
@@ -276,9 +272,9 @@ fn test_rescale_down() {
 
         assert!(Zt.is_zero(&ZZ_to_Zt.map(input * qprime - output * q)));
 
-        let input = from.iter().map(|R| R.int_hom().map(input)).collect::<Vec<_>>();
-        let output = to.iter().map(|R| R.int_hom().map(output)).collect::<Vec<_>>();
-        let mut actual = to.iter().map(|R| R.zero()).collect::<Vec<_>>();
+        let input = from.iter().map(|Zn| Zn.int_hom().map(input)).collect::<Vec<_>>();
+        let output = to.iter().map(|Zn| Zn.int_hom().map(output)).collect::<Vec<_>>();
+        let mut actual = to.iter().map(|Zn| Zn.zero()).collect::<Vec<_>>();
 
         rescaling.apply(Submatrix::<AsFirstElement<_>, _>::new(&input, 3, 1), SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 2, 1));
 

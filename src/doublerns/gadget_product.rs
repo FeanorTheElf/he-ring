@@ -1,9 +1,11 @@
 use feanor_math::integer::int_cast;
 use feanor_math::integer::BigIntRingBase;
 use feanor_math::mempool::*;
+use feanor_math::mempool::caching::*;
 use feanor_math::ring::*;
 use feanor_math::homomorphism::*;
 use feanor_math::rings::zn::*;
+use feanor_math::rings::zn::zn_64::*;
 use feanor_math::rings::extension::*;
 use feanor_math::vector::*;
 use feanor_math::default_memory_provider;
@@ -25,35 +27,32 @@ use crate::rnsconv::*;
 /// some more data is stored to allow for faster computations later.
 /// For more details, see [`DoubleRNSRingBase::gadget_product()`].
 /// 
-pub enum GadgetProductRhsOperand<'a, R, F, M> 
-    where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase> + SelfIso,
-        F: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M: MemoryProvider<El<R>>
+pub enum GadgetProductRhsOperand<'a, F, M> 
+    where F: GeneralizedFFT + GeneralizedFFTSelfIso,
+        ZnBase: CanIsoFromTo<F::BaseRingBase>,
+        M: MemoryProvider<ZnEl>
 {
-    LKSSStyle(LKSSGadgetProductRhsOperand<'a, R, F, M>),
-    Naive(Vec<El<DoubleRNSRing<R, F, M>>>)
+    LKSSStyle(LKSSGadgetProductRhsOperand<'a, F, M>),
+    Naive(Vec<El<DoubleRNSRing<Zn, F, M>>>)
 }
 
-pub struct LKSSGadgetProductRhsOperand<'a, R, F, M> 
-    where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase> + SelfIso,
-        F: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M: MemoryProvider<El<R>>
+pub struct LKSSGadgetProductRhsOperand<'a, F, M> 
+    where F: GeneralizedFFT + GeneralizedFFTSelfIso,
+        ZnBase: CanIsoFromTo<F::BaseRingBase>,
+        M: MemoryProvider<ZnEl>
 {
-    shortened_rns_base: zn_rns::Zn<&'a R, BigIntRing>,
-    ring: &'a DoubleRNSRingBase<R, F, M>,
+    shortened_rns_base: zn_rns::Zn<Zn, BigIntRing>,
+    ring: &'a DoubleRNSRingBase<Zn, F, M>,
     operands: Vec<Vec<M::Object>>,
-    conversions: Vec<AlmostExactBaseConversion<&'a R, DefaultMemoryProvider, DefaultMemoryProvider>>
+    conversions: Vec<AlmostExactBaseConversion<DefaultMemoryProvider, DefaultMemoryProvider>>
 }
 
-impl<'a, R, F, M> LKSSGadgetProductRhsOperand<'a, R, F, M>
-    where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase> + SelfIso,
-        F: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M: MemoryProvider<El<R>>
+impl<'a, F, M> LKSSGadgetProductRhsOperand<'a, F, M>
+    where F: GeneralizedFFT + GeneralizedFFTSelfIso,
+        ZnBase: CanIsoFromTo<F::BaseRingBase>,
+        M: MemoryProvider<ZnEl>
 {
-    fn at(&self, i: usize, j: usize, k: usize, l: usize) -> &El<R> {
+    fn at(&self, i: usize, j: usize, k: usize, l: usize) -> &ZnEl {
         debug_assert!(i < self.ring.rns_base().len());
         debug_assert!(j < self.ring.rns_base().len());
         debug_assert!(k < self.shortened_rns_base.get_ring().len());
@@ -61,18 +60,17 @@ impl<'a, R, F, M> LKSSGadgetProductRhsOperand<'a, R, F, M>
         &self.operands[i][j][k * self.ring.rank() + l]
     }
 
-    fn set_rns_factor(&mut self, i: usize, el: <DoubleRNSRingBase<R, F, M> as RingBase>::Element) {
+    fn set_rns_factor(&mut self, i: usize, el: <DoubleRNSRingBase<Zn, F, M> as RingBase>::Element) {
         self.operands[i] = self.ring.gadget_decompose(self.ring.undo_fft(el), self.shortened_rns_base.get_ring().len());
     }
 }
 
-impl<'a, R, F, M> GadgetProductRhsOperand<'a, R, F, M>
-    where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase> + SelfIso,
-        F: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M: MemoryProvider<El<R>>
+impl<'a, F, M> GadgetProductRhsOperand<'a, F, M>
+    where F: GeneralizedFFT + GeneralizedFFTSelfIso,
+        ZnBase: CanIsoFromTo<F::BaseRingBase>,
+        M: MemoryProvider<ZnEl>
 {
-    pub fn set_rns_factor(&mut self, i: usize, el: <DoubleRNSRingBase<R, F, M> as RingBase>::Element) {
+    pub fn set_rns_factor(&mut self, i: usize, el: <DoubleRNSRingBase<Zn, F, M> as RingBase>::Element) {
         match self {
             GadgetProductRhsOperand::LKSSStyle(op) => op.set_rns_factor(i, el),
             GadgetProductRhsOperand::Naive(op) => op[i] = el
@@ -86,32 +84,29 @@ impl<'a, R, F, M> GadgetProductRhsOperand<'a, R, F, M>
 /// `(lift((q / pi)^-1 mod pi) * q / pi)_i` where `q = p1 * ... * pm` is the ring modulus.
 /// For more details, see [`DoubleRNSRingBase::gadget_product()`].
 /// 
-pub enum GadgetProductLhsOperand<'a, R, F, M> 
-    where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase> + SelfIso,
-        F: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M: MemoryProvider<El<R>>
+pub enum GadgetProductLhsOperand<'a, F, M> 
+    where F: GeneralizedFFT + GeneralizedFFTSelfIso,
+        ZnBase: CanIsoFromTo<F::BaseRingBase>,
+        M: MemoryProvider<ZnEl>
 {
-    LKSSStyle(LKSSGadgetProductLhsOperand<'a, R, F, M>),
-    Naive(Vec<El<DoubleRNSRing<R, F, M>>>)
+    LKSSStyle(LKSSGadgetProductLhsOperand<'a, F, M>),
+    Naive(Vec<El<DoubleRNSRing<Zn, F, M>>>)
 }
 
-pub struct LKSSGadgetProductLhsOperand<'a, R, F, M> 
-    where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
-        F: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M: MemoryProvider<El<R>>
+pub struct LKSSGadgetProductLhsOperand<'a, F, M> 
+    where F: GeneralizedFFT + GeneralizedFFTSelfIso,
+        ZnBase: CanIsoFromTo<F::BaseRingBase>,
+        M: MemoryProvider<ZnEl>
 {
     output_moduli_count: usize,
-    ring: PhantomData<&'a DoubleRNSRingBase<R, F, M>>,
+    ring: PhantomData<&'a DoubleRNSRingBase<Zn, F, M>>,
     operands: Vec<M::Object>
 }
 
-impl<R, F, M> DoubleRNSRingBase<R, F, M>
-    where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase> + SelfIso,
-        F: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M: MemoryProvider<El<R>>
+impl<F, M> DoubleRNSRingBase<Zn, F, M>
+    where F: GeneralizedFFT + GeneralizedFFTSelfIso,
+        ZnBase: CanIsoFromTo<F::BaseRingBase>,
+        M: MemoryProvider<ZnEl>
 {
     ///
     /// `gadget_decompose()[decomposed_component][rns_base_index][coefficient_index]` contains the 
@@ -120,12 +115,11 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
     /// 
     /// The order of the fourier coefficients is the same as specified by the corresponding [`GeneralizedFFT`].
     /// 
-    fn gadget_decompose(&self, el: DoubleRNSNonFFTEl<R, F, M>, output_moduli_count: usize) -> Vec<M::Object> {
+    fn gadget_decompose(&self, el: DoubleRNSNonFFTEl<Zn, F, M>, output_moduli_count: usize) -> Vec<M::Object> {
         let mut result = Vec::new();
 
         for i in 0..self.rns_base().len() {
-            let int_ring = self.rns_base().at(i).integer_ring();
-            let homs = (0..output_moduli_count).map(|k| self.rns_base().at(self.rns_base().len() - output_moduli_count + k).can_hom(int_ring).unwrap()).collect::<Vec<_>>();
+            let homs = (0..output_moduli_count).map(|k| self.rns_base().at(self.rns_base().len() - output_moduli_count + k).can_hom::<StaticRing<i64>>(&StaticRing::<i64>::RING).unwrap()).collect::<Vec<_>>();
             result.push(self.memory_provider().get_new_init(output_moduli_count * self.rank(), |idx| {
                 let k = idx / self.rank();
                 let j = idx % self.rank();
@@ -133,7 +127,7 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
             }));
             for k in 0..output_moduli_count {
                 let ring_i = self.rns_base().len() - output_moduli_count + k;
-                self.generalized_fft().at(ring_i).fft_forward(&mut result.last_mut().unwrap()[(k * self.rank())..((k + 1) * self.rank())], homs[k].codomain(), self.memory_provider());
+                self.generalized_fft().at(ring_i).fft_forward::<&Zn, _>(&mut result.last_mut().unwrap()[(k * self.rank())..((k + 1) * self.rank())], homs[k].codomain(), self.memory_provider());
             }
         }
         return result;
@@ -167,7 +161,7 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
     /// left-hand side. This can be though of computing the gadget decomposition of the argument.
     /// For more details, see [`DoubleRNSRingBase::gadget_product()`].
     /// 
-    pub fn to_gadget_product_lhs<'a>(&'a self, el: DoubleRNSNonFFTEl<R, F, M>) -> GadgetProductLhsOperand<'a, R, F, M> {
+    pub fn to_gadget_product_lhs<'a>(&'a self, el: DoubleRNSNonFFTEl<Zn, F, M>) -> GadgetProductLhsOperand<'a, F, M> {
         timed!("to_gadget_product_lhs", || {
             let output_moduli_count = self.get_gadget_product_modulo_count();
             if self.use_lkss_gadget_product() {
@@ -194,12 +188,12 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
     /// of scalings of the base ring element) can be set later with [`GadgetProductRhsOperand::set_rns_factor()`].
     /// For more details, see [`DoubleRNSRingBase::gadget_product()`].
     /// 
-    pub fn gadget_product_rhs_zero<'a>(&'a self) -> GadgetProductRhsOperand<'a, R, F, M> {
+    pub fn gadget_product_rhs_zero<'a>(&'a self) -> GadgetProductRhsOperand<'a, F, M> {
         let output_moduli_count = self.get_gadget_product_modulo_count();
         // if the RNS base is very short, we don't want to do LKSS style gadget products, mainly
         // for code simplicity, but we also don't expect much performance improvement
         if self.use_lkss_gadget_product() {
-            let shortened_rns_base = zn_rns::Zn::new(self.rns_base().iter().skip(self.rns_base().len() - output_moduli_count).collect(), BigIntRing::RING, default_memory_provider!());
+            let shortened_rns_base = zn_rns::Zn::<Zn, BigIntRing>::new(self.rns_base().iter().skip(self.rns_base().len() - output_moduli_count).cloned().collect(), BigIntRing::RING, default_memory_provider!());
             GadgetProductRhsOperand::LKSSStyle(LKSSGadgetProductRhsOperand {
                 ring: self,
                 operands: (0..self.rns_base().len()).map(|_| (0..self.rns_base().len()).map(|_| self.memory_provider().get_new_init(output_moduli_count * self.rank(), |idx| {
@@ -208,7 +202,7 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
                 })).collect()).collect(),
                 conversions: (0..self.rns_base().len()).map(|i| AlmostExactBaseConversion::new(
                     shortened_rns_base.get_ring().iter().cloned().collect(), 
-                    vec![self.rns_base().at(i)], 
+                    vec![*self.rns_base().at(i)], 
                     default_memory_provider!(),
                     default_memory_provider!()
                 )).collect::<Vec<_>>(),
@@ -319,11 +313,11 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
     /// assert!((0..8).all(|i| int_cast(ring.base_ring().smallest_lift(error_coefficients.at(i)), StaticRing::<i64>::RING, BigIntRing::RING).abs() <= max_allowed_error));
     /// ```
     /// 
-    pub fn gadget_product(&self, lhs: &GadgetProductLhsOperand<R, F, M>, rhs: &GadgetProductRhsOperand<R, F, M>) -> DoubleRNSEl<R, F, M> {
+    pub fn gadget_product(&self, lhs: &GadgetProductLhsOperand<F, M>, rhs: &GadgetProductRhsOperand<F, M>) -> DoubleRNSEl<Zn, F, M> {
         self.do_fft(self.gadget_product_base(lhs, rhs))
     }
 
-    fn gadget_product_lkss(&self, lhs: &LKSSGadgetProductLhsOperand<R, F, M>, rhs: &LKSSGadgetProductRhsOperand<R, F, M>) -> DoubleRNSNonFFTEl<R, F, M> {
+    fn gadget_product_lkss(&self, lhs: &LKSSGadgetProductLhsOperand<F, M>, rhs: &LKSSGadgetProductRhsOperand<F, M>) -> DoubleRNSNonFFTEl<Zn, F, M> {
         timed!("gadget_product_lkss", || {
             assert_eq!(lhs.output_moduli_count, rhs.shortened_rns_base.get_ring().len());
             let output_moduli_count = lhs.output_moduli_count;
@@ -358,7 +352,7 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
     /// 
     /// The implementation uses the KLSS-style algorithm (ia.cr/2023/413).
     /// 
-    pub fn gadget_product_base(&self, lhs: &GadgetProductLhsOperand<R, F, M>, rhs: &GadgetProductRhsOperand<R, F, M>) -> DoubleRNSNonFFTEl<R, F, M> {
+    pub fn gadget_product_base(&self, lhs: &GadgetProductLhsOperand<F, M>, rhs: &GadgetProductRhsOperand<F, M>) -> DoubleRNSNonFFTEl<Zn, F, M> {
         match (lhs, rhs) {
             (GadgetProductLhsOperand::LKSSStyle(lhs), GadgetProductRhsOperand::LKSSStyle(rhs)) => self.gadget_product_lkss(lhs, rhs),
             (GadgetProductLhsOperand::Naive(lhs), GadgetProductRhsOperand::Naive(rhs)) => timed!("gadget_product_base::naive", || {
@@ -473,7 +467,12 @@ fn bench_gadget_product(bencher: &mut Bencher) {
     let rns_base_len = 32;
     let rns_base: Vec<_> = (0..).map(|i| (i << (log2_n + 1)) + 1).filter(|p| is_prime(ZZ, &(*p as i64), 10)).map(Zn::new).take(rns_base_len).collect();
     let error_bound = ZZbig.can_hom(&ZZ).unwrap().map((rns_base.len() as i64 * *rns_base.last().unwrap().modulus() as i64) << log2_n);
-    let ring = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<FFTTableCooleyTuckey<Zn>>, _>::new(zn_rns::Zn::new(rns_base.clone(), ZZbig, default_memory_provider!()), rns_base, log2_n, default_memory_provider!());
+    let ring = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<FFTTableCooleyTuckey<Zn>>, _>::new(
+        zn_rns::Zn::new(rns_base.clone(), ZZbig, default_memory_provider!()), 
+        rns_base, 
+        log2_n, 
+        default_memory_provider!()
+    );
 
     let mut rng = oorandom::Rand64::new(1);
     let rhs = ring.random_element(|| rng.rand_u64());

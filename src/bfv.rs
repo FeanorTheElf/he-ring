@@ -2,6 +2,7 @@
 #![allow(non_upper_case_globals)]
 
 use std::time::Instant;
+use feanor_math::mempool::caching::CachingMemoryProvider;
 use feanor_math::{assert_el_eq, ring::*};
 use feanor_math::rings::zn::*;
 use feanor_math::rings::zn::zn_64::*;
@@ -31,13 +32,13 @@ pub type CiphertextRing = doublerns::double_rns_ring::DoubleRNSRing<Zn, FFTTable
 
 pub type Ciphertext = (El<CiphertextRing>, El<CiphertextRing>);
 pub type SecretKey = El<CiphertextRing>;
-pub type GadgetProductOperand<'a> = doublerns::gadget_product::GadgetProductRhsOperand<'a, Zn, FFTTable, DefaultMemoryProvider>;
+pub type GadgetProductOperand<'a> = doublerns::gadget_product::GadgetProductRhsOperand<'a, FFTTable, DefaultMemoryProvider>;
 pub type KeySwitchKey<'a> = (GadgetProductOperand<'a>, GadgetProductOperand<'a>);
 pub type RelinKey<'a> = (GadgetProductOperand<'a>, GadgetProductOperand<'a>);
 
 pub struct MulConversionData {
-    lift_to_C_mul: rnsconv::shared_lift::AlmostExactSharedBaseConversion<Zn, DefaultMemoryProvider, DefaultMemoryProvider>,
-    scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert<Zn, DefaultMemoryProvider, DefaultMemoryProvider>
+    lift_to_C_mul: rnsconv::shared_lift::AlmostExactSharedBaseConversion,
+    scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert
 }
 
 const ZZbig: BigIntRing = BigIntRing::RING;
@@ -56,7 +57,7 @@ fn max_prime_congruent_one_lt_bound(n: i64, bound: i64) -> Option<i64> {
 }
 
 pub fn create_ciphertext_rings(log2_ring_degree: usize, q_min_bits: usize, q_max_bits: usize) -> (CiphertextRing, CiphertextRing) {
-    let approx_moduli_size = (1 << 40) + 1;
+    let approx_moduli_size = (1 << 58) + 1;
 
     let mut rns_base_components = Vec::new();
     let mut p = max_prime_congruent_one_lt_bound(2 << log2_ring_degree, approx_moduli_size).unwrap();
@@ -116,14 +117,14 @@ pub fn create_multiplication_rescale(P: &PlaintextRing, C: &CiphertextRing, C_mu
             Vec::new(),
             C_mul.get_ring().rns_base().iter().skip(C.get_ring().rns_base().len()).map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
             default_memory_provider!(),
-            default_memory_provider!()
+            CachingMemoryProvider::new(2)
         ),
         scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert::new(
             C_mul.get_ring().rns_base().iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
             Some(P.base_ring()).into_iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
             C.get_ring().rns_base().len(), 
             default_memory_provider!(),
-            default_memory_provider!()
+            CachingMemoryProvider::new(2)
         )
     }
 }
@@ -264,6 +265,8 @@ fn run_bfv() {
     let end = Instant::now();
     println!("Performed multiplication in {} ms", (end - start).as_millis());
     print_all_timings();
+
+    return;
 
     let m_sqr = dec(&P, &C, &ct_sqr, &sk);
     println!("Decrypted result");

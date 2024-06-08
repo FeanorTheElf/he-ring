@@ -1,12 +1,16 @@
 use feanor_math::matrix::submatrix::*;
 use feanor_math::mempool::*;
+use feanor_math::mempool::caching::*;
 use feanor_math::rings::zn::*;
+use feanor_math::rings::zn::zn_64::*;
 use feanor_math::homomorphism::*;
 use feanor_math::integer::*;
 use feanor_math::divisibility::DivisibilityRingStore;
 use feanor_math::ring::*;
 use feanor_math::vector::*;
 use feanor_math::ordered::OrderedRingStore;
+
+use std::rc::Rc;
 
 use super::lift::AlmostExactBaseConversion;
 
@@ -34,23 +38,19 @@ const ZZbig: BigIntRing = BigIntRing::RING;
 /// ```
 /// for an arbitrary `c`, which can be implemented just as easily.
 /// 
-pub struct AlmostExactRescalingConvert<R, M_Zn, M_Int>
-    where R: ZnRingStore + Clone,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + SelfIso,
-        M_Zn: MemoryProvider<El<R>>,
-        M_Int: MemoryProvider<El<<R::Type as ZnRing>::Integers>>
+pub struct AlmostExactRescalingConvert<M_Zn = DefaultMemoryProvider, M_Int = Rc<CachingMemoryProvider<i64>>>
+    where M_Zn: MemoryProvider<El<Zn>>,
+        M_Int: MemoryProvider<i64>
 {
     // rescale `Z/qZ -> Z/(aq/b)Z`
-    rescaling: AlmostExactRescaling<R, M_Zn, M_Int>,
+    rescaling: AlmostExactRescaling<M_Zn, M_Int>,
     // convert `Z/(aq/b)Z -> Z/bZ`
-    convert: AlmostExactBaseConversion<R, M_Int, M_Zn>
+    convert: AlmostExactBaseConversion<M_Zn, M_Int>
 }
 
-impl<'a, R, M_Zn, M_Int> AlmostExactRescalingConvert<R, M_Zn, M_Int>
-    where R: ZnRingStore + Clone,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + SelfIso,
-        M_Zn: MemoryProvider<El<R>> + Clone,
-        M_Int: MemoryProvider<El<<R::Type as ZnRing>::Integers>> + Clone
+impl<'a, M_Zn, M_Int> AlmostExactRescalingConvert<M_Zn, M_Int>
+    where M_Zn: MemoryProvider<ZnEl> + Clone,
+        M_Int: MemoryProvider<i64> + Clone
 {
     ///
     /// Creates a new [`AlmostExactRescalingConvert`], where
@@ -59,33 +59,31 @@ impl<'a, R, M_Zn, M_Int> AlmostExactRescalingConvert<R, M_Zn, M_Int>
     ///  - `b` is the product of the first `den_moduli_count` elements of `in_moduli`
     /// At least the moduli belonging to `b` are expected to be sorted.
     /// 
-    pub fn new(in_moduli: Vec<R>, num_moduli: Vec<R>, den_moduli_count: usize, memory_provider: M_Zn, memory_provider_int: M_Int) -> Self {
+    pub fn new(in_moduli: Vec<Zn>, num_moduli: Vec<Zn>, den_moduli_count: usize, memory_provider: M_Zn, memory_provider_int: M_Int) -> Self {
         let rescaling = AlmostExactRescaling::new(in_moduli.clone(), num_moduli, den_moduli_count, memory_provider.clone(), memory_provider_int.clone());
         let convert = AlmostExactBaseConversion::new(
             rescaling.output_rings().iter().cloned().collect(),
             in_moduli[..den_moduli_count].iter().cloned().collect(),
+            memory_provider,
             memory_provider_int,
-            memory_provider
         );
         return Self { rescaling, convert };
     }
 }
 
-impl<R, M_Zn, M_Int> RNSOperation for AlmostExactRescalingConvert<R, M_Zn, M_Int>
-    where R: ZnRingStore + Clone,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + SelfIso,
-        M_Zn: MemoryProvider<El<R>>,
-        M_Int: MemoryProvider<<<<R as RingStore>::Type as ZnRing>::IntegerRingBase as RingBase>::Element>
+impl<M_Zn, M_Int> RNSOperation for AlmostExactRescalingConvert<M_Zn, M_Int>
+    where M_Zn: MemoryProvider<ZnEl>,
+        M_Int: MemoryProvider<i64>
 {
-    type Ring = R;
+    type Ring = Zn;
 
-    type RingType = R::Type;
+    type RingType = ZnBase;
 
-    fn input_rings<'a>(&'a self) -> &'a [R] {
+    fn input_rings<'a>(&'a self) -> &'a [Zn] {
         self.rescaling.input_rings()
     }
 
-    fn output_rings<'a>(&'a self) -> &'a [R] {
+    fn output_rings<'a>(&'a self) -> &'a [Zn] {
         self.convert.output_rings()
     }
 
@@ -144,29 +142,25 @@ impl<R, M_Zn, M_Int> RNSOperation for AlmostExactRescalingConvert<R, M_Zn, M_Int
 ///     &output[0]);
 /// ```
 /// 
-pub struct AlmostExactRescaling<R, M_Zn, M_Int>
-    where R: ZnRingStore + Clone,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + SelfIso,
-        M_Zn: MemoryProvider<El<R>>,
-        M_Int: MemoryProvider<El<<R::Type as ZnRing>::Integers>>
+pub struct AlmostExactRescaling<M_Zn, M_Int>
+    where M_Zn: MemoryProvider<ZnEl>,
+        M_Int: MemoryProvider<i64>
 {
-    q_moduli: Vec<R>,
+    q_moduli: Vec<Zn>,
     /// `q_moduli[i + b_moduli_count] = aq_over_b_moduli[q_to_aq_over_b_permutation[i]]`
     q_over_b_to_aq_over_b_permutation: Vec<usize>,
     /// contains the moduli of `q` and then the moduli of `a`
-    b_to_aq_over_b_lift: AlmostExactBaseConversion<R, M_Int, M_Zn>,
+    b_to_aq_over_b_lift: AlmostExactBaseConversion<M_Zn, M_Int>,
     /// a as element of each modulus of `q` (ordered as `q_moduli`)
-    a: Vec<El<R>>,
+    a: Vec<El<Zn>>,
     /// 1/b as element of each modulus of `aq/b` (ordered as `self.aq_over_b_moduli()`)
-    b_inv: Vec<El<R>>,
+    b_inv: Vec<El<Zn>>,
     memory_provider: M_Zn
 }
 
-impl<'a, R, M_Zn, M_Int> AlmostExactRescaling<R, M_Zn, M_Int>
-    where R: ZnRingStore + Clone,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + SelfIso,
-        M_Zn: MemoryProvider<El<R>> + Clone,
-        M_Int: MemoryProvider<El<<R::Type as ZnRing>::Integers>>
+impl<'a, M_Zn, M_Int> AlmostExactRescaling<M_Zn, M_Int>
+    where M_Zn: MemoryProvider<ZnEl> + Clone,
+        M_Int: MemoryProvider<i64> + Clone
 {
     ///
     /// Creates a new [`AlmostExactRescaling`], where
@@ -175,7 +169,7 @@ impl<'a, R, M_Zn, M_Int> AlmostExactRescaling<R, M_Zn, M_Int>
     ///  - `b` is the product of the first `den_moduli_count` elements of `in_moduli`
     /// At least the moduli belonging to `b` are expected to be sorted.
     /// 
-    pub fn new(in_moduli: Vec<R>, num_moduli: Vec<R>, den_moduli_count: usize, memory_provider: M_Zn, memory_provider_int: M_Int) -> Self {
+    pub fn new(in_moduli: Vec<Zn>, num_moduli: Vec<Zn>, den_moduli_count: usize, memory_provider: M_Zn, memory_provider_int: M_Int) -> Self {
         let a_moduli_count = num_moduli.len();
         let ZZ = in_moduli[0].integer_ring();
         for ring in &in_moduli {
@@ -185,9 +179,9 @@ impl<'a, R, M_Zn, M_Int> AlmostExactRescaling<R, M_Zn, M_Int>
             assert!(ring.integer_ring().get_ring() == ZZ.get_ring());
         }
         
-        let a = ZZbig.prod(num_moduli.iter().map(|R| int_cast(R.integer_ring().clone_el(R.modulus()), &ZZbig, R.integer_ring())));
-        let b = ZZbig.prod(in_moduli.iter().take(den_moduli_count).map(|R| int_cast(R.integer_ring().clone_el(R.modulus()), &ZZbig, R.integer_ring())));
-        let a_mod = in_moduli.iter().map(|R| R.coerce(&ZZbig, ZZbig.clone_el(&a))).collect::<Vec<_>>();
+        let a = ZZbig.prod(num_moduli.iter().map(|Zn| int_cast(Zn.integer_ring().clone_el(Zn.modulus()), &ZZbig, Zn.integer_ring())));
+        let b = ZZbig.prod(in_moduli.iter().take(den_moduli_count).map(|Zn| int_cast(Zn.integer_ring().clone_el(Zn.modulus()), &ZZbig, Zn.integer_ring())));
+        let a_mod = in_moduli.iter().map(|Zn| Zn.coerce(&ZZbig, ZZbig.clone_el(&a))).collect::<Vec<_>>();
 
         let mut in_moduli_iter = in_moduli.iter().cloned();
         let b_moduli = in_moduli_iter.by_ref().take(den_moduli_count).collect::<Vec<_>>();
@@ -199,12 +193,12 @@ impl<'a, R, M_Zn, M_Int> AlmostExactRescaling<R, M_Zn, M_Int>
         let b_to_aq_over_b_lift = AlmostExactBaseConversion::new(
             b_moduli,
             aq_over_b_moduli,
-            memory_provider_int,
-            memory_provider.clone()
+            memory_provider.clone(),
+            memory_provider_int
         );
         let inv_b = b_to_aq_over_b_lift.output_rings()
             .iter()
-            .map(|ring: &R| ring.invert(&ring.coerce(&ZZbig, ZZbig.clone_el(&b))).unwrap())
+            .map(|ring: &Zn| ring.invert(&ring.coerce(&ZZbig, ZZbig.clone_el(&b))).unwrap())
             .collect();
 
         AlmostExactRescaling {
@@ -218,40 +212,36 @@ impl<'a, R, M_Zn, M_Int> AlmostExactRescaling<R, M_Zn, M_Int>
     }
 }
 
-impl<R, M_Zn, M_Int> AlmostExactRescaling<R, M_Zn, M_Int>
-    where R: ZnRingStore + Clone,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + SelfIso,
-        M_Zn: MemoryProvider<El<R>>,
-        M_Int: MemoryProvider<El<<R::Type as ZnRing>::Integers>>
+impl<M_Zn, M_Int> AlmostExactRescaling<M_Zn, M_Int>
+    where M_Zn: MemoryProvider<ZnEl>,
+        M_Int: MemoryProvider<i64>
 {
-    fn b_moduli<'a>(&'a self) -> &'a [R] {
+    fn b_moduli<'a>(&'a self) -> &'a [Zn] {
         self.b_to_aq_over_b_lift.input_rings()
     }
 
-    fn q_moduli<'a>(&'a self) -> &'a [R] {
+    fn q_moduli<'a>(&'a self) -> &'a [Zn] {
         &self.q_moduli
     }
 
-    fn aq_over_b_moduli<'a>(&'a self) -> &'a [R] {
+    fn aq_over_b_moduli<'a>(&'a self) -> &'a [Zn] {
         self.b_to_aq_over_b_lift.output_rings()
     }
 }
 
-impl<R, M_Zn, M_Int> RNSOperation for AlmostExactRescaling<R, M_Zn, M_Int>
-    where R: ZnRingStore + Clone,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + SelfIso,
-        M_Zn: MemoryProvider<El<R>>,
-        M_Int: MemoryProvider<<<<R as RingStore>::Type as ZnRing>::IntegerRingBase as RingBase>::Element>
+impl<M_Zn, M_Int> RNSOperation for AlmostExactRescaling<M_Zn, M_Int>
+    where M_Zn: MemoryProvider<ZnEl>,
+        M_Int: MemoryProvider<i64>
 {
-    type Ring = R;
+    type Ring = Zn;
 
-    type RingType = R::Type;
+    type RingType = ZnBase;
 
-    fn input_rings<'a>(&'a self) -> &'a [R] {
+    fn input_rings<'a>(&'a self) -> &'a [Zn] {
         self.q_moduli()
     }
 
-    fn output_rings<'a>(&'a self) -> &'a [R] {
+    fn output_rings<'a>(&'a self) -> &'a [Zn] {
         self.aq_over_b_moduli()
     }
 
@@ -329,9 +319,9 @@ fn test_rescale() {
     );
 
     for i in -(q/2)..=(q/2) {
-        let input = from.iter().map(|R| R.int_hom().map(i)).collect::<Vec<_>>();
-        let output = to.iter().map(|R| R.int_hom().map((i as f64 * 257. / 17. / 97.).round() as i32)).collect::<Vec<_>>();
-        let mut actual = to.iter().map(|R| R.zero()).collect::<Vec<_>>();
+        let input = from.iter().map(|Zn| Zn.int_hom().map(i)).collect::<Vec<_>>();
+        let output = to.iter().map(|Zn| Zn.int_hom().map((i as f64 * 257. / 17. / 97.).round() as i32)).collect::<Vec<_>>();
+        let mut actual = to.iter().map(|Zn| Zn.zero()).collect::<Vec<_>>();
 
         rescaling.apply(Submatrix::<AsFirstElement<_>, _>::new(&input, 3, 1), SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 2, 1));
 
@@ -358,9 +348,9 @@ fn test_rescale_small_num() {
     );
 
     for i in -(q/2)..=(q/2) {
-        let input = from.iter().map(|R| R.int_hom().map(i)).collect::<Vec<_>>();
-        let output = to.iter().map(|R| R.int_hom().map((i as f64 * 19. * 23. / 17. / 97.).round() as i32)).collect::<Vec<_>>();
-        let mut actual = to.iter().map(|R| R.zero()).collect::<Vec<_>>();
+        let input = from.iter().map(|Zn| Zn.int_hom().map(i)).collect::<Vec<_>>();
+        let output = to.iter().map(|Zn| Zn.int_hom().map((i as f64 * 19. * 23. / 17. / 97.).round() as i32)).collect::<Vec<_>>();
+        let mut actual = to.iter().map(|Zn| Zn.zero()).collect::<Vec<_>>();
 
         rescaling.apply(Submatrix::<AsFirstElement<_>, _>::new(&input, 3, 1), SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 3, 1));
 
@@ -387,9 +377,9 @@ fn test_rescale_small() {
 
     // since Zm_intermediate has a very large modulus, we can ignore errors here at the moment (I think)
     for i in -(q/2)..=(q/2) {
-        let input = from.iter().map(|R| R.int_hom().map(i)).collect::<Vec<_>>();
-        let output = num.iter().map(|R| R.int_hom().map((i as f64 * 29. / q as f64).round() as i32)).collect::<Vec<_>>();
-        let mut actual = num.iter().map(|R| R.zero()).collect::<Vec<_>>();
+        let input = from.iter().map(|Zn| Zn.int_hom().map(i)).collect::<Vec<_>>();
+        let output = num.iter().map(|Zn| Zn.int_hom().map((i as f64 * 29. / q as f64).round() as i32)).collect::<Vec<_>>();
+        let mut actual = num.iter().map(|Zn| Zn.zero()).collect::<Vec<_>>();
 
         rescaling.apply(Submatrix::<AsFirstElement<_>, _>::new(&input, 3, 1), SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 1, 1));
 
