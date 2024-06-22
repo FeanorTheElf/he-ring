@@ -7,7 +7,7 @@ use feanor_math::ring::*;
 
 use super::RNSOperation;
 
-type UsedBaseConversion<A> = super::lift::AlmostExactBaseConversion<A>;
+type UsedBaseConversion<A> = super::matrix_lift::AlmostExactMatrixBaseConversion<A>;
 
 ///
 /// Computes almost exact base conversion with a shared factor.

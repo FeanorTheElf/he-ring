@@ -10,10 +10,10 @@ use feanor_math::ordered::OrderedRingStore;
 use std::alloc::Allocator;
 use std::alloc::Global;
 
-use super::lift::AlmostExactBaseConversion;
-
 use super::sort_unstable_permutation;
 use super::RNSOperation;
+
+type UsedBaseConversion<A> = super::matrix_lift::AlmostExactMatrixBaseConversion<A>;
 
 const ZZbig: BigIntRing = BigIntRing::RING;
 
@@ -42,7 +42,7 @@ pub struct AlmostExactRescalingConvert<A = Global>
     // rescale `Z/qZ -> Z/(aq/b)Z`
     rescaling: AlmostExactRescaling<A>,
     // convert `Z/(aq/b)Z -> Z/bZ`
-    convert: AlmostExactBaseConversion<A>
+    convert: UsedBaseConversion<A>
 }
 
 impl<A> AlmostExactRescalingConvert<A>
@@ -57,7 +57,7 @@ impl<A> AlmostExactRescalingConvert<A>
     /// 
     pub fn new_with(in_moduli: Vec<Zn>, num_moduli: Vec<Zn>, den_moduli_count: usize, allocator: A) -> Self {
         let rescaling = AlmostExactRescaling::new_with(in_moduli.clone(), num_moduli, den_moduli_count, allocator.clone());
-        let convert = AlmostExactBaseConversion::new_with(
+        let convert = UsedBaseConversion::new_with(
             rescaling.output_rings().iter().cloned().collect(),
             in_moduli[..den_moduli_count].iter().cloned().collect(),
             allocator,
@@ -143,7 +143,7 @@ pub struct AlmostExactRescaling<A>
     /// `q_moduli[i + b_moduli_count] = aq_over_b_moduli[q_to_aq_over_b_permutation[i]]`
     q_over_b_to_aq_over_b_permutation: Vec<usize>,
     /// contains the moduli of `q` and then the moduli of `a`
-    b_to_aq_over_b_lift: AlmostExactBaseConversion<A>,
+    b_to_aq_over_b_lift: UsedBaseConversion<A>,
     /// a as element of each modulus of `q` (ordered as `q_moduli`)
     a: Vec<El<Zn>>,
     /// 1/b as element of each modulus of `aq/b` (ordered as `self.aq_over_b_moduli()`)
@@ -182,7 +182,7 @@ impl<A> AlmostExactRescaling<A>
         let mut q_over_b_to_aq_over_b_permutation = aq_permutation;
         q_over_b_to_aq_over_b_permutation.truncate(aq_over_b_moduli.len() - a_moduli_count);
 
-        let b_to_aq_over_b_lift = AlmostExactBaseConversion::new_with(
+        let b_to_aq_over_b_lift = UsedBaseConversion::new_with(
             b_moduli,
             aq_over_b_moduli,
             allocator.clone()

@@ -99,7 +99,7 @@ impl<A> AlmostExactMatrixBaseConversion<A>
             q_over_Q: q_over_Q,
             Q_mod_q: (0..out_rings.len()).map(|i| out_rings.at(i).coerce(&ZZbig, ZZbig.clone_el(&Q))).collect(),
             Q_dropped_bits: int_cast(ZZbig.rounded_div(Q, &ZZbig.power_of_two(drop_bits)), ZZi128, ZZbig),
-            allocator: allocator,
+            allocator: allocator.clone(),
             from_summands: in_rings,
             to_summands: out_rings
         }

@@ -12,12 +12,12 @@ use feanor_math::ring::*;
 use feanor_math::ordered::OrderedRingStore;
 use feanor_math::seq::*;
 
-use crate::rnsconv::lift::AlmostExactBaseConversion;
-
 use super::sort_unstable_permutation;
 use super::RNSOperation;
 
 const ZZbig: BigIntRing = BigIntRing::RING;
+
+type UsedBaseConversion<A> = super::matrix_lift::AlmostExactMatrixBaseConversion<A>;
 
 ///
 /// Computes the almost exact rescaling that preserves congruence modulo `t`,
@@ -40,8 +40,8 @@ pub struct CongruencePreservingRescaling<A = Global>
     /// `aq_moduli[i] = aq_moduli_sorted[aq_permutation[i]]`
     aq_permutation: Vec<usize>,
     /// contains all the moduli, but sorted
-    b_to_aq_lift: AlmostExactBaseConversion<A>,
-    aq_to_t_conv: AlmostExactBaseConversion<A>,
+    b_to_aq_lift: UsedBaseConversion<A>,
+    aq_to_t_conv: UsedBaseConversion<A>,
     allocator: A,
     /// `a` as an element of each modulus of `q`
     a: Vec<El<Zn>>,
@@ -91,8 +91,8 @@ impl<A> CongruencePreservingRescaling<A>
             aq_moduli: aq_moduli,
             aq_permutation: aq_permutation,
             b_inv_mod_t: plaintext_modulus.invert(&plaintext_modulus.coerce(&ZZbig, b)).unwrap(),
-            b_to_aq_lift: AlmostExactBaseConversion::new_with(b_moduli, aq_moduli_sorted.iter().cloned().collect(), allocator.clone()),
-            aq_to_t_conv: AlmostExactBaseConversion::new_with(aq_moduli_sorted, vec![plaintext_modulus], allocator.clone()),
+            b_to_aq_lift: UsedBaseConversion::new_with(b_moduli, aq_moduli_sorted.iter().cloned().collect(), allocator.clone()),
+            aq_to_t_conv: UsedBaseConversion::new_with(aq_moduli_sorted, vec![plaintext_modulus], allocator.clone()),
             allocator: allocator
         }
     }
