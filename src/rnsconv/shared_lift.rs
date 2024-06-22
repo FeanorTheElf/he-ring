@@ -4,12 +4,10 @@ use std::alloc::Global;
 use feanor_math::matrix::*;
 use feanor_math::rings::zn::zn_64::*;
 use feanor_math::ring::*;
-use feanor_math::homomorphism::*;
-use feanor_math::seq::*;
 
 use super::RNSOperation;
 
-type UsedBaseConversion<A> = super::matrix_lift::AlmostExactMatrixBaseConversion<A>;
+type UsedBaseConversion<A> = super::lift::AlmostExactBaseConversion<A>;
 
 ///
 /// Computes almost exact base conversion with a shared factor.
@@ -79,6 +77,11 @@ impl<A> RNSOperation for AlmostExactSharedBaseConversion<A>
         }
     }
 }
+
+#[cfg(test)]
+use feanor_math::homomorphism::*;
+#[cfg(test)]
+use feanor_math::seq::*;
 
 #[test]
 fn test_rns_shared_base_conversion() {

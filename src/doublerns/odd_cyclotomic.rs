@@ -13,6 +13,7 @@ use feanor_math::ring::*;
 use feanor_math::homomorphism::*;
 use feanor_math::rings::poly::sparse_poly::SparsePolyRing;
 use feanor_math::rings::zn::*;
+use feanor_math::seq::*;
 
 use crate::complexfft;
 use crate::cyclotomic::*;
@@ -290,8 +291,6 @@ use feanor_math::rings::extension::generic_test_free_algebra_axioms;
 use feanor_math::rings::zn::zn_64::Zn;
 #[cfg(test)]
 use feanor_math::rings::extension::FreeAlgebraStore;
-#[cfg(test)]
-use feanor_math::seq::*;
 
 #[cfg(test)]
 fn edge_case_elements<'a, R, F, A>(R: &'a DoubleRNSRing<R, F, A>) -> impl 'a + Iterator<Item = El<DoubleRNSRing<R, F, A>>>

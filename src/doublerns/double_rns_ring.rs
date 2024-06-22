@@ -17,8 +17,6 @@ use feanor_math::primitive_int::*;
 use feanor_math::seq::*;
 
 use crate::complexfft::complex_fft_ring;
-use crate::complexfft::pow2_cyclotomic::DefaultPow2CyclotomicCCFFTRingBase;
-use crate::doublerns::pow2_cyclotomic::DefaultPow2CyclotomicDoubleRNSRingBase;
 use crate::rnsconv::*;
 
 ///
@@ -110,7 +108,7 @@ pub struct DoubleRNSRingBase<R, F, A = Global>
         F: GeneralizedFFTSelfIso<R::Type>,
         A: Allocator + Clone
 {
-    data: Vec<F>,
+    generalized_ffts: Vec<F>,
     scalar_ring: zn_rns::Zn<R, BigIntRing>,
     allocator: A
 }
@@ -152,11 +150,11 @@ impl<R, F, A> DoubleRNSRingBase<R, F, A>
             assert_eq!(data[i].rank(), data[0].rank());
         }
         let scalar_ring = rns_base;
-        Self { data, allocator, scalar_ring }
+        Self { generalized_ffts: data, allocator, scalar_ring }
     }
 
     pub fn generalized_fft(&self) -> &Vec<F> {
-        &self.data
+        &self.generalized_ffts
     }
 
     pub fn rns_base(&self) -> &zn_rns::ZnBase<R, BigIntRing> {
@@ -227,7 +225,7 @@ impl<R, F, A> DoubleRNSRingBase<R, F, A>
         assert_eq!(element.data.len(), self.element_len());
         timed!("undo_fft", || {
             for i in 0..self.rns_base().len() {
-                self.data[i].fft_backward(&mut element.data[(i * self.rank())..((i + 1) * self.rank())], self.rns_base().at(i).get_ring());
+                self.generalized_ffts[i].fft_backward(&mut element.data[(i * self.rank())..((i + 1) * self.rank())], self.rns_base().at(i).get_ring());
             }
         });
         DoubleRNSNonFFTEl {
@@ -253,7 +251,7 @@ impl<R, F, A> DoubleRNSRingBase<R, F, A>
         assert_eq!(element.data.len(), self.element_len());
         timed!("do_fft", || {
             for i in 0..self.rns_base().len() {
-                self.data[i].fft_forward(&mut element.data[(i * self.rank())..((i + 1) * self.rank())], self.rns_base().at(i).get_ring());
+                self.generalized_ffts[i].fft_forward(&mut element.data[(i * self.rank())..((i + 1) * self.rank())], self.rns_base().at(i).get_ring());
             }
         });
         DoubleRNSEl {
@@ -308,22 +306,17 @@ impl<R, F, A> DoubleRNSRingBase<R, F, A>
             F2: complex_fft_ring::GeneralizedFFTSelfIso<R::Type>,
             A2: Allocator + Clone
     {
-         assert!(<_ as GeneralizedFFTCrossIso<_, _, _>>::is_isomorphic(&self.generalized_fft()[0], &from.generalized_fft()));
-         debug_assert_eq!(self.rank(), from.rank());
+        assert!(<_ as GeneralizedFFTCrossIso<_, _, _>>::is_isomorphic(&self.generalized_fft()[0], &from.generalized_fft()));
+        debug_assert_eq!(self.rank(), from.rank());
 
-        let mut result = Vec::with_capacity_in(self.element_len(), self.allocator.clone());
-        result.extend((0..self.element_len()).map(|i| self.rns_base().at(i / self.rank()).zero()));
+        let mut result = self.non_fft_zero();
         for j in 0..self.rank() {
             let x = int_cast(from.base_ring().smallest_lift(from.base_ring().clone_el(&element[j])), &StaticRing::<i32>::RING, from.base_ring().integer_ring());
             for i in 0..self.rns_base().len() {
-                result[j + i * self.rank()] = self.rns_base().at(i).int_hom().map(x);
+                result.data[j + i * self.rank()] = self.rns_base().at(i).int_hom().map(x);
             }
         }
-        return DoubleRNSNonFFTEl {
-            data: result,
-            generalized_fft: PhantomData,
-            allocator: PhantomData
-        };
+        return result;
     }
 
     pub fn perform_rns_op_to_cfft<F2, A2, Op>(
@@ -437,7 +430,7 @@ impl<R, F, A> PartialEq for DoubleRNSRingBase<R, F, A>
         A: Allocator + Clone
 {
     fn eq(&self, other: &Self) -> bool {
-        self.scalar_ring.get_ring() == other.scalar_ring.get_ring() && self.data[0].is_isomorphic(&other.data[0])
+        self.scalar_ring.get_ring() == other.scalar_ring.get_ring() && self.generalized_ffts[0].is_isomorphic(&other.generalized_ffts[0])
     }
 }
 
@@ -509,6 +502,16 @@ impl<R, F, A> RingBase for DoubleRNSRingBase<R, F, A>
     
     fn from_int(&self, value: i32) -> Self::Element {
         self.from(self.base_ring().get_ring().from_int(value))
+    }
+
+    fn zero(&self) -> Self::Element {
+        let mut result = Vec::with_capacity_in(self.element_len(), self.allocator.clone());
+        result.extend(self.rns_base().as_iter().flat_map(|Zp| (0..self.rank()).map(|_| Zp.zero())));
+        return DoubleRNSEl {
+            data: result,
+            generalized_fft: PhantomData,
+            allocator: PhantomData
+        };
     }
 
     fn eq_el(&self, lhs: &Self::Element, rhs: &Self::Element) -> bool {
@@ -604,23 +607,15 @@ impl<R, F, A> FreeAlgebra for DoubleRNSRingBase<R, F, A>
         where Self: 'a;
 
     fn canonical_gen(&self) -> Self::Element {
-        let mut result = Vec::with_capacity_in(self.element_len(), self.allocator.clone());
-        for Zp in self.rns_base().as_iter() {
-            result.push(Zp.zero());
-            result.push(Zp.one());
-            for _ in 2..self.rank() {
-                result.push(Zp.zero());
-            }
+        let mut result = self.non_fft_zero();
+        for (i, Zp) in self.rns_base().as_iter().enumerate() {
+            result.data[i * self.rank() + 1] = Zp.one();
         }
-        return self.do_fft(DoubleRNSNonFFTEl {
-            data: result,
-            generalized_fft: PhantomData,
-            allocator: PhantomData
-        });
+        return self.do_fft(result);
     }
 
     fn rank(&self) -> usize {
-        self.data[0].rank()
+        self.generalized_ffts[0].rank()
     }
 
     fn wrt_canonical_basis<'a>(&'a self, el: &'a Self::Element) -> Self::VectorRepresentation<'a> {
@@ -633,23 +628,14 @@ impl<R, F, A> FreeAlgebra for DoubleRNSRingBase<R, F, A>
     fn from_canonical_basis<V>(&self, vec: V) -> Self::Element
         where V: ExactSizeIterator + DoubleEndedIterator + Iterator<Item = El<Self::BaseRing>>
     {
-        let mut result = Vec::with_capacity_in(self.element_len(), self.allocator.clone());
-        for Zp in self.rns_base().as_iter() {
-            for _ in 0..self.rank() {
-                result.push(Zp.zero());
-            }
-        }
+        let mut result = self.non_fft_zero();
         for (j, x) in vec.enumerate() {
             let congruence = self.base_ring().get_ring().get_congruence(&x);
             for i in 0..self.rns_base().len() {
-                result[i * self.rank() + j] = self.rns_base().at(i).clone_el(congruence.at(i));
+                result.data[i * self.rank() + j] = self.rns_base().at(i).clone_el(congruence.at(i));
             }
         }
-        return self.do_fft(DoubleRNSNonFFTEl {
-            data: result,
-            generalized_fft: PhantomData,
-            allocator: PhantomData
-        });
+        return self.do_fft(result);
     }
 }
 
@@ -673,9 +659,8 @@ impl<R, F, A> RingExtension for DoubleRNSRingBase<R, F, A>
         let x_congruence = self.rns_base().get_congruence(x);
         let mut result = Vec::with_capacity_in(self.element_len(), self.allocator.clone());
         for (i, Zp) in self.rns_base().as_iter().enumerate() {
-            result.push(Zp.clone_el(x_congruence.at(i)));
-            for _ in 1..self.rank() {
-                result.push(Zp.zero());
+            for _ in 0..self.rank() {
+                result.push(Zp.clone_el(x_congruence.at(i)));
             }
         }
         return self.do_fft(DoubleRNSNonFFTEl {
@@ -791,9 +776,9 @@ impl<R1, R2, F1, F2, A1, A2> CanHomFrom<DoubleRNSRingBase<R2, F2, A2>> for Doubl
     type Homomorphism = Vec<<R1::Type as CanHomFrom<R2::Type>>::Homomorphism>;
 
     fn has_canonical_hom(&self, from: &DoubleRNSRingBase<R2, F2, A2>) -> Option<Self::Homomorphism> {
-        if self.rns_base().len() == from.rns_base().len() && self.data[0].is_isomorphic(&from.data[0]) {
+        if self.rns_base().len() == from.rns_base().len() && self.generalized_ffts[0].is_isomorphic(&from.generalized_ffts[0]) {
             debug_assert!(self.rank() == from.rank());
-            debug_assert!(self.data.iter().zip(from.data.iter()).all(|(l, r)| l.is_isomorphic(r)));
+            debug_assert!(self.generalized_ffts.iter().zip(from.generalized_ffts.iter()).all(|(l, r)| l.is_isomorphic(r)));
             (0..self.rns_base().len()).map(|i| self.rns_base().at(i).get_ring().has_canonical_hom(from.rns_base().at(i).get_ring()).ok_or(())).collect::<Result<Vec<_>, ()>>().ok()
         } else {
             None
@@ -836,9 +821,9 @@ impl<R1, R2, F1, F2, A1, A2> CanIsoFromTo<DoubleRNSRingBase<R2, F2, A2>> for Dou
     type Isomorphism = Vec<<R1::Type as CanIsoFromTo<R2::Type>>::Isomorphism>;
 
     fn has_canonical_iso(&self, from: &DoubleRNSRingBase<R2, F2, A2>) -> Option<Self::Isomorphism> {
-        if self.rns_base().len() == from.rns_base().len() && self.data[0].is_isomorphic(&from.data[0]) {
+        if self.rns_base().len() == from.rns_base().len() && self.generalized_ffts[0].is_isomorphic(&from.generalized_ffts[0]) {
             debug_assert!(self.rank() == from.rank());
-            debug_assert!(self.data.iter().zip(from.data.iter()).all(|(l, r)| l.is_isomorphic(r)));
+            debug_assert!(self.generalized_ffts.iter().zip(from.generalized_ffts.iter()).all(|(l, r)| l.is_isomorphic(r)));
             (0..self.rns_base().len()).map(|i| self.rns_base().at(i).get_ring().has_canonical_iso(from.rns_base().at(i).get_ring()).ok_or(())).collect::<Result<Vec<_>, ()>>().ok()
         } else {
             None
@@ -866,6 +851,10 @@ use feanor_math::assert_el_eq;
 use crate::rnsconv::lift::*;
 #[cfg(test)]
 use crate::feanor_math::rings::zn::zn_64::Zn;
+#[cfg(test)]
+use crate::complexfft::pow2_cyclotomic::DefaultPow2CyclotomicCCFFTRingBase;
+#[cfg(test)]
+use crate::doublerns::pow2_cyclotomic::DefaultPow2CyclotomicDoubleRNSRingBase;
 
 #[test]
 fn test_almost_exact_convert_from() {

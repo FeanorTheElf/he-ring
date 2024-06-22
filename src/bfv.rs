@@ -2,7 +2,10 @@
 #![allow(non_upper_case_globals)]
 
 use std::alloc::Global;
+use std::ptr::Alignment;
+use std::sync::Arc;
 use std::time::Instant;
+use feanor_math::homomorphism::CanHom;
 use feanor_math::homomorphism::Identity;
 use feanor_math::ring::*;
 use feanor_math::assert_el_eq;
@@ -18,6 +21,8 @@ use feanor_math::ordered::OrderedRingStore;
 use feanor_math::rings::extension::FreeAlgebraStore;
 use feanor_math::seq::*;
 use feanor_math::rings::float_complex::Complex64;
+use feanor_mempool::dynsize::DynLayoutMempool;
+use feanor_mempool::AllocArc;
 
 use crate::doublerns::pow2_cyclotomic::*;
 use crate::doublerns::gadget_product::*;
@@ -34,20 +39,22 @@ type PlaintextZn = zn_64::Zn;
 type PlaintextFFT = cooley_tuckey::CooleyTuckeyFFT<Complex64Base, Complex64Base, Identity<Complex64>>;
 pub type PlaintextRing = CCFFTRing<PlaintextZn, crate::complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<Zn, PlaintextFFT>>;
 
+type CiphertextAllocator = AllocArc<DynLayoutMempool>;
 type CiphertextZn = zn_64::Zn;
-type CiphertextFFT = cooley_tuckey::CooleyTuckeyFFT<<CiphertextZn as RingStore>::Type, <CiphertextZn as RingStore>::Type, Identity<CiphertextZn>>;
+type CiphertextFastmulZn = zn_64::ZnFastmul;
+type CiphertextFFT = cooley_tuckey::CooleyTuckeyFFT<<CiphertextZn as RingStore>::Type, <CiphertextFastmulZn as RingStore>::Type, CanHom<CiphertextFastmulZn, CiphertextZn>>;
 type CiphertextGenFFT = Pow2CyclotomicFFT<CiphertextZn, CiphertextFFT>;
-pub type CiphertextRing = DoubleRNSRing<Zn, CiphertextGenFFT>;
+pub type CiphertextRing = DoubleRNSRing<Zn, CiphertextGenFFT, CiphertextAllocator>;
 
-pub type Ciphertext = (DoubleRNSNonFFTEl<Zn, CiphertextGenFFT>, DoubleRNSNonFFTEl<Zn, CiphertextGenFFT>);
+pub type Ciphertext = (DoubleRNSNonFFTEl<Zn, CiphertextGenFFT, CiphertextAllocator>, DoubleRNSNonFFTEl<Zn, CiphertextGenFFT, CiphertextAllocator>);
 pub type SecretKey = El<CiphertextRing>;
-pub type GadgetProductOperand<'a> = GadgetProductRhsOperand<'a, CiphertextGenFFT>;
+pub type GadgetProductOperand<'a> = GadgetProductRhsOperand<'a, CiphertextGenFFT, CiphertextAllocator>;
 pub type KeySwitchKey<'a> = (GadgetProductOperand<'a>, GadgetProductOperand<'a>);
 pub type RelinKey<'a> = (GadgetProductOperand<'a>, GadgetProductOperand<'a>);
 
 pub struct MulConversionData {
-    lift_to_C_mul: rnsconv::shared_lift::AlmostExactSharedBaseConversion,
-    scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert
+    lift_to_C_mul: rnsconv::shared_lift::AlmostExactSharedBaseConversion<CiphertextAllocator>,
+    scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert<CiphertextAllocator>
 }
 
 const ZZbig: BigIntRing = BigIntRing::RING;
@@ -108,8 +115,9 @@ pub fn create_ciphertext_rings(log2_ring_degree: usize, q_min_bits: usize, q_max
     );
     assert!(ZZbig.is_geq(&ZZbig.prod(rns_base_mul.as_iter().map(|Fp: &Zn| int_cast(*Fp.modulus(), ZZbig, ZZ))), &ZZbig.pow(ZZbig.mul(Q, ZZbig.int_hom().map(2)), 2)), "Failed to find a suitable ciphertext modulus within the given range");
 
-    let C = <CiphertextRing as RingStore>::Type::new(rns_base.clone(), log2_ring_degree);
-    let C_mul = <CiphertextRing as RingStore>::Type::new(rns_base_mul.clone(), log2_ring_degree);
+    let allocator = AllocArc(Arc::new(DynLayoutMempool::new_in(Alignment::of::<u128>(), Global)));
+    let C = <CiphertextRing as RingStore>::Type::new_with(rns_base.clone(), rns_base.as_iter().map(|R| CiphertextFastmulZn::new(*R)).collect(), log2_ring_degree, allocator.clone());
+    let C_mul = <CiphertextRing as RingStore>::Type::new_with(rns_base_mul.clone(), rns_base_mul.as_iter().map(|R| CiphertextFastmulZn::new(*R)).collect(), log2_ring_degree, allocator.clone());
     return (C, C_mul);
 }
 
@@ -118,18 +126,19 @@ pub fn create_plaintext_ring(log2_ring_degree: usize, plaintext_modulus: i64) ->
 }
 
 pub fn create_multiplication_rescale(P: &PlaintextRing, C: &CiphertextRing, C_mul: &CiphertextRing) -> MulConversionData {
+    let allocator = C.get_ring().allocator().clone();
     MulConversionData {
         lift_to_C_mul: rnsconv::shared_lift::AlmostExactSharedBaseConversion::new_with(
             C.get_ring().rns_base().as_iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
             Vec::new(),
             C_mul.get_ring().rns_base().as_iter().skip(C.get_ring().rns_base().len()).map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(),
-            Global
+            allocator.clone()
         ),
         scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert::new_with(
             C_mul.get_ring().rns_base().as_iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
             Some(P.base_ring()).into_iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
             C.get_ring().rns_base().len(),
-            Global
+            allocator
         )
     }
 }
@@ -200,7 +209,7 @@ pub fn gen_rk<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing, rng: R, sk: &Secret
 pub fn hom_mul(C: &CiphertextRing, C_mul: &CiphertextRing, lhs: &Ciphertext, rhs: &Ciphertext, rk: &RelinKey, conv_data: &MulConversionData) -> Ciphertext {
     let (c00, c01) = lhs;
     let (c10, c11) = rhs;
-    let lift = |c: &DoubleRNSNonFFTEl<Zn, CiphertextGenFFT>| C_mul.get_ring().do_fft(C_mul.get_ring().perform_rns_op_from(C.get_ring(), &c, &conv_data.lift_to_C_mul));
+    let lift = |c: &DoubleRNSNonFFTEl<Zn, CiphertextGenFFT, CiphertextAllocator>| C_mul.get_ring().do_fft(C_mul.get_ring().perform_rns_op_from(C.get_ring(), &c, &conv_data.lift_to_C_mul));
 
     let lifted0 = C_mul.mul(lift(c00), lift(c10));
     let lifted1 = C_mul.add(C_mul.mul(lift(c00), lift(c11)), C_mul.mul(lift(c01), lift(c10)));
@@ -273,14 +282,16 @@ fn run_bfv() {
     let relin_key = gen_rk(&C, &mut rng, &sk);
     println!("Created relin key");
 
+    const COUNT: usize = 10;
+
     clear_all_timings();
     let start = Instant::now();
     let mut ct_sqr = hom_mul(&C, &C_mul, &ct, &ct, &relin_key, &mul_rescale_data);
-    for _ in 0..9 {
+    for _ in 0..(COUNT - 1) {
         ct_sqr = hom_mul(&C, &C_mul, &ct, &ct, &relin_key, &mul_rescale_data);
     }
     let end = Instant::now();
-    println!("Performed multiplication in {} ms", (end - start).as_millis());
+    println!("Performed multiplication in {} ms", (end - start).as_millis() as f64 / COUNT as f64);
     print_all_timings();
 
     let m_sqr = dec(&P, &C, ct_sqr, &sk);

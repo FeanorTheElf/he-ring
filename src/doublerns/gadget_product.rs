@@ -1,4 +1,3 @@
-use feanor_math::algorithms::eea::inv_crt;
 use feanor_math::integer::*;
 use feanor_math::ring::*;
 use feanor_math::homomorphism::*;
@@ -377,6 +376,8 @@ use feanor_math::algorithms::miller_rabin::is_prime;
 use feanor_math::rings::finite::FiniteRingStore;
 #[cfg(test)]
 use feanor_math::assert_el_eq;
+#[cfg(test)]
+use feanor_math::algorithms::eea::inv_crt;
 
 #[test]
 fn test_gadget_product() {

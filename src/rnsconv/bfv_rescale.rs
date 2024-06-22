@@ -1,5 +1,4 @@
 use feanor_math::matrix::*;
-use feanor_math::homomorphism::*;
 use feanor_math::rings::zn::*;
 use feanor_math::rings::zn::zn_64::*;
 use feanor_math::integer::*;
@@ -290,6 +289,8 @@ impl<A> RNSOperation for AlmostExactRescaling<A>
 
 #[cfg(test)]
 use feanor_math::assert_el_eq;
+#[cfg(test)]
+use feanor_math::homomorphism::*;
 
 #[test]
 fn test_rescale() {

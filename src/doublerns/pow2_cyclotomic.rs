@@ -143,6 +143,19 @@ impl<R_main, R_twiddle, A> DoubleRNSRingBase<R_main, Pow2CyclotomicFFT<R_main, c
         A: Allocator + Default + Clone
 {
     pub fn new(base_ring: zn_rns::Zn<R_main, BigIntRing>, fft_rings: Vec<R_twiddle>, log2_n: usize) -> RingValue<Self> {
+        Self::new_with(base_ring, fft_rings, log2_n, A::default())
+    }
+}
+
+impl<R_main, R_twiddle, A> DoubleRNSRingBase<R_main, Pow2CyclotomicFFT<R_main, cooley_tuckey::CooleyTuckeyFFT<R_main::Type, R_twiddle::Type, CanHom<R_twiddle, R_main>>>, A>
+    where R_main: RingStore + Clone,
+        R_twiddle: RingStore,
+        R_main::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanHomFrom<R_twiddle::Type>,
+        R_twiddle::Type: ZnRing,
+        A: Allocator + Clone
+{
+    pub fn new_with(base_ring: zn_rns::Zn<R_main, BigIntRing>, fft_rings: Vec<R_twiddle>, log2_n: usize, allocator: A) -> RingValue<Self> {
+        assert_eq!(base_ring.len(), fft_rings.len());
         let ffts = fft_rings.into_iter().enumerate().map(|(i, R)| {
             let root_of_unity = algorithms::unity_root::get_prim_root_of_unity_pow2(&R, log2_n + 1).unwrap();
             let fft_table_root_of_unity = R.pow(R.clone_el(&root_of_unity), 2);
@@ -157,13 +170,13 @@ impl<R_main, R_twiddle, A> DoubleRNSRingBase<R_main, Pow2CyclotomicFFT<R_main, c
         RingValue::from(Self::from_generalized_ffts(
             base_ring,
             ffts,
-            A::default()
+            allocator
         ))
     }
 }
 
-pub type DefaultPow2CyclotomicDoubleRNSRingBase<R = zn_64::Zn> = DoubleRNSRingBase<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckeyFFT<<R as RingStore>::Type, <R as RingStore>::Type, Identity<R>>>, Global>;
-pub type DefaultPow2CyclotomicDoubleRNSRing<R = zn_64::Zn> = DoubleRNSRing<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckeyFFT<<R as RingStore>::Type, <R as RingStore>::Type, Identity<R>>>, Global>;
+pub type DefaultPow2CyclotomicDoubleRNSRingBase<R = zn_64::Zn> = DoubleRNSRingBase<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckeyFFT<<R as RingStore>::Type, <R as RingStore>::Type, Identity<R>>>>;
+pub type DefaultPow2CyclotomicDoubleRNSRing<R = zn_64::Zn> = DoubleRNSRing<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckeyFFT<<R as RingStore>::Type, <R as RingStore>::Type, Identity<R>>>>;
 
 impl<R, A> DoubleRNSRingBase<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckeyFFT<R::Type, R::Type, Identity<R>>>, A>
     where R: RingStore + Clone,
@@ -171,6 +184,16 @@ impl<R, A> DoubleRNSRingBase<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckey
         A: Allocator + Default + Clone
 {
     pub fn new(base_ring: zn_rns::Zn<R, BigIntRing>, log2_n: usize) -> RingValue<Self> {
+        Self::new_with(base_ring, log2_n, A::default())
+    }
+}
+
+impl<R, A> DoubleRNSRingBase<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckeyFFT<R::Type, R::Type, Identity<R>>>, A>
+    where R: RingStore + Clone,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        A: Allocator + Clone
+{
+    pub fn new_with(base_ring: zn_rns::Zn<R, BigIntRing>, log2_n: usize, allocator: A) -> RingValue<Self> {
         let ffts = base_ring.as_iter().enumerate().map(|(_, R)| {
             let root_of_unity = algorithms::unity_root::get_prim_root_of_unity_pow2(&R, log2_n + 1).unwrap();
             let fft_table_root_of_unity = R.pow(R.clone_el(&root_of_unity), 2);
@@ -183,7 +206,7 @@ impl<R, A> DoubleRNSRingBase<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckey
         RingValue::from(Self::from_generalized_ffts(
             base_ring,
             ffts,
-            A::default()
+            allocator
         ))
     }
 }
@@ -192,8 +215,6 @@ impl<R, A> DoubleRNSRingBase<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckey
 use feanor_math::rings::extension::generic_test_free_algebra_axioms;
 #[cfg(test)]
 use feanor_math::rings::zn::zn_64::Zn;
-#[cfg(test)]
-use std::alloc::Global;
 
 #[cfg(test)]
 fn edge_case_elements<'a, R, F, A>(R: &'a DoubleRNSRing<R, F, A>) -> impl 'a + Iterator<Item = El<DoubleRNSRing<R, F, A>>>
