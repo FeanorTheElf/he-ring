@@ -1,4 +1,5 @@
-use feanor_math::algorithms::matmul::ComputeInnerProduct;
+use feanor_math::algorithms::matmul::strassen::dispatch_strassen_impl;
+use feanor_math::algorithms::matmul::strassen::strassen_mem_size;
 use feanor_math::integer::*;
 use feanor_math::matrix::*;
 use feanor_math::homomorphism::*;
@@ -38,14 +39,19 @@ pub struct AlmostExactMatrixBaseConversion<A = Global>
     to_summands: Vec<Zn>,
     /// the values `q/Q mod q` for each RNS factor q dividing Q (ordered as `from_summands`)
     q_over_Q: Vec<ZnEl>,
-    /// shortest lifts of the values `Q/q mod q'` for each RNS factor q dividing Q (ordered as `from_summands_ordered`) and q' dividing Q'
-    Q_over_q: Vec<i64>,
-    /// the values `Q/q/2^drop_bits'` for each RNS factor q dividing Q (ordered as `from_summands_ordered`)
-    Q_over_q_int: Vec<i128>,
-    Q_dropped_bits: i128,
+    /// shortest lifts of the values `Q/q mod q'` for each RNS factor q dividing Q (ordered as `from_summands_ordered`) and q' dividing Q';
+    /// finally, the last row are the values `gamma/q'` for each RNS factor q dividing Q (ordered as `from_summands_ordered`)
+    Q_over_q_mod_and_downscaled: OwnedMatrix<i128>,
+    gamma: i128,
     /// `Q mod q'` for every `q'` dividing `Q'`
     Q_mod_q: Vec<ZnEl>,
     allocator: A
+}
+
+const BLOCK_SIZE_LOG2: usize = 4;
+
+fn pad_to_block(len: usize) -> usize {
+    ((len - 1) / (1 << BLOCK_SIZE_LOG2) + 1) * (1 << BLOCK_SIZE_LOG2)
 }
 
 const ZZbig: BigIntRing = BigIntRing::RING;
@@ -63,42 +69,50 @@ impl<A> AlmostExactMatrixBaseConversion<A>
         
         let Q = ZZbig.prod((0..in_rings.len()).map(|i| int_cast(*in_rings.at(i).modulus(), ZZbig, ZZi64)));
 
+        // we currently use `any_lift()`; I haven't yet documented it anywhere, but in fact the largest output of `zn_64::Zn::any_lift()` is currently `6 * modulus()`
+        const ZN_ANY_LIFT_FACTOR: i64 = 6;
+
         let max = |l, r| if ZZbig.is_geq(&l, &r) { l } else { r };
         let max_computation_result = ZZbig.prod([
-            in_rings.iter().map(|ring| int_cast(*ring.modulus(), ZZbig, ZZi64)).reduce(max).unwrap(),
+            in_rings.iter().map(|ring| int_cast(*ring.modulus() * ZN_ANY_LIFT_FACTOR, ZZbig, ZZi64)).reduce(max).unwrap(),
             out_rings.iter().map(|ring| int_cast(*ring.modulus(), ZZbig, ZZi64)).reduce(max).unwrap(),
             ZZbig.int_hom().map(in_rings.len() as i32)
         ].into_iter());
-        assert!(ZZbig.is_lt(&max_computation_result, &ZZbig.power_of_two(i128::BITS as usize - 1)), "AlmostExactMatrixBaseConversion requires that the unreduced result fits into an i128");
+        assert!(ZZbig.is_lt(&max_computation_result, &ZZbig.power_of_two(i128::BITS as usize - 1)), "temporarily unreduced modular lift sum will overflow");
         
-        // When computing the approximate lifted value, we can drop `k` bits where `k <= 1 + log(Q/(4 r max(q + 1)))` and `q | Q`
-        let log2_r = ZZi64.abs_log2_ceil(&(in_rings.len() as i64)).unwrap() as i64;
-        let log2_qmax = ZZi64.abs_log2_ceil(&(0..in_rings.len()).map(|i| *in_rings.at(i).modulus()).max().unwrap()).unwrap() as i64;
-        let log2_Q = ZZbig.abs_log2_ceil(&Q).unwrap() as i64;
-        let drop_bits = log2_Q - log2_r - log2_qmax - 5;
-        let drop_bits = if drop_bits < 0 { 0 } else { drop_bits as usize };
-        assert!((drop_bits as i64) < log2_Q);
-        assert!(i128::BITS as i64 - 1 > log2_r + log2_Q - drop_bits as i64);
+        // this is currently the case and makes things slightly easier; remove it later and adjust matmul code
+        assert!(pad_to_block(out_rings.len() + 1) == 1 << BLOCK_SIZE_LOG2);
+        assert!(pad_to_block(in_rings.len()) == 1 << BLOCK_SIZE_LOG2);
 
-        let Q_over_q = (0..(in_rings.len() * out_rings.len())).map(|idx| {
-            let i = idx / in_rings.len();
-            let j = idx % in_rings.len();
-            let ring = out_rings.at(i);
-            ring.smallest_lift(ring.coerce(&ZZbig, ZZbig.checked_div(&Q, &int_cast(*in_rings.at(j).modulus(), ZZbig, ZZi64)).unwrap()))
-        }).collect();
-        let Q_over_q_int = (0..in_rings.len()).map(|i| 
-            int_cast(ZZbig.rounded_div(ZZbig.clone_el(&Q), &ZZbig.mul(int_cast(*in_rings.at(i).modulus(), ZZbig, ZZi64), ZZbig.power_of_two(drop_bits))), ZZi128, ZZbig)
-        ).collect();
+        // When computing the approximate lifted value, we can work with `gamma` in place of `Q`, where `gamma >= 4 r max(q)` (`q` runs through the input factors)
+        let log2_r = ZZi64.abs_log2_ceil(&(in_rings.len() as i64)).unwrap();
+        let log2_qmax = ZZi64.abs_log2_ceil(&(0..in_rings.len()).map(|i| *in_rings.at(i).modulus()).max().unwrap()).unwrap();
+        let log2_any_lift_factor = ZZi64.abs_log2_ceil(&ZN_ANY_LIFT_FACTOR).unwrap();
+        let gamma = ZZbig.power_of_two(log2_r + log2_qmax + log2_any_lift_factor + 2);
+        // we compute a sum of `r` summands, each being a product of a lifted value (mod `q`, `q | Q`) and `gamma/q`; this must not overflow
+        assert!(ZZbig.abs_log2_ceil(&gamma).unwrap() + log2_r + log2_any_lift_factor + 1 < ZZi128.get_ring().representable_bits().unwrap(), "correction computation will overflow");
+        let gamma_log2 = ZZbig.abs_log2_ceil(&gamma).unwrap();
+        assert!(gamma_log2 == ZZbig.abs_log2_floor(&gamma).unwrap());
+
+        let Q_over_q = OwnedMatrix::from_fn_in(pad_to_block(out_rings.len() + 1), pad_to_block(in_rings.len()), |i, j| {
+            if i < out_rings.len() && j < in_rings.len() {
+                let ring = out_rings.at(i);
+                ring.smallest_lift(ring.coerce(&ZZbig, ZZbig.checked_div(&Q, &int_cast(*in_rings.at(j).modulus(), ZZbig, ZZi64)).unwrap())) as i128
+            } else if i == out_rings.len() && j < in_rings.len() {
+                int_cast(ZZbig.rounded_div(ZZbig.clone_el(&gamma), &int_cast(*in_rings.at(j).modulus(), ZZbig, ZZi64)), ZZi128, ZZbig)
+            } else {
+                0
+            }
+        }, Global);
         let q_over_Q = (0..(in_rings.len())).map(|i| 
             in_rings.at(i).invert(&in_rings.at(i).coerce(&ZZbig, ZZbig.checked_div(&Q, &int_cast(*in_rings.at(i).modulus(), ZZbig, ZZi64)).unwrap())).unwrap()
         ).collect();
 
         Self {
-            Q_over_q: Q_over_q,
-            Q_over_q_int: Q_over_q_int,
+            Q_over_q_mod_and_downscaled: Q_over_q,
             q_over_Q: q_over_Q,
             Q_mod_q: (0..out_rings.len()).map(|i| out_rings.at(i).coerce(&ZZbig, ZZbig.clone_el(&Q))).collect(),
-            Q_dropped_bits: int_cast(ZZbig.rounded_div(Q, &ZZbig.power_of_two(drop_bits)), ZZi128, ZZbig),
+            gamma: ZZi128.power_of_two(gamma_log2),
             allocator: allocator.clone(),
             from_summands: in_rings,
             to_summands: out_rings
@@ -145,39 +159,49 @@ impl<A> RNSOperation for AlmostExactMatrixBaseConversion<A>
 
         let int_to_homs = (0..self.output_rings().len()).map(|k| self.output_rings().at(k).can_hom(&ZZi128).unwrap()).collect::<Vec<_>>();
 
-        let mut lifts = Vec::with_capacity_in(in_len * col_count, self.allocator.clone());
-        lifts.extend((0..(in_len * col_count)).map(|_| 0));
-        let mut lifts = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut lifts, in_len, col_count);
+        let mut lifts = OwnedMatrix::from_fn_in(pad_to_block(in_len), pad_to_block(col_count), |_, _| 0, self.allocator.clone());
+        let mut lifts = lifts.data_mut();
 
         for i in 0..in_len {
             for j in 0..col_count {
-                *lifts.at_mut(i, j) = self.from_summands[i].smallest_lift(self.from_summands[i].mul_ref(input.at(i, j), self.q_over_Q.at(i)));
+                // using `any_lift()` here is slightly dangerous, as I haven't documented anywhere that `zn_64::Zn::any_lift()` returns values `<= 6 * modulus()`, but
+                // it currently does, so this is currently fine
+                *lifts.at_mut(i, j) = self.from_summands[i].any_lift(self.from_summands[i].mul_ref(input.at(i, j), self.q_over_Q.at(i))) as i128;
             }
         }
 
-        let mut output_unreduced = Vec::with_capacity_in(col_count * out_len, self.allocator.clone());
-        output_unreduced.extend((0..(col_count * out_len)).map(|_| 0));
-        let mut output_unreduced = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut output_unreduced, out_len, col_count);
+        let mut output_unreduced = OwnedMatrix::from_fn_in(pad_to_block(out_len + 1), pad_to_block(col_count), |_, _| 0, self.allocator.clone());
+        let mut output_unreduced = output_unreduced.data_mut();
 
-        let Q_over_q = Submatrix::<AsFirstElement<_>, _>::new(&self.Q_over_q, out_len, in_len);
+        // actually using Strassen's algorithm here doesn't make much of a difference, it is basically as fast as without
+        const STRASSEN_THRESHOLD_LOG2: usize = 3;
+        let mut memory = Vec::with_capacity_in(strassen_mem_size(false, BLOCK_SIZE_LOG2, 3), self.allocator.clone());
+        memory.resize(strassen_mem_size(false, BLOCK_SIZE_LOG2, STRASSEN_THRESHOLD_LOG2), 0);
 
-        for i in 0..out_len {
-            for j in 0..col_count {
-                for k in 0..in_len {
-                    *output_unreduced.at_mut(i, j) += *Q_over_q.at(i, k) as i128 * *lifts.at(k, j) as i128;
-                }
+        assert!(pad_to_block(out_len + 1) == 1 << BLOCK_SIZE_LOG2);
+        assert!(pad_to_block(in_len) == 1 << BLOCK_SIZE_LOG2);
+        timed!("AlmostExactMatrixBaseConversion::apply::matmul", || {
+            for j in (0..pad_to_block(col_count)).step_by(1 << BLOCK_SIZE_LOG2) {
+                dispatch_strassen_impl::<_, _, _, _, false, false, false, false>(
+                    BLOCK_SIZE_LOG2, 
+                    STRASSEN_THRESHOLD_LOG2, 
+                    TransposableSubmatrix::from(self.Q_over_q_mod_and_downscaled.data()), 
+                    TransposableSubmatrix::from(lifts.as_const().restrict_cols(j..(j + (1 << BLOCK_SIZE_LOG2)))), 
+                    TransposableSubmatrixMut::from(output_unreduced.reborrow().restrict_cols(j..(j + (1 << BLOCK_SIZE_LOG2)))), 
+                    StaticRing::<i128>::RING, 
+                    &mut memory
+                );
             }
-        }
+        });
         
         for j in 0..col_count {
-            let correction: i128 = ZZi128.rounded_div(<_ as ComputeInnerProduct>::inner_product(ZZi128.get_ring(), 
-                (0..input.row_count()).map(|i| (*lifts.at(i, j) as i128, *self.Q_over_q_int.at(i)))
-            ), &self.Q_dropped_bits);
+            let mut correction = *output_unreduced.at(out_len, j);
+            correction = ZZi128.rounded_div(correction, &self.gamma);
 
             for i in 0..out_len {
                 *output.at_mut(i, j) = self.to_summands[i].sub(
                     int_to_homs.at(i).map_ref(output_unreduced.at(i, j)), 
-                    self.to_summands[i].mul_ref_snd(int_to_homs[i].map(correction as i128), &self.Q_mod_q[i])
+                    self.to_summands[i].mul_ref_snd(int_to_homs[i].map(correction), &self.Q_mod_q[i])
                 );
             }
         }

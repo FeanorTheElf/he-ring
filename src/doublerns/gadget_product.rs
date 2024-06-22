@@ -15,8 +15,11 @@ use std::alloc::Global;
 use std::marker::PhantomData;
 
 use super::double_rns_ring::*;
-use crate::rnsconv::lift::AlmostExactBaseConversion;
 use crate::rnsconv::*;
+
+// don't use the matrix one here, as in our case, one dimension is very small (e.g. 3), and the matrix
+// version pads to multiples of 16
+type UsedBaseConversion<A> = lift::AlmostExactBaseConversion<A>;
 
 ///
 /// Right-hand side operand of an "RNS-gadget product", hence this struct can be thought
@@ -40,7 +43,7 @@ pub struct LKSSGadgetProductRhsOperand<'a, F, A = Global>
     shortened_rns_base: zn_rns::Zn<Zn, BigIntRing>,
     ring: &'a DoubleRNSRingBase<Zn, F, A>,
     operands: Vec<Vec<Vec<ZnEl, A>, A>, A>,
-    conversions: Vec<AlmostExactBaseConversion<A>>
+    conversions: Vec<UsedBaseConversion<A>>
 }
 
 impl<'a, F, A> LKSSGadgetProductRhsOperand<'a, F, A> 
@@ -193,7 +196,7 @@ impl<F, A> DoubleRNSRingBase<Zn, F, A>
             GadgetProductRhsOperand::LKSSStyle(LKSSGadgetProductRhsOperand {
                 ring: self,
                 operands: operands,
-                conversions: (0..self.rns_base().len()).map(|i| AlmostExactBaseConversion::new_with(
+                conversions: (0..self.rns_base().len()).map(|i| UsedBaseConversion::new_with(
                     shortened_rns_base.get_ring().as_iter().cloned().collect(), 
                     vec![*self.rns_base().at(i)],
                     self.allocator().clone()
