@@ -1,19 +1,19 @@
+use std::alloc::Allocator;
+use std::alloc::Global;
 use std::collections::HashMap;
 
 use feanor_math::algorithms::fft::*;
 use feanor_math::algorithms;
 use feanor_math::integer::int_cast;
+use feanor_math::rings::float_complex::Complex64Base;
 use feanor_math::rings::poly::*;
-use feanor_math::algorithms::fft::complex_fft::ErrorEstimate;
-use feanor_math::divisibility::DivisibilityRing;
-use feanor_math::mempool::*;
+use feanor_math::algorithms::fft::complex_fft::FFTErrorEstimate;
 use feanor_math::primitive_int::*;
 use feanor_math::ring::*;
 use feanor_math::homomorphism::*;
 use feanor_math::rings::float_complex::{Complex64, Complex64El};
 use feanor_math::rings::poly::sparse_poly::SparsePolyRing;
 use feanor_math::rings::zn::{ZnRing, ZnRingStore};
-use feanor_math::vector::*;
 
 use super::complex_fft_ring::{GeneralizedFFT, ComplexFFTBasedRingBase, GeneralizedFFTIso};
 use crate::cyclotomic::*;
@@ -55,28 +55,35 @@ fn phi(factorization: &Vec<(i64, usize)>) -> i64 {
 /// # use he_ring::complexfft::complex_fft_ring::*;
 /// # use he_ring::cyclotomic::*;
 /// # use he_ring::complexfft::odd_cyclotomic::OddCyclotomicFFT;
-/// type TheRing = ComplexFFTBasedRing<OddCyclotomicFFT<Zn, bluestein::FFTTableBluestein<Complex64>>, DefaultMemoryProvider, DefaultMemoryProvider>;
+/// type TheRing = ComplexFFTBasedRing<OddCyclotomicFFT<Zn, bluestein::FFTTableBluestein<Complex64>>>;
 /// 
 /// // the ring `F7[X]/(Phi_15(X)) = F7[X]/(X^8 - X^7 + X^5 - X^4 + X^3 - X + 1)`
-/// let R = <TheRing as RingStore>::Type::new(Zn::new(7), 15, default_memory_provider!(), default_memory_provider!());
+/// let R = <TheRing as RingStore>::Type::new(Zn::new(7), 15);
 /// let root_of_unity = R.canonical_gen();
 /// assert_eq!(8, R.rank());
 /// assert_eq!(15, R.n());
 /// assert_el_eq!(&R, &R.one(), &R.pow(root_of_unity, 15));
 /// ```
 /// 
-pub struct OddCyclotomicFFT<R: ZnRingStore, F: FFTTable<Ring = Complex64> + ErrorEstimate> 
-    where R::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>
+pub struct OddCyclotomicFFT<R, F, A> 
+    where R: RingStore,
+        R::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>,
+        F: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
+        A: Allocator + Clone
 {
+    ring: R,
     fft_table: F,
-    base_ring: R,
     n_factorization: Vec<(i64, usize)>,
     zeta_pow_rank: HashMap<usize, Complex64El>,
-    rank: usize
+    rank: usize,
+    allocator: A    
 }
 
-impl<R: ZnRingStore, F: FFTTable<Ring = Complex64> + ErrorEstimate> OddCyclotomicFFT<R, F> 
-    where R::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>
+impl<R, F, A> OddCyclotomicFFT<R, F, A> 
+    where R: RingStore,
+        R::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>,
+        F: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
+        A: Allocator + Clone
 {
     ///
     /// Computing this "generalized FFT" requires evaluating a polynomial at all primitive
@@ -100,52 +107,55 @@ impl<R: ZnRingStore, F: FFTTable<Ring = Complex64> + ErrorEstimate> OddCyclotomi
     }
 }
 
-impl<R: ZnRingStore, F: FFTTable<Ring = Complex64> + ErrorEstimate> OddCyclotomicFFT<R, F> 
-    where R::Type: ZnRing + DivisibilityRing + CanHomFrom<StaticRingBase<i64>>, 
-        R: Clone
+impl<R, F, A> OddCyclotomicFFT<R, F, A> 
+    where R: RingStore,
+        R::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>,
+        F: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
+        A: Allocator + Clone
 {
-    pub fn create(base_ring: R, fft_table: F) -> Self {
+    pub fn create(ring: R, fft_table: F, allocator: A) -> Self {
         let n_factorization = algorithms::int_factor::factor(&ZZ, fft_table.len() as i64);
         let rank = phi(&n_factorization) as usize;
 
-        let poly_ring = SparsePolyRing::new(&base_ring, "X");
+        let poly_ring = SparsePolyRing::new(&ring, "X");
         let cyclotomic_poly = algorithms::cyclotomic::cyclotomic_polynomial(&poly_ring, fft_table.len());
         assert_eq!(poly_ring.degree(&cyclotomic_poly).unwrap(), rank);
         let mut zeta_pow_rank = HashMap::new();
         for (a, i) in poly_ring.terms(&cyclotomic_poly) {
             if i != rank {
-                zeta_pow_rank.insert(i, CC.from_f64(int_cast(base_ring.smallest_lift(base_ring.negate(base_ring.clone_el(a))), &ZZ, base_ring.integer_ring()) as f64));
+                zeta_pow_rank.insert(i, CC.from_f64(int_cast(ring.smallest_lift(ring.negate(ring.clone_el(a))), &ZZ, ring.integer_ring()) as f64));
             }
         }
 
-        return Self { fft_table, base_ring, n_factorization, zeta_pow_rank, rank };
+        return Self { ring, fft_table, n_factorization, zeta_pow_rank, rank, allocator };
     }
 }
 
-impl<R: ZnRingStore, F: FFTTable<Ring = Complex64> + ErrorEstimate> OddCyclotomicFFT<R, F> 
-    where R::Type: ZnRing + DivisibilityRing + CanHomFrom<StaticRingBase<i64>>
+impl<R, F, A> OddCyclotomicFFT<R, F, A> 
+    where R: RingStore,
+        R::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>,
+        F: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
+        A: Allocator + Clone
 {
     pub fn n(&self) -> usize {
         self.fft_table.len()
     }
 }
 
-impl<R: ZnRingStore, F: FFTTable<Ring = Complex64> + ErrorEstimate> GeneralizedFFT for OddCyclotomicFFT<R, F> 
-    where R::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>
+impl<R, F, A> GeneralizedFFT<R::Type> for OddCyclotomicFFT<R, F, A> 
+    where R: RingStore,
+        R::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>,
+        F: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
+        A: Allocator + Clone
 {
-    type BaseRingBase = R::Type;
-    type BaseRingStore = R;
-
-    fn base_ring(&self) -> &Self::BaseRingStore {
-        &self.base_ring
-    }
-
-    fn fft_backward<M_Zn: MemoryProvider<El<Self::BaseRingStore>>, M_CC: MemoryProvider<Complex64El>>(&self, data: &mut [Complex64El], destination: &mut [El<Self::BaseRingStore>], _: &M_Zn, memory_provider_cc: &M_CC) {
-        let mut tmp = memory_provider_cc.get_new_init(self.fft_table.len(), |_| CC.zero());
+    fn fft_backward(&self, data: &mut [Complex64El], destination: &mut [El<R>], ring: &R::Type) {
+        assert!(self.ring.get_ring() == ring);
+        let mut tmp = Vec::with_capacity_in(self.fft_table.len(), self.allocator.clone());
+        tmp.extend((0..self.fft_table.len()).map(|_| CC.zero()));
         for (j, i) in self.fft_output_indices().enumerate() {
             tmp[i] = data[j];
         }
-        self.fft_table.unordered_inv_fft(&mut tmp[..], memory_provider_cc, &CC.identity());
+        self.fft_table.unordered_inv_fft(&mut tmp[..], CC.get_ring());
         for i in (self.rank()..self.fft_table.len()).rev() {
             let factor = tmp[i];
             for (j, c) in self.zeta_pow_rank.iter() {
@@ -157,17 +167,19 @@ impl<R: ZnRingStore, F: FFTTable<Ring = Complex64> + ErrorEstimate> GeneralizedF
             let (re, im) = Complex64::RING.closest_gaussian_int(tmp[i]);
             debug_assert_eq!(0, im);
             debug_assert!(CC.abs(CC.sub(tmp[i], CC.from_f64(re as f64))) < 0.01);
-            destination[i] = self.base_ring().coerce(&ZZ, re);
+            destination[i] = self.ring.coerce(&ZZ, re);
         }
     }
 
-    fn fft_forward<M: MemoryProvider<Complex64El>>(&self, data: &[El<Self::BaseRingStore>], destination: &mut [Complex64El], memory_provider: &M) {
-        let mut tmp = memory_provider.get_new_init(self.fft_table.len(), |_| CC.zero());
+    fn fft_forward(&self, data: &[El<R>], destination: &mut [Complex64El], ring: &R::Type) {
+        assert!(self.ring.get_ring() == ring);
+        let mut tmp = Vec::with_capacity_in(self.fft_table.len(), self.allocator.clone());
+        tmp.extend((0..self.fft_table.len()).map(|_| CC.zero()));
         for i in 0..self.rank() {
-            tmp[i] = CC.from_f64(int_cast(self.base_ring().smallest_lift(self.base_ring().clone_el(&data[i])), &ZZ, self.base_ring().integer_ring()) as f64);
+            tmp[i] = CC.from_f64(int_cast(self.ring.smallest_lift(self.ring.clone_el(&data[i])), &ZZ, self.ring.integer_ring()) as f64);
         }
 
-        self.fft_table.unordered_fft(&mut tmp[..], memory_provider, &CC.identity());
+        self.fft_table.unordered_fft(&mut tmp[..], CC.get_ring());
         for (j, i) in self.fft_output_indices().enumerate() {
             destination[j] = tmp[i];
         }
@@ -178,42 +190,48 @@ impl<R: ZnRingStore, F: FFTTable<Ring = Complex64> + ErrorEstimate> GeneralizedF
     }
 }
 
-impl<R1: ZnRingStore, F1, R2: ZnRingStore, F2> GeneralizedFFTIso<OddCyclotomicFFT<R1, F1>> for OddCyclotomicFFT<R2, F2>
-    where R1::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>, 
-        F1: FFTTable<Ring = Complex64> + ErrorEstimate,
-        R2::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>, 
-        F2: FFTTable<Ring = Complex64> + ErrorEstimate
+impl<R1, F1, A1, R2, F2, A2> GeneralizedFFTIso<R2::Type, R1::Type, OddCyclotomicFFT<R1, F1, A1>> for OddCyclotomicFFT<R2, F2, A2>
+    where R1: RingStore,
+        R1::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>,
+        F1: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
+        A1: Allocator + Clone,
+        R2: RingStore,
+        R2::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>,
+        F2: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
+        A2: Allocator + Clone
 {
-    fn is_isomorphic(&self, other: &OddCyclotomicFFT<R1, F1>) -> bool {
+    fn is_isomorphic(&self, other: &OddCyclotomicFFT<R1, F1, A1>) -> bool {
         self.fft_table.len() == other.fft_table.len()
     }
 }
 
-impl<R: ZnRingStore, F: FFTTable<Ring = Complex64> + ErrorEstimate, M_Zn, M_CC> CyclotomicRing for ComplexFFTBasedRingBase<OddCyclotomicFFT<R, F>, M_Zn, M_CC>
-    where R::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>,
-        M_Zn: MemoryProvider<El<R>>,
-        M_CC: MemoryProvider<Complex64El>
+impl<R, F, A1, A2> CyclotomicRing for ComplexFFTBasedRingBase<R, OddCyclotomicFFT<R, F, A1>, A2>
+    where R: RingStore,
+        R::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>,
+        F: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
+        A1: Allocator + Clone,
+        A2: Allocator + Clone
 {
     fn n(&self) -> usize {
         self.generalized_fft().fft_table.len()
     }
 }
 
-impl<R: ZnRingStore, M_Zn, M_CC> ComplexFFTBasedRingBase<OddCyclotomicFFT<R, bluestein::FFTTableBluestein<Complex64>>, M_Zn, M_CC>
-    where R::Type: ZnRing + DivisibilityRing + CanHomFrom<StaticRingBase<i64>>, 
-        R: Clone,
-        M_Zn: MemoryProvider<El<R>>,
-        M_CC: MemoryProvider<Complex64El>
+impl<R, A> ComplexFFTBasedRingBase<R, OddCyclotomicFFT<R, bluestein::BluesteinFFT<Complex64Base, Complex64Base, Identity<Complex64>, A>, A>, A>
+    where R: RingStore + Clone,
+        R::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>,
+        A: Allocator + Clone
 {
-    pub fn new(base_ring: R, n: usize, memory_provider_zn: M_Zn, memory_provider_cc: M_CC) -> RingValue<Self> {
+    pub fn new(ring: R, n: usize, allocator: A) -> RingValue<Self> {
         RingValue::from(
             Self::from_generalized_fft(
+                ring.clone(),
                 OddCyclotomicFFT::create(
-                    base_ring, 
-                    bluestein::FFTTableBluestein::for_complex(Complex64::RING, n)
+                    ring, 
+                    bluestein::BluesteinFFT::for_complex(Complex64::RING, n, allocator.clone()),
+                    allocator.clone()
                 ), 
-                memory_provider_zn, 
-                memory_provider_cc
+                allocator
             )
         )
     }
@@ -223,13 +241,11 @@ impl<R: ZnRingStore, M_Zn, M_CC> ComplexFFTBasedRingBase<OddCyclotomicFFT<R, blu
 use feanor_math::rings::extension::generic_test_free_algebra_axioms;
 #[cfg(test)]
 use feanor_math::rings::zn::zn_64::Zn;
-#[cfg(test)]
-use feanor_math::default_memory_provider;
 
 #[test]
 fn test_ring_axioms() {
     let Fp = Zn::new(65537);
-    let R = ComplexFFTBasedRingBase::<OddCyclotomicFFT<_, bluestein::FFTTableBluestein<_>>, _, _>::new(Fp, 9, default_memory_provider!(), default_memory_provider!());
+    let R = ComplexFFTBasedRingBase::<_, OddCyclotomicFFT<_, bluestein::BluesteinFFT<_, _, _, _>, _>, _>::new(Fp, 9, Global);
     feanor_math::ring::generic_tests::test_ring_axioms(&R, [
         ring_literal!(&R, [0, 0, 0, 0, 0, 0]),
         ring_literal!(&R, [1, 0, 0, 0, 0, 0]),
@@ -244,21 +260,21 @@ fn test_ring_axioms() {
 #[test]
 fn test_free_algebra_axioms() {
     let Fp = Zn::new(65537);
-    let R = ComplexFFTBasedRingBase::<OddCyclotomicFFT<_, bluestein::FFTTableBluestein<_>>, _, _>::new(Fp, 9, default_memory_provider!(), default_memory_provider!());
+    let R = ComplexFFTBasedRingBase::<_, OddCyclotomicFFT<_, bluestein::BluesteinFFT<_, _, _, _>, _>, _>::new(Fp, 9, Global);
     generic_test_free_algebra_axioms(R);
 }
 
 #[test]
 fn test_cyclotomic_ring_axioms() {
     let Fp = Zn::new(65537);
-    let R = ComplexFFTBasedRingBase::<OddCyclotomicFFT<_, bluestein::FFTTableBluestein<_>>, _, _>::new(Fp, 9, default_memory_provider!(), default_memory_provider!());
+    let R = ComplexFFTBasedRingBase::<_, OddCyclotomicFFT<_, bluestein::BluesteinFFT<_, _, _, _>, _>, _>::new(Fp, 9, Global);
     generic_test_cyclotomic_ring_axioms(R);
 }
 
 #[test]
 fn test_fft_output_indices() {
     let Fp = Zn::new(257);
-    let S = ComplexFFTBasedRingBase::<OddCyclotomicFFT<_, bluestein::FFTTableBluestein<_>>, _, _>::new(Fp, 7, default_memory_provider!(), default_memory_provider!());
+    let S = ComplexFFTBasedRingBase::<_, OddCyclotomicFFT<_, bluestein::BluesteinFFT<_, _, _, _>, _>, _>::new(Fp, 7, Global);
 
     assert_eq!(vec![1, 2, 3, 4, 5, 6], S.get_ring().generalized_fft().fft_output_indices().collect::<Vec<_>>());
 }

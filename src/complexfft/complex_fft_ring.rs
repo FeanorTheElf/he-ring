@@ -1,10 +1,11 @@
+use std::alloc::Allocator;
+use std::alloc::Global;
+
 use feanor_math::algorithms;
 use feanor_math::integer::*;
 use feanor_math::iters::multi_cartesian_product;
 use feanor_math::iters::MultiProduct;
-use feanor_math::iters::RingElementClone;
 use feanor_math::rings::extension::*;
-use feanor_math::mempool::*;
 use feanor_math::ring::*;
 use feanor_math::rings::finite::*;
 use feanor_math::rings::float_complex::*;
@@ -12,8 +13,7 @@ use feanor_math::rings::poly::PolyRing;
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
 use feanor_math::rings::zn::*;
 use feanor_math::homomorphism::*;
-use feanor_math::vector::*;
-use feanor_math::vector::vec_fn::RingElVectorViewFn;
+use feanor_math::seq::*;
 
 const CC: Complex64 = Complex64::RING;
 
@@ -34,12 +34,7 @@ const CC: Complex64 = Complex64::RING;
 /// In practice, this is only sensible if `fft_forward` and `fft_backward` can be computed in 
 /// time `o(deg(f)^2)`, which would usually be the case if some FFT-techniques can be applied.
 /// 
-pub trait GeneralizedFFT {
-
-    type BaseRingBase: ?Sized + ZnRing;
-    type BaseRingStore: RingStore<Type = Self::BaseRingBase>;
-    
-    fn base_ring(&self) -> &Self::BaseRingStore;
+pub trait GeneralizedFFT<R: ?Sized + RingBase> {
 
     fn rank(&self) -> usize;
 
@@ -50,7 +45,7 @@ pub trait GeneralizedFFT {
     /// ```
     /// For more detail, see the trait-level doc of [`GeneralizedFFT`].
     /// 
-    fn fft_forward<M: MemoryProvider<Complex64El>>(&self, input: &[El<Self::BaseRingStore>], destination: &mut [Complex64El], memory_provider: &M);
+    fn fft_forward(&self, input: &[R::Element], destination: &mut [Complex64El], ring: &R);
 
     ///
     /// Computes the inverse of [`fft_forward()`].
@@ -58,19 +53,19 @@ pub trait GeneralizedFFT {
     /// As opposed to [`fft_forward()`], this function is allowed to arbitrarily change the value
     /// stored in `input`, should that enable a more efficient implementation.
     /// 
-    fn fft_backward<M_Zn: MemoryProvider<El<Self::BaseRingStore>>, M_CC: MemoryProvider<Complex64El>>(&self, input: &mut [Complex64El], destination: &mut [El<Self::BaseRingStore>], memory_provider_zn: &M_Zn, memory_provider_cc: &M_CC);
+    fn fft_backward(&self, input: &mut [Complex64El], destination: &mut [R::Element], ring: &R);
 
     ///
     /// Computes the product of `lhs` and `rhs`, and stores it in `lhs`. Note that `lhs` here is
     /// given in coefficient-representation and `rhs` is given in (complex-valued) FFT representation.
     /// 
-    fn mul_assign_fft<M_Zn: MemoryProvider<El<Self::BaseRingStore>>, M_CC: MemoryProvider<Complex64El>>(&self, lhs: &mut [El<Self::BaseRingStore>], rhs: &[Complex64El], memory_provider_zn: &M_Zn, memory_provider_cc: &M_CC) {
-        let mut tmp = memory_provider_cc.get_new_init(self.rank(), |_| CC.zero());
-        self.fft_forward(&lhs, &mut tmp, memory_provider_cc);
+    fn mul_assign_fft(&self, lhs: &mut [R::Element], rhs: &[Complex64El], ring: &R) {
+        let mut tmp = (0..self.rank()).map(|_| CC.zero()).collect::<Vec<_>>();
+        self.fft_forward(&lhs, &mut tmp, ring);
         for i in 0..self.rank() {
             CC.mul_assign_ref(&mut tmp[i], &rhs[i]);
         }
-        self.fft_backward(&mut tmp, lhs, memory_provider_zn, memory_provider_cc);
+        self.fft_backward(&mut tmp, lhs, ring);
     }
 }
 
@@ -83,14 +78,14 @@ pub trait GeneralizedFFT {
 /// 
 /// Note that whenever `a.is_isomorphic(b)` is true, it is necessary that also `a.rank() == b.rank()`.
 /// 
-pub trait GeneralizedFFTIso<F: GeneralizedFFT>: GeneralizedFFT {
+pub trait GeneralizedFFTIso<R1: ?Sized + RingBase, R2: ?Sized + RingBase, F: ?Sized + GeneralizedFFT<R2>>: GeneralizedFFT<R1> {
 
     fn is_isomorphic(&self, other: &F) -> bool;
 }
 
-pub trait GeneralizedFFTSelfIso: Sized + GeneralizedFFTIso<Self> {}
+pub trait GeneralizedFFTSelfIso<R: ?Sized + RingBase>: GeneralizedFFTIso<R, R, Self> {}
 
-impl<F: GeneralizedFFT + GeneralizedFFTIso<F>> GeneralizedFFTSelfIso for F {}
+impl<R: ?Sized + RingBase, F: ?Sized + GeneralizedFFT<R> + GeneralizedFFTIso<R, R, F>> GeneralizedFFTSelfIso<R> for F {}
 
 ///
 /// Implementation of rings `Z[X]/(f(X), q)` that uses a [`GeneralizedFFT`] for fast arithmetic.
@@ -118,10 +113,10 @@ impl<F: GeneralizedFFT + GeneralizedFFTIso<F>> GeneralizedFFTSelfIso for F {}
 /// # use he_ring::complexfft::complex_fft_ring::*;
 /// # use he_ring::cyclotomic::*;
 /// # use he_ring::complexfft::pow2_cyclotomic::Pow2CyclotomicFFT;
-/// type TheRing = ComplexFFTBasedRing<Pow2CyclotomicFFT<Zn, cooley_tuckey::FFTTableCooleyTuckey<Complex64>>, DefaultMemoryProvider, DefaultMemoryProvider>;
+/// type TheRing = ComplexFFTBasedRing<Pow2CyclotomicFFT<Zn, cooley_tuckey::FFTTableCooleyTuckey<Complex64>>>;
 /// 
 /// // the ring `F7[X]/(X^8 + 1)`
-/// let R = <TheRing as RingStore>::Type::new(Zn::new(7), 3, default_memory_provider!(), default_memory_provider!());
+/// let R = <TheRing as RingStore>::Type::new(Zn::new(7), 3);
 /// let root_of_unity = R.canonical_gen();
 /// assert_eq!(8, R.rank());
 /// assert_eq!(16, R.n());
@@ -132,62 +127,77 @@ impl<F: GeneralizedFFT + GeneralizedFFTIso<F>> GeneralizedFFTSelfIso for F {}
 ///     Zn::new(7),
 ///     cooley_tuckey::FFTTableCooleyTuckey::for_complex(Complex64::RING, 3)
 /// );
-/// let R = RingValue::from(<TheRing as RingStore>::Type::from_generalized_fft(generalized_fft, default_memory_provider!(), default_memory_provider!()));
+/// let R = RingValue::from(<TheRing as RingStore>::Type::from_generalized_fft(generalized_fft));
 /// assert_eq!(8, R.rank());
 /// assert_eq!(16, R.n());
 /// assert_el_eq!(&R, &R.neg_one(), &R.pow(R.canonical_gen(), 8));
 /// ```
 /// 
-pub struct ComplexFFTBasedRingBase<F: GeneralizedFFT + GeneralizedFFTSelfIso, M_Zn: MemoryProvider<El<F::BaseRingStore>>, M_CC: MemoryProvider<Complex64El>> {
-    data: F,
-    memory_provider_zn: M_Zn,
-    memory_provider_cc: M_CC
+pub struct ComplexFFTBasedRingBase<R, F, A = Global>
+    where R: RingStore,
+        R::Type: ZnRing,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
+{
+    ring: R,
+    generalized_fft: F,
+    allocator: A
 }
 
 ///
 /// The [`RingStore`] corresponding to [`ComplexFFTBasedRingBase`].
 /// 
-pub type ComplexFFTBasedRing<F, M_Zn, M_CC> = RingValue<ComplexFFTBasedRingBase<F, M_Zn, M_CC>>;
+pub type ComplexFFTBasedRing<R, F, A = Global> = RingValue<ComplexFFTBasedRingBase<R, F, A>>;
 
-impl<F: GeneralizedFFT + GeneralizedFFTSelfIso, M_Zn: MemoryProvider<El<F::BaseRingStore>>, M_CC: MemoryProvider<Complex64El>> ComplexFFTBasedRingBase<F, M_Zn, M_CC> {
-
-    pub fn from_generalized_fft(data: F, memory_provider_zn: M_Zn, memory_provider_cc: M_CC) -> Self {
-        Self { data, memory_provider_cc, memory_provider_zn }
+impl<R, F, A> ComplexFFTBasedRingBase<R, F, A>
+    where R: RingStore,
+        R::Type: ZnRing,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
+{
+    pub fn from_generalized_fft(ring: R, generalized_fft: F, allocator: A) -> Self {
+        Self { ring, generalized_fft, allocator }
     }
 
     pub fn generalized_fft(&self) -> &F {
-        &self.data
+        &self.generalized_fft
     }
 
-    pub fn memory_provider_zn(&self) -> &M_Zn {
-        &self.memory_provider_zn
-    }
-
-    pub fn memory_provider_cc(&self) -> &M_CC {
-        &self.memory_provider_cc
+    pub fn allocator(&self) -> &A {
+        &self.allocator
     }
 }
 
-impl<F: GeneralizedFFT + GeneralizedFFTSelfIso, M_Zn: MemoryProvider<El<F::BaseRingStore>>, M_CC: MemoryProvider<Complex64El>> PartialEq for ComplexFFTBasedRingBase<F, M_Zn, M_CC> {
-
+impl<R, F, A> PartialEq for ComplexFFTBasedRingBase<R, F, A>
+    where R: RingStore,
+        R::Type: ZnRing,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
+{
     fn eq(&self, other: &Self) -> bool {
-        self.data.base_ring().get_ring() == other.data.base_ring().get_ring() && self.data.is_isomorphic(&other.data)
+        self.ring.get_ring() == other.ring.get_ring() && self.generalized_fft.is_isomorphic(&other.generalized_fft)
     }
 }
 
-impl<F: GeneralizedFFT + GeneralizedFFTSelfIso, M_Zn: MemoryProvider<El<F::BaseRingStore>>, M_CC: MemoryProvider<Complex64El>> RingBase for ComplexFFTBasedRingBase<F, M_Zn, M_CC> {
-
-    type Element = M_Zn::Object;
+impl<R, F, A> RingBase for ComplexFFTBasedRingBase<R, F, A>
+    where R: RingStore,
+        R::Type: ZnRing,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
+{
+    type Element = Vec<El<R>, A>;
 
     fn clone_el(&self, val: &Self::Element) -> Self::Element {
-        assert_eq!(self.data.rank(), val.len());
-        self.memory_provider_zn.get_new_init(self.data.rank(), |i| self.base_ring().clone_el(&val[i]))
+        assert_eq!(self.rank(), val.len());
+        let mut result = Vec::with_capacity_in(self.rank(), self.allocator.clone());
+        result.extend((0..self.rank()).map(|i| self.base_ring().clone_el(&val[i])));
+        return result;
     }
 
     fn add_assign_ref(&self, lhs: &mut Self::Element, rhs: &Self::Element) {
-        assert_eq!(self.data.rank(), lhs.len());
-        assert_eq!(self.data.rank(), rhs.len());
-        for i in 0..self.data.rank() {
+        assert_eq!(self.generalized_fft.rank(), lhs.len());
+        assert_eq!(self.generalized_fft.rank(), rhs.len());
+        for i in 0..self.generalized_fft.rank() {
             self.base_ring().add_assign_ref(&mut lhs[i], &rhs[i]);
         }
     }
@@ -203,8 +213,8 @@ impl<F: GeneralizedFFT + GeneralizedFFTSelfIso, M_Zn: MemoryProvider<El<F::BaseR
     }
 
     fn negate_inplace(&self, lhs: &mut Self::Element) {
-        assert_eq!(self.data.rank(), lhs.len());
-        for i in 0..self.data.rank() {
+        assert_eq!(self.generalized_fft.rank(), lhs.len());
+        for i in 0..self.generalized_fft.rank() {
             self.base_ring().negate_inplace(&mut lhs[i]);
         }
     }
@@ -214,20 +224,27 @@ impl<F: GeneralizedFFT + GeneralizedFFTSelfIso, M_Zn: MemoryProvider<El<F::BaseR
     }
 
     fn mul_assign_ref(&self, lhs: &mut Self::Element, rhs: &Self::Element) {
-        assert_eq!(self.data.rank(), lhs.len());
-        assert_eq!(self.data.rank(), rhs.len());
-        let mut rhs_fft = self.memory_provider_cc.get_new_init(self.data.rank(), |_| CC.zero());
-        self.data.fft_forward(rhs, &mut rhs_fft, &self.memory_provider_cc);
-        self.data.mul_assign_fft(lhs, &rhs_fft, &self.memory_provider_zn, &self.memory_provider_cc);
+        assert_eq!(self.rank(), lhs.len());
+        assert_eq!(self.rank(), rhs.len());
+        let mut rhs_fft = Vec::with_capacity_in(self.rank(), self.allocator.clone());
+        rhs_fft.extend((0..self.rank()).map(|_| CC.zero()));
+        self.generalized_fft.fft_forward(rhs, &mut rhs_fft, self.base_ring().get_ring());
+        self.generalized_fft.mul_assign_fft(lhs, &rhs_fft, self.base_ring().get_ring());
     }
     
     fn from_int(&self, value: i32) -> Self::Element {
         self.from(self.base_ring().get_ring().from_int(value))
     }
 
+    fn zero(&self) -> Self::Element {
+        let mut result = Vec::with_capacity_in(self.rank(), self.allocator.clone());
+        result.extend((0..self.rank()).map(|_| self.base_ring().zero()));
+        return result;
+    }
+
     fn eq_el(&self, lhs: &Self::Element, rhs: &Self::Element) -> bool {
-        assert_eq!(self.data.rank(), lhs.len());
-        assert_eq!(self.data.rank(), rhs.len());
+        assert_eq!(self.generalized_fft.rank(), lhs.len());
+        assert_eq!(self.generalized_fft.rank(), rhs.len());
         (0..self.rank()).all(|i| self.base_ring().eq_el(&lhs[i], &rhs[i]))
     }
     
@@ -241,20 +258,22 @@ impl<F: GeneralizedFFT + GeneralizedFFTSelfIso, M_Zn: MemoryProvider<El<F::BaseR
 
     fn square(&self, value: &mut Self::Element) {
         assert_eq!(self.rank(), value.len());
-        let mut value_fft = self.memory_provider_cc.get_new_init(self.data.rank(), |_| CC.zero());
-        self.data.fft_forward(value, &mut value_fft, &self.memory_provider_cc);
+        let mut value_fft = Vec::with_capacity_in(self.rank(), self.allocator.clone());
+        value_fft.extend((0..self.rank()).map(|_| CC.zero()));
+        self.generalized_fft.fft_forward(value, &mut value_fft, self.base_ring().get_ring());
         for i in 0..self.rank() {
             Complex64::RING.square(&mut value_fft[i]);
         }
-        self.data.fft_backward(&mut value_fft, value, &self.memory_provider_zn, &self.memory_provider_cc);
+        self.generalized_fft.fft_backward(&mut value_fft, value, self.base_ring().get_ring());
     }
 
     fn pow_gen<I: IntegerRingStore>(&self, x: Self::Element, power: &El<I>, integers: I) -> Self::Element 
         where I::Type: IntegerRing
     {
         assert_eq!(self.rank(), x.len());
-        let mut x_fft = self.memory_provider_cc.get_new_init(self.data.rank(), |_| CC.zero());
-        self.data.fft_forward(&x, &mut x_fft, &self.memory_provider_cc);
+        let mut x_fft = Vec::with_capacity_in(self.rank(), self.allocator.clone());
+        x_fft.extend((0..self.rank()).map(|_| CC.zero()));
+        self.generalized_fft.fft_forward(&x, &mut x_fft, self.base_ring().get_ring());
         algorithms::sqr_mul::generic_abs_square_and_multiply(
             x_fft, 
             power, 
@@ -264,7 +283,7 @@ impl<F: GeneralizedFFT + GeneralizedFFTSelfIso, M_Zn: MemoryProvider<El<F::BaseR
                 return a;
             }, 
             |a, mut b| {
-                self.data.mul_assign_fft(&mut b, a, &self.memory_provider_zn, &self.memory_provider_cc);
+                self.generalized_fft.mul_assign_fft(&mut b, a, self.base_ring().get_ring());
                 return b;
             }, 
             self.one()
@@ -278,53 +297,85 @@ impl<F: GeneralizedFFT + GeneralizedFFTSelfIso, M_Zn: MemoryProvider<El<F::BaseR
     }
 }
 
-pub struct WRTCanonicalBasisElementCreator<'a, F: GeneralizedFFT + GeneralizedFFTSelfIso, M_Zn: MemoryProvider<El<F::BaseRingStore>>, M_CC: MemoryProvider<Complex64El>> {
-    ring: &'a ComplexFFTBasedRingBase<F, M_Zn, M_CC>,
+pub struct WRTCanonicalBasisElementCreator<'a, R, F, A>
+    where R: RingStore,
+        R::Type: ZnRing,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
+{
+    ring: &'a ComplexFFTBasedRingBase<R, F, A>,
 }
 
-impl<'a, F: GeneralizedFFT + GeneralizedFFTSelfIso, M_Zn: MemoryProvider<El<F::BaseRingStore>>, M_CC: MemoryProvider<Complex64El>> Copy for WRTCanonicalBasisElementCreator<'a, F, M_Zn, M_CC> {}
+impl<'a, R, F, A> Copy for WRTCanonicalBasisElementCreator<'a, R, F, A>
+    where R: RingStore,
+        R::Type: ZnRing,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
+{}
 
-impl<'a, F: GeneralizedFFT + GeneralizedFFTSelfIso, M_Zn: MemoryProvider<El<F::BaseRingStore>>, M_CC: MemoryProvider<Complex64El>> Clone for WRTCanonicalBasisElementCreator<'a, F, M_Zn, M_CC> {
-
+impl<'a, R, F, A> Clone for WRTCanonicalBasisElementCreator<'a, R, F, A>
+    where R: RingStore,
+        R::Type: ZnRing,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
+{
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<'a, 'b, F: GeneralizedFFT + GeneralizedFFTSelfIso, M_Zn: MemoryProvider<El<F::BaseRingStore>>, M_CC: MemoryProvider<Complex64El>> FnOnce<(&'b [El<F::BaseRingStore>],)> for WRTCanonicalBasisElementCreator<'a, F, M_Zn, M_CC> {
+impl<'a, 'b, R, F, A> FnOnce<(&'b [El<R>],)> for WRTCanonicalBasisElementCreator<'a, R, F, A>
+    where R: RingStore,
+        R::Type: ZnRing,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
+{
+    type Output = El<ComplexFFTBasedRing<R, F, A>>;
 
-    type Output = M_Zn::Object;
-
-    extern "rust-call" fn call_once(self, args: (&'b [El<F::BaseRingStore>],)) -> Self::Output {
+    extern "rust-call" fn call_once(self, args: (&'b [El<R>],)) -> Self::Output {
         self.call(args)
     }
 }
 
-impl<'a, 'b, F: GeneralizedFFT + GeneralizedFFTSelfIso, M_Zn: MemoryProvider<El<F::BaseRingStore>>, M_CC: MemoryProvider<Complex64El>> FnMut<(&'b [El<F::BaseRingStore>],)> for WRTCanonicalBasisElementCreator<'a, F, M_Zn, M_CC> {
-
-    extern "rust-call" fn call_mut(&mut self, args: (&'b [El<F::BaseRingStore>],)) -> Self::Output {
+impl<'a, 'b, R, F, A> FnMut<(&'b [El<R>],)> for WRTCanonicalBasisElementCreator<'a, R, F, A>
+    where R: RingStore,
+        R::Type: ZnRing,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
+{
+    extern "rust-call" fn call_mut(&mut self, args: (&'b [El<R>],)) -> Self::Output {
         self.call(args)
     }
 }
 
-impl<'a, 'b, F: GeneralizedFFT + GeneralizedFFTSelfIso, M_Zn: MemoryProvider<El<F::BaseRingStore>>, M_CC: MemoryProvider<Complex64El>> Fn<(&'b [El<F::BaseRingStore>],)> for WRTCanonicalBasisElementCreator<'a, F, M_Zn, M_CC> {
-
-    extern "rust-call" fn call(&self, args: (&'b [El<F::BaseRingStore>],)) -> Self::Output {
+impl<'a, 'b, R, F, A> Fn<(&'b [El<R>],)> for WRTCanonicalBasisElementCreator<'a, R, F, A>
+    where R: RingStore,
+        R::Type: ZnRing,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
+{
+    extern "rust-call" fn call(&self, args: (&'b [El<R>],)) -> Self::Output {
         self.ring.from_canonical_basis(args.0.iter().map(|x| self.ring.base_ring().clone_el(x)))
     }
 }
 
-impl<F: GeneralizedFFT + GeneralizedFFTSelfIso, M_Zn: MemoryProvider<El<F::BaseRingStore>>, M_CC: MemoryProvider<Complex64El>> FiniteRing for ComplexFFTBasedRingBase<F, M_Zn, M_CC> {
-
-    type ElementsIter<'a> = MultiProduct<<F::BaseRingBase as FiniteRing>::ElementsIter<'a>, WRTCanonicalBasisElementCreator<'a, F, M_Zn, M_CC>, RingElementClone<'a, F::BaseRingBase>, Self::Element>
+impl<R, F, A> FiniteRing for ComplexFFTBasedRingBase<R, F, A>
+    where R: RingStore,
+        R::Type: ZnRing,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
+{
+    type ElementsIter<'a> = MultiProduct<<R::Type as FiniteRing>::ElementsIter<'a>, WRTCanonicalBasisElementCreator<'a, R, F, A>, CloneRingEl<&'a R>, Self::Element>
         where Self: 'a;
 
     fn elements<'a>(&'a self) -> Self::ElementsIter<'a> {
-        multi_cartesian_product((0..self.rank()).map(|_| self.base_ring().elements()), WRTCanonicalBasisElementCreator { ring: self }, RingElementClone::new(self.base_ring().get_ring()))
+        multi_cartesian_product((0..self.rank()).map(|_| self.base_ring().elements()), WRTCanonicalBasisElementCreator { ring: self }, CloneRingEl(self.base_ring()))
     }
 
     fn random_element<G: FnMut() -> u64>(&self, mut rng: G) -> Self::Element {
-        self.memory_provider_zn().get_new_init(self.rank(), |_| self.base_ring().random_element(&mut rng))
+        let mut result = Vec::with_capacity_in(self.rank(), self.allocator.clone());
+        result.extend((0..self.rank()).map(|_| self.base_ring().random_element(&mut rng)));
+        return result;
     }
 
     fn size<I: IntegerRingStore>(&self, ZZ: &I) -> Option<El<I>>
@@ -339,46 +390,58 @@ impl<F: GeneralizedFFT + GeneralizedFFTSelfIso, M_Zn: MemoryProvider<El<F::BaseR
     }
 }
 
-impl<F: GeneralizedFFT + GeneralizedFFTSelfIso, M_Zn: MemoryProvider<El<F::BaseRingStore>>, M_CC: MemoryProvider<Complex64El>> FreeAlgebra for ComplexFFTBasedRingBase<F, M_Zn, M_CC> {
-
-    type VectorRepresentation<'a> = RingElVectorViewFn<&'a F::BaseRingStore, &'a [El<F::BaseRingStore>], El<F::BaseRingStore>>
+impl<R, F, A> FreeAlgebra for ComplexFFTBasedRingBase<R, F, A>
+    where R: RingStore,
+        R::Type: ZnRing,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
+{
+    type VectorRepresentation<'a> = CloneElFn<&'a [El<R>], El<R>, CloneRingEl<&'a R>>
         where Self: 'a;
 
     fn canonical_gen(&self) -> Self::Element {
-        self.memory_provider_zn.get_new_init(self.rank(), |i| if i == 1 { self.base_ring().one() } else { self.base_ring().zero() })
+        let mut result = self.zero();
+        result[1] = self.base_ring().one();
+        return result;
     }
 
     fn rank(&self) -> usize {
-        self.data.rank()
+        self.generalized_fft.rank()
     }
 
     fn wrt_canonical_basis<'a>(&'a self, el: &'a Self::Element) -> Self::VectorRepresentation<'a> {
-        (&el[..]).as_el_fn(self.data.base_ring())
+        (&el[..]).into_fn(CloneRingEl(self.base_ring()))
     }
 }
 
-impl<F: GeneralizedFFT + GeneralizedFFTSelfIso, M_Zn: MemoryProvider<El<F::BaseRingStore>>, M_CC: MemoryProvider<Complex64El>> RingExtension for ComplexFFTBasedRingBase<F, M_Zn, M_CC> {
-
-    type BaseRing = F::BaseRingStore;
+impl<R, F, A> RingExtension for ComplexFFTBasedRingBase<R, F, A>
+    where R: RingStore,
+        R::Type: ZnRing,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
+{
+    type BaseRing = R;
 
     fn base_ring<'a>(&'a self) -> &'a Self::BaseRing {
-        self.data.base_ring()
+        &self.ring
     }
 
     fn from(&self, x: El<Self::BaseRing>) -> Self::Element {
-        let mut x_opt = Some(x);
-        self.memory_provider_zn.get_new_init(self.rank(), |i| if i == 0 { x_opt.take().unwrap() } else { self.base_ring().zero() })
+        let mut result = self.zero();
+        result[0] = x;
+        return result;
     }
 }
 
-impl<P, F, M_Zn, M_CC> CanHomFrom<P> for ComplexFFTBasedRingBase<F, M_Zn, M_CC>
-    where F: GeneralizedFFT + GeneralizedFFTSelfIso, 
-        M_Zn: MemoryProvider<El<F::BaseRingStore>>, 
-        M_CC: MemoryProvider<Complex64El>, 
+impl<P, R, F, A> CanHomFrom<P> for ComplexFFTBasedRingBase<R, F, A>
+    where R: RingStore,
+        R::Type: ZnRing,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone,
         P: PolyRing,
-        F::BaseRingBase: CanHomFrom<<P::BaseRing as RingStore>::Type>
+        R::Type: CanHomFrom<<P::BaseRing as RingStore>::Type>
 {
-    type Homomorphism = <F::BaseRingBase as CanHomFrom<<P::BaseRing as RingStore>::Type>>::Homomorphism;
+    type Homomorphism = <R::Type as CanHomFrom<<P::BaseRing as RingStore>::Type>>::Homomorphism;
 
     fn has_canonical_hom(&self, from: &P) -> Option<Self::Homomorphism> {
         self.base_ring().get_ring().has_canonical_hom(from.base_ring().get_ring())
@@ -389,57 +452,65 @@ impl<P, F, M_Zn, M_CC> CanHomFrom<P> for ComplexFFTBasedRingBase<F, M_Zn, M_CC>
     }
 
     fn map_in_ref(&self, from: &P, el: &<P as RingBase>::Element, hom: &Self::Homomorphism) -> Self::Element {
-        assert!(from.degree(&el).unwrap_or(0) < self.rank());
-        self.memory_provider_zn.get_new_init(self.data.rank(), |i| self.base_ring().get_ring().map_in_ref(from.base_ring().get_ring(), from.coefficient_at(&el, i), hom))
+        assert!(from.degree(&el).unwrap_or(0) < self.rank(), "`ComplexFFTBasedRing` currently only supports mapping in elements from polynomial rings that don't require additional reduction");
+        let mut result = Vec::with_capacity_in(self.rank(), self.allocator.clone());
+        result.extend((0..self.rank()).map(|i| self.base_ring().get_ring().map_in_ref(from.base_ring().get_ring(), from.coefficient_at(&el, i), hom)));
+        return result;
     }
 }
 
-impl<F1, F2, M1_Zn, M2_Zn, M1_CC, M2_CC> CanHomFrom<ComplexFFTBasedRingBase<F2, M2_Zn, M2_CC>> for ComplexFFTBasedRingBase<F1, M1_Zn, M1_CC>
-    where F1: GeneralizedFFT + GeneralizedFFTSelfIso, 
-        F2: GeneralizedFFT + GeneralizedFFTSelfIso, 
-        M1_Zn: MemoryProvider<El<F1::BaseRingStore>>, 
-        M1_CC: MemoryProvider<Complex64El>, 
-        M2_Zn: MemoryProvider<El<F2::BaseRingStore>>, 
-        M2_CC: MemoryProvider<Complex64El>,
-        F1::BaseRingBase: CanHomFrom<F2::BaseRingBase>, 
-        F1: GeneralizedFFTIso<F2>
+impl<R1, R2, F1, F2, A1, A2> CanHomFrom<ComplexFFTBasedRingBase<R2, F2, A2>> for ComplexFFTBasedRingBase<R1, F1, A1>
+    where R1: RingStore,
+        R1::Type: ZnRing + CanHomFrom<R2::Type>,
+        F1: GeneralizedFFTSelfIso<R1::Type>,
+        A1: Allocator + Clone,
+        R2: RingStore,
+        R2::Type: ZnRing,
+        F2: GeneralizedFFTSelfIso<R2::Type>,
+        A2: Allocator + Clone,
+        F1: GeneralizedFFTIso<R1::Type, R2::Type, F2>
 {
-    type Homomorphism = <F1::BaseRingBase as CanHomFrom<F2::BaseRingBase>>::Homomorphism;
+    type Homomorphism = <R1::Type as CanHomFrom<R2::Type>>::Homomorphism;
 
-    fn has_canonical_hom(&self, from: &ComplexFFTBasedRingBase<F2, M2_Zn, M2_CC>) -> Option<Self::Homomorphism> {
-        if self.data.is_isomorphic(&from.data) {
+    fn has_canonical_hom(&self, from: &ComplexFFTBasedRingBase<R2, F2, A2>) -> Option<Self::Homomorphism> {
+        if self.generalized_fft.is_isomorphic(&from.generalized_fft) {
             self.base_ring().get_ring().has_canonical_hom(from.base_ring().get_ring())
         } else {
             None
         }
     }
 
-    fn map_in(&self, from: &ComplexFFTBasedRingBase<F2, M2_Zn, M2_CC>, el: <ComplexFFTBasedRingBase<F2, M2_Zn, M2_CC> as RingBase>::Element, hom: &Self::Homomorphism) -> Self::Element {
-        self.memory_provider_zn.get_new_init(self.data.rank(), |i| self.base_ring().get_ring().map_in(from.base_ring().get_ring(), from.base_ring().clone_el(&el[i]), hom))
+    fn map_in(&self, from: &ComplexFFTBasedRingBase<R2, F2, A2>, el: <ComplexFFTBasedRingBase<R2, F2, A2> as RingBase>::Element, hom: &Self::Homomorphism) -> Self::Element {
+        let mut result = Vec::with_capacity_in(self.rank(), self.allocator.clone());
+        result.extend((0..self.rank()).map(|i| self.base_ring().get_ring().map_in(from.base_ring().get_ring(), from.base_ring().clone_el(&el[i]), hom)));
+        return result;
     }
 }
 
-impl<F1, F2, M1_Zn, M2_Zn, M1_CC, M2_CC> CanIsoFromTo<ComplexFFTBasedRingBase<F2, M2_Zn, M2_CC>> for ComplexFFTBasedRingBase<F1, M1_Zn, M1_CC>
-    where F1: GeneralizedFFT + GeneralizedFFTSelfIso, 
-        F2: GeneralizedFFT + GeneralizedFFTSelfIso, 
-        M1_Zn: MemoryProvider<El<F1::BaseRingStore>>, 
-        M1_CC: MemoryProvider<Complex64El>, 
-        M2_Zn: MemoryProvider<El<F2::BaseRingStore>>, 
-        M2_CC: MemoryProvider<Complex64El>,
-        F1::BaseRingBase: CanIsoFromTo<F2::BaseRingBase>, 
-        F1: GeneralizedFFTIso<F2>
+impl<R1, R2, F1, F2, A1, A2> CanIsoFromTo<ComplexFFTBasedRingBase<R2, F2, A2>> for ComplexFFTBasedRingBase<R1, F1, A1>
+    where R1: RingStore,
+        R1::Type: ZnRing + CanIsoFromTo<R2::Type>,
+        F1: GeneralizedFFTSelfIso<R1::Type>,
+        A1: Allocator + Clone,
+        R2: RingStore,
+        R2::Type: ZnRing,
+        F2: GeneralizedFFTSelfIso<R2::Type>,
+        A2: Allocator + Clone,
+        F1: GeneralizedFFTIso<R1::Type, R2::Type, F2>
 {
-    type Isomorphism = <F1::BaseRingBase as CanIsoFromTo<F2::BaseRingBase>>::Isomorphism;
+    type Isomorphism = <R1::Type as CanIsoFromTo<R2::Type>>::Isomorphism;
 
-    fn has_canonical_iso(&self, from: &ComplexFFTBasedRingBase<F2, M2_Zn, M2_CC>) -> Option<Self::Isomorphism> {
-        if self.data.is_isomorphic(&from.data) {
-            self.base_ring().get_ring().has_canonical_iso(from.data.base_ring().get_ring())
+    fn has_canonical_iso(&self, from: &ComplexFFTBasedRingBase<R2, F2, A2>) -> Option<Self::Isomorphism> {
+        if self.generalized_fft.is_isomorphic(&from.generalized_fft) {
+            self.base_ring().get_ring().has_canonical_iso(from.base_ring().get_ring())
         } else {
             None
         }
     }
 
-    fn map_out(&self, from: &ComplexFFTBasedRingBase<F2, M2_Zn, M2_CC>, el: Self::Element, iso: &Self::Isomorphism) -> <ComplexFFTBasedRingBase<F2, M2_Zn, M2_CC> as RingBase>::Element {
-        from.memory_provider_zn.get_new_init(from.data.rank(), |i| self.base_ring().get_ring().map_out(from.base_ring().get_ring(), self.base_ring().clone_el(&el[i]), iso))
+    fn map_out(&self, from: &ComplexFFTBasedRingBase<R2, F2, A2>, el: Self::Element, iso: &Self::Isomorphism) -> <ComplexFFTBasedRingBase<R2, F2, A2> as RingBase>::Element {
+        let mut result = Vec::with_capacity_in(self.rank(), from.allocator.clone());
+        result.extend((0..self.rank()).map(|i| self.base_ring().get_ring().map_out(from.base_ring().get_ring(), self.base_ring().clone_el(&el[i]), iso)));
+        return result;
     }
 }

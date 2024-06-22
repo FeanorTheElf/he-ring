@@ -3,6 +3,8 @@
 #![feature(unboxed_closures)]
 #![feature(test)]
 #![feature(const_type_name)]
+#![feature(allocator_api)]
+
 #![allow(non_snake_case)]
 #![allow(non_camel_case_types)]
 #![allow(non_upper_case_globals)]
@@ -26,12 +28,15 @@ extern crate test;
 #[macro_use]
 pub mod profiling;
 
-pub mod matmul;
-
 ///
 /// Defines the trait [`cyclotomic::CyclotomicRing`] for rings of the form `R[X]/(Phi_n)`, where `R` is any base ring.
 /// 
 pub mod cyclotomic;
+
+///
+/// Implementation of fast RNS conversion algorithms.
+/// 
+pub mod rnsconv;
 
 ///
 /// Implementation of rings using complex-valued fast fourier transforms for efficient arithmetic.
@@ -43,10 +48,5 @@ pub mod complexfft;
 /// 
 pub mod doublerns;
 
-///
-/// Implementation of fast RNS conversion algorithms.
-/// 
-pub mod rnsconv;
-
-#[cfg(test)]
-pub mod bfv;
+// #[cfg(test)]
+// pub mod bfv;

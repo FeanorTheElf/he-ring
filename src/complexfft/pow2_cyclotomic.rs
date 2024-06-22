@@ -1,8 +1,12 @@
+use std::alloc::Allocator;
+use std::alloc::Global;
+
 use feanor_math::algorithms::fft::*;
-use feanor_math::algorithms::fft::complex_fft::ErrorEstimate;
-use feanor_math::mempool::*;
+use feanor_math::algorithms::fft::complex_fft::FFTErrorEstimate;
+use feanor_math::homomorphism::Identity;
 use feanor_math::primitive_int::*;
 use feanor_math::ring::*;
+use feanor_math::rings::float_complex::Complex64Base;
 use feanor_math::rings::float_complex::{Complex64, Complex64El};
 use feanor_math::rings::zn::{ZnRing, ZnRingStore};
 use feanor_math::rings::extension::*;
@@ -25,19 +29,23 @@ const CC: Complex64 = Complex64::RING;
 /// [`super::odd_cyclotomic::OddCyclotomicFFT`] in the case that the cyclotomic conductor is odd instead
 /// of a power of two.
 /// 
-pub struct Pow2CyclotomicFFT<R: ZnRingStore, F: FFTTable<Ring = Complex64> + ErrorEstimate> 
-    where R::Type: ZnRing
+pub struct Pow2CyclotomicFFT<R, F> 
+    where R: RingStore,
+        R::Type: ZnRing,
+        F: FFTAlgorithm<Complex64Base> + FFTErrorEstimate
 {
     fft_table: F,
-    base_ring: R,
+    ring: R,
     twiddles: Vec<Complex64El>,
     inv_twiddles: Vec<Complex64El>,
 }
 
-impl<R: ZnRingStore, F: FFTTable<Ring = Complex64> + ErrorEstimate> Pow2CyclotomicFFT<R, F> 
-    where R::Type: ZnRing
+impl<R, F> Pow2CyclotomicFFT<R, F> 
+    where R: RingStore,
+        R::Type: ZnRing,
+        F: FFTAlgorithm<Complex64Base> + FFTErrorEstimate
 {
-    pub fn create(base_ring: R, fft_table: F) -> Self {
+    pub fn create(ring: R, fft_table: F) -> Self {
         let rank = fft_table.len() as i64;
         let log2_n = StaticRing::<i64>::RING.abs_highest_set_bit(&rank).unwrap();
         assert!(rank == (1 << log2_n));
@@ -47,37 +55,34 @@ impl<R: ZnRingStore, F: FFTTable<Ring = Complex64> + ErrorEstimate> Pow2Cyclotom
             twiddles.push(CC.root_of_unity(i, rank * 2));
             inv_twiddles.push(CC.root_of_unity(-i, rank * 2));
         }
-        return Self { fft_table, base_ring, twiddles, inv_twiddles };
+        return Self { fft_table, ring, twiddles, inv_twiddles };
     }
 }
 
-impl<R: ZnRingStore, F: FFTTable<Ring = Complex64> + ErrorEstimate> GeneralizedFFT for Pow2CyclotomicFFT<R, F> 
-    where R::Type: ZnRing
+impl<R, F> GeneralizedFFT<R::Type> for Pow2CyclotomicFFT<R, F> 
+    where R: RingStore,
+        R::Type: ZnRing,
+        F: FFTAlgorithm<Complex64Base> + FFTErrorEstimate
 {
-    type BaseRingBase = R::Type;
-    type BaseRingStore = R;
-
-    fn base_ring(&self) -> &Self::BaseRingStore {
-        &self.base_ring
-    }
-
-    fn fft_backward<M_Zn: MemoryProvider<El<Self::BaseRingStore>>, M_CC: MemoryProvider<Complex64El>>(&self, data: &mut [Complex64El], destination: &mut [El<Self::BaseRingStore>], _: &M_Zn, memory_provider_cc: &M_CC) {
-        self.fft_table.unordered_inv_fft(&mut data[..], memory_provider_cc, &Complex64::RING.identity());
+    fn fft_backward(&self, data: &mut [Complex64El], destination: &mut [El<R>], ring: &R::Type) {
+        assert!(ring == self.ring.get_ring());
+        self.fft_table.unordered_inv_fft(&mut data[..], CC.get_ring());
         for i in 0..self.rank() {
             CC.mul_assign_ref(&mut data[i], &self.twiddles[i]);
             let (re, im) = Complex64::RING.closest_gaussian_int(data[i]);
             debug_assert_eq!(0, im);
             debug_assert!(CC.abs(CC.sub(data[i], CC.from_f64(re as f64))) < 0.01);
-            destination[i] = self.base_ring().coerce(self.base_ring().integer_ring(), int_cast(re as i64, self.base_ring().integer_ring(), &StaticRing::<i64>::RING));
+            destination[i] = self.ring.coerce(self.ring.integer_ring(), int_cast(re as i64, self.ring.integer_ring(), &StaticRing::<i64>::RING));
         }
     }
 
-    fn fft_forward<M: MemoryProvider<Complex64El>>(&self, data: &[El<Self::BaseRingStore>], destination: &mut [Complex64El], memory_provider: &M) {
+    fn fft_forward(&self, data: &[El<R>], destination: &mut [Complex64El], ring: &R::Type) {
+        assert!(ring == self.ring.get_ring());
         for i in 0..self.rank() {
-            destination[i] = Complex64::RING.from_f64(int_cast(self.base_ring().smallest_lift(self.base_ring().clone_el(&data[i])), StaticRing::<i64>::RING, self.base_ring().integer_ring()) as f64);
+            destination[i] = CC.from_f64(int_cast(self.ring.smallest_lift(self.ring.clone_el(&data[i])), StaticRing::<i64>::RING, self.ring.integer_ring()) as f64);
             CC.mul_assign_ref(&mut destination[i], &self.inv_twiddles[i]);
         }
-        self.fft_table.unordered_fft(destination, memory_provider, &Complex64::RING.identity());
+        self.fft_table.unordered_fft(destination, CC.get_ring());
     }
 
     fn rank(&self) -> usize {
@@ -85,39 +90,44 @@ impl<R: ZnRingStore, F: FFTTable<Ring = Complex64> + ErrorEstimate> GeneralizedF
     }
 }
 
-impl<R1: ZnRingStore, F1, R2: ZnRingStore, F2> GeneralizedFFTIso<Pow2CyclotomicFFT<R1, F1>> for Pow2CyclotomicFFT<R2, F2>
-    where R1::Type: ZnRing, F1: FFTTable<Ring = Complex64> + ErrorEstimate,
-        R2::Type: ZnRing, F2: FFTTable<Ring = Complex64> + ErrorEstimate
+impl<R1, F1, R2, F2> GeneralizedFFTIso<R2::Type, R1::Type, Pow2CyclotomicFFT<R1, F1>> for Pow2CyclotomicFFT<R2, F2>
+    where R1: RingStore,
+        R1::Type: ZnRing,
+        F1: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
+        R2: RingStore,
+        R2::Type: ZnRing,
+        F2: FFTAlgorithm<Complex64Base> + FFTErrorEstimate
 {
     fn is_isomorphic(&self, other: &Pow2CyclotomicFFT<R1, F1>) -> bool {
         self.rank() == other.rank()
     }
 }
 
-impl<R: ZnRingStore, F: FFTTable<Ring = Complex64> + ErrorEstimate, M_Zn, M_CC> CyclotomicRing for ComplexFFTBasedRingBase<Pow2CyclotomicFFT<R, F>, M_Zn, M_CC>
-    where R::Type: ZnRing,
-        M_Zn: MemoryProvider<El<R>>,
-        M_CC: MemoryProvider<Complex64El>
+impl<R, F, A> CyclotomicRing for ComplexFFTBasedRingBase<R, Pow2CyclotomicFFT<R, F>, A>
+    where R: RingStore,
+        R::Type: ZnRing,
+        F: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
+        A: Allocator + Clone
 {
     fn n(&self) -> usize {
         2 * self.rank()
     }
 }
 
-impl<R: ZnRingStore, M_Zn, M_CC> ComplexFFTBasedRingBase<Pow2CyclotomicFFT<R, cooley_tuckey::FFTTableCooleyTuckey<Complex64>>, M_Zn, M_CC>
-    where R::Type: ZnRing,
-        M_Zn: MemoryProvider<El<R>>,
-        M_CC: MemoryProvider<Complex64El>
+impl<R, A> ComplexFFTBasedRingBase<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckeyFFT<Complex64Base, Complex64Base, Identity<Complex64>>>, A>
+    where R: RingStore + Clone,
+        R::Type: ZnRing,
+        A: Allocator + Clone
 {
-    pub fn new(base_ring: R, log2_ring_degree: usize, memory_provider_zn: M_Zn, memory_provider_cc: M_CC) -> RingValue<Self> {
+    pub fn new(ring: R, log2_ring_degree: usize, allocator: A) -> RingValue<Self> {
         RingValue::from(
             Self::from_generalized_fft(
+                ring.clone(),
                 Pow2CyclotomicFFT::create(
-                    base_ring, 
-                    cooley_tuckey::FFTTableCooleyTuckey::for_complex(Complex64::RING, log2_ring_degree)
-                ), 
-                memory_provider_zn, 
-                memory_provider_cc
+                    ring, 
+                    cooley_tuckey::CooleyTuckeyFFT::for_complex(Complex64::RING, log2_ring_degree)
+                ),
+                allocator
             )
         )
     }
@@ -127,13 +137,11 @@ impl<R: ZnRingStore, M_Zn, M_CC> ComplexFFTBasedRingBase<Pow2CyclotomicFFT<R, co
 use feanor_math::rings::extension::generic_test_free_algebra_axioms;
 #[cfg(test)]
 use feanor_math::rings::zn::zn_64::Zn;
-#[cfg(test)]
-use feanor_math::default_memory_provider;
 
 #[test]
 fn test_ring_axioms() {
     let Fp = Zn::new(65537);
-    let R = ComplexFFTBasedRingBase::<Pow2CyclotomicFFT<_, cooley_tuckey::FFTTableCooleyTuckey<Complex64>>, _, _>::new(Fp, 3, default_memory_provider!(), default_memory_provider!());
+    let R = ComplexFFTBasedRingBase::<_, Pow2CyclotomicFFT<_, cooley_tuckey::CooleyTuckeyFFT<_, _, _>>, _>::new(Fp, 3, Global);
     feanor_math::ring::generic_tests::test_ring_axioms(&R, [
         ring_literal!(&R, [0, 0, 0, 0, 0, 0, 0, 0]),
         ring_literal!(&R, [1, 0, 0, 0, 0, 0, 0, 0]),
@@ -148,14 +156,14 @@ fn test_ring_axioms() {
 #[test]
 fn test_free_algebra_axioms() {
     let Fp = Zn::new(65537);
-    let R = ComplexFFTBasedRingBase::<Pow2CyclotomicFFT<_, cooley_tuckey::FFTTableCooleyTuckey<Complex64>>, _, _>::new(Fp, 3, default_memory_provider!(), default_memory_provider!());
+    let R = ComplexFFTBasedRingBase::<_, Pow2CyclotomicFFT<_, cooley_tuckey::CooleyTuckeyFFT<_, _, _>>, _>::new(Fp, 3, Global);
     generic_test_free_algebra_axioms(R);
 }
 
 #[test]
 fn test_cyclotomic_ring_axioms() {
     let Fp = Zn::new(65537);
-    let R = ComplexFFTBasedRingBase::<Pow2CyclotomicFFT<_, cooley_tuckey::FFTTableCooleyTuckey<Complex64>>, _, _>::new(Fp, 3, default_memory_provider!(), default_memory_provider!());
+    let R = ComplexFFTBasedRingBase::<_, Pow2CyclotomicFFT<_, cooley_tuckey::CooleyTuckeyFFT<_, _, _>>, _>::new(Fp, 3, Global);
     generic_test_cyclotomic_ring_axioms(R);
 
 }

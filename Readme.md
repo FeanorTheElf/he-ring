@@ -47,13 +47,13 @@ use rand_distr::StandardNormal;
 
 // in the spirit of feanor-math, all rings are highly generic and extensible using the type system.
 // here we define the ring types we will use to implement the scheme. 
-pub type PlaintextRing = complexfft::complex_fft_ring::ComplexFFTBasedRing<complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<Zn, cooley_tuckey::FFTTableCooleyTuckey<Complex64>>, DefaultMemoryProvider, DefaultMemoryProvider>;
+pub type PlaintextRing = complexfft::complex_fft_ring::ComplexFFTBasedRing<complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<Zn, cooley_tuckey::FFTTableCooleyTuckey<Complex64>>>;
 pub type FFTTable = doublerns::pow2_cyclotomic::Pow2CyclotomicFFT<cooley_tuckey::FFTTableCooleyTuckey<ZnFastmul>>;
-pub type CiphertextRing = doublerns::double_rns_ring::DoubleRNSRing<Zn, FFTTable, DefaultMemoryProvider>;
+pub type CiphertextRing = doublerns::double_rns_ring::DoubleRNSRing<Zn, FFTTable>;
 
 pub type Ciphertext = (El<CiphertextRing>, El<CiphertextRing>);
 pub type SecretKey = El<CiphertextRing>;
-pub type GadgetProductOperand<'a> = doublerns::gadget_product::GadgetProductRhsOperand<'a, Zn, FFTTable, DefaultMemoryProvider>;
+pub type GadgetProductOperand<'a> = doublerns::gadget_product::GadgetProductRhsOperand<'a, Zn, FFTTable>;
 pub type KeySwitchKey<'a> = (GadgetProductOperand<'a>, GadgetProductOperand<'a>);
 pub type RelinKey<'a> = (GadgetProductOperand<'a>, GadgetProductOperand<'a>);
 
@@ -62,8 +62,8 @@ pub type RelinKey<'a> = (GadgetProductOperand<'a>, GadgetProductOperand<'a>);
 // this in a fast-RNS-conversion manner requires precomputing all kinds of data, encapsulated by `MulConversionData`.
 //
 pub struct MulConversionData {
-    to_C_mul: rnsconv::approx_lift::AlmostExactBaseConversion<Zn, DefaultMemoryProvider, DefaultMemoryProvider>,
-    scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert<Zn, DefaultMemoryProvider, DefaultMemoryProvider>
+    to_C_mul: rnsconv::approx_lift::AlmostExactBaseConversion<Zn>,
+    scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert<Zn>
 };
 
 const ZZbig: BigIntRing = BigIntRing::RING;
@@ -98,7 +98,7 @@ pub fn create_ciphertext_rings(log2_ring_degree: usize, ciphertext_moduli_count:
 }
 
 pub fn create_plaintext_ring(log2_ring_degree: usize, plaintext_modulus: i64) -> PlaintextRing {
-    return <PlaintextRing as RingStore>::Type::new(Zn::new(plaintext_modulus as u64), log2_ring_degree, default_memory_provider!(), default_memory_provider!());
+    return <PlaintextRing as RingStore>::Type::new(Zn::new(plaintext_modulus as u64), log2_ring_degree);
 }
 
 //

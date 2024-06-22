@@ -1,15 +1,17 @@
-use feanor_math::algorithms::fft::complex_fft::ErrorEstimate;
+use feanor_math::algorithms::fft::complex_fft::FFTErrorEstimate;
 use feanor_math::algorithms;
 use feanor_math::algorithms::fft::*;
-use feanor_math::mempool::*;
 use feanor_math::primitive_int::StaticRing;
 use feanor_math::ring::*;
 use feanor_math::assert_el_eq;
 use feanor_math::homomorphism::*;
 use feanor_math::integer::*;
-use feanor_math::rings::float_complex::Complex64;
+use feanor_math::rings::float_complex::Complex64Base;
+use feanor_math::seq::*;
 use feanor_math::rings::zn::{ZnRing, ZnRingStore, zn_rns};
 use feanor_math::rings::extension::*;
+
+use std::alloc::Allocator;
 
 use crate::complexfft;
 use crate::cyclotomic::*;
@@ -32,29 +34,29 @@ use super::double_rns_ring::*;
 /// FFT, thus saving a few multiplications on each execution. However, for the sake of modularity,
 /// we currently don't do this and use the underlying FFT as a black box.
 /// 
-pub struct Pow2CyclotomicFFT<F> 
-    where F: FFTTable,
-        F::Ring: Sized + ZnRingStore,
-        <F::Ring as RingStore>::Type: ZnRing + CanHomFrom<BigIntRingBase>
+pub struct Pow2CyclotomicFFT<R, F> 
+    where R: RingStore,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F: FFTAlgorithm<R::Type>
 {
     fft_table: F,
-    twiddles: Vec<El<F::Ring>>,
-    inv_twiddles: Vec<El<F::Ring>>
+    twiddles: Vec<El<R>>,
+    inv_twiddles: Vec<El<R>>,
+    ring: R
 }
 
-impl<F> Pow2CyclotomicFFT<F> 
-    where F: FFTTable,
-        F::Ring: Sized + ZnRingStore,
-        <F::Ring as RingStore>::Type: ZnRing + CanHomFrom<BigIntRingBase>
+impl<R, F> Pow2CyclotomicFFT<R, F> 
+    where R: RingStore,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F: FFTAlgorithm<R::Type>
 {
-    pub fn create(fft_table: F, root_of_unity: El<F::Ring>) -> Self {
+    pub fn create(ring: R, fft_table: F, root_of_unity: El<R>) -> Self {
         let rank = fft_table.len() as i64;
-        let log2_n = StaticRing::<i64>::RING.abs_highest_set_bit(&rank).unwrap();
+        let log2_n = StaticRing::<i64>::RING.abs_log2_floor(&rank).unwrap();
         assert!(rank == (1 << log2_n));
         let mut twiddles = Vec::with_capacity(rank as usize);
         let mut inv_twiddles = Vec::with_capacity(rank as usize);
-        let ring = fft_table.ring();
-        assert_el_eq!(ring, fft_table.root_of_unity(), &ring.pow(ring.clone_el(&root_of_unity), 2));
+        assert_el_eq!(&ring, fft_table.root_of_unity(ring.get_ring()), &ring.pow(ring.clone_el(&root_of_unity), 2));
 
         let mut current = ring.one();
         let mut current_inv = ring.one();
@@ -65,44 +67,29 @@ impl<F> Pow2CyclotomicFFT<F>
             ring.mul_assign_ref(&mut current, &root_of_unity);
             ring.mul_assign_ref(&mut current_inv, &zeta_inv);
         }
-        return Self { fft_table, twiddles, inv_twiddles };
+        return Self { ring, fft_table, twiddles, inv_twiddles };
     }
 }
 
-impl<F> GeneralizedFFT for Pow2CyclotomicFFT<F> 
-    where F: FFTTable,
-        F::Ring: Sized + ZnRingStore,
-        <F::Ring as RingStore>::Type: ZnRing + CanHomFrom<BigIntRingBase>
+impl<R, F> GeneralizedFFT<R::Type> for Pow2CyclotomicFFT<R, F> 
+    where R: RingStore,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F: FFTAlgorithm<R::Type>
 {
-    type BaseRingBase = <F::Ring as RingStore>::Type;
-    type BaseRingStore = F::Ring;
-
-    fn base_ring(&self) -> &Self::BaseRingStore {
-        self.fft_table.ring()
-    }
-
-    fn fft_backward<S, M>(&self, data: &mut [El<S>], ring: &S, memory_provider: &M)
-        where S: ZnRingStore,
-            S::Type: ZnRing + CanHomFrom<Self::BaseRingBase>,
-            M: MemoryProvider<El<S>>
-    {
-        self.fft_table.unordered_inv_fft(&mut data[..], memory_provider, &ring.can_hom(self.fft_table.ring()).unwrap());
-        let hom = ring.can_hom(self.base_ring()).unwrap();
+    fn fft_backward(&self, data: &mut [El<R>], ring: &R::Type) {
+        assert!(ring == self.ring.get_ring());
+        self.fft_table.unordered_inv_fft(&mut data[..], ring);
         for i in 0..self.rank() {
-            ring.get_ring().mul_assign_map_in_ref(self.base_ring().get_ring(), &mut data[i], &self.twiddles[i], hom.raw_hom());
+            ring.mul_assign_ref(&mut data[i], &self.twiddles[i]);
         }
     }
 
-    fn fft_forward<S, M>(&self, data: &mut [El<S>], ring: &S, memory_provider: &M)
-        where S: ZnRingStore,
-            S::Type: ZnRing + CanHomFrom<Self::BaseRingBase>,
-            M: MemoryProvider<El<S>> 
-    {
-        let hom = ring.can_hom(self.base_ring()).unwrap();
+    fn fft_forward(&self, data: &mut [El<R>], ring: &R::Type) {
+        assert!(ring == self.ring.get_ring());
         for i in 0..self.rank() {
-            ring.get_ring().mul_assign_map_in_ref(self.base_ring().get_ring(), &mut data[i], &self.inv_twiddles[i], hom.raw_hom());
+            ring.mul_assign_ref(&mut data[i], &self.inv_twiddles[i]);
         }
-        self.fft_table.unordered_fft(&mut data[..], memory_provider, &ring.can_hom(self.fft_table.ring()).unwrap());
+        self.fft_table.unordered_fft(&mut data[..], ring);
     }
 
     fn rank(&self) -> usize {
@@ -110,65 +97,65 @@ impl<F> GeneralizedFFT for Pow2CyclotomicFFT<F>
     }
 }
 
-impl<F1, F2> GeneralizedFFTIso<Pow2CyclotomicFFT<F1>> for Pow2CyclotomicFFT<F2>
-    where F1: FFTTable,
-        F1::Ring: Sized + ZnRingStore,
-        <F1::Ring as RingStore>::Type: ZnRing + CanHomFrom<BigIntRingBase>,
-        F2: FFTTable,
-        F2::Ring: Sized + ZnRingStore,
-        <F2::Ring as RingStore>::Type: ZnRing + CanHomFrom<BigIntRingBase>
+impl<R1, R2, F1, F2> GeneralizedFFTIso<R1::Type, R2::Type, Pow2CyclotomicFFT<R2, F2>> for Pow2CyclotomicFFT<R1, F1>
+    where R1: RingStore,
+        R1::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F1: FFTAlgorithm<R1::Type>,
+        R2: RingStore,
+        R2::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F2: FFTAlgorithm<R2::Type>
 {
-    fn is_isomorphic(&self, other: &Pow2CyclotomicFFT<F1>) -> bool {
+    fn is_isomorphic(&self, other: &Pow2CyclotomicFFT<R2, F2>) -> bool {
         self.rank() == other.rank()
     }
 }
 
-impl<R1, F1, F2> GeneralizedFFTCrossIso<complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<R1, F1>> for Pow2CyclotomicFFT<F2>
+impl<R1, R2, F1, F2> GeneralizedFFTCrossIso<R2::Type, R1::Type, complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<R1, F1>> for Pow2CyclotomicFFT<R2, F2>
     where R1: RingStore,
-        F1: FFTTable<Ring = Complex64> + ErrorEstimate,
+        F1: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
         R1::Type: ZnRing,
-        F2: FFTTable,
-        F2::Ring: Sized + ZnRingStore,
-        <F2::Ring as RingStore>::Type: ZnRing + CanHomFrom<BigIntRingBase>
+        R2: RingStore,
+        R2::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F2: FFTAlgorithm<R2::Type>
 {
     fn is_isomorphic(&self, other: &complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<R1, F1>) -> bool {
-        self.rank() == <_ as complexfft::complex_fft_ring::GeneralizedFFT>::rank(other)
+        self.rank() == <_ as complexfft::complex_fft_ring::GeneralizedFFT<_>>::rank(other)
     }
 }
 
-impl<R, F, M> CyclotomicRing for DoubleRNSRingBase<R, Pow2CyclotomicFFT<F>, M>
+impl<R, F, A> CyclotomicRing for DoubleRNSRingBase<R, Pow2CyclotomicFFT<R, F>, A>
     where R: ZnRingStore,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanIsoFromTo<<F::Ring as RingStore>::Type>,
-        F: FFTTable,
-        F::Ring: Sized + ZnRingStore,
-        <F::Ring as RingStore>::Type: ZnRing + CanHomFrom<BigIntRingBase>,
-        M: MemoryProvider<El<R>>
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F: FFTAlgorithm<R::Type>,
+        A: Allocator + Clone
 {
     fn n(&self) -> usize {
         2 * self.rank()
     }
 }
 
-impl<R_main, R_fft, M> DoubleRNSRingBase<R_main, Pow2CyclotomicFFT<cooley_tuckey::FFTTableCooleyTuckey<R_fft>>, M>
-    where R_main: ZnRingStore,
-        R_fft: ZnRingStore,
-        R_fft::Type: ZnRing + CanHomFrom<BigIntRingBase>,
-        R_main::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanIsoFromTo<R_fft::Type> + CanHomFrom<BigIntRingBase>,
-        M: MemoryProvider<El<R_main>>
+impl<R_main, R_twiddle> DoubleRNSRingBase<R_main, Pow2CyclotomicFFT<R_main, cooley_tuckey::CooleyTuckeyFFT<R_main::Type, R_twiddle::Type, CanHom<R_twiddle, R_main>>>>
+    where R_main: RingStore + Clone,
+        R_twiddle: RingStore,
+        R_main::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanHomFrom<R_twiddle::Type>,
+        R_twiddle::Type: ZnRing
 {
-    pub fn new(base_ring: zn_rns::Zn<R_main, BigIntRing>, fft_rings: Vec<R_fft>, log2_n: usize, memory_provider: M) -> RingValue<Self> {
-        let ffts = fft_rings.into_iter().map(|R| {
+    pub fn new(base_ring: zn_rns::Zn<R_main, BigIntRing>, fft_rings: Vec<R_twiddle>, log2_n: usize) -> RingValue<Self> {
+        let ffts = fft_rings.into_iter().enumerate().map(|(i, R)| {
             let root_of_unity = algorithms::unity_root::get_prim_root_of_unity_pow2(&R, log2_n + 1).unwrap();
             let fft_table_root_of_unity = R.pow(R.clone_el(&root_of_unity), 2);
+            let hom = base_ring.at(i).clone().into_can_hom(R).ok().unwrap();
+            let root_of_unity = hom.map(root_of_unity);
             Pow2CyclotomicFFT::create(
-                cooley_tuckey::FFTTableCooleyTuckey::new(R, fft_table_root_of_unity, log2_n),
+                hom.codomain().clone(),
+                cooley_tuckey::CooleyTuckeyFFT::new_with_hom(hom, fft_table_root_of_unity, log2_n),
                 root_of_unity
             )
         }).collect();
         RingValue::from(Self::from_generalized_ffts(
             base_ring,
-            ffts, 
-            memory_provider
+            ffts,
+            Global
         ))
     }
 }
@@ -178,16 +165,14 @@ use feanor_math::rings::extension::generic_test_free_algebra_axioms;
 #[cfg(test)]
 use feanor_math::rings::zn::zn_64::Zn;
 #[cfg(test)]
-use feanor_math::vector::*;
-#[cfg(test)]
-use feanor_math::default_memory_provider;
+use std::alloc::Global;
 
 #[cfg(test)]
-fn edge_case_elements<'a, R, F, M>(R: &'a DoubleRNSRing<R, F, M>) -> impl 'a + Iterator<Item = El<DoubleRNSRing<R, F, M>>>
+fn edge_case_elements<'a, R, F, A>(R: &'a DoubleRNSRing<R, F, A>) -> impl 'a + Iterator<Item = El<DoubleRNSRing<R, F, A>>>
     where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
-        F: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M: MemoryProvider<El<R>>
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
 {
     assert_eq!(2, R.get_ring().rns_base().len());
     assert_eq!(17, int_cast(R.get_ring().rns_base().at(0).integer_ring().clone_el(R.get_ring().rns_base().at(0).modulus()), StaticRing::<i64>::RING, R.get_ring().rns_base().at(0).integer_ring()));
@@ -209,32 +194,32 @@ fn edge_case_elements<'a, R, F, M>(R: &'a DoubleRNSRing<R, F, M>) -> impl 'a + I
 
 #[test]
 fn test_ring_axioms() {
-    let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING, default_memory_provider!());
-    let fft_rings = rns_base.get_ring().iter().cloned().collect();
-    let R = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<cooley_tuckey::FFTTableCooleyTuckey<_>>, _>::new(rns_base, fft_rings, 3, default_memory_provider!());
+    let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
+    let fft_rings = rns_base.get_ring().as_iter().cloned().collect();
+    let R = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<_, cooley_tuckey::CooleyTuckeyFFT<_, _, _>>, _>::new(rns_base, fft_rings, 3);
     feanor_math::ring::generic_tests::test_ring_axioms(&R, edge_case_elements(&R));
 }
 
 #[test]
 fn test_divisibility_axioms() {
-    let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING, default_memory_provider!());
-    let fft_rings = rns_base.get_ring().iter().cloned().collect();
-    let R = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<cooley_tuckey::FFTTableCooleyTuckey<_>>, _>::new(rns_base, fft_rings, 3, default_memory_provider!());
+    let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
+    let fft_rings = rns_base.get_ring().as_iter().cloned().collect();
+    let R = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<_, cooley_tuckey::CooleyTuckeyFFT<_, _, _>>, _>::new(rns_base, fft_rings, 3);
     feanor_math::divisibility::generic_tests::test_divisibility_axioms(&R, edge_case_elements(&R));
 }
 
 #[test]
 fn test_free_algebra_axioms() {
-    let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING, default_memory_provider!());
-    let fft_rings = rns_base.get_ring().iter().cloned().collect();
-    let R = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<cooley_tuckey::FFTTableCooleyTuckey<_>>, _>::new(rns_base, fft_rings, 3, default_memory_provider!());
+    let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
+    let fft_rings = rns_base.get_ring().as_iter().cloned().collect();
+    let R = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<_, cooley_tuckey::CooleyTuckeyFFT<_, _, _>>, _>::new(rns_base, fft_rings, 3);
     generic_test_free_algebra_axioms(R);
 }
 
 #[test]
 fn test_cyclotomic_ring_axioms() {
-    let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING, default_memory_provider!());
-    let fft_rings = rns_base.get_ring().iter().cloned().collect();
-    let R = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<cooley_tuckey::FFTTableCooleyTuckey<_>>, _>::new(rns_base, fft_rings, 3, default_memory_provider!());
+    let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
+    let fft_rings = rns_base.get_ring().as_iter().cloned().collect();
+    let R = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<_, cooley_tuckey::CooleyTuckeyFFT<_, _, _>>, _>::new(rns_base, fft_rings, 3);
     generic_test_cyclotomic_ring_axioms(R);
 }

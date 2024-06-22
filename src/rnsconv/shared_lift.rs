@@ -1,18 +1,15 @@
-use std::rc::Rc;
+use std::alloc::Allocator;
+use std::alloc::Global;
 
-use feanor_math::matrix::submatrix::*;
-use feanor_math::primitive_int::StaticRingBase;
-use feanor_math::rings::zn::*;
+use feanor_math::matrix::*;
 use feanor_math::rings::zn::zn_64::*;
 use feanor_math::ring::*;
 use feanor_math::homomorphism::*;
-use feanor_math::integer::*;
-use feanor_math::mempool::*;
-use feanor_math::vector::VectorView;
+use feanor_math::seq::*;
 
 use super::RNSOperation;
 
-type UsedBaseConversion<M_Zn, M_Int> = super::matrix_lift::AlmostExactMatrixBaseConversion<M_Zn, M_Int>;
+type UsedBaseConversion<A> = super::matrix_lift::AlmostExactMatrixBaseConversion<A>;
 
 ///
 /// Computes almost exact base conversion with a shared factor.
@@ -27,22 +24,20 @@ type UsedBaseConversion<M_Zn, M_Int> = super::matrix_lift::AlmostExactMatrixBase
 /// The functionality is exactly as for [`AlmostExactBaseConversion`],
 /// except that it might be faster by reusing the shared factor `a`.
 /// 
-pub struct AlmostExactSharedBaseConversion<M_Zn = DefaultMemoryProvider, M_Int = Rc<caching::CachingMemoryProvider<i64>>>
-    where M_Zn: MemoryProvider<ZnEl>,
-        M_Int: MemoryProvider<i64>
+pub struct AlmostExactSharedBaseConversion<A = Global>
+    where A: Allocator + Clone
 {
-    conversion: UsedBaseConversion<M_Zn, M_Int>,
+    conversion: UsedBaseConversion<A>,
     out_moduli: Vec<Zn>
 }
 
-impl<M_Zn, M_Int> AlmostExactSharedBaseConversion<M_Zn, M_Int>
-    where M_Zn: MemoryProvider<ZnEl>,
-        M_Int: MemoryProvider<i64>
+impl<A> AlmostExactSharedBaseConversion<A>
+    where A: Allocator + Clone
 {
-    pub fn new(shared_moduli: Vec<Zn>, additional_in_moduli: Vec<Zn>, additional_out_moduli: Vec<Zn>, memory_provider: M_Zn, memory_provider_int: M_Int) -> Self {
+    pub fn new(shared_moduli: Vec<Zn>, additional_in_moduli: Vec<Zn>, additional_out_moduli: Vec<Zn>, allocator: A) -> Self {
         let in_moduli = shared_moduli.iter().cloned().chain(additional_in_moduli.into_iter()).collect::<Vec<_>>();
         let out_moduli = shared_moduli.into_iter().chain(additional_out_moduli.iter().cloned()).collect::<Vec<_>>();
-        let conversion = UsedBaseConversion::new(in_moduli, additional_out_moduli, memory_provider, memory_provider_int);
+        let conversion = UsedBaseConversion::new(in_moduli, additional_out_moduli, allocator);
         Self {
             out_moduli: out_moduli,
             conversion: conversion
@@ -54,9 +49,8 @@ impl<M_Zn, M_Int> AlmostExactSharedBaseConversion<M_Zn, M_Int>
     }
 }
 
-impl<M_Zn, M_Int> RNSOperation for AlmostExactSharedBaseConversion<M_Zn, M_Int>
-    where M_Zn: MemoryProvider<ZnEl>,
-        M_Int: MemoryProvider<i64>
+impl<A> RNSOperation for AlmostExactSharedBaseConversion<A>
+    where A: Allocator + Clone
 {
     type Ring = Zn;
     type RingType = ZnBase;
@@ -80,20 +74,17 @@ impl<M_Zn, M_Int> RNSOperation for AlmostExactSharedBaseConversion<M_Zn, M_Int>
         self.conversion.apply(input, output.reborrow().restrict_rows(self.a_moduli_count()..self.output_rings().len()));
         for i in 0..self.a_moduli_count() {
             for j in 0..input.col_count() {
-                *output.at(i, j) = self.output_rings()[i].clone_el(input.at(i, j));
+                *output.at_mut(i, j) = self.output_rings()[i].clone_el(input.at(i, j));
             }
         }
     }
 }
 
-#[cfg(test)]
-use feanor_math::default_memory_provider;
-
 #[test]
 fn test_rns_shared_base_conversion() {
     let from = vec![Zn::new(17), Zn::new(97), Zn::new(113)];
     let to = vec![Zn::new(17), Zn::new(97), Zn::new(113), Zn::new(257)];
-    let table = AlmostExactSharedBaseConversion::new(from.clone(), Vec::new(), vec![to[3]], default_memory_provider!(), default_memory_provider!());
+    let table = AlmostExactSharedBaseConversion::new(from.clone(), Vec::new(), vec![to[3]], Global);
 
     for k in -(17 * 97 * 113 / 4)..=(17 * 97 * 113 / 4) {
         let x = from.iter().map(|Zn| Zn.int_hom().map(k)).collect::<Vec<_>>();

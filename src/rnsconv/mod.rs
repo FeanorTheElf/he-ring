@@ -1,6 +1,6 @@
 use feanor_math::ring::*;
 use feanor_math::rings::zn::{ZnRing, ZnRingStore};
-use feanor_math::matrix::submatrix::*;
+use feanor_math::matrix::*;
 
 pub mod lift;
 pub mod bfv_rescale;

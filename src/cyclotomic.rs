@@ -57,7 +57,7 @@ use feanor_math::rings::poly::*;
 #[cfg(test)]
 use feanor_math::rings::poly::sparse_poly::SparsePolyRing;
 #[cfg(test)]
-use feanor_math::vector::vec_fn::*;
+use feanor_math::seq::*;
 
 #[cfg(test)]
 pub fn generic_test_cyclotomic_ring_axioms<R: CyclotomicRingStore>(ring: R)

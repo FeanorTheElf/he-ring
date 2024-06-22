@@ -3,21 +3,18 @@
 
 use std::time::Instant;
 use doublerns::double_rns_ring::*;
-use feanor_math::mempool::caching::CachingMemoryProvider;
-use feanor_math::{assert_el_eq, ring::*};
+use feanor_math::ring::*;
+use feanor_math::assert_el_eq;
 use feanor_math::rings::zn::*;
 use feanor_math::rings::zn::zn_64::*;
 use feanor_math::primitive_int::StaticRing;
 use feanor_math::integer::*;
 use feanor_math::algorithms::miller_rabin::is_prime;
-use feanor_math::mempool::DefaultMemoryProvider;
 use feanor_math::algorithms::fft::*;
-use feanor_math::default_memory_provider;
 use feanor_math::homomorphism::Homomorphism;
 use feanor_math::ordered::OrderedRingStore;
-use feanor_math::vector::VectorView;
 use feanor_math::rings::extension::FreeAlgebraStore;
-use feanor_math::vector::vec_fn::VectorFn;
+use feanor_math::seq::*;
 use feanor_math::rings::float_complex::Complex64;
 use profiling::*;
 
@@ -27,13 +24,13 @@ use rand::thread_rng;
 use rand::{Rng, CryptoRng};
 use rand_distr::StandardNormal;
 
-pub type PlaintextRing = complexfft::complex_fft_ring::ComplexFFTBasedRing<complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<Zn, cooley_tuckey::FFTTableCooleyTuckey<Complex64>>, DefaultMemoryProvider, DefaultMemoryProvider>;
+pub type PlaintextRing = complexfft::complex_fft_ring::ComplexFFTBasedRing<complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<Zn, cooley_tuckey::FFTTableCooleyTuckey<Complex64>>>;
 pub type FFTTable = doublerns::pow2_cyclotomic::Pow2CyclotomicFFT<cooley_tuckey::FFTTableCooleyTuckey<ZnFastmul>>;
-pub type CiphertextRing = DoubleRNSRing<Zn, FFTTable, DefaultMemoryProvider>;
+pub type CiphertextRing = DoubleRNSRing<Zn, FFTTable>;
 
-pub type Ciphertext = (DoubleRNSNonFFTEl<Zn, FFTTable, DefaultMemoryProvider>, DoubleRNSNonFFTEl<Zn, FFTTable, DefaultMemoryProvider>);
+pub type Ciphertext = (DoubleRNSNonFFTEl<Zn, FFTTable>, DoubleRNSNonFFTEl<Zn, FFTTable>);
 pub type SecretKey = El<CiphertextRing>;
-pub type GadgetProductOperand<'a> = doublerns::gadget_product::GadgetProductRhsOperand<'a, FFTTable, DefaultMemoryProvider>;
+pub type GadgetProductOperand<'a> = doublerns::gadget_product::GadgetProductRhsOperand<'a, FFTTable>;
 pub type KeySwitchKey<'a> = (GadgetProductOperand<'a>, GadgetProductOperand<'a>);
 pub type RelinKey<'a> = (GadgetProductOperand<'a>, GadgetProductOperand<'a>);
 
@@ -102,13 +99,13 @@ pub fn create_ciphertext_rings(log2_ring_degree: usize, q_min_bits: usize, q_max
     );
     assert!(ZZbig.is_geq(&ZZbig.prod(rns_base_mul.get_ring().iter().map(|Fp: &Zn| int_cast(*Fp.modulus(), ZZbig, ZZ))), &ZZbig.pow(ZZbig.mul(Q, ZZbig.int_hom().map(2)), 2)), "Failed to find a suitable ciphertext modulus within the given range");
 
-    let C = <CiphertextRing as RingStore>::Type::new(rns_base.clone(), rns_base.get_ring().iter().cloned().map(ZnFastmul::new).collect(), log2_ring_degree, default_memory_provider!());
-    let C_mul = <CiphertextRing as RingStore>::Type::new(rns_base_mul.clone(), rns_base_mul.get_ring().iter().cloned().map(ZnFastmul::new).collect(), log2_ring_degree, default_memory_provider!());
+    let C = <CiphertextRing as RingStore>::Type::new(rns_base.clone(), rns_base.get_ring().iter().cloned().map(ZnFastmul::new).collect(), log2_ring_degree);
+    let C_mul = <CiphertextRing as RingStore>::Type::new(rns_base_mul.clone(), rns_base_mul.get_ring().iter().cloned().map(ZnFastmul::new).collect(), log2_ring_degree);
     return (C, C_mul);
 }
 
 pub fn create_plaintext_ring(log2_ring_degree: usize, plaintext_modulus: i64) -> PlaintextRing {
-    return <PlaintextRing as RingStore>::Type::new(Zn::new(plaintext_modulus as u64), log2_ring_degree, default_memory_provider!(), default_memory_provider!());
+    return <PlaintextRing as RingStore>::Type::new(Zn::new(plaintext_modulus as u64), log2_ring_degree);
 }
 
 pub fn create_multiplication_rescale(P: &PlaintextRing, C: &CiphertextRing, C_mul: &CiphertextRing) -> MulConversionData {
@@ -116,16 +113,12 @@ pub fn create_multiplication_rescale(P: &PlaintextRing, C: &CiphertextRing, C_mu
         lift_to_C_mul: rnsconv::shared_lift::AlmostExactSharedBaseConversion::new(
             C.get_ring().rns_base().iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
             Vec::new(),
-            C_mul.get_ring().rns_base().iter().skip(C.get_ring().rns_base().len()).map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
-            default_memory_provider!(),
-            CachingMemoryProvider::new(2)
+            C_mul.get_ring().rns_base().iter().skip(C.get_ring().rns_base().len()).map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>()
         ),
         scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert::new(
             C_mul.get_ring().rns_base().iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
             Some(P.base_ring()).into_iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
-            C.get_ring().rns_base().len(), 
-            default_memory_provider!(),
-            CachingMemoryProvider::new(2)
+            C.get_ring().rns_base().len()
         )
     }
 }
@@ -196,7 +189,7 @@ pub fn gen_rk<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing, rng: R, sk: &Secret
 pub fn hom_mul(C: &CiphertextRing, C_mul: &CiphertextRing, lhs: &Ciphertext, rhs: &Ciphertext, rk: &RelinKey, conv_data: &MulConversionData) -> Ciphertext {
     let (c00, c01) = lhs;
     let (c10, c11) = rhs;
-    let lift = |c: &DoubleRNSNonFFTEl<Zn, FFTTable, DefaultMemoryProvider>| C_mul.get_ring().do_fft(C_mul.get_ring().perform_rns_op_from(C.get_ring(), &c, &conv_data.lift_to_C_mul));
+    let lift = |c: &DoubleRNSNonFFTEl<Zn, FFTTable>| C_mul.get_ring().do_fft(C_mul.get_ring().perform_rns_op_from(C.get_ring(), &c, &conv_data.lift_to_C_mul));
 
     let lifted0 = C_mul.mul(lift(c00), lift(c10));
     let lifted1 = C_mul.add(C_mul.mul(lift(c00), lift(c11)), C_mul.mul(lift(c01), lift(c10)));

@@ -1,15 +1,16 @@
+use std::alloc::Allocator;
+use std::alloc::Global;
+
 use feanor_math::divisibility::DivisibilityRingStore;
 use feanor_math::homomorphism::*;
-use feanor_math::matrix::submatrix::*;
-use feanor_math::mempool::*;
-use feanor_math::mempool::caching::*;
+use feanor_math::matrix::*;
 use feanor_math::rings::zn::*;
 use feanor_math::rings::zn::zn_64::*;
 use feanor_math::integer::int_cast;
 use feanor_math::integer::*;
 use feanor_math::ring::*;
 use feanor_math::ordered::OrderedRingStore;
-use feanor_math::vector::*;
+use feanor_math::seq::*;
 
 use crate::rnsconv::lift::AlmostExactBaseConversion;
 
@@ -30,9 +31,8 @@ const ZZbig: BigIntRing = BigIntRing::RING;
 /// This means that the "closest integer" above might only be the second-closest when there is
 /// almost a tie.
 /// 
-pub struct CongruencePreservingRescaling<M_Zn, M_Int>
-    where M_Zn: MemoryProvider<ZnEl>,
-        M_Int: MemoryProvider<i64>
+pub struct CongruencePreservingRescaling<A = Global>
+    where A: Allocator + Clone
 {
     aq_moduli: Vec<Zn>,
     b_moduli_count: usize,
@@ -40,9 +40,9 @@ pub struct CongruencePreservingRescaling<M_Zn, M_Int>
     /// `aq_moduli[i] = aq_moduli_sorted[aq_permutation[i]]`
     aq_permutation: Vec<usize>,
     /// contains all the moduli, but sorted
-    b_to_aq_lift: AlmostExactBaseConversion<M_Zn, M_Int>,
-    aq_to_t_conv: AlmostExactBaseConversion<M_Zn, M_Int>,
-    memory_provider: M_Zn,
+    b_to_aq_lift: AlmostExactBaseConversion<A>,
+    aq_to_t_conv: AlmostExactBaseConversion<A>,
+    allocator: A,
     /// `a` as an element of each modulus of `q`
     a: Vec<El<Zn>>,
     /// `b^-1` as an element of each modulus of `aq/b`
@@ -51,12 +51,11 @@ pub struct CongruencePreservingRescaling<M_Zn, M_Int>
     b_inv_mod_t: El<Zn>
 }
 
-impl<M_Zn, M_Int> CongruencePreservingRescaling<M_Zn, M_Int>
-    where M_Zn: MemoryProvider<ZnEl> + Clone,
-        M_Int: MemoryProvider<i64> + Clone
+impl<A> CongruencePreservingRescaling<A>
+    where A: Allocator + Clone
 {
-    pub fn scale_down(q_moduli: Vec<Zn>, den_moduli_count: usize, plaintext_modulus: Zn, memory_provider: M_Zn, memory_provider_int: M_Int) -> Self {
-        Self::new(q_moduli, Vec::new(), den_moduli_count, plaintext_modulus, memory_provider, memory_provider_int)
+    pub fn scale_down(q_moduli: Vec<Zn>, den_moduli_count: usize, plaintext_modulus: Zn, allocator: A) -> Self {
+        Self::new(q_moduli, Vec::new(), den_moduli_count, plaintext_modulus, allocator)
     }
 
     ///
@@ -66,7 +65,7 @@ impl<M_Zn, M_Int> CongruencePreservingRescaling<M_Zn, M_Int>
     ///  - `b` is the product of the first `den_moduli_count` elements of `in_moduli`
     /// At least the moduli belonging to `b` are expected to be sorted.
     /// 
-    pub fn new(in_moduli: Vec<Zn>, num_moduli: Vec<Zn>, den_moduli_count: usize, plaintext_modulus: Zn, memory_provider: M_Zn, memory_provider_int: M_Int) -> Self {
+    pub fn new(in_moduli: Vec<Zn>, num_moduli: Vec<Zn>, den_moduli_count: usize, plaintext_modulus: Zn, allocator: A) -> Self {
         let ZZ = plaintext_modulus.integer_ring();
         for ring in &in_moduli {
             assert!(ring.integer_ring().get_ring() == ZZ.get_ring());
@@ -92,9 +91,9 @@ impl<M_Zn, M_Int> CongruencePreservingRescaling<M_Zn, M_Int>
             aq_moduli: aq_moduli,
             aq_permutation: aq_permutation,
             b_inv_mod_t: plaintext_modulus.invert(&plaintext_modulus.coerce(&ZZbig, b)).unwrap(),
-            b_to_aq_lift: AlmostExactBaseConversion::new(b_moduli, aq_moduli_sorted.iter().cloned().collect(), memory_provider.clone(), memory_provider_int.clone()),
-            aq_to_t_conv: AlmostExactBaseConversion::new(aq_moduli_sorted, vec![plaintext_modulus], memory_provider.clone(), memory_provider_int),
-            memory_provider: memory_provider
+            b_to_aq_lift: AlmostExactBaseConversion::new(b_moduli, aq_moduli_sorted.iter().cloned().collect(), allocator.clone()),
+            aq_to_t_conv: AlmostExactBaseConversion::new(aq_moduli_sorted, vec![plaintext_modulus], allocator.clone()),
+            allocator: allocator
         }
     }
 
@@ -107,9 +106,8 @@ impl<M_Zn, M_Int> CongruencePreservingRescaling<M_Zn, M_Int>
     }
 }
 
-impl<M_Zn, M_Int> RNSOperation for CongruencePreservingRescaling<M_Zn, M_Int>
-    where M_Zn: MemoryProvider<ZnEl> + Clone,
-        M_Int: MemoryProvider<i64> + Clone
+impl<A> RNSOperation for CongruencePreservingRescaling<A>
+    where A: Allocator + Clone
 {
     type Ring = Zn;
 
@@ -142,7 +140,8 @@ impl<M_Zn, M_Int> RNSOperation for CongruencePreservingRescaling<M_Zn, M_Int>
         assert_eq!(input.col_count(), output.col_count());
 
         // Compute `x := el * a`
-        let mut x = self.memory_provider.get_new_init(self.aq_moduli().len() * input.col_count(), |idx| {
+        let mut x = Vec::with_capacity_in(self.aq_moduli().len() * input.col_count(), self.allocator.clone());
+        x.extend((0..(self.aq_moduli().len() * input.col_count())).map(|idx| {
             let i = idx / input.col_count();
             let j = idx % input.col_count();
             if i < self.input_rings().len() {
@@ -150,13 +149,14 @@ impl<M_Zn, M_Int> RNSOperation for CongruencePreservingRescaling<M_Zn, M_Int>
             } else {
                 self.aq_moduli().at(i).zero()
             }
-        });
+        }));
         let mut x = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut x, self.aq_moduli().len(), input.col_count());
 
         let x_mod_b = x.as_const().restrict_rows(0..self.b_moduli_count);
 
         // Compute `lift(x mod b)`; Here we introduce an error of `+/- b`
-        let mut x_mod_b_lift = self.memory_provider.get_new_init(self.aq_moduli().len() * input.col_count(), |idx| self.aq_moduli().at(idx / input.col_count()).zero());
+        let mut x_mod_b_lift = Vec::with_capacity_in(self.aq_moduli().len() * input.col_count(), self.allocator.clone());
+        x_mod_b_lift.extend((0..(self.aq_moduli().len() * input.col_count())).map(|idx| self.aq_moduli().at(idx / input.col_count()).zero()));
         let mut x_mod_b_lift = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut x_mod_b_lift, self.aq_moduli().len(), input.col_count());
         self.b_to_aq_lift.apply(x_mod_b, x_mod_b_lift.reborrow());
         // `x_mod_b_lift` is ordered according to `self.aq_moduli_sorted()`, not `self.aq_moduli()`
@@ -164,17 +164,18 @@ impl<M_Zn, M_Int> RNSOperation for CongruencePreservingRescaling<M_Zn, M_Int>
         // Make `x` divisible by `b` by subtracting `lift(x mod b)`
         for (i, Zk) in self.aq_moduli().iter().enumerate() {
             for j in 0..input.col_count() {
-                Zk.sub_assign_ref(x.at(i, j), x_mod_b_lift.at(self.aq_permutation[i], j));
+                Zk.sub_assign_ref(x.at_mut(i, j), x_mod_b_lift.at(self.aq_permutation[i], j));
             }
         }
 
         // now we have to ensure congruence; the difference between `x = el * a` and `b * exactdiv(x, b)` is exactly `x_mod_b_lift`;
         // this is small, so no error here
-        let mut diff_mod_t = self.memory_provider.get_new_init(input.col_count(), |_j| self.t_modulus().zero());
+        let mut diff_mod_t = Vec::with_capacity_in(input.col_count(), self.allocator.clone());
+        diff_mod_t.extend((0..input.col_count()).map(|_j| self.t_modulus().zero()));
         let mut diff_mod_t = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut diff_mod_t, 1, input.col_count());
         self.aq_to_t_conv.apply(x_mod_b_lift.as_const(), diff_mod_t.reborrow());
         for j in 0..input.col_count() {
-            self.t_modulus().mul_assign_ref(diff_mod_t.at(0, j), &self.b_inv_mod_t);
+            self.t_modulus().mul_assign_ref(diff_mod_t.at_mut(0, j), &self.b_inv_mod_t);
         }
 
         // this is now `round((aq/b) * el / q)`, possibly `+/- 1`
@@ -182,17 +183,15 @@ impl<M_Zn, M_Int> RNSOperation for CongruencePreservingRescaling<M_Zn, M_Int>
             let modulo = Zk.can_hom(self.t_modulus().integer_ring()).unwrap();
             debug_assert!(Zk.integer_ring().get_ring() == self.t_modulus().integer_ring().get_ring());
             for j in 0..input.col_count() {
-                *output.at(i, j) = Zk.mul_ref(x.at(i + self.b_moduli_count, j), self.b_inv.at(i));
+                *output.at_mut(i, j) = Zk.mul_ref(x.at(i + self.b_moduli_count, j), self.b_inv.at(i));
 
                 // fix the congruence
-                Zk.add_assign(output.at(i, j), modulo.map(self.t_modulus().smallest_lift(self.t_modulus().clone_el(diff_mod_t.at(0, j)))));
+                Zk.add_assign(output.at_mut(i, j), modulo.map(self.t_modulus().smallest_lift(self.t_modulus().clone_el(diff_mod_t.at(0, j)))));
             }
         }
     }
 }
 
-#[cfg(test)]
-use feanor_math::default_memory_provider;
 #[cfg(test)]
 use feanor_math::assert_el_eq;
 
@@ -209,8 +208,7 @@ fn test_rescale() {
         to.clone(), 
         3,
         Zt.clone(), 
-        default_memory_provider!(), 
-        default_memory_provider!()
+        Global
     );
 
     let ZZ_to_Zt = Zt.int_hom();
@@ -253,8 +251,7 @@ fn test_rescale_down() {
         from.clone(), 
         1,
         Zt.clone(), 
-        default_memory_provider!(), 
-        default_memory_provider!()
+        Global
     );
 
     let ZZ_to_Zt = Zt.int_hom();

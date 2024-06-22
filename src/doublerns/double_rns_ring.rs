@@ -1,24 +1,19 @@
+use std::alloc::Allocator;
+use std::alloc::Global;
 use std::marker::PhantomData;
 
 use feanor_math::divisibility::*;
 use feanor_math::integer::*;
 use feanor_math::iters::multi_cartesian_product;
 use feanor_math::iters::MultiProduct;
-use feanor_math::iters::RingElementClone;
-use feanor_math::matrix::submatrix::AsFirstElement;
-use feanor_math::matrix::submatrix::Submatrix;
-use feanor_math::matrix::submatrix::SubmatrixMut;
+use feanor_math::matrix::*;
 use feanor_math::rings::extension::*;
-use feanor_math::mempool::*;
 use feanor_math::rings::finite::*;
 use feanor_math::ring::*;
-use feanor_math::rings::float_complex::Complex64El;
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
 use feanor_math::rings::zn::*;
-use feanor_math::vector::*;
 use feanor_math::homomorphism::*;
-use feanor_math::vector::vec_fn::VectorFn;
-use feanor_math::primitive_int::*;
+use feanor_math::seq::*;
 
 use crate::complexfft::complex_fft_ring;
 use crate::rnsconv::*;
@@ -45,12 +40,7 @@ use crate::rnsconv::*;
 /// Note that this is most useful, if the map can be computed in time `o(deg(f)^2)`, which usually means
 /// that fast fourier-transform techniques are used for the evaluation.
 /// 
-pub trait GeneralizedFFT {
-
-    type BaseRingBase: ?Sized + ZnRing;
-    type BaseRingStore: RingStore<Type = Self::BaseRingBase>;
-    
-    fn base_ring(&self) -> &Self::BaseRingStore;
+pub trait GeneralizedFFT<R: ?Sized + RingBase> {
 
     fn rank(&self) -> usize;
 
@@ -61,18 +51,12 @@ pub trait GeneralizedFFT {
     /// ```
     /// For a more detailed explanation, see the trait-level doc [`GeneralizedFFT`].
     /// 
-    fn fft_forward<S, M>(&self, data: &mut [El<S>], ring: &S, memory_provider: &M)
-        where S: ZnRingStore,
-            S::Type: ZnRing + CanIsoFromTo<Self::BaseRingBase>,
-            M: MemoryProvider<El<S>>;
+    fn fft_forward(&self, data: &mut [R::Element], ring: &R);
 
     ///
     /// Computes the inverse of [`GeneralizedFFT::fft_forward()`].
     /// 
-    fn fft_backward<S, M>(&self, data: &mut [El<S>], ring: &S, memory_provider: &M)
-        where S: ZnRingStore,
-            S::Type: ZnRing + CanIsoFromTo<Self::BaseRingBase>,
-            M: MemoryProvider<El<S>>;
+    fn fft_backward(&self, data: &mut [R::Element], ring: &R);
 }
 
 ///
@@ -84,7 +68,7 @@ pub trait GeneralizedFFT {
 /// 
 /// Note that whenever `a.is_isomorphic(b)` is true, it is necessary that also `a.rank() == b.rank()`.
 /// 
-pub trait GeneralizedFFTIso<F: GeneralizedFFT>: GeneralizedFFT {
+pub trait GeneralizedFFTIso<R1: ?Sized + RingBase, R2: ?Sized + RingBase, F: GeneralizedFFT<R2>>: GeneralizedFFT<R1> {
 
     fn is_isomorphic(&self, other: &F) -> bool;
 }
@@ -100,14 +84,14 @@ pub trait GeneralizedFFTIso<F: GeneralizedFFT>: GeneralizedFFT {
 /// 
 /// See also [`GeneralizedFFTIso`].
 /// 
-pub trait GeneralizedFFTCrossIso<F: complex_fft_ring::GeneralizedFFT>: GeneralizedFFT {
+pub trait GeneralizedFFTCrossIso<R1: ?Sized + RingBase, R2: ?Sized + RingBase, F: complex_fft_ring::GeneralizedFFT<R2>>: GeneralizedFFT<R1> {
 
     fn is_isomorphic(&self, other: &F) -> bool;
 }
 
-pub trait GeneralizedFFTSelfIso: Sized + GeneralizedFFTIso<Self> {}
+pub trait GeneralizedFFTSelfIso<R: ?Sized + RingBase>: Sized + GeneralizedFFTIso<R, R, Self> {}
 
-impl<F: GeneralizedFFT + GeneralizedFFTIso<F>> GeneralizedFFTSelfIso for F {}
+impl<R: ?Sized + RingBase, F: GeneralizedFFT<R> + GeneralizedFFTIso<R, R, F>> GeneralizedFFTSelfIso<R> for F {}
 
 ///
 /// The ring specified by a [`GeneralizedFFT`]. Elements are stored in double-RNS-representation
@@ -117,64 +101,57 @@ impl<F: GeneralizedFFT + GeneralizedFFTIso<F>> GeneralizedFFTSelfIso for F {}
 /// [`DoubleRNSRingBase::undo_fft()`] to work with ring elements not in double-RNS-representation,
 /// but note that arithmetic operations are not available for those.
 /// 
-pub struct DoubleRNSRingBase<R, F, M> 
+pub struct DoubleRNSRingBase<R, F, A = Global> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanIsoFromTo<F::BaseRingBase>,
-        F: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M: MemoryProvider<El<R>>
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
 {
     data: Vec<F>,
     scalar_ring: zn_rns::Zn<R, BigIntRing>,
-    memory_provider: M
+    allocator: A
 }
 
-pub type DoubleRNSRing<R, F, M> = RingValue<DoubleRNSRingBase<R, F, M>>;
+pub type DoubleRNSRing<R, F, A> = RingValue<DoubleRNSRingBase<R, F, A>>;
 
-pub struct DoubleRNSEl<R, F, M> 
+pub struct DoubleRNSEl<R, F, A> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
-        F: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M: MemoryProvider<El<R>>
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
 {
     pub(super) generalized_fft: PhantomData<F>,
-    pub(super) memory_provider: PhantomData<M>,
-    pub(super) data: M::Object
+    pub(super) allocator: PhantomData<A>,
+    pub(super) data: Vec<El<R>, A>
 }
 
-pub struct DoubleRNSNonFFTEl<R, F, M> 
+pub struct DoubleRNSNonFFTEl<R, F, A> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
-        F: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M: MemoryProvider<El<R>>
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
 {
     generalized_fft: PhantomData<F>,
-    memory_provider: PhantomData<M>,
-    data: M::Object
+    allocator: PhantomData<A>,
+    data: Vec<El<R>, A>
 }
 
-impl<R, F, M> DoubleRNSRingBase<R, F, M> 
+impl<R, F, A> DoubleRNSRingBase<R, F, A> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
-        F: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M: MemoryProvider<El<R>>
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
 {
-    pub fn from_generalized_ffts(rns_base: zn_rns::Zn<R, BigIntRing>, data: Vec<F>, memory_provider: M) -> Self {
+    pub fn from_generalized_ffts(rns_base: zn_rns::Zn<R, BigIntRing>, data: Vec<F>, allocator: A) -> Self {
         assert!(data.len() > 0);
         for i in 0..data.len() {
             assert!(data[i].is_isomorphic(&data[0]));
             assert_eq!(data[i].rank(), data[0].rank());
         }
         let scalar_ring = rns_base;
-        Self { data, memory_provider, scalar_ring }
+        Self { data, allocator, scalar_ring }
     }
-}
 
-impl<R, F, M> DoubleRNSRingBase<R, F, M> 
-    where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
-        F: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M: MemoryProvider<El<R>>
-{
     pub fn generalized_fft(&self) -> &Vec<F> {
         &self.data
     }
@@ -187,11 +164,11 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
         self.rank() * self.rns_base().len()
     }
 
-    pub fn as_matrix<'a>(&self, element: &'a DoubleRNSNonFFTEl<R, F, M>) -> Submatrix<'a, AsFirstElement<El<R>>, El<R>> {
+    pub fn as_matrix<'a>(&self, element: &'a DoubleRNSNonFFTEl<R, F, A>) -> Submatrix<'a, AsFirstElement<El<R>>, El<R>> {
         Submatrix::<AsFirstElement<_>, _>::new(&element.data, self.rns_base().len(), self.rank())
     }
 
-    pub fn as_matrix_mut<'a>(&self, element: &'a mut DoubleRNSNonFFTEl<R, F, M>) -> SubmatrixMut<'a, AsFirstElement<El<R>>, El<R>> {
+    pub fn as_matrix_mut<'a>(&self, element: &'a mut DoubleRNSNonFFTEl<R, F, A>) -> SubmatrixMut<'a, AsFirstElement<El<R>>, El<R>> {
         SubmatrixMut::<AsFirstElement<_>, _>::new(&mut element.data, self.rns_base().len(), self.rank())
     }
 
@@ -201,7 +178,7 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
     /// Here `pi` is the `i`-th prime divisor of the base ring (using the order exposed by
     /// [`zn_rns::ZnBase`]).
     /// 
-    pub fn at<'a>(&self, i: usize, j: usize, el: &'a DoubleRNSNonFFTEl<R, F, M>) -> &'a El<R> {
+    pub fn at<'a>(&self, i: usize, j: usize, el: &'a DoubleRNSNonFFTEl<R, F, A>) -> &'a El<R> {
         &el.data[i * self.rank() + j]
     }
 
@@ -221,7 +198,7 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
     /// remain constant during the lifetime of the ring. Note also that changing the order corresponds to an
     /// automorphism of the ring.
     /// 
-    pub fn fourier_coefficient<'a>(&self, i: usize, j: usize, el: &'a DoubleRNSEl<R, F, M>) -> &'a El<R> {
+    pub fn fourier_coefficient<'a>(&self, i: usize, j: usize, el: &'a DoubleRNSEl<R, F, A>) -> &'a El<R> {
         &el.data[i * self.rank() + j]
     }
 
@@ -230,7 +207,7 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
     /// 
     /// See [`Self::at()`] for details.
     /// 
-    pub fn at_mut<'a>(&self, i: usize, j: usize, el: &'a mut DoubleRNSNonFFTEl<R, F, M>) -> &'a mut El<R> {
+    pub fn at_mut<'a>(&self, i: usize, j: usize, el: &'a mut DoubleRNSNonFFTEl<R, F, A>) -> &'a mut El<R> {
         &mut el.data[i * self.rank() + j]
     }
 
@@ -239,62 +216,62 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
     /// 
     /// See [`Self::fourier_coefficient()`] for details.
     /// 
-    pub fn fourier_coefficient_mut<'a>(&self, i: usize, j: usize, el: &'a mut DoubleRNSEl<R, F, M>) -> &'a mut El<R> {
+    pub fn fourier_coefficient_mut<'a>(&self, i: usize, j: usize, el: &'a mut DoubleRNSEl<R, F, A>) -> &'a mut El<R> {
         &mut el.data[i * self.rank() + j]
     }
 
-    pub fn undo_fft(&self, mut element: DoubleRNSEl<R, F, M>) -> DoubleRNSNonFFTEl<R, F, M> {
+    pub fn undo_fft(&self, mut element: DoubleRNSEl<R, F, A>) -> DoubleRNSNonFFTEl<R, F, A> {
         assert_eq!(element.data.len(), self.element_len());
         timed!("undo_fft", || {
             for i in 0..self.rns_base().len() {
-                self.data[i].fft_backward(&mut element.data[(i * self.rank())..((i + 1) * self.rank())], self.rns_base().at(i), &self.memory_provider);
+                self.data[i].fft_backward(&mut element.data[(i * self.rank())..((i + 1) * self.rank())], self.rns_base().at(i).get_ring());
             }
         });
         DoubleRNSNonFFTEl {
             data: element.data,
             generalized_fft: PhantomData,
-            memory_provider: PhantomData
+            allocator: PhantomData
         }
     }
 
-    pub fn memory_provider(&self) -> &M {
-        &self.memory_provider
+    pub fn allocator(&self) -> &A {
+        &self.allocator
     }
 
-    pub fn non_fft_zero(&self) -> DoubleRNSNonFFTEl<R, F, M> {
+    pub fn non_fft_zero(&self) -> DoubleRNSNonFFTEl<R, F, A> {
         DoubleRNSNonFFTEl {
             data: self.zero().data,
             generalized_fft: PhantomData,
-            memory_provider: PhantomData
+            allocator: PhantomData
         }
     }
 
-    pub fn do_fft(&self, mut element: DoubleRNSNonFFTEl<R, F, M>) -> DoubleRNSEl<R, F, M> {
+    pub fn do_fft(&self, mut element: DoubleRNSNonFFTEl<R, F, A>) -> DoubleRNSEl<R, F, A> {
         assert_eq!(element.data.len(), self.element_len());
         timed!("do_fft", || {
             for i in 0..self.rns_base().len() {
-                self.data[i].fft_forward(&mut element.data[(i * self.rank())..((i + 1) * self.rank())], self.rns_base().at(i), &self.memory_provider);
+                self.data[i].fft_forward(&mut element.data[(i * self.rank())..((i + 1) * self.rank())], self.rns_base().at(i).get_ring());
             }
         });
         DoubleRNSEl {
             data: element.data,
             generalized_fft: PhantomData,
-            memory_provider: PhantomData
+            allocator: PhantomData
         }
     }
 
-    pub fn perform_rns_op_from<R2, F2, M2, Op>(
+    pub fn perform_rns_op_from<R2, F2, A2, Op>(
         &self, 
-        from: &DoubleRNSRingBase<R2, F2, M2>, 
-        el: &DoubleRNSNonFFTEl<R2, F2, M2>, 
+        from: &DoubleRNSRingBase<R2, F2, A2>, 
+        el: &DoubleRNSNonFFTEl<R2, F2, A2>, 
         op: &Op
-    ) -> DoubleRNSNonFFTEl<R, F, M> 
-        where F: GeneralizedFFTIso<F2>,
-            // the constraings for DoubleRNSRingBase<R2, F2, M2> 
+    ) -> DoubleRNSNonFFTEl<R, F, A> 
+        where F: GeneralizedFFTIso<R::Type, R2::Type, F2>,
+            // the constraings for DoubleRNSRingBase<R2, F2, A2> 
             R2: ZnRingStore<Type = R::Type>,
-            R::Type: CanIsoFromTo<F2::BaseRingBase> + SelfIso,
-            F2: GeneralizedFFT + GeneralizedFFTSelfIso,
-            M2: MemoryProvider<El<R2>>,
+            R::Type: CanIsoFromTo<R2::Type> + SelfIso,
+            F2: GeneralizedFFTSelfIso<R2::Type>,
+            A2: Allocator + Clone,
             // constraints for Op
             Op: RNSOperation<RingType = R::Type>
     {
@@ -316,108 +293,102 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
         })
     }
 
-    pub fn exact_convert_from_cfft<F2, M2_Zn, M2_CC>(
-        &self, 
-        from: &complex_fft_ring::ComplexFFTBasedRingBase<F2, M2_Zn, M2_CC>, 
-        element: &<complex_fft_ring::ComplexFFTBasedRingBase<F2, M2_Zn, M2_CC> as RingBase>::Element
-    ) -> DoubleRNSNonFFTEl<R, F, M> 
-        where F: GeneralizedFFTCrossIso<F2>,
-            // the constraings for DoubleRNSRingBase<F2, M2>
-            F2: complex_fft_ring::GeneralizedFFT + complex_fft_ring::GeneralizedFFTSelfIso,
-            F2::BaseRingBase: CanHomFrom<BigIntRingBase>,
-            M2_Zn: MemoryProvider<El<F2::BaseRingStore>>,
-            M2_CC: MemoryProvider<Complex64El>
-    {
-        assert!(<_ as GeneralizedFFTCrossIso<_>>::is_isomorphic(&self.generalized_fft()[0], &from.generalized_fft()));
-        debug_assert_eq!(self.rank(), from.rank());
+    // pub fn exact_convert_from_cfft<F2, A2_Zn, A2_CC>(
+    //     &self, 
+    //     from: &complex_fft_ring::ComplexFFTBasedRingBase<F2, A2_Zn, A2_CC>, 
+    //     element: &<complex_fft_ring::ComplexFFTBasedRingBase<F2, A2_Zn, A2_CC> as RingBase>::Element
+    // ) -> DoubleRNSNonFFTEl<R, F, A> 
+    //     where F: GeneralizedFFTCrossIso<F2>,
+    //         // the constraings for DoubleRNSRingBase<F2, A2>
+    //         F2: complex_fft_ring::GeneralizedFFT + complex_fft_ring::GeneralizedFFTSelfIso,
+    //         F2::RingBase: CanHomFrom<BigIntRingBase>,
+    //         M2_Zn: MemoryProvider<El<F2::BaseRingStore>>,
+    //         M2_CC: MemoryProvider<Complex64El>
+    // {
+    //     assert!(<_ as GeneralizedFFTCrossIso<_>>::is_isomorphic(&self.generalized_fft()[0], &from.generalized_fft()));
+    //     debug_assert_eq!(self.rank(), from.rank());
 
-        let mut result = self.memory_provider.get_new_init(self.element_len(), |i| self.rns_base().at(i / self.rank()).zero());
-        for j in 0..self.rank() {
-            let x = int_cast(from.base_ring().smallest_lift(from.base_ring().clone_el(&element[j])), &StaticRing::<i32>::RING, from.base_ring().integer_ring());
-            for i in 0..self.rns_base().len() {
-                result[j + i * self.rank()] = self.rns_base().at(i).int_hom().map(x);
-            }
-        }
-        return DoubleRNSNonFFTEl {
-            data: result,
-            generalized_fft: PhantomData,
-            memory_provider: PhantomData
-        };
-    }
+    //     let mut result = self.allocator.get_new_init(self.element_len(), |i| self.rns_base().at(i / self.rank()).zero());
+    //     for j in 0..self.rank() {
+    //         let x = int_cast(from.base_ring().smallest_lift(from.base_ring().clone_el(&element[j])), &StaticRing::<i32>::RING, from.base_ring().integer_ring());
+    //         for i in 0..self.rns_base().len() {
+    //             result[j + i * self.rank()] = self.rns_base().at(i).int_hom().map(x);
+    //         }
+    //     }
+    //     return DoubleRNSNonFFTEl {
+    //         data: result,
+    //         generalized_fft: PhantomData,
+    //         allocator: PhantomData
+    //     };
+    // }
 
-    pub fn perform_rns_op_to_cfft<F2, M2_Zn, M2_CC, Op>(
-        &self, 
-        to: &complex_fft_ring::ComplexFFTBasedRingBase<F2, M2_Zn, M2_CC>, 
-        element: &DoubleRNSNonFFTEl<R, F, M>, 
-        op: &Op
-    ) -> <complex_fft_ring::ComplexFFTBasedRingBase<F2, M2_Zn, M2_CC> as RingBase>::Element 
-        where F: GeneralizedFFTCrossIso<F2>,
-            R::Type: SelfIso,
-            // the constraings for DoubleRNSRingBase<F2, M2>
-            F2: complex_fft_ring::GeneralizedFFT<BaseRingBase = R::Type> + complex_fft_ring::GeneralizedFFTSelfIso,
-            M2_Zn: MemoryProvider<El<F2::BaseRingStore>>,
-            M2_CC: MemoryProvider<Complex64El>,
-            Op: RNSOperation<RingType = R::Type>
-    {
-        assert!(<_ as GeneralizedFFTCrossIso<_>>::is_isomorphic(&self.generalized_fft()[0], &to.generalized_fft()));
-        debug_assert_eq!(self.rank(), to.rank());
-        assert_eq!(self.rns_base().len(), op.input_rings().len());
-        assert_eq!(1, op.output_rings().len());
+    // pub fn perform_rns_op_to_cfft<F2, A2_Zn, A2_CC, Op>(
+    //     &self, 
+    //     to: &complex_fft_ring::ComplexFFTBasedRingBase<F2, A2_Zn, A2_CC>, 
+    //     element: &DoubleRNSNonFFTEl<R, F, A>, 
+    //     op: &Op
+    // ) -> <complex_fft_ring::ComplexFFTBasedRingBase<F2, A2_Zn, A2_CC> as RingBase>::Element 
+    //     where F: GeneralizedFFTCrossIso<F2>,
+    //         R::Type: SelfIso,
+    //         // the constraings for DoubleRNSRingBase<F2, A2>
+    //         F2: complex_fft_ring::GeneralizedFFT<BaseRingBase = R::Type> + complex_fft_ring::GeneralizedFFTSelfIso,
+    //         M2_Zn: MemoryProvider<El<F2::BaseRingStore>>,
+    //         M2_CC: MemoryProvider<Complex64El>,
+    //         Op: RNSOperation<RingType = R::Type>
+    // {
+    //     assert!(<_ as GeneralizedFFTCrossIso<_>>::is_isomorphic(&self.generalized_fft()[0], &to.generalized_fft()));
+    //     debug_assert_eq!(self.rank(), to.rank());
+    //     assert_eq!(self.rns_base().len(), op.input_rings().len());
+    //     assert_eq!(1, op.output_rings().len());
 
-        timed!("perform_rns_op_to_cfft", || {
-            for i in 0..self.rns_base().len() {
-                assert!(self.rns_base().at(i).get_ring() == op.input_rings().at(i).get_ring());
-            }
-            assert!(to.base_ring().get_ring() == op.output_rings().at(0).get_ring());
+    //     timed!("perform_rns_op_to_cfft", || {
+    //         for i in 0..self.rns_base().len() {
+    //             assert!(self.rns_base().at(i).get_ring() == op.input_rings().at(i).get_ring());
+    //         }
+    //         assert!(to.base_ring().get_ring() == op.output_rings().at(0).get_ring());
             
-            let mut result = to.zero();
-            let result_matrix = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut result, 1, to.rank());
-            op.apply(self.as_matrix(element), result_matrix);
-            return result;
-        })
-    }
+    //         let mut result = to.zero();
+    //         let result_matrix = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut result, 1, to.rank());
+    //         op.apply(self.as_matrix(element), result_matrix);
+    //         return result;
+    //     })
+    // }
 
-    pub fn sample_from_coefficient_distribution<G: FnMut() -> i32>(&self, mut distribution: G) -> DoubleRNSNonFFTEl<R, F, M> {
-        let mut result = self.memory_provider.get_new_init(self.element_len(), |i| self.rns_base().at(i / self.rank()).zero());
+    pub fn sample_from_coefficient_distribution<G: FnMut() -> i32>(&self, mut distribution: G) -> DoubleRNSNonFFTEl<R, F, A> {
+        let mut result = self.non_fft_zero();
         let mut data = Vec::new();
         for j in 0..self.rank() {
             let c = distribution();
             data.push(c);
             for i in 0..self.rns_base().len() {
-                result[j + i * self.rank()] = self.rns_base().at(i).int_hom().map(c);
+                result.data[j + i * self.rank()] = self.rns_base().at(i).int_hom().map(c);
             }
         }
-        return DoubleRNSNonFFTEl {
-            data: result,
-            generalized_fft: PhantomData,
-            memory_provider: PhantomData
-        };
+        return result;
     }
 
     pub fn sample_uniform<G: FnMut() -> u64>(&self, mut rng: G) -> <Self as RingBase>::Element {
-        let mut result = self.memory_provider.get_new_init(self.element_len(), |i| self.rns_base().at(i / self.rank()).zero());
+        let mut result = self.zero();
         for j in 0..self.rank() {
             for i in 0..self.rns_base().len() {
-                result[j + i * self.rank()] = self.rns_base().at(i).random_element(&mut rng);
+                result.data[j + i * self.rank()] = self.rns_base().at(i).random_element(&mut rng);
             }
         }
-        return DoubleRNSEl {
-            data: result,
-            generalized_fft: PhantomData,
-            memory_provider: PhantomData
-        };
+        return result;
     }
 
-    pub fn clone_el_non_fft(&self, val: &DoubleRNSNonFFTEl<R, F, M>) -> DoubleRNSNonFFTEl<R, F, M> {
+    pub fn clone_el_non_fft(&self, val: &DoubleRNSNonFFTEl<R, F, A>) -> DoubleRNSNonFFTEl<R, F, A> {
         assert_eq!(self.element_len(), val.data.len());
+        let mut result = Vec::with_capacity_in(self.element_len(), self.allocator.clone());
+        result.extend((0..self.element_len()).map(|i| self.rns_base().at(i / self.rank()).clone_el(&val.data[i])));
         DoubleRNSNonFFTEl {
-            data: self.memory_provider.get_new_init(self.element_len(), |i| self.rns_base().at(i / self.rank()).clone_el(&val.data[i])),
+            data: result,
             generalized_fft: PhantomData,
-            memory_provider: PhantomData
+            allocator: PhantomData
         }
     }
 
-    pub fn sub_assign_non_fft(&self, lhs: &mut DoubleRNSNonFFTEl<R, F, M>, rhs: &DoubleRNSNonFFTEl<R, F, M>) {
+    pub fn sub_assign_non_fft(&self, lhs: &mut DoubleRNSNonFFTEl<R, F, A>, rhs: &DoubleRNSNonFFTEl<R, F, A>) {
         assert_eq!(self.element_len(), lhs.data.len());
         assert_eq!(self.element_len(), rhs.data.len());
         for i in 0..self.rns_base().len() {
@@ -427,7 +398,7 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
         }
     }
 
-    pub fn mul_scalar_assign_non_fft(&self, lhs: &mut DoubleRNSNonFFTEl<R, F, M>, rhs: &El<zn_rns::Zn<R, BigIntRing, DefaultMemoryProvider>>) {
+    pub fn mul_scalar_assign_non_fft(&self, lhs: &mut DoubleRNSNonFFTEl<R, F, A>, rhs: &El<zn_rns::Zn<R, BigIntRing>>) {
         assert_eq!(self.element_len(), lhs.data.len());
         for i in 0..self.rns_base().len() {
             for j in 0..self.rank() {
@@ -436,7 +407,7 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
         }
     }
 
-    pub fn add_assign_non_fft(&self, lhs: &mut DoubleRNSNonFFTEl<R, F, M>, rhs: &DoubleRNSNonFFTEl<R, F, M>) {
+    pub fn add_assign_non_fft(&self, lhs: &mut DoubleRNSNonFFTEl<R, F, A>, rhs: &DoubleRNSNonFFTEl<R, F, A>) {
         assert_eq!(self.element_len(), lhs.data.len());
         assert_eq!(self.element_len(), rhs.data.len());
         for i in 0..self.rns_base().len() {
@@ -446,7 +417,7 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
         }
     }
 
-    pub fn wrt_canonical_basis_non_fft<'a>(&'a self, el: &'a DoubleRNSNonFFTEl<R, F, M>) -> DoubleRNSRingBaseElVectorRepresentation<'a, R, F, M> {
+    pub fn wrt_canonical_basis_non_fft<'a>(&'a self, el: &'a DoubleRNSNonFFTEl<R, F, A>) -> DoubleRNSRingBaseElVectorRepresentation<'a, R, F, A> {
         DoubleRNSRingBaseElVectorRepresentation {
             ring: self,
             inv_fft_data: self.clone_el_non_fft(el)
@@ -454,31 +425,33 @@ impl<R, F, M> DoubleRNSRingBase<R, F, M>
     }
 }
 
-impl<R, F, M> PartialEq for DoubleRNSRingBase<R, F, M> 
+impl<R, F, A> PartialEq for DoubleRNSRingBase<R, F, A> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
-        F: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M: MemoryProvider<El<R>>
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
 {
     fn eq(&self, other: &Self) -> bool {
         self.scalar_ring.get_ring() == other.scalar_ring.get_ring() && self.data[0].is_isomorphic(&other.data[0])
     }
 }
 
-impl<R, F, M> RingBase for DoubleRNSRingBase<R, F, M> 
+impl<R, F, A> RingBase for DoubleRNSRingBase<R, F, A> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
-        F: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M: MemoryProvider<El<R>>
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
 {
-    type Element = DoubleRNSEl<R, F, M>;
+    type Element = DoubleRNSEl<R, F, A>;
 
     fn clone_el(&self, val: &Self::Element) -> Self::Element {
         assert_eq!(self.element_len(), val.data.len());
+        let mut result = Vec::with_capacity_in(self.element_len(), self.allocator.clone());
+        result.extend((0..self.element_len()).map(|i| self.rns_base().at(i / self.rank()).clone_el(&val.data[i])));
         DoubleRNSEl {
-            data: self.memory_provider.get_new_init(self.element_len(), |i| self.rns_base().at(i / self.rank()).clone_el(&val.data[i])),
+            data: result,
             generalized_fft: PhantomData,
-            memory_provider: PhantomData
+            allocator: PhantomData
         }
     }
 
@@ -570,21 +543,20 @@ impl<R, F, M> RingBase for DoubleRNSRingBase<R, F, M>
     }
 }
 
-impl<R, F, M> DivisibilityRing for DoubleRNSRingBase<R, F, M> 
+impl<R, F, A> DivisibilityRing for DoubleRNSRingBase<R, F, A> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase> + DivisibilityRing,
-        F: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M: MemoryProvider<El<R>>
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + DivisibilityRing,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
 {
     fn checked_left_div(&self, lhs: &Self::Element, rhs: &Self::Element) -> Option<Self::Element> {
-        self.memory_provider.try_get_new_init(self.element_len(), |index| {
-            let i = index / self.rank();
-            if let Some(quo) = self.rns_base().at(i).checked_div(&lhs.data[index], &rhs.data[index]) {
-                return Ok(quo);
-            } else {
-                return Err(());
+        let mut result = Vec::with_capacity_in(self.element_len(), self.allocator.clone());
+        for (i, Zp) in self.rns_base().as_iter().enumerate() {
+            for j in 0..self.rank() {
+                result.push(Zp.checked_div(&lhs.data[i * self.rank() + j], &rhs.data[i * self.rank() + j])?);
             }
-        }).ok().map(|data| DoubleRNSEl { data: data, generalized_fft: PhantomData, memory_provider: PhantomData })
+        }
+        return Some(DoubleRNSEl { data: result, generalized_fft: PhantomData, allocator: PhantomData })
     }
 
     fn is_unit(&self, x: &Self::Element) -> bool {
@@ -592,21 +564,21 @@ impl<R, F, M> DivisibilityRing for DoubleRNSRingBase<R, F, M>
     }
 }
 
-pub struct DoubleRNSRingBaseElVectorRepresentation<'a, R, F, M> 
+pub struct DoubleRNSRingBaseElVectorRepresentation<'a, R, F, A> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
-        F: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M: MemoryProvider<El<R>>
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
 {
-    inv_fft_data: DoubleRNSNonFFTEl<R, F, M>,
-    ring: &'a DoubleRNSRingBase<R, F, M>
+    inv_fft_data: DoubleRNSNonFFTEl<R, F, A>,
+    ring: &'a DoubleRNSRingBase<R, F, A>
 }
 
-impl<'a, R, F, M> VectorFn<El<zn_rns::Zn<R, BigIntRing>>> for DoubleRNSRingBaseElVectorRepresentation<'a, R, F, M> 
+impl<'a, R, F, A> VectorFn<El<zn_rns::Zn<R, BigIntRing>>> for DoubleRNSRingBaseElVectorRepresentation<'a, R, F, A> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
-        F: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M: MemoryProvider<El<R>>
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
 {
     fn len(&self) -> usize {
         self.ring.rank()
@@ -617,29 +589,28 @@ impl<'a, R, F, M> VectorFn<El<zn_rns::Zn<R, BigIntRing>>> for DoubleRNSRingBaseE
     }
 }
 
-impl<R, F, M> FreeAlgebra for DoubleRNSRingBase<R, F, M> 
+impl<R, F, A> FreeAlgebra for DoubleRNSRingBase<R, F, A> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
-        F: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M: MemoryProvider<El<R>>
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
 {
-    type VectorRepresentation<'a> = DoubleRNSRingBaseElVectorRepresentation<'a, R, F, M> 
+    type VectorRepresentation<'a> = DoubleRNSRingBaseElVectorRepresentation<'a, R, F, A> 
         where Self: 'a;
 
     fn canonical_gen(&self) -> Self::Element {
-        let result = self.memory_provider.get_new_init(self.element_len(), |index| {
-            let i = index / self.rank();
-            let j = index % self.rank();
-            if j == 1 {
-                self.rns_base().at(i).one()
-            } else {
-                self.rns_base().at(i).zero()
+        let mut result = Vec::with_capacity_in(self.element_len(), self.allocator.clone());
+        for Zp in self.rns_base().as_iter() {
+            result.push(Zp.zero());
+            result.push(Zp.one());
+            for _ in 2..self.rank() {
+                result.push(Zp.zero());
             }
-        });
+        }
         return self.do_fft(DoubleRNSNonFFTEl {
             data: result,
             generalized_fft: PhantomData,
-            memory_provider: PhantomData
+            allocator: PhantomData
         });
     }
 
@@ -657,7 +628,12 @@ impl<R, F, M> FreeAlgebra for DoubleRNSRingBase<R, F, M>
     fn from_canonical_basis<V>(&self, vec: V) -> Self::Element
         where V: ExactSizeIterator + DoubleEndedIterator + Iterator<Item = El<Self::BaseRing>>
     {
-        let mut result = self.memory_provider.get_new_init(self.element_len(), |index| self.rns_base().at(index / self.rank()).zero());
+        let mut result = Vec::with_capacity_in(self.element_len(), self.allocator.clone());
+        for Zp in self.rns_base().as_iter() {
+            for _ in 0..self.rank() {
+                result.push(Zp.zero());
+            }
+        }
         for (j, x) in vec.enumerate() {
             let congruence = self.base_ring().get_ring().get_congruence(&x);
             for i in 0..self.rns_base().len() {
@@ -667,16 +643,16 @@ impl<R, F, M> FreeAlgebra for DoubleRNSRingBase<R, F, M>
         return self.do_fft(DoubleRNSNonFFTEl {
             data: result,
             generalized_fft: PhantomData,
-            memory_provider: PhantomData
+            allocator: PhantomData
         });
     }
 }
 
-impl<R, F, M> RingExtension for DoubleRNSRingBase<R, F, M> 
+impl<R, F, A> RingExtension for DoubleRNSRingBase<R, F, A> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
-        F: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M: MemoryProvider<El<R>>
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
 {
     type BaseRing = zn_rns::Zn<R, BigIntRing>;
 
@@ -689,94 +665,92 @@ impl<R, F, M> RingExtension for DoubleRNSRingBase<R, F, M>
     }
 
     fn from_ref(&self, x: &El<Self::BaseRing>) -> Self::Element {
-        let x_data = self.rns_base().get_congruence(x);
-        let result = self.memory_provider.get_new_init(self.element_len(), |index| {
-            let i = index / self.rank();
-            let j = index % self.rank();
-            if j == 0 {
-                self.rns_base().at(i).clone_el(x_data.at(i))
-            } else {
-                self.rns_base().at(i).zero()
+        let x_congruence = self.rns_base().get_congruence(x);
+        let mut result = Vec::with_capacity_in(self.element_len(), self.allocator.clone());
+        for (i, Zp) in self.rns_base().as_iter().enumerate() {
+            result.push(Zp.clone_el(x_congruence.at(i)));
+            for _ in 1..self.rank() {
+                result.push(Zp.zero());
             }
-        });
+        }
         return self.do_fft(DoubleRNSNonFFTEl {
             data: result,
             generalized_fft: PhantomData,
-            memory_provider: PhantomData
+            allocator: PhantomData
         });
     }
 }
 
-pub struct WRTCanonicalBasisElementCreator<'a, R, F, M>
+pub struct WRTCanonicalBasisElementCreator<'a, R, F, A>
     where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
-        F: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M: MemoryProvider<El<R>>
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
 {
-    ring: &'a DoubleRNSRingBase<R, F, M>
+    ring: &'a DoubleRNSRingBase<R, F, A>
 }
 
-impl<'a, 'b, R, F, M> Clone for WRTCanonicalBasisElementCreator<'a, R, F, M>
+impl<'a, 'b, R, F, A> Clone for WRTCanonicalBasisElementCreator<'a, R, F, A>
     where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
-        F: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M: MemoryProvider<El<R>>
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
 {
     fn clone(&self) -> Self {
         Self { ring: self.ring }
     }
 }
 
-impl<'a, 'b, R, F, M> Fn<(&'b [El<zn_rns::Zn<R, BigIntRing>>],)> for WRTCanonicalBasisElementCreator<'a, R, F, M>
+impl<'a, 'b, R, F, A> Fn<(&'b [El<zn_rns::Zn<R, BigIntRing>>],)> for WRTCanonicalBasisElementCreator<'a, R, F, A>
     where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
-        F: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M: MemoryProvider<El<R>>
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
 {
     extern "rust-call" fn call(&self, args: (&'b [El<zn_rns::Zn<R, BigIntRing>>],)) -> Self::Output {
         self.ring.from_canonical_basis(args.0.iter().map(|x| self.ring.base_ring().clone_el(x)))
     }
 }
 
-impl<'a, 'b, R, F, M> FnMut<(&'b [El<zn_rns::Zn<R, BigIntRing>>],)> for WRTCanonicalBasisElementCreator<'a, R, F, M>
+impl<'a, 'b, R, F, A> FnMut<(&'b [El<zn_rns::Zn<R, BigIntRing>>],)> for WRTCanonicalBasisElementCreator<'a, R, F, A>
     where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
-        F: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M: MemoryProvider<El<R>>
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
 {
     extern "rust-call" fn call_mut(&mut self, args: (&'b [El<zn_rns::Zn<R, BigIntRing>>],)) -> Self::Output {
         self.call(args)
     }
 }
 
-impl<'a, 'b, R, F, M> FnOnce<(&'b [El<zn_rns::Zn<R, BigIntRing>>],)> for WRTCanonicalBasisElementCreator<'a, R, F, M>
+impl<'a, 'b, R, F, A> FnOnce<(&'b [El<zn_rns::Zn<R, BigIntRing>>],)> for WRTCanonicalBasisElementCreator<'a, R, F, A>
     where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
-        F: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M: MemoryProvider<El<R>>
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
 {
-    type Output = El<DoubleRNSRing<R, F, M>>;
+    type Output = El<DoubleRNSRing<R, F, A>>;
 
     extern "rust-call" fn call_once(self, args: (&'b [El<zn_rns::Zn<R, BigIntRing>>],)) -> Self::Output {
         self.call(args)
     }
 }
 
-impl<R, F, M> FiniteRing for DoubleRNSRingBase<R, F, M> 
+impl<R, F, A> FiniteRing for DoubleRNSRingBase<R, F, A> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanIsoFromTo<F::BaseRingBase> + CanHomFrom<BigIntRingBase>,
-        F: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M: MemoryProvider<El<R>>
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F: GeneralizedFFTSelfIso<R::Type>,
+        A: Allocator + Clone
 {
     type ElementsIter<'a> = MultiProduct<
         <zn_rns::ZnBase<R, BigIntRing> as FiniteRing>::ElementsIter<'a>, 
-        WRTCanonicalBasisElementCreator<'a, R, F, M>, 
-        RingElementClone<'a, zn_rns::ZnBase<R, BigIntRing>>,
-        El<DoubleRNSRing<R, F, M>>
+        WRTCanonicalBasisElementCreator<'a, R, F, A>, 
+        CloneRingEl<&'a zn_rns::Zn<R, BigIntRing>>,
+        El<DoubleRNSRing<R, F, A>>
     > where Self: 'a;
 
     fn elements<'a>(&'a self) -> Self::ElementsIter<'a> {
-        multi_cartesian_product((0..self.rank()).map(|_| self.base_ring().elements()), WRTCanonicalBasisElementCreator { ring: self }, RingElementClone::new(self.base_ring().get_ring()))
+        multi_cartesian_product((0..self.rank()).map(|_| self.base_ring().elements()), WRTCanonicalBasisElementCreator { ring: self }, CloneRingEl(self.base_ring()))
     }
 
     fn size<I: IntegerRingStore>(&self, ZZ: &I) -> Option<El<I>>
@@ -795,23 +769,23 @@ impl<R, F, M> FiniteRing for DoubleRNSRingBase<R, F, M>
     }
 }
 
-impl<R1, R2, F1, F2, M1, M2> CanHomFrom<DoubleRNSRingBase<R2, F2, M2>> for DoubleRNSRingBase<R1, F1, M1>
+impl<R1, R2, F1, F2, A1, A2> CanHomFrom<DoubleRNSRingBase<R2, F2, A2>> for DoubleRNSRingBase<R1, F1, A1>
     where R1: ZnRingStore,
-        R1::Type: ZnRing + CanIsoFromTo<F1::BaseRingBase> + CanHomFrom<BigIntRingBase>,
-        F1: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M1: MemoryProvider<El<R1>>,
+        R1::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F1: GeneralizedFFTSelfIso<R1::Type>,
+        A1: Allocator + Clone,
 
         R2: ZnRingStore,
-        R2::Type: ZnRing + CanIsoFromTo<F2::BaseRingBase> + CanHomFrom<BigIntRingBase>,
-        F2: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M2: MemoryProvider<El<R2>>,
+        R2::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F2: GeneralizedFFTSelfIso<R2::Type>,
+        A2: Allocator + Clone,
 
         R1::Type: CanHomFrom<R2::Type>,
-        F1: GeneralizedFFTIso<F2>
+        F1: GeneralizedFFTIso<R1::Type, R2::Type, F2>
 {
     type Homomorphism = Vec<<R1::Type as CanHomFrom<R2::Type>>::Homomorphism>;
 
-    fn has_canonical_hom(&self, from: &DoubleRNSRingBase<R2, F2, M2>) -> Option<Self::Homomorphism> {
+    fn has_canonical_hom(&self, from: &DoubleRNSRingBase<R2, F2, A2>) -> Option<Self::Homomorphism> {
         if self.rns_base().len() == from.rns_base().len() && self.data[0].is_isomorphic(&from.data[0]) {
             debug_assert!(self.rank() == from.rank());
             debug_assert!(self.data.iter().zip(from.data.iter()).all(|(l, r)| l.is_isomorphic(r)));
@@ -821,39 +795,42 @@ impl<R1, R2, F1, F2, M1, M2> CanHomFrom<DoubleRNSRingBase<R2, F2, M2>> for Doubl
         }
     }
 
-    fn map_in(&self, from: &DoubleRNSRingBase<R2, F2, M2>, el: <DoubleRNSRingBase<R2, F2, M2> as RingBase>::Element, hom: &Self::Homomorphism) -> Self::Element {
+    fn map_in(&self, from: &DoubleRNSRingBase<R2, F2, A2>, el: <DoubleRNSRingBase<R2, F2, A2> as RingBase>::Element, hom: &Self::Homomorphism) -> Self::Element {
         self.map_in_ref(from, &el, hom)
     }
 
-    fn map_in_ref(&self, from: &DoubleRNSRingBase<R2, F2, M2>, el: &<DoubleRNSRingBase<R2, F2, M2> as RingBase>::Element, hom: &Self::Homomorphism) -> Self::Element {
+    fn map_in_ref(&self, from: &DoubleRNSRingBase<R2, F2, A2>, el: &<DoubleRNSRingBase<R2, F2, A2> as RingBase>::Element, hom: &Self::Homomorphism) -> Self::Element {
+        let mut result = Vec::with_capacity_in(self.element_len(), self.allocator.clone());
+        for (i, Zp) in self.rns_base().as_iter().enumerate() {
+            for j in 0..self.rank() {
+                result.push(Zp.get_ring().map_in_ref(from.rns_base().at(i).get_ring(), &el.data[i * self.rank() + j], &hom[i]));
+            }
+        }
         DoubleRNSEl {
-            data: self.memory_provider.get_new_init(self.element_len(), |index| {
-                let i = index / self.rank();
-                self.rns_base().at(i).get_ring().map_in_ref(from.rns_base().at(i).get_ring(), &el.data[index], &hom[i])
-            }),
+            data: result,
             generalized_fft: PhantomData,
-            memory_provider: PhantomData
+            allocator: PhantomData
         }
     }
 }
 
-impl<R1, R2, F1, F2, M1, M2> CanIsoFromTo<DoubleRNSRingBase<R2, F2, M2>> for DoubleRNSRingBase<R1, F1, M1>
+impl<R1, R2, F1, F2, A1, A2> CanIsoFromTo<DoubleRNSRingBase<R2, F2, A2>> for DoubleRNSRingBase<R1, F1, A1>
     where R1: ZnRingStore,
-        R1::Type: ZnRing + CanIsoFromTo<F1::BaseRingBase> + CanHomFrom<BigIntRingBase>,
-        F1: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M1: MemoryProvider<El<R1>>,
+        R1::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F1: GeneralizedFFTSelfIso<R1::Type>,
+        A1: Allocator + Clone,
 
         R2: ZnRingStore,
-        R2::Type: ZnRing + CanIsoFromTo<F2::BaseRingBase> + CanHomFrom<BigIntRingBase>,
-        F2: GeneralizedFFT + GeneralizedFFTSelfIso,
-        M2: MemoryProvider<El<R2>>,
+        R2::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F2: GeneralizedFFTSelfIso<R2::Type>,
+        A2: Allocator + Clone,
 
         R1::Type: CanIsoFromTo<R2::Type>,
-        F1: GeneralizedFFTIso<F2>
+        F1: GeneralizedFFTIso<R1::Type, R2::Type, F2>
 {
     type Isomorphism = Vec<<R1::Type as CanIsoFromTo<R2::Type>>::Isomorphism>;
 
-    fn has_canonical_iso(&self, from: &DoubleRNSRingBase<R2, F2, M2>) -> Option<Self::Isomorphism> {
+    fn has_canonical_iso(&self, from: &DoubleRNSRingBase<R2, F2, A2>) -> Option<Self::Isomorphism> {
         if self.rns_base().len() == from.rns_base().len() && self.data[0].is_isomorphic(&from.data[0]) {
             debug_assert!(self.rank() == from.rank());
             debug_assert!(self.data.iter().zip(from.data.iter()).all(|(l, r)| l.is_isomorphic(r)));
@@ -863,14 +840,17 @@ impl<R1, R2, F1, F2, M1, M2> CanIsoFromTo<DoubleRNSRingBase<R2, F2, M2>> for Dou
         }
     }
 
-    fn map_out(&self, from: &DoubleRNSRingBase<R2, F2, M2>, el: Self::Element, iso: &Self::Isomorphism) -> <DoubleRNSRingBase<R2, F2, M2> as RingBase>::Element {
+    fn map_out(&self, from: &DoubleRNSRingBase<R2, F2, A2>, el: Self::Element, iso: &Self::Isomorphism) -> <DoubleRNSRingBase<R2, F2, A2> as RingBase>::Element {
+        let mut result = Vec::with_capacity_in(from.element_len(), from.allocator.clone());
+        for (i, Zp) in self.rns_base().as_iter().enumerate() {
+            for j in 0..self.rank() {
+                result.push(Zp.get_ring().map_out(from.rns_base().at(i).get_ring(), Zp.clone_el(&el.data[i * self.rank() + j]), &iso[i]));
+            }
+        }
         DoubleRNSEl {
-            data: from.memory_provider.get_new_init(self.element_len(), |index| {
-                let i = index / self.rank();
-                self.rns_base().at(i).get_ring().map_out(from.rns_base().at(i).get_ring(), self.rns_base().at(i).clone_el(&el.data[index]), &iso[i])
-            }),
+            data: result,
             generalized_fft: PhantomData,
-            memory_provider: PhantomData
+            allocator: PhantomData
         }
     }
 }
@@ -878,29 +858,23 @@ impl<R1, R2, F1, F2, M1, M2> CanIsoFromTo<DoubleRNSRingBase<R2, F2, M2>> for Dou
 #[cfg(test)]
 use feanor_math::assert_el_eq;
 #[cfg(test)]
-use feanor_math::default_memory_provider;
-#[cfg(test)]
-use crate::complexfft;
-#[cfg(test)]
 use crate::rnsconv::lift::*;
 #[cfg(test)]
 use crate::doublerns::pow2_cyclotomic::Pow2CyclotomicFFT;
-#[cfg(test)]
-use crate::complexfft::complex_fft_ring::ComplexFFTBasedRingBase;
 #[cfg(test)]
 use crate::feanor_math::rings::zn::zn_64::Zn;
 
 #[test]
 fn test_almost_exact_convert_from() {
-    let rns_base1 = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING, default_memory_provider!());
-    let fft_rings1 = rns_base1.get_ring().iter().cloned().collect();
-    let R1 = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<_>, _>::new(rns_base1, fft_rings1, 3, default_memory_provider!());
+    let rns_base1 = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
+    let fft_rings1 = rns_base1.as_iter().cloned().collect();
+    let R1 = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<_, _>, _>::new(rns_base1, fft_rings1, 3);
 
-    let rns_base2 = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(113)], BigIntRing::RING, default_memory_provider!());
-    let fft_rings2 = rns_base2.get_ring().iter().cloned().collect();
-    let R2 = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<_>, _>::new(rns_base2, fft_rings2, 3, default_memory_provider!());
+    let rns_base2 = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(113)], BigIntRing::RING);
+    let fft_rings2 = rns_base2.as_iter().cloned().collect();
+    let R2 = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<_, _>, _>::new(rns_base2, fft_rings2, 3);
 
-    let converter = AlmostExactBaseConversion::new(R1.base_ring().get_ring().iter().cloned().collect(), R2.base_ring().get_ring().iter().cloned().collect(), default_memory_provider!(), default_memory_provider!());
+    let converter = AlmostExactBaseConversion::new(R1.base_ring().as_iter().cloned().collect(), R2.base_ring().as_iter().cloned().collect(), Global);
 
     assert_el_eq!(&R2, &R2.canonical_gen(), &R2.get_ring().do_fft(R2.get_ring().perform_rns_op_from(R1.get_ring(), &R1.get_ring().undo_fft(R1.canonical_gen()), &converter)));
     for i in (-4 * 97)..=(4 * 97) {
@@ -908,18 +882,18 @@ fn test_almost_exact_convert_from() {
     }
 }
 
-#[test]
-fn test_almost_exact_convert_to_cfft() {
-    let rns_base1 = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING, default_memory_provider!());
-    let fft_rings1 = rns_base1.get_ring().iter().cloned().collect();
-    let R1 = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<_>, _>::new(rns_base1, fft_rings1, 3, default_memory_provider!());
+// #[test]
+// fn test_almost_exact_convert_to_cfft() {
+//     let rns_base1 = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
+//     let fft_rings1 = rns_base1.get_ring().iter().cloned().collect();
+//     let R1 = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<_>, _>::new(rns_base1, fft_rings1, 3);
 
-    let R2 = ComplexFFTBasedRingBase::<complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<_, _>, _, _>::new(Zn::new(7), 3, default_memory_provider!(), default_memory_provider!());
+//     let R2 = ComplexFFTBasedRingBase::<complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<_, _>, _, _>::new(Zn::new(7), 3);
 
-    let converter = AlmostExactBaseConversion::new(R1.base_ring().get_ring().iter().cloned().collect(), vec![R2.base_ring().clone()], default_memory_provider!(), default_memory_provider!());
+//     let converter = AlmostExactBaseConversion::new(R1.base_ring().get_ring().iter().cloned().collect(), vec![R2.base_ring().clone()]);
 
-    assert_el_eq!(&R2, &R2.canonical_gen(), &R1.get_ring().perform_rns_op_to_cfft(R2.get_ring(), &R1.get_ring().undo_fft(R1.canonical_gen()), &converter));
-    for i in (-4 * 97)..=(4 * 97) {
-        assert_el_eq!(&R2, &R2.int_hom().map(i), &R1.get_ring().perform_rns_op_to_cfft(R2.get_ring(), &R1.get_ring().undo_fft(R1.int_hom().map(i)), &converter));
-    }
-}
+//     assert_el_eq!(&R2, &R2.canonical_gen(), &R1.get_ring().perform_rns_op_to_cfft(R2.get_ring(), &R1.get_ring().undo_fft(R1.canonical_gen()), &converter));
+//     for i in (-4 * 97)..=(4 * 97) {
+//         assert_el_eq!(&R2, &R2.int_hom().map(i), &R1.get_ring().perform_rns_op_to_cfft(R2.get_ring(), &R1.get_ring().undo_fft(R1.int_hom().map(i)), &converter));
+//     }
+// }

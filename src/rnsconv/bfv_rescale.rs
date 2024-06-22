@@ -1,16 +1,15 @@
-use feanor_math::matrix::submatrix::*;
-use feanor_math::mempool::*;
-use feanor_math::mempool::caching::*;
+use feanor_math::matrix::*;
 use feanor_math::homomorphism::*;
 use feanor_math::rings::zn::*;
 use feanor_math::rings::zn::zn_64::*;
 use feanor_math::integer::*;
 use feanor_math::divisibility::DivisibilityRingStore;
 use feanor_math::ring::*;
-use feanor_math::vector::*;
+use feanor_math::seq::*;
 use feanor_math::ordered::OrderedRingStore;
 
-use std::rc::Rc;
+use std::alloc::Allocator;
+use std::alloc::Global;
 
 use super::lift::AlmostExactBaseConversion;
 
@@ -38,19 +37,17 @@ const ZZbig: BigIntRing = BigIntRing::RING;
 /// ```
 /// for an arbitrary `c`, which can be implemented just as easily.
 /// 
-pub struct AlmostExactRescalingConvert<M_Zn = DefaultMemoryProvider, M_Int = Rc<CachingMemoryProvider<i64>>>
-    where M_Zn: MemoryProvider<El<Zn>>,
-        M_Int: MemoryProvider<i64>
+pub struct AlmostExactRescalingConvert<A = Global>
+    where A: Allocator + Clone
 {
     // rescale `Z/qZ -> Z/(aq/b)Z`
-    rescaling: AlmostExactRescaling<M_Zn, M_Int>,
+    rescaling: AlmostExactRescaling<A>,
     // convert `Z/(aq/b)Z -> Z/bZ`
-    convert: AlmostExactBaseConversion<M_Zn, M_Int>
+    convert: AlmostExactBaseConversion<A>
 }
 
-impl<'a, M_Zn, M_Int> AlmostExactRescalingConvert<M_Zn, M_Int>
-    where M_Zn: MemoryProvider<ZnEl> + Clone,
-        M_Int: MemoryProvider<i64> + Clone
+impl<A> AlmostExactRescalingConvert<A>
+    where A: Allocator + Clone
 {
     ///
     /// Creates a new [`AlmostExactRescalingConvert`], where
@@ -59,21 +56,19 @@ impl<'a, M_Zn, M_Int> AlmostExactRescalingConvert<M_Zn, M_Int>
     ///  - `b` is the product of the first `den_moduli_count` elements of `in_moduli`
     /// At least the moduli belonging to `b` are expected to be sorted.
     /// 
-    pub fn new(in_moduli: Vec<Zn>, num_moduli: Vec<Zn>, den_moduli_count: usize, memory_provider: M_Zn, memory_provider_int: M_Int) -> Self {
-        let rescaling = AlmostExactRescaling::new(in_moduli.clone(), num_moduli, den_moduli_count, memory_provider.clone(), memory_provider_int.clone());
+    pub fn new(in_moduli: Vec<Zn>, num_moduli: Vec<Zn>, den_moduli_count: usize, allocator: A) -> Self {
+        let rescaling = AlmostExactRescaling::new(in_moduli.clone(), num_moduli, den_moduli_count, allocator.clone());
         let convert = AlmostExactBaseConversion::new(
             rescaling.output_rings().iter().cloned().collect(),
             in_moduli[..den_moduli_count].iter().cloned().collect(),
-            memory_provider,
-            memory_provider_int,
+            allocator,
         );
         return Self { rescaling, convert };
     }
 }
 
-impl<M_Zn, M_Int> RNSOperation for AlmostExactRescalingConvert<M_Zn, M_Int>
-    where M_Zn: MemoryProvider<ZnEl>,
-        M_Int: MemoryProvider<i64>
+impl<A> RNSOperation for AlmostExactRescalingConvert<A>
+    where A: Allocator + Clone
 {
     type Ring = Zn;
 
@@ -92,7 +87,7 @@ impl<M_Zn, M_Int> RNSOperation for AlmostExactRescalingConvert<M_Zn, M_Int>
                 V2: AsPointerToSlice<El<Self::Ring>>
     {
         assert_eq!(input.col_count(), output.col_count());
-        let mut tmp = self.rescaling.memory_provider.get_new_init(self.rescaling.output_rings().len() * input.col_count(), |idx| self.rescaling.output_rings().at(idx  / input.col_count()).zero());
+        let mut tmp = (0..(self.rescaling.output_rings().len() * input.col_count())).map(|idx| self.rescaling.output_rings().at(idx  / input.col_count()).zero()).collect::<Vec<_>>();
         let mut tmp = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut tmp, self.rescaling.output_rings().len(), input.col_count());
         self.rescaling.apply(input, tmp.reborrow());
         self.convert.apply(tmp.as_const(), output);
@@ -123,7 +118,7 @@ impl<M_Zn, M_Int> RNSOperation for AlmostExactRescalingConvert<M_Zn, M_Int>
 /// let from = vec![Zn::new(17), Zn::new(19), Zn::new(23)];
 /// let from_modulus = 17 * 19 * 23;
 /// let to = vec![Zn::new(29)];
-/// let rescaling = AlmostExactRescaling::new(from.clone(), to.clone(), 3, default_memory_provider!(), default_memory_provider!());
+/// let rescaling = AlmostExactRescaling::new(from.clone(), to.clone(), 3);
 /// let mut output = [to[0].zero()];
 ///
 /// let x = 1000;
@@ -142,25 +137,23 @@ impl<M_Zn, M_Int> RNSOperation for AlmostExactRescalingConvert<M_Zn, M_Int>
 ///     &output[0]);
 /// ```
 /// 
-pub struct AlmostExactRescaling<M_Zn, M_Int>
-    where M_Zn: MemoryProvider<ZnEl>,
-        M_Int: MemoryProvider<i64>
+pub struct AlmostExactRescaling<A>
+    where A: Allocator + Clone
 {
     q_moduli: Vec<Zn>,
     /// `q_moduli[i + b_moduli_count] = aq_over_b_moduli[q_to_aq_over_b_permutation[i]]`
     q_over_b_to_aq_over_b_permutation: Vec<usize>,
     /// contains the moduli of `q` and then the moduli of `a`
-    b_to_aq_over_b_lift: AlmostExactBaseConversion<M_Zn, M_Int>,
+    b_to_aq_over_b_lift: AlmostExactBaseConversion<A>,
     /// a as element of each modulus of `q` (ordered as `q_moduli`)
     a: Vec<El<Zn>>,
     /// 1/b as element of each modulus of `aq/b` (ordered as `self.aq_over_b_moduli()`)
     b_inv: Vec<El<Zn>>,
-    memory_provider: M_Zn
+    allocator: A
 }
 
-impl<'a, M_Zn, M_Int> AlmostExactRescaling<M_Zn, M_Int>
-    where M_Zn: MemoryProvider<ZnEl> + Clone,
-        M_Int: MemoryProvider<i64> + Clone
+impl<A> AlmostExactRescaling<A>
+    where A: Allocator + Clone
 {
     ///
     /// Creates a new [`AlmostExactRescaling`], where
@@ -169,7 +162,7 @@ impl<'a, M_Zn, M_Int> AlmostExactRescaling<M_Zn, M_Int>
     ///  - `b` is the product of the first `den_moduli_count` elements of `in_moduli`
     /// At least the moduli belonging to `b` are expected to be sorted.
     /// 
-    pub fn new(in_moduli: Vec<Zn>, num_moduli: Vec<Zn>, den_moduli_count: usize, memory_provider: M_Zn, memory_provider_int: M_Int) -> Self {
+    pub fn new(in_moduli: Vec<Zn>, num_moduli: Vec<Zn>, den_moduli_count: usize, allocator: A) -> Self {
         let a_moduli_count = num_moduli.len();
         let ZZ = in_moduli[0].integer_ring();
         for ring in &in_moduli {
@@ -193,8 +186,7 @@ impl<'a, M_Zn, M_Int> AlmostExactRescaling<M_Zn, M_Int>
         let b_to_aq_over_b_lift = AlmostExactBaseConversion::new(
             b_moduli,
             aq_over_b_moduli,
-            memory_provider.clone(),
-            memory_provider_int
+            allocator.clone()
         );
         let inv_b = b_to_aq_over_b_lift.output_rings()
             .iter()
@@ -207,14 +199,13 @@ impl<'a, M_Zn, M_Int> AlmostExactRescaling<M_Zn, M_Int>
             b_to_aq_over_b_lift: b_to_aq_over_b_lift,
             q_over_b_to_aq_over_b_permutation: q_over_b_to_aq_over_b_permutation,
             q_moduli: in_moduli, 
-            memory_provider: memory_provider
+            allocator: allocator
         }
     }
 }
 
-impl<M_Zn, M_Int> AlmostExactRescaling<M_Zn, M_Int>
-    where M_Zn: MemoryProvider<ZnEl>,
-        M_Int: MemoryProvider<i64>
+impl<A> AlmostExactRescaling<A>
+    where A: Allocator + Clone
 {
     fn b_moduli<'a>(&'a self) -> &'a [Zn] {
         self.b_to_aq_over_b_lift.input_rings()
@@ -229,9 +220,8 @@ impl<M_Zn, M_Int> AlmostExactRescaling<M_Zn, M_Int>
     }
 }
 
-impl<M_Zn, M_Int> RNSOperation for AlmostExactRescaling<M_Zn, M_Int>
-    where M_Zn: MemoryProvider<ZnEl>,
-        M_Int: MemoryProvider<i64>
+impl<A> RNSOperation for AlmostExactRescaling<A>
+    where A: Allocator + Clone
 {
     type Ring = Zn;
 
@@ -256,32 +246,32 @@ impl<M_Zn, M_Int> RNSOperation for AlmostExactRescaling<M_Zn, M_Int>
         let col_count = input.col_count();
 
         // Compute `x := el * a mod aq`, store it in `x_mod_b` and `x_mod_aq_over_b`
-        let mut x_mod_b = self.memory_provider.get_new_init(self.b_moduli().len() * col_count, |_| self.b_moduli().at(0).get_ring().zero());
+        let mut x_mod_b = Vec::with_capacity_in(self.b_moduli().len() * col_count, self.allocator.clone());
+        x_mod_b.extend((0..(self.b_moduli().len() * col_count)).map(|_| self.b_moduli().at(0).get_ring().zero()));
         let mut x_mod_b = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut x_mod_b, self.b_moduli().len(), col_count);
         for i in 0..self.b_moduli().len() {
             for j in 0..col_count {
-                *x_mod_b.at(i, j) = self.b_moduli().at(i).mul_ref(input.at(i, j), self.a.at(i));
+                *x_mod_b.at_mut(i, j) = self.b_moduli().at(i).mul_ref(input.at(i, j), self.a.at(i));
             }
         }
 
         for i in 0..self.aq_over_b_moduli().len() {
             for j in 0..col_count {
-                *output.at(i, j) = self.aq_over_b_moduli().at(i).zero();
+                *output.at_mut(i, j) = self.aq_over_b_moduli().at(i).zero();
             }
         }
         for i in self.b_moduli().len()..in_len {
             for j in 0..col_count {
                 let target_index = self.q_over_b_to_aq_over_b_permutation[i - self.b_moduli().len()];
-                *output.at(target_index, j) = self.aq_over_b_moduli().at(target_index).mul_ref(input.at(i, j), self.a.at(i));
+                *output.at_mut(target_index, j) = self.aq_over_b_moduli().at(target_index).mul_ref(input.at(i, j), self.a.at(i));
             }
         }
         let mut x_mod_aq_over_b = output;
 
         // Compute the shortest lift of `x mod b` to `aq/b`; Here we might introduce an error of `+/- b`
         // that will later be rescaled to `+/- 1`.
-        let mut x_mod_b_lift = self.memory_provider.get_new_init(self.aq_over_b_moduli().len() * col_count, |idx| 
-            self.aq_over_b_moduli().at(idx / col_count).zero()
-        );
+        let mut x_mod_b_lift: Vec<ZnEl, _> = Vec::with_capacity_in(self.aq_over_b_moduli().len() * col_count, self.allocator.clone());
+        x_mod_b_lift.extend((0..(self.aq_over_b_moduli().len() * col_count)).map(|idx| self.aq_over_b_moduli().at(idx / col_count).zero()));
         let mut x_mod_b_lift = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut x_mod_b_lift, self.aq_over_b_moduli().len(), col_count);
         self.b_to_aq_over_b_lift.apply(x_mod_b.as_const(), x_mod_b_lift.reborrow());
         debug_assert!(x_mod_b_lift.row_count() == self.aq_over_b_moduli().len());
@@ -289,9 +279,9 @@ impl<M_Zn, M_Int> RNSOperation for AlmostExactRescaling<M_Zn, M_Int>
         for (i, Zk) in self.aq_over_b_moduli().iter().enumerate() {
             for j in 0..col_count {
                 // Subtract `lift(x mod b) mod aq/b` from `x_mod_aq_over_b`
-                Zk.sub_assign_ref(x_mod_aq_over_b.at(i, j), x_mod_b_lift.at(i, j));
+                Zk.sub_assign_ref(x_mod_aq_over_b.at_mut(i, j), x_mod_b_lift.at(i, j));
                 // Now `x_mod_aq_over_b - lift(x mod b)` is divisibible by b
-                Zk.mul_assign_ref(x_mod_aq_over_b.at(i, j), self.b_inv.at(i));
+                Zk.mul_assign_ref(x_mod_aq_over_b.at_mut(i, j), self.b_inv.at(i));
             }
         }
     }
@@ -299,7 +289,7 @@ impl<M_Zn, M_Int> RNSOperation for AlmostExactRescaling<M_Zn, M_Int>
 }
 
 #[cfg(test)]
-use feanor_math::{assert_el_eq, default_memory_provider};
+use feanor_math::assert_el_eq;
 
 #[test]
 fn test_rescale() {
@@ -312,8 +302,7 @@ fn test_rescale() {
         from.clone(), 
         num.clone(), 
         2,
-        default_memory_provider!(), 
-        default_memory_provider!()
+        Global
     );
 
     for i in -(q/2)..=(q/2) {
@@ -341,8 +330,7 @@ fn test_rescale_small_num() {
         from.clone(), 
         num.clone(), 
         2,
-        default_memory_provider!(), 
-        default_memory_provider!()
+        Global
     );
 
     for i in -(q/2)..=(q/2) {
@@ -369,8 +357,7 @@ fn test_rescale_small() {
         from.clone(), 
         num.clone(), 
         3,
-        default_memory_provider!(), 
-        default_memory_provider!()
+        Global
     );
 
     // since Zm_intermediate has a very large modulus, we can ignore errors here at the moment (I think)
