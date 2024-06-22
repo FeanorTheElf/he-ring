@@ -12,6 +12,7 @@ use feanor_math::algorithms::matmul::ComputeInnerProduct;
 use feanor_math::matrix::*;
 
 use std::alloc::Allocator;
+use std::alloc::Global;
 use std::marker::PhantomData;
 
 use super::double_rns_ring::*;
@@ -25,7 +26,7 @@ use crate::rnsconv::*;
 /// some more data is stored to allow for faster computations later.
 /// For more details, see [`DoubleRNSRingBase::gadget_product()`].
 /// 
-pub enum GadgetProductRhsOperand<'a, F, A> 
+pub enum GadgetProductRhsOperand<'a, F, A = Global> 
     where F: GeneralizedFFTSelfIso<ZnBase>,
         A: Allocator + Clone
 {
@@ -33,7 +34,7 @@ pub enum GadgetProductRhsOperand<'a, F, A>
     Naive(&'a DoubleRNSRingBase<Zn, F, A>, Vec<El<DoubleRNSRing<Zn, F, A>>>)
 }
 
-pub struct LKSSGadgetProductRhsOperand<'a, F, A> 
+pub struct LKSSGadgetProductRhsOperand<'a, F, A = Global> 
     where F: GeneralizedFFTSelfIso<ZnBase>,
         A: Allocator + Clone
 {
@@ -78,7 +79,7 @@ impl<'a, F, A> GadgetProductRhsOperand<'a, F, A>
 /// `(lift((q / pi)^-1 mod pi) * q / pi)_i` where `q = p1 * ... * pm` is the ring modulus.
 /// For more details, see [`DoubleRNSRingBase::gadget_product()`].
 /// 
-pub enum GadgetProductLhsOperand<'a, F, A> 
+pub enum GadgetProductLhsOperand<'a, F, A = Global> 
     where F: GeneralizedFFTSelfIso<ZnBase>,
         A: Allocator + Clone
 {
@@ -193,7 +194,7 @@ impl<F, A> DoubleRNSRingBase<Zn, F, A>
             GadgetProductRhsOperand::LKSSStyle(LKSSGadgetProductRhsOperand {
                 ring: self,
                 operands: operands,
-                conversions: (0..self.rns_base().len()).map(|i| AlmostExactBaseConversion::new(
+                conversions: (0..self.rns_base().len()).map(|i| AlmostExactBaseConversion::new_with(
                     shortened_rns_base.get_ring().as_iter().cloned().collect(), 
                     vec![*self.rns_base().at(i)],
                     self.allocator().clone()
@@ -365,8 +366,6 @@ use crate::doublerns::pow2_cyclotomic::*;
 #[cfg(test)]
 use crate::profiling::print_all_timings;
 #[cfg(test)]
-use feanor_math::algorithms::fft::cooley_tuckey::*;
-#[cfg(test)]
 use zn_64::Zn;
 #[cfg(test)]
 use feanor_math::ordered::OrderedRingStore;
@@ -385,7 +384,7 @@ fn test_gadget_product() {
 
     {
         let rns_base = vec![Zn::new(17), Zn::new(97), Zn::new(113), Zn::new(193), Zn::new(241), Zn::new(257)];
-        let ring = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<_, CooleyTuckeyFFT<_, _, _>>, _>::new(zn_rns::Zn::new(rns_base.clone(), ZZbig), rns_base, 3);
+        let ring = DefaultPow2CyclotomicDoubleRNSRingBase::new(zn_rns::Zn::new(rns_base.clone(), ZZbig), 3);
 
         let rhs = ring_literal!(&ring, [0, 100000, 120000, 100, 60000, 160000, 0, 80000]);
         let mut rhs_op = ring.get_ring().gadget_product_rhs_empty();
@@ -412,7 +411,7 @@ fn test_gadget_product() {
     }
     {
         let rns_base = vec![Zn::new(17), Zn::new(97)];
-        let ring = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<_, CooleyTuckeyFFT<_, _, _>>, _>::new(zn_rns::Zn::new(rns_base.clone(), ZZbig), rns_base, 3);
+        let ring = DefaultPow2CyclotomicDoubleRNSRingBase::new(zn_rns::Zn::new(rns_base.clone(), ZZbig), 3);
 
         let rhs_factor = ring_literal!(&ring, [0, 1000, 1200, 1, 600, 1600, 0, 800]);
         let mut rhs_op = ring.get_ring().gadget_product_rhs_empty();
@@ -437,7 +436,7 @@ fn test_gadget_product_zero() {
     
     {
         let rns_base = vec![Zn::new(17), Zn::new(97), Zn::new(113), Zn::new(193), Zn::new(241), Zn::new(257)];
-        let ring = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<_, CooleyTuckeyFFT<_, _, _>>, _>::new(zn_rns::Zn::new(rns_base.clone(), ZZbig), rns_base.clone(), 3);
+        let ring = DefaultPow2CyclotomicDoubleRNSRingBase::new(zn_rns::Zn::new(rns_base.clone(), ZZbig), 3);
 
         let mut rhs_op = ring.get_ring().gadget_product_rhs_empty();
         for i in 0..rns_base.len() {
@@ -448,7 +447,7 @@ fn test_gadget_product_zero() {
     }
     {
         let rns_base = vec![Zn::new(17), Zn::new(97)];
-        let ring = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<_, CooleyTuckeyFFT<_, _, _>>, _>::new(zn_rns::Zn::new(rns_base.clone(), ZZbig), rns_base.clone(), 3);
+        let ring = DefaultPow2CyclotomicDoubleRNSRingBase::new(zn_rns::Zn::new(rns_base.clone(), ZZbig), 3);
 
         let mut rhs_op = ring.get_ring().gadget_product_rhs_empty();
         for i in 0..rns_base.len() {
@@ -467,9 +466,8 @@ fn bench_gadget_product(bencher: &mut Bencher) {
     let rns_base_len = 32;
     let rns_base: Vec<_> = (0..).map(|i| (i << (log2_n + 1)) + 1).filter(|p| is_prime(ZZ, &(*p as i64), 10)).map(Zn::new).take(rns_base_len).collect();
     let error_bound = ZZbig.can_hom(&ZZ).unwrap().map((rns_base.len() as i64 * *rns_base.last().unwrap().modulus() as i64) << log2_n);
-    let ring = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<_, CooleyTuckeyFFT<_, _, _>>, _>::new(
+    let ring = DefaultPow2CyclotomicDoubleRNSRingBase::new(
         zn_rns::Zn::new(rns_base.clone(), ZZbig), 
-        rns_base, 
         log2_n
     );
 

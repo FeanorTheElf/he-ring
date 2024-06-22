@@ -7,6 +7,7 @@ use feanor_math::assert_el_eq;
 use feanor_math::homomorphism::*;
 use feanor_math::integer::*;
 use feanor_math::rings::float_complex::Complex64Base;
+use feanor_math::rings::zn::zn_64;
 use feanor_math::seq::*;
 use feanor_math::rings::zn::{ZnRing, ZnRingStore, zn_rns};
 use feanor_math::rings::extension::*;
@@ -134,11 +135,12 @@ impl<R, F, A> CyclotomicRing for DoubleRNSRingBase<R, Pow2CyclotomicFFT<R, F>, A
     }
 }
 
-impl<R_main, R_twiddle> DoubleRNSRingBase<R_main, Pow2CyclotomicFFT<R_main, cooley_tuckey::CooleyTuckeyFFT<R_main::Type, R_twiddle::Type, CanHom<R_twiddle, R_main>>>>
+impl<R_main, R_twiddle, A> DoubleRNSRingBase<R_main, Pow2CyclotomicFFT<R_main, cooley_tuckey::CooleyTuckeyFFT<R_main::Type, R_twiddle::Type, CanHom<R_twiddle, R_main>>>, A>
     where R_main: RingStore + Clone,
         R_twiddle: RingStore,
         R_main::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanHomFrom<R_twiddle::Type>,
-        R_twiddle::Type: ZnRing
+        R_twiddle::Type: ZnRing,
+        A: Allocator + Default + Clone
 {
     pub fn new(base_ring: zn_rns::Zn<R_main, BigIntRing>, fft_rings: Vec<R_twiddle>, log2_n: usize) -> RingValue<Self> {
         let ffts = fft_rings.into_iter().enumerate().map(|(i, R)| {
@@ -155,7 +157,33 @@ impl<R_main, R_twiddle> DoubleRNSRingBase<R_main, Pow2CyclotomicFFT<R_main, cool
         RingValue::from(Self::from_generalized_ffts(
             base_ring,
             ffts,
-            Global
+            A::default()
+        ))
+    }
+}
+
+pub type DefaultPow2CyclotomicDoubleRNSRingBase<R = zn_64::Zn> = DoubleRNSRingBase<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckeyFFT<<R as RingStore>::Type, <R as RingStore>::Type, Identity<R>>>, Global>;
+pub type DefaultPow2CyclotomicDoubleRNSRing<R = zn_64::Zn> = DoubleRNSRing<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckeyFFT<<R as RingStore>::Type, <R as RingStore>::Type, Identity<R>>>, Global>;
+
+impl<R, A> DoubleRNSRingBase<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckeyFFT<R::Type, R::Type, Identity<R>>>, A>
+    where R: RingStore + Clone,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        A: Allocator + Default + Clone
+{
+    pub fn new(base_ring: zn_rns::Zn<R, BigIntRing>, log2_n: usize) -> RingValue<Self> {
+        let ffts = base_ring.as_iter().enumerate().map(|(_, R)| {
+            let root_of_unity = algorithms::unity_root::get_prim_root_of_unity_pow2(&R, log2_n + 1).unwrap();
+            let fft_table_root_of_unity = R.pow(R.clone_el(&root_of_unity), 2);
+            Pow2CyclotomicFFT::create(
+                R.clone(),
+                cooley_tuckey::CooleyTuckeyFFT::new(R.clone() as R, fft_table_root_of_unity, log2_n),
+                root_of_unity
+            )
+        }).collect();
+        RingValue::from(Self::from_generalized_ffts(
+            base_ring,
+            ffts,
+            A::default()
         ))
     }
 }
@@ -195,31 +223,27 @@ fn edge_case_elements<'a, R, F, A>(R: &'a DoubleRNSRing<R, F, A>) -> impl 'a + I
 #[test]
 fn test_ring_axioms() {
     let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
-    let fft_rings = rns_base.get_ring().as_iter().cloned().collect();
-    let R = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<_, cooley_tuckey::CooleyTuckeyFFT<_, _, _>>, _>::new(rns_base, fft_rings, 3);
+    let R = DefaultPow2CyclotomicDoubleRNSRingBase::new(rns_base, 3);
     feanor_math::ring::generic_tests::test_ring_axioms(&R, edge_case_elements(&R));
 }
 
 #[test]
 fn test_divisibility_axioms() {
     let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
-    let fft_rings = rns_base.get_ring().as_iter().cloned().collect();
-    let R = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<_, cooley_tuckey::CooleyTuckeyFFT<_, _, _>>, _>::new(rns_base, fft_rings, 3);
+    let R = DefaultPow2CyclotomicDoubleRNSRingBase::new(rns_base, 3);
     feanor_math::divisibility::generic_tests::test_divisibility_axioms(&R, edge_case_elements(&R));
 }
 
 #[test]
 fn test_free_algebra_axioms() {
     let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
-    let fft_rings = rns_base.get_ring().as_iter().cloned().collect();
-    let R = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<_, cooley_tuckey::CooleyTuckeyFFT<_, _, _>>, _>::new(rns_base, fft_rings, 3);
+    let R = DefaultPow2CyclotomicDoubleRNSRingBase::new(rns_base, 3);
     generic_test_free_algebra_axioms(R);
 }
 
 #[test]
 fn test_cyclotomic_ring_axioms() {
     let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
-    let fft_rings = rns_base.get_ring().as_iter().cloned().collect();
-    let R = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<_, cooley_tuckey::CooleyTuckeyFFT<_, _, _>>, _>::new(rns_base, fft_rings, 3);
+    let R = DefaultPow2CyclotomicDoubleRNSRingBase::new(rns_base, 3);
     generic_test_cyclotomic_ring_axioms(R);
 }

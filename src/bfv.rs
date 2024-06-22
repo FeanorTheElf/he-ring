@@ -1,10 +1,12 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 
+use std::alloc::Global;
 use std::time::Instant;
-use doublerns::double_rns_ring::*;
+use feanor_math::homomorphism::Identity;
 use feanor_math::ring::*;
 use feanor_math::assert_el_eq;
+use feanor_math::rings::float_complex::Complex64Base;
 use feanor_math::rings::zn::*;
 use feanor_math::rings::zn::zn_64::*;
 use feanor_math::primitive_int::StaticRing;
@@ -16,21 +18,30 @@ use feanor_math::ordered::OrderedRingStore;
 use feanor_math::rings::extension::FreeAlgebraStore;
 use feanor_math::seq::*;
 use feanor_math::rings::float_complex::Complex64;
-use profiling::*;
 
-use super::*;
+use crate::doublerns::pow2_cyclotomic::*;
+use crate::doublerns::gadget_product::*;
+use crate::complexfft::complex_fft_ring::*;
+use crate::doublerns::double_rns_ring::*;
+use crate::profiling::*;
+use crate::rnsconv;
 
 use rand::thread_rng;
 use rand::{Rng, CryptoRng};
 use rand_distr::StandardNormal;
 
-pub type PlaintextRing = complexfft::complex_fft_ring::ComplexFFTBasedRing<complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<Zn, cooley_tuckey::FFTTableCooleyTuckey<Complex64>>>;
-pub type FFTTable = doublerns::pow2_cyclotomic::Pow2CyclotomicFFT<cooley_tuckey::FFTTableCooleyTuckey<ZnFastmul>>;
-pub type CiphertextRing = DoubleRNSRing<Zn, FFTTable>;
+type PlaintextZn = zn_64::Zn;
+type PlaintextFFT = cooley_tuckey::CooleyTuckeyFFT<Complex64Base, Complex64Base, Identity<Complex64>>;
+pub type PlaintextRing = CCFFTRing<PlaintextZn, crate::complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<Zn, PlaintextFFT>>;
 
-pub type Ciphertext = (DoubleRNSNonFFTEl<Zn, FFTTable>, DoubleRNSNonFFTEl<Zn, FFTTable>);
+type CiphertextZn = zn_64::Zn;
+type CiphertextFFT = cooley_tuckey::CooleyTuckeyFFT<<CiphertextZn as RingStore>::Type, <CiphertextZn as RingStore>::Type, Identity<CiphertextZn>>;
+type CiphertextGenFFT = Pow2CyclotomicFFT<CiphertextZn, CiphertextFFT>;
+pub type CiphertextRing = DoubleRNSRing<Zn, CiphertextGenFFT>;
+
+pub type Ciphertext = (DoubleRNSNonFFTEl<Zn, CiphertextGenFFT>, DoubleRNSNonFFTEl<Zn, CiphertextGenFFT>);
 pub type SecretKey = El<CiphertextRing>;
-pub type GadgetProductOperand<'a> = doublerns::gadget_product::GadgetProductRhsOperand<'a, FFTTable>;
+pub type GadgetProductOperand<'a> = GadgetProductRhsOperand<'a, CiphertextGenFFT>;
 pub type KeySwitchKey<'a> = (GadgetProductOperand<'a>, GadgetProductOperand<'a>);
 pub type RelinKey<'a> = (GadgetProductOperand<'a>, GadgetProductOperand<'a>);
 
@@ -75,10 +86,9 @@ pub fn create_ciphertext_rings(log2_ring_degree: usize, q_min_bits: usize, q_max
 
     let rns_base = zn_rns::Zn::new(
         rns_base_components.into_iter().map(|p| p as u64).map(Zn::new).collect(), 
-        ZZbig, 
-        default_memory_provider!()
+        ZZbig
     );
-    let Q = ZZbig.prod(rns_base.get_ring().iter().map(|Fp: &Zn| int_cast(*Fp.modulus(), ZZbig, ZZ)));
+    let Q = ZZbig.prod(rns_base.as_iter().map(|Fp: &Zn| int_cast(*Fp.modulus(), ZZbig, ZZ)));
     assert!(ZZbig.is_geq(&Q, &ZZbig.power_of_two(q_min_bits)), "Failed to find a suitable ciphertext modulus within the given range");
     
     let mut current_mul_bits = 0.;
@@ -86,7 +96,7 @@ pub fn create_ciphertext_rings(log2_ring_degree: usize, q_min_bits: usize, q_max
         .map(|k| approx_moduli_size + (k << (log2_ring_degree + 1)))
         .filter(|p| is_prime(ZZ, p, 10));
     let rns_base_mul = zn_rns::Zn::new(
-        rns_base.get_ring().iter().map(|R: &RingValue<ZnBase>| *R.modulus()).chain(
+        rns_base.as_iter().map(|R: &RingValue<ZnBase>| *R.modulus()).chain(
             primes.take_while(|p| if current_mul_bits >= current_bits as f64 + 1. {
                 false
             } else {
@@ -94,13 +104,12 @@ pub fn create_ciphertext_rings(log2_ring_degree: usize, q_min_bits: usize, q_max
                 true
             })
         ).map(|p| p as u64).map(Zn::new).collect(), 
-        ZZbig, 
-        default_memory_provider!()
+        ZZbig
     );
-    assert!(ZZbig.is_geq(&ZZbig.prod(rns_base_mul.get_ring().iter().map(|Fp: &Zn| int_cast(*Fp.modulus(), ZZbig, ZZ))), &ZZbig.pow(ZZbig.mul(Q, ZZbig.int_hom().map(2)), 2)), "Failed to find a suitable ciphertext modulus within the given range");
+    assert!(ZZbig.is_geq(&ZZbig.prod(rns_base_mul.as_iter().map(|Fp: &Zn| int_cast(*Fp.modulus(), ZZbig, ZZ))), &ZZbig.pow(ZZbig.mul(Q, ZZbig.int_hom().map(2)), 2)), "Failed to find a suitable ciphertext modulus within the given range");
 
-    let C = <CiphertextRing as RingStore>::Type::new(rns_base.clone(), rns_base.get_ring().iter().cloned().map(ZnFastmul::new).collect(), log2_ring_degree);
-    let C_mul = <CiphertextRing as RingStore>::Type::new(rns_base_mul.clone(), rns_base_mul.get_ring().iter().cloned().map(ZnFastmul::new).collect(), log2_ring_degree);
+    let C = <CiphertextRing as RingStore>::Type::new(rns_base.clone(), log2_ring_degree);
+    let C_mul = <CiphertextRing as RingStore>::Type::new(rns_base_mul.clone(), log2_ring_degree);
     return (C, C_mul);
 }
 
@@ -110,15 +119,17 @@ pub fn create_plaintext_ring(log2_ring_degree: usize, plaintext_modulus: i64) ->
 
 pub fn create_multiplication_rescale(P: &PlaintextRing, C: &CiphertextRing, C_mul: &CiphertextRing) -> MulConversionData {
     MulConversionData {
-        lift_to_C_mul: rnsconv::shared_lift::AlmostExactSharedBaseConversion::new(
-            C.get_ring().rns_base().iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
+        lift_to_C_mul: rnsconv::shared_lift::AlmostExactSharedBaseConversion::new_with(
+            C.get_ring().rns_base().as_iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
             Vec::new(),
-            C_mul.get_ring().rns_base().iter().skip(C.get_ring().rns_base().len()).map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>()
+            C_mul.get_ring().rns_base().as_iter().skip(C.get_ring().rns_base().len()).map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(),
+            Global
         ),
-        scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert::new(
-            C_mul.get_ring().rns_base().iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
+        scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert::new_with(
+            C_mul.get_ring().rns_base().as_iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
             Some(P.base_ring()).into_iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
-            C.get_ring().rns_base().len()
+            C.get_ring().rns_base().len(),
+            Global
         )
     }
 }
@@ -189,7 +200,7 @@ pub fn gen_rk<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing, rng: R, sk: &Secret
 pub fn hom_mul(C: &CiphertextRing, C_mul: &CiphertextRing, lhs: &Ciphertext, rhs: &Ciphertext, rk: &RelinKey, conv_data: &MulConversionData) -> Ciphertext {
     let (c00, c01) = lhs;
     let (c10, c11) = rhs;
-    let lift = |c: &DoubleRNSNonFFTEl<Zn, FFTTable>| C_mul.get_ring().do_fft(C_mul.get_ring().perform_rns_op_from(C.get_ring(), &c, &conv_data.lift_to_C_mul));
+    let lift = |c: &DoubleRNSNonFFTEl<Zn, CiphertextGenFFT>| C_mul.get_ring().do_fft(C_mul.get_ring().perform_rns_op_from(C.get_ring(), &c, &conv_data.lift_to_C_mul));
 
     let lifted0 = C_mul.mul(lift(c00), lift(c10));
     let lifted1 = C_mul.add(C_mul.mul(lift(c00), lift(c11)), C_mul.mul(lift(c01), lift(c10)));
@@ -211,8 +222,8 @@ pub fn hom_mul(C: &CiphertextRing, C_mul: &CiphertextRing, lhs: &Ciphertext, rhs
 
 pub fn gen_switch_key<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing, mut rng: R, old_sk: &SecretKey, new_sk: &SecretKey) -> KeySwitchKey<'a> {
     let old_sk_non_fft = C.get_ring().undo_fft(C.clone_el(old_sk));
-    let mut res_0 = C.get_ring().gadget_product_rhs_zero();
-    let mut res_1 = C.get_ring().gadget_product_rhs_zero();
+    let mut res_0 = C.get_ring().gadget_product_rhs_empty();
+    let mut res_1 = C.get_ring().gadget_product_rhs_empty();
     for i in 0..C.get_ring().rns_base().len() {
         let (c0, c1) = enc_sym_zero(C, &mut rng, new_sk);
         let factor = C.base_ring().get_ring().from_congruence((0..C.get_ring().rns_base().len()).map(|i2| {
@@ -271,8 +282,6 @@ fn run_bfv() {
     let end = Instant::now();
     println!("Performed multiplication in {} ms", (end - start).as_millis());
     print_all_timings();
-
-    return;
 
     let m_sqr = dec(&P, &C, ct_sqr, &sk);
     println!("Decrypted result");

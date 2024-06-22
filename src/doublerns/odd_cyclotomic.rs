@@ -179,14 +179,42 @@ impl<R_main, R_twiddle, A> DoubleRNSRingBase<R_main, OddCyclotomicFFT<R_main, bl
         R_twiddle: ZnRingStore + Clone,
         R_twiddle::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         R_main::Type: CanIsoFromTo<R_twiddle::Type> + CanHomFrom<BigIntRingBase>,
-        A: Allocator + Clone
+        A: Allocator + Clone + Default
 {
-    pub fn new(base_ring: zn_rns::Zn<R_main, BigIntRing>, fft_rings: Vec<R_twiddle>, n: usize, allocator: A) -> RingValue<Self> {
+    pub fn new(base_ring: zn_rns::Zn<R_main, BigIntRing>, fft_rings: Vec<R_twiddle>, n: usize) -> RingValue<Self> {
+        let allocator = A::default();
         let ffts = fft_rings.into_iter().enumerate().map(|(i, R)| {
             let hom = base_ring.at(i).clone().into_can_hom(R).ok().unwrap();
             OddCyclotomicFFT::create(
                 hom.codomain().clone(),
                 bluestein::BluesteinFFT::for_zn_with_hom(hom, n, allocator.clone()).unwrap(),
+                allocator.clone()
+            )
+        }).collect();
+        RingValue::from(
+            Self::from_generalized_ffts(
+                base_ring,
+                ffts, 
+                allocator
+            )
+        )
+    }
+}
+
+pub type DefaultOddCyclotomicDoubleRNSRingBase<R = zn_64::Zn> = DoubleRNSRingBase<R, OddCyclotomicFFT<R, bluestein::BluesteinFFT<<R as RingStore>::Type, <R as RingStore>::Type, Identity<R>>>, Global>;
+pub type DefaultOddCyclotomicDoubleRNSRing<R = zn_64::Zn> = DoubleRNSRing<R, OddCyclotomicFFT<R, bluestein::BluesteinFFT<<R as RingStore>::Type, <R as RingStore>::Type, Identity<R>>>, Global>;
+
+impl<R, A> DoubleRNSRingBase<R, OddCyclotomicFFT<R, bluestein::BluesteinFFT<R::Type, R::Type, Identity<R>, A>, A>, A>
+    where R: ZnRingStore + Clone,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        A: Allocator + Clone + Default
+{
+    pub fn new(base_ring: zn_rns::Zn<R, BigIntRing>, n: usize) -> RingValue<Self> {
+        let allocator = A::default();
+        let ffts = base_ring.as_iter().map(|R| {
+            OddCyclotomicFFT::create(
+                R.clone(),
+                bluestein::BluesteinFFT::for_zn(R.clone(), n, allocator.clone()).unwrap(),
                 allocator.clone()
             )
         }).collect();
@@ -315,31 +343,27 @@ fn test_odd_cyclotomic_fft_factor_fft() {
 #[test]
 fn test_ring_axioms() {
     let rns_base = zn_rns::Zn::new(vec![Zn::new(577), Zn::new(1153)], BigIntRing::RING);
-    let fft_rings = rns_base.get_ring().as_iter().cloned().collect();
-    let R = DoubleRNSRingBase::<_, OddCyclotomicFFT<_, bluestein::BluesteinFFT<_, _, _, _>>, _>::new(rns_base, fft_rings, 9, Global);
+    let R = DefaultOddCyclotomicDoubleRNSRingBase::new(rns_base, 9);
     feanor_math::ring::generic_tests::test_ring_axioms(&R, edge_case_elements(&R));
 }
 
 #[test]
 fn test_divisibility_axioms() {
     let rns_base = zn_rns::Zn::new(vec![Zn::new(577), Zn::new(1153)], BigIntRing::RING);
-    let fft_rings = rns_base.get_ring().as_iter().cloned().collect();
-    let R = DoubleRNSRingBase::<_, OddCyclotomicFFT<_, bluestein::BluesteinFFT<_, _, _, _>>, _>::new(rns_base, fft_rings, 9, Global);
+    let R = DefaultOddCyclotomicDoubleRNSRingBase::new(rns_base, 9);
     feanor_math::divisibility::generic_tests::test_divisibility_axioms(&R, edge_case_elements(&R));
 }
 
 #[test]
 fn test_free_algebra_axioms() {
     let rns_base = zn_rns::Zn::new(vec![Zn::new(577), Zn::new(1153)], BigIntRing::RING);
-    let fft_rings = rns_base.get_ring().as_iter().cloned().collect();
-    let R = DoubleRNSRingBase::<_, OddCyclotomicFFT<_, bluestein::BluesteinFFT<_, _, _, _>>, _>::new(rns_base, fft_rings, 9, Global);
+    let R = DefaultOddCyclotomicDoubleRNSRingBase::new(rns_base, 9);
     generic_test_free_algebra_axioms(R);
 }
 
 #[test]
 fn test_cyclotomic_ring_axioms() {
     let rns_base = zn_rns::Zn::new(vec![Zn::new(577), Zn::new(1153)], BigIntRing::RING);
-    let fft_rings = rns_base.get_ring().as_iter().cloned().collect();
-    let R = DoubleRNSRingBase::<_, OddCyclotomicFFT<_, bluestein::BluesteinFFT<_, _, _, _>>, _>::new(rns_base, fft_rings, 9, Global);
+    let R = DefaultOddCyclotomicDoubleRNSRingBase::new(rns_base, 9);
     generic_test_cyclotomic_ring_axioms(R);
 }

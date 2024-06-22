@@ -49,4 +49,4 @@ pub mod complexfft;
 pub mod doublerns;
 
 // #[cfg(test)]
-// pub mod bfv;
+pub mod bfv;

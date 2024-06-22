@@ -1,5 +1,4 @@
 use std::alloc::Allocator;
-use std::alloc::Global;
 
 use feanor_math::algorithms::fft::*;
 use feanor_math::algorithms::fft::complex_fft::FFTErrorEstimate;
@@ -8,6 +7,7 @@ use feanor_math::primitive_int::*;
 use feanor_math::ring::*;
 use feanor_math::rings::float_complex::Complex64Base;
 use feanor_math::rings::float_complex::{Complex64, Complex64El};
+use feanor_math::rings::zn::zn_64;
 use feanor_math::rings::zn::{ZnRing, ZnRingStore};
 use feanor_math::rings::extension::*;
 use feanor_math::integer::*;
@@ -103,7 +103,7 @@ impl<R1, F1, R2, F2> GeneralizedFFTIso<R2::Type, R1::Type, Pow2CyclotomicFFT<R1,
     }
 }
 
-impl<R, F, A> CyclotomicRing for ComplexFFTBasedRingBase<R, Pow2CyclotomicFFT<R, F>, A>
+impl<R, F, A> CyclotomicRing for CCFFTRingBase<R, Pow2CyclotomicFFT<R, F>, A>
     where R: RingStore,
         R::Type: ZnRing,
         F: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
@@ -114,12 +114,15 @@ impl<R, F, A> CyclotomicRing for ComplexFFTBasedRingBase<R, Pow2CyclotomicFFT<R,
     }
 }
 
-impl<R, A> ComplexFFTBasedRingBase<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckeyFFT<Complex64Base, Complex64Base, Identity<Complex64>>>, A>
+pub type DefaultPow2CyclotomicCCFFTRingBase<R = zn_64::Zn> = CCFFTRingBase<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckeyFFT<Complex64Base, Complex64Base, Identity<Complex64>>>>;
+pub type DefaultPow2CyclotomicCCFFTRing<R = zn_64::Zn> = CCFFTRing<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckeyFFT<Complex64Base, Complex64Base, Identity<Complex64>>>>;
+
+impl<R, A> CCFFTRingBase<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckeyFFT<Complex64Base, Complex64Base, Identity<Complex64>>>, A>
     where R: RingStore + Clone,
         R::Type: ZnRing,
-        A: Allocator + Clone
+        A: Allocator + Clone + Default
 {
-    pub fn new(ring: R, log2_ring_degree: usize, allocator: A) -> RingValue<Self> {
+    pub fn new(ring: R, log2_ring_degree: usize) -> RingValue<Self> {
         RingValue::from(
             Self::from_generalized_fft(
                 ring.clone(),
@@ -127,7 +130,7 @@ impl<R, A> ComplexFFTBasedRingBase<R, Pow2CyclotomicFFT<R, cooley_tuckey::Cooley
                     ring, 
                     cooley_tuckey::CooleyTuckeyFFT::for_complex(Complex64::RING, log2_ring_degree)
                 ),
-                allocator
+                A::default()
             )
         )
     }
@@ -141,7 +144,7 @@ use feanor_math::rings::zn::zn_64::Zn;
 #[test]
 fn test_ring_axioms() {
     let Fp = Zn::new(65537);
-    let R = ComplexFFTBasedRingBase::<_, Pow2CyclotomicFFT<_, cooley_tuckey::CooleyTuckeyFFT<_, _, _>>, _>::new(Fp, 3, Global);
+    let R = DefaultPow2CyclotomicCCFFTRingBase::<>::new(Fp, 3);
     feanor_math::ring::generic_tests::test_ring_axioms(&R, [
         ring_literal!(&R, [0, 0, 0, 0, 0, 0, 0, 0]),
         ring_literal!(&R, [1, 0, 0, 0, 0, 0, 0, 0]),
@@ -156,14 +159,14 @@ fn test_ring_axioms() {
 #[test]
 fn test_free_algebra_axioms() {
     let Fp = Zn::new(65537);
-    let R = ComplexFFTBasedRingBase::<_, Pow2CyclotomicFFT<_, cooley_tuckey::CooleyTuckeyFFT<_, _, _>>, _>::new(Fp, 3, Global);
+    let R = DefaultPow2CyclotomicCCFFTRingBase::<>::new(Fp, 3);
     generic_test_free_algebra_axioms(R);
 }
 
 #[test]
 fn test_cyclotomic_ring_axioms() {
     let Fp = Zn::new(65537);
-    let R = ComplexFFTBasedRingBase::<_, Pow2CyclotomicFFT<_, cooley_tuckey::CooleyTuckeyFFT<_, _, _>>, _>::new(Fp, 3, Global);
+    let R = DefaultPow2CyclotomicCCFFTRingBase::<>::new(Fp, 3);
     generic_test_cyclotomic_ring_axioms(R);
 
 }

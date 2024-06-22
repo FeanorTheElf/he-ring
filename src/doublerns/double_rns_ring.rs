@@ -13,9 +13,12 @@ use feanor_math::ring::*;
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
 use feanor_math::rings::zn::*;
 use feanor_math::homomorphism::*;
+use feanor_math::primitive_int::*;
 use feanor_math::seq::*;
 
 use crate::complexfft::complex_fft_ring;
+use crate::complexfft::pow2_cyclotomic::DefaultPow2CyclotomicCCFFTRingBase;
+use crate::doublerns::pow2_cyclotomic::DefaultPow2CyclotomicDoubleRNSRingBase;
 use crate::rnsconv::*;
 
 ///
@@ -112,7 +115,7 @@ pub struct DoubleRNSRingBase<R, F, A = Global>
     allocator: A
 }
 
-pub type DoubleRNSRing<R, F, A> = RingValue<DoubleRNSRingBase<R, F, A>>;
+pub type DoubleRNSRing<R, F, A = Global> = RingValue<DoubleRNSRingBase<R, F, A>>;
 
 pub struct DoubleRNSEl<R, F, A> 
     where R: ZnRingStore,
@@ -125,7 +128,7 @@ pub struct DoubleRNSEl<R, F, A>
     pub(super) data: Vec<El<R>, A>
 }
 
-pub struct DoubleRNSNonFFTEl<R, F, A> 
+pub struct DoubleRNSNonFFTEl<R, F, A = Global> 
     where R: ZnRingStore,
         R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         F: GeneralizedFFTSelfIso<R::Type>,
@@ -293,66 +296,68 @@ impl<R, F, A> DoubleRNSRingBase<R, F, A>
         })
     }
 
-    // pub fn exact_convert_from_cfft<F2, A2_Zn, A2_CC>(
-    //     &self, 
-    //     from: &complex_fft_ring::ComplexFFTBasedRingBase<F2, A2_Zn, A2_CC>, 
-    //     element: &<complex_fft_ring::ComplexFFTBasedRingBase<F2, A2_Zn, A2_CC> as RingBase>::Element
-    // ) -> DoubleRNSNonFFTEl<R, F, A> 
-    //     where F: GeneralizedFFTCrossIso<F2>,
-    //         // the constraings for DoubleRNSRingBase<F2, A2>
-    //         F2: complex_fft_ring::GeneralizedFFT + complex_fft_ring::GeneralizedFFTSelfIso,
-    //         F2::RingBase: CanHomFrom<BigIntRingBase>,
-    //         M2_Zn: MemoryProvider<El<F2::BaseRingStore>>,
-    //         M2_CC: MemoryProvider<Complex64El>
-    // {
-    //     assert!(<_ as GeneralizedFFTCrossIso<_>>::is_isomorphic(&self.generalized_fft()[0], &from.generalized_fft()));
-    //     debug_assert_eq!(self.rank(), from.rank());
+    pub fn exact_convert_from_cfft<F2, A2>(
+        &self, 
+        from: &complex_fft_ring::CCFFTRingBase<R, F2, A2>, 
+        element: &<complex_fft_ring::CCFFTRingBase<R, F2, A2> as RingBase>::Element
+    ) -> DoubleRNSNonFFTEl<R, F, A> 
+        where R: RingStore,
+            R::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>, 
+            F: GeneralizedFFTCrossIso<R::Type, R::Type, F2>,
+            // the constraings for DoubleRNSRingBase<R::Type, F2, A2>
+            F2: complex_fft_ring::GeneralizedFFTSelfIso<R::Type>,
+            A2: Allocator + Clone
+    {
+         assert!(<_ as GeneralizedFFTCrossIso<_, _, _>>::is_isomorphic(&self.generalized_fft()[0], &from.generalized_fft()));
+         debug_assert_eq!(self.rank(), from.rank());
 
-    //     let mut result = self.allocator.get_new_init(self.element_len(), |i| self.rns_base().at(i / self.rank()).zero());
-    //     for j in 0..self.rank() {
-    //         let x = int_cast(from.base_ring().smallest_lift(from.base_ring().clone_el(&element[j])), &StaticRing::<i32>::RING, from.base_ring().integer_ring());
-    //         for i in 0..self.rns_base().len() {
-    //             result[j + i * self.rank()] = self.rns_base().at(i).int_hom().map(x);
-    //         }
-    //     }
-    //     return DoubleRNSNonFFTEl {
-    //         data: result,
-    //         generalized_fft: PhantomData,
-    //         allocator: PhantomData
-    //     };
-    // }
+        let mut result = Vec::with_capacity_in(self.element_len(), self.allocator.clone());
+        result.extend((0..self.element_len()).map(|i| self.rns_base().at(i / self.rank()).zero()));
+        for j in 0..self.rank() {
+            let x = int_cast(from.base_ring().smallest_lift(from.base_ring().clone_el(&element[j])), &StaticRing::<i32>::RING, from.base_ring().integer_ring());
+            for i in 0..self.rns_base().len() {
+                result[j + i * self.rank()] = self.rns_base().at(i).int_hom().map(x);
+            }
+        }
+        return DoubleRNSNonFFTEl {
+            data: result,
+            generalized_fft: PhantomData,
+            allocator: PhantomData
+        };
+    }
 
-    // pub fn perform_rns_op_to_cfft<F2, A2_Zn, A2_CC, Op>(
-    //     &self, 
-    //     to: &complex_fft_ring::ComplexFFTBasedRingBase<F2, A2_Zn, A2_CC>, 
-    //     element: &DoubleRNSNonFFTEl<R, F, A>, 
-    //     op: &Op
-    // ) -> <complex_fft_ring::ComplexFFTBasedRingBase<F2, A2_Zn, A2_CC> as RingBase>::Element 
-    //     where F: GeneralizedFFTCrossIso<F2>,
-    //         R::Type: SelfIso,
-    //         // the constraings for DoubleRNSRingBase<F2, A2>
-    //         F2: complex_fft_ring::GeneralizedFFT<BaseRingBase = R::Type> + complex_fft_ring::GeneralizedFFTSelfIso,
-    //         M2_Zn: MemoryProvider<El<F2::BaseRingStore>>,
-    //         M2_CC: MemoryProvider<Complex64El>,
-    //         Op: RNSOperation<RingType = R::Type>
-    // {
-    //     assert!(<_ as GeneralizedFFTCrossIso<_>>::is_isomorphic(&self.generalized_fft()[0], &to.generalized_fft()));
-    //     debug_assert_eq!(self.rank(), to.rank());
-    //     assert_eq!(self.rns_base().len(), op.input_rings().len());
-    //     assert_eq!(1, op.output_rings().len());
+    pub fn perform_rns_op_to_cfft<F2, A2, Op>(
+        &self, 
+        to: &complex_fft_ring::CCFFTRingBase<R, F2, A2>, 
+        element: &DoubleRNSNonFFTEl<R, F, A>, 
+        op: &Op
+    ) -> <complex_fft_ring::CCFFTRingBase<R, F2, A2> as RingBase>::Element 
+        where R: RingStore,
+            R::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>, 
+            F: GeneralizedFFTCrossIso<R::Type, R::Type, F2>,
+            R::Type: SelfIso,
+            // the constraings for DoubleRNSRingBase<R::Type, F2, A2>
+            F2: complex_fft_ring::GeneralizedFFTSelfIso<R::Type>,
+            A2: Allocator + Clone, 
+            Op: RNSOperation<RingType = R::Type>
+    {
+        assert!(<_ as GeneralizedFFTCrossIso<_, _, _>>::is_isomorphic(&self.generalized_fft()[0], &to.generalized_fft()));
+        debug_assert_eq!(self.rank(), to.rank());
+        assert_eq!(self.rns_base().len(), op.input_rings().len());
+        assert_eq!(1, op.output_rings().len());
 
-    //     timed!("perform_rns_op_to_cfft", || {
-    //         for i in 0..self.rns_base().len() {
-    //             assert!(self.rns_base().at(i).get_ring() == op.input_rings().at(i).get_ring());
-    //         }
-    //         assert!(to.base_ring().get_ring() == op.output_rings().at(0).get_ring());
+        timed!("perform_rns_op_to_cfft", || {
+            for i in 0..self.rns_base().len() {
+                assert!(self.rns_base().at(i).get_ring() == op.input_rings().at(i).get_ring());
+            }
+            assert!(to.base_ring().get_ring() == op.output_rings().at(0).get_ring());
             
-    //         let mut result = to.zero();
-    //         let result_matrix = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut result, 1, to.rank());
-    //         op.apply(self.as_matrix(element), result_matrix);
-    //         return result;
-    //     })
-    // }
+            let mut result = to.zero();
+            let result_matrix = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut result, 1, to.rank());
+            op.apply(self.as_matrix(element), result_matrix);
+            return result;
+        })
+    }
 
     pub fn sample_from_coefficient_distribution<G: FnMut() -> i32>(&self, mut distribution: G) -> DoubleRNSNonFFTEl<R, F, A> {
         let mut result = self.non_fft_zero();
@@ -860,21 +865,17 @@ use feanor_math::assert_el_eq;
 #[cfg(test)]
 use crate::rnsconv::lift::*;
 #[cfg(test)]
-use crate::doublerns::pow2_cyclotomic::Pow2CyclotomicFFT;
-#[cfg(test)]
 use crate::feanor_math::rings::zn::zn_64::Zn;
 
 #[test]
 fn test_almost_exact_convert_from() {
     let rns_base1 = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
-    let fft_rings1 = rns_base1.as_iter().cloned().collect();
-    let R1 = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<_, _>, _>::new(rns_base1, fft_rings1, 3);
+    let R1 = DefaultPow2CyclotomicDoubleRNSRingBase::new(rns_base1, 3);
 
     let rns_base2 = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(113)], BigIntRing::RING);
-    let fft_rings2 = rns_base2.as_iter().cloned().collect();
-    let R2 = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<_, _>, _>::new(rns_base2, fft_rings2, 3);
+    let R2 = DefaultPow2CyclotomicDoubleRNSRingBase::new(rns_base2, 3);
 
-    let converter = AlmostExactBaseConversion::new(R1.base_ring().as_iter().cloned().collect(), R2.base_ring().as_iter().cloned().collect(), Global);
+    let converter = AlmostExactBaseConversion::new_with(R1.base_ring().as_iter().cloned().collect(), R2.base_ring().as_iter().cloned().collect(), Global);
 
     assert_el_eq!(&R2, &R2.canonical_gen(), &R2.get_ring().do_fft(R2.get_ring().perform_rns_op_from(R1.get_ring(), &R1.get_ring().undo_fft(R1.canonical_gen()), &converter)));
     for i in (-4 * 97)..=(4 * 97) {
@@ -882,18 +883,14 @@ fn test_almost_exact_convert_from() {
     }
 }
 
-// #[test]
-// fn test_almost_exact_convert_to_cfft() {
-//     let rns_base1 = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
-//     let fft_rings1 = rns_base1.get_ring().iter().cloned().collect();
-//     let R1 = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<_>, _>::new(rns_base1, fft_rings1, 3);
-
-//     let R2 = ComplexFFTBasedRingBase::<complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<_, _>, _, _>::new(Zn::new(7), 3);
-
-//     let converter = AlmostExactBaseConversion::new(R1.base_ring().get_ring().iter().cloned().collect(), vec![R2.base_ring().clone()]);
-
-//     assert_el_eq!(&R2, &R2.canonical_gen(), &R1.get_ring().perform_rns_op_to_cfft(R2.get_ring(), &R1.get_ring().undo_fft(R1.canonical_gen()), &converter));
-//     for i in (-4 * 97)..=(4 * 97) {
-//         assert_el_eq!(&R2, &R2.int_hom().map(i), &R1.get_ring().perform_rns_op_to_cfft(R2.get_ring(), &R1.get_ring().undo_fft(R1.int_hom().map(i)), &converter));
-//     }
-// }
+#[test]
+fn test_almost_exact_convert_to_cfft() {
+    let rns_base1 = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
+    let R1 = DefaultPow2CyclotomicDoubleRNSRingBase::new(rns_base1, 3);
+    let R2 = DefaultPow2CyclotomicCCFFTRingBase::new(Zn::new(7), 3);
+    let converter = AlmostExactBaseConversion::new_with(R1.base_ring().get_ring().as_iter().cloned().collect(), vec![R2.base_ring().clone()], Global);
+    assert_el_eq!(&R2, &R2.canonical_gen(), &R1.get_ring().perform_rns_op_to_cfft(R2.get_ring(), &R1.get_ring().undo_fft(R1.canonical_gen()), &converter));
+    for i in (-4 * 97)..=(4 * 97) {
+        assert_el_eq!(&R2, &R2.int_hom().map(i), &R1.get_ring().perform_rns_op_to_cfft(R2.get_ring(), &R1.get_ring().undo_fft(R1.int_hom().map(i)), &converter));
+    }
+}

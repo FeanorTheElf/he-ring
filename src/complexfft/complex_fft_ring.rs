@@ -133,7 +133,7 @@ impl<R: ?Sized + RingBase, F: ?Sized + GeneralizedFFT<R> + GeneralizedFFTIso<R, 
 /// assert_el_eq!(&R, &R.neg_one(), &R.pow(R.canonical_gen(), 8));
 /// ```
 /// 
-pub struct ComplexFFTBasedRingBase<R, F, A = Global>
+pub struct CCFFTRingBase<R, F, A = Global>
     where R: RingStore,
         R::Type: ZnRing,
         F: GeneralizedFFTSelfIso<R::Type>,
@@ -147,9 +147,9 @@ pub struct ComplexFFTBasedRingBase<R, F, A = Global>
 ///
 /// The [`RingStore`] corresponding to [`ComplexFFTBasedRingBase`].
 /// 
-pub type ComplexFFTBasedRing<R, F, A = Global> = RingValue<ComplexFFTBasedRingBase<R, F, A>>;
+pub type CCFFTRing<R, F, A = Global> = RingValue<CCFFTRingBase<R, F, A>>;
 
-impl<R, F, A> ComplexFFTBasedRingBase<R, F, A>
+impl<R, F, A> CCFFTRingBase<R, F, A>
     where R: RingStore,
         R::Type: ZnRing,
         F: GeneralizedFFTSelfIso<R::Type>,
@@ -168,7 +168,7 @@ impl<R, F, A> ComplexFFTBasedRingBase<R, F, A>
     }
 }
 
-impl<R, F, A> PartialEq for ComplexFFTBasedRingBase<R, F, A>
+impl<R, F, A> PartialEq for CCFFTRingBase<R, F, A>
     where R: RingStore,
         R::Type: ZnRing,
         F: GeneralizedFFTSelfIso<R::Type>,
@@ -179,7 +179,7 @@ impl<R, F, A> PartialEq for ComplexFFTBasedRingBase<R, F, A>
     }
 }
 
-impl<R, F, A> RingBase for ComplexFFTBasedRingBase<R, F, A>
+impl<R, F, A> RingBase for CCFFTRingBase<R, F, A>
     where R: RingStore,
         R::Type: ZnRing,
         F: GeneralizedFFTSelfIso<R::Type>,
@@ -303,7 +303,7 @@ pub struct WRTCanonicalBasisElementCreator<'a, R, F, A>
         F: GeneralizedFFTSelfIso<R::Type>,
         A: Allocator + Clone
 {
-    ring: &'a ComplexFFTBasedRingBase<R, F, A>,
+    ring: &'a CCFFTRingBase<R, F, A>,
 }
 
 impl<'a, R, F, A> Copy for WRTCanonicalBasisElementCreator<'a, R, F, A>
@@ -330,7 +330,7 @@ impl<'a, 'b, R, F, A> FnOnce<(&'b [El<R>],)> for WRTCanonicalBasisElementCreator
         F: GeneralizedFFTSelfIso<R::Type>,
         A: Allocator + Clone
 {
-    type Output = El<ComplexFFTBasedRing<R, F, A>>;
+    type Output = El<CCFFTRing<R, F, A>>;
 
     extern "rust-call" fn call_once(self, args: (&'b [El<R>],)) -> Self::Output {
         self.call(args)
@@ -359,7 +359,7 @@ impl<'a, 'b, R, F, A> Fn<(&'b [El<R>],)> for WRTCanonicalBasisElementCreator<'a,
     }
 }
 
-impl<R, F, A> FiniteRing for ComplexFFTBasedRingBase<R, F, A>
+impl<R, F, A> FiniteRing for CCFFTRingBase<R, F, A>
     where R: RingStore,
         R::Type: ZnRing,
         F: GeneralizedFFTSelfIso<R::Type>,
@@ -390,7 +390,7 @@ impl<R, F, A> FiniteRing for ComplexFFTBasedRingBase<R, F, A>
     }
 }
 
-impl<R, F, A> FreeAlgebra for ComplexFFTBasedRingBase<R, F, A>
+impl<R, F, A> FreeAlgebra for CCFFTRingBase<R, F, A>
     where R: RingStore,
         R::Type: ZnRing,
         F: GeneralizedFFTSelfIso<R::Type>,
@@ -414,7 +414,7 @@ impl<R, F, A> FreeAlgebra for ComplexFFTBasedRingBase<R, F, A>
     }
 }
 
-impl<R, F, A> RingExtension for ComplexFFTBasedRingBase<R, F, A>
+impl<R, F, A> RingExtension for CCFFTRingBase<R, F, A>
     where R: RingStore,
         R::Type: ZnRing,
         F: GeneralizedFFTSelfIso<R::Type>,
@@ -433,7 +433,7 @@ impl<R, F, A> RingExtension for ComplexFFTBasedRingBase<R, F, A>
     }
 }
 
-impl<P, R, F, A> CanHomFrom<P> for ComplexFFTBasedRingBase<R, F, A>
+impl<P, R, F, A> CanHomFrom<P> for CCFFTRingBase<R, F, A>
     where R: RingStore,
         R::Type: ZnRing,
         F: GeneralizedFFTSelfIso<R::Type>,
@@ -459,7 +459,7 @@ impl<P, R, F, A> CanHomFrom<P> for ComplexFFTBasedRingBase<R, F, A>
     }
 }
 
-impl<R1, R2, F1, F2, A1, A2> CanHomFrom<ComplexFFTBasedRingBase<R2, F2, A2>> for ComplexFFTBasedRingBase<R1, F1, A1>
+impl<R1, R2, F1, F2, A1, A2> CanHomFrom<CCFFTRingBase<R2, F2, A2>> for CCFFTRingBase<R1, F1, A1>
     where R1: RingStore,
         R1::Type: ZnRing + CanHomFrom<R2::Type>,
         F1: GeneralizedFFTSelfIso<R1::Type>,
@@ -472,7 +472,7 @@ impl<R1, R2, F1, F2, A1, A2> CanHomFrom<ComplexFFTBasedRingBase<R2, F2, A2>> for
 {
     type Homomorphism = <R1::Type as CanHomFrom<R2::Type>>::Homomorphism;
 
-    fn has_canonical_hom(&self, from: &ComplexFFTBasedRingBase<R2, F2, A2>) -> Option<Self::Homomorphism> {
+    fn has_canonical_hom(&self, from: &CCFFTRingBase<R2, F2, A2>) -> Option<Self::Homomorphism> {
         if self.generalized_fft.is_isomorphic(&from.generalized_fft) {
             self.base_ring().get_ring().has_canonical_hom(from.base_ring().get_ring())
         } else {
@@ -480,14 +480,14 @@ impl<R1, R2, F1, F2, A1, A2> CanHomFrom<ComplexFFTBasedRingBase<R2, F2, A2>> for
         }
     }
 
-    fn map_in(&self, from: &ComplexFFTBasedRingBase<R2, F2, A2>, el: <ComplexFFTBasedRingBase<R2, F2, A2> as RingBase>::Element, hom: &Self::Homomorphism) -> Self::Element {
+    fn map_in(&self, from: &CCFFTRingBase<R2, F2, A2>, el: <CCFFTRingBase<R2, F2, A2> as RingBase>::Element, hom: &Self::Homomorphism) -> Self::Element {
         let mut result = Vec::with_capacity_in(self.rank(), self.allocator.clone());
         result.extend((0..self.rank()).map(|i| self.base_ring().get_ring().map_in(from.base_ring().get_ring(), from.base_ring().clone_el(&el[i]), hom)));
         return result;
     }
 }
 
-impl<R1, R2, F1, F2, A1, A2> CanIsoFromTo<ComplexFFTBasedRingBase<R2, F2, A2>> for ComplexFFTBasedRingBase<R1, F1, A1>
+impl<R1, R2, F1, F2, A1, A2> CanIsoFromTo<CCFFTRingBase<R2, F2, A2>> for CCFFTRingBase<R1, F1, A1>
     where R1: RingStore,
         R1::Type: ZnRing + CanIsoFromTo<R2::Type>,
         F1: GeneralizedFFTSelfIso<R1::Type>,
@@ -500,7 +500,7 @@ impl<R1, R2, F1, F2, A1, A2> CanIsoFromTo<ComplexFFTBasedRingBase<R2, F2, A2>> f
 {
     type Isomorphism = <R1::Type as CanIsoFromTo<R2::Type>>::Isomorphism;
 
-    fn has_canonical_iso(&self, from: &ComplexFFTBasedRingBase<R2, F2, A2>) -> Option<Self::Isomorphism> {
+    fn has_canonical_iso(&self, from: &CCFFTRingBase<R2, F2, A2>) -> Option<Self::Isomorphism> {
         if self.generalized_fft.is_isomorphic(&from.generalized_fft) {
             self.base_ring().get_ring().has_canonical_iso(from.base_ring().get_ring())
         } else {
@@ -508,7 +508,7 @@ impl<R1, R2, F1, F2, A1, A2> CanIsoFromTo<ComplexFFTBasedRingBase<R2, F2, A2>> f
         }
     }
 
-    fn map_out(&self, from: &ComplexFFTBasedRingBase<R2, F2, A2>, el: Self::Element, iso: &Self::Isomorphism) -> <ComplexFFTBasedRingBase<R2, F2, A2> as RingBase>::Element {
+    fn map_out(&self, from: &CCFFTRingBase<R2, F2, A2>, el: Self::Element, iso: &Self::Isomorphism) -> <CCFFTRingBase<R2, F2, A2> as RingBase>::Element {
         let mut result = Vec::with_capacity_in(self.rank(), from.allocator.clone());
         result.extend((0..self.rank()).map(|i| self.base_ring().get_ring().map_out(from.base_ring().get_ring(), self.base_ring().clone_el(&el[i]), iso)));
         return result;

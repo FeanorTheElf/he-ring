@@ -55,7 +55,7 @@ impl<A> CongruencePreservingRescaling<A>
     where A: Allocator + Clone
 {
     pub fn scale_down(q_moduli: Vec<Zn>, den_moduli_count: usize, plaintext_modulus: Zn, allocator: A) -> Self {
-        Self::new(q_moduli, Vec::new(), den_moduli_count, plaintext_modulus, allocator)
+        Self::new_with(q_moduli, Vec::new(), den_moduli_count, plaintext_modulus, allocator)
     }
 
     ///
@@ -65,7 +65,7 @@ impl<A> CongruencePreservingRescaling<A>
     ///  - `b` is the product of the first `den_moduli_count` elements of `in_moduli`
     /// At least the moduli belonging to `b` are expected to be sorted.
     /// 
-    pub fn new(in_moduli: Vec<Zn>, num_moduli: Vec<Zn>, den_moduli_count: usize, plaintext_modulus: Zn, allocator: A) -> Self {
+    pub fn new_with(in_moduli: Vec<Zn>, num_moduli: Vec<Zn>, den_moduli_count: usize, plaintext_modulus: Zn, allocator: A) -> Self {
         let ZZ = plaintext_modulus.integer_ring();
         for ring in &in_moduli {
             assert!(ring.integer_ring().get_ring() == ZZ.get_ring());
@@ -91,8 +91,8 @@ impl<A> CongruencePreservingRescaling<A>
             aq_moduli: aq_moduli,
             aq_permutation: aq_permutation,
             b_inv_mod_t: plaintext_modulus.invert(&plaintext_modulus.coerce(&ZZbig, b)).unwrap(),
-            b_to_aq_lift: AlmostExactBaseConversion::new(b_moduli, aq_moduli_sorted.iter().cloned().collect(), allocator.clone()),
-            aq_to_t_conv: AlmostExactBaseConversion::new(aq_moduli_sorted, vec![plaintext_modulus], allocator.clone()),
+            b_to_aq_lift: AlmostExactBaseConversion::new_with(b_moduli, aq_moduli_sorted.iter().cloned().collect(), allocator.clone()),
+            aq_to_t_conv: AlmostExactBaseConversion::new_with(aq_moduli_sorted, vec![plaintext_modulus], allocator.clone()),
             allocator: allocator
         }
     }
@@ -203,7 +203,7 @@ fn test_rescale() {
     let q = 17 * 97 * 113;
     let qprime = 19 * 257;
 
-    let rescaling = CongruencePreservingRescaling::new(
+    let rescaling = CongruencePreservingRescaling::new_with(
         from.clone(), 
         to.clone(), 
         3,

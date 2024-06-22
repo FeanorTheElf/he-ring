@@ -13,9 +13,11 @@ use feanor_math::ring::*;
 use feanor_math::homomorphism::*;
 use feanor_math::rings::float_complex::{Complex64, Complex64El};
 use feanor_math::rings::poly::sparse_poly::SparsePolyRing;
+use feanor_math::rings::zn::zn_64;
 use feanor_math::rings::zn::{ZnRing, ZnRingStore};
 
-use super::complex_fft_ring::{GeneralizedFFT, ComplexFFTBasedRingBase, GeneralizedFFTIso};
+use super::complex_fft_ring::CCFFTRing;
+use super::complex_fft_ring::{GeneralizedFFT, CCFFTRingBase, GeneralizedFFTIso};
 use crate::cyclotomic::*;
 
 const CC: Complex64 = Complex64::RING;
@@ -65,7 +67,7 @@ fn phi(factorization: &Vec<(i64, usize)>) -> i64 {
 /// assert_el_eq!(&R, &R.one(), &R.pow(root_of_unity, 15));
 /// ```
 /// 
-pub struct OddCyclotomicFFT<R, F, A> 
+pub struct OddCyclotomicFFT<R, F, A = Global> 
     where R: RingStore,
         R::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>,
         F: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
@@ -205,7 +207,7 @@ impl<R1, F1, A1, R2, F2, A2> GeneralizedFFTIso<R2::Type, R1::Type, OddCyclotomic
     }
 }
 
-impl<R, F, A1, A2> CyclotomicRing for ComplexFFTBasedRingBase<R, OddCyclotomicFFT<R, F, A1>, A2>
+impl<R, F, A1, A2> CyclotomicRing for CCFFTRingBase<R, OddCyclotomicFFT<R, F, A1>, A2>
     where R: RingStore,
         R::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>,
         F: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
@@ -217,12 +219,16 @@ impl<R, F, A1, A2> CyclotomicRing for ComplexFFTBasedRingBase<R, OddCyclotomicFF
     }
 }
 
-impl<R, A> ComplexFFTBasedRingBase<R, OddCyclotomicFFT<R, bluestein::BluesteinFFT<Complex64Base, Complex64Base, Identity<Complex64>, A>, A>, A>
+pub type DefaultOddCyclotomicCCFFTRingBase<R = zn_64::Zn> = CCFFTRingBase<R, OddCyclotomicFFT<R, bluestein::BluesteinFFT<Complex64Base, Complex64Base, Identity<Complex64>>>>;
+pub type DefaultOddCyclotomicCCFFTRing<R = zn_64::Zn> = CCFFTRing<R, OddCyclotomicFFT<R, bluestein::BluesteinFFT<Complex64Base, Complex64Base, Identity<Complex64>>>>;
+
+impl<R, A> CCFFTRingBase<R, OddCyclotomicFFT<R, bluestein::BluesteinFFT<Complex64Base, Complex64Base, Identity<Complex64>, A>, A>, A>
     where R: RingStore + Clone,
         R::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>,
-        A: Allocator + Clone
+        A: Allocator + Clone + Default
 {
-    pub fn new(ring: R, n: usize, allocator: A) -> RingValue<Self> {
+    pub fn new(ring: R, n: usize) -> RingValue<Self> {
+        let allocator = A::default();
         RingValue::from(
             Self::from_generalized_fft(
                 ring.clone(),
@@ -245,7 +251,7 @@ use feanor_math::rings::zn::zn_64::Zn;
 #[test]
 fn test_ring_axioms() {
     let Fp = Zn::new(65537);
-    let R = ComplexFFTBasedRingBase::<_, OddCyclotomicFFT<_, bluestein::BluesteinFFT<_, _, _, _>, _>, _>::new(Fp, 9, Global);
+    let R = DefaultOddCyclotomicCCFFTRingBase::new(Fp, 9);
     feanor_math::ring::generic_tests::test_ring_axioms(&R, [
         ring_literal!(&R, [0, 0, 0, 0, 0, 0]),
         ring_literal!(&R, [1, 0, 0, 0, 0, 0]),
@@ -260,21 +266,21 @@ fn test_ring_axioms() {
 #[test]
 fn test_free_algebra_axioms() {
     let Fp = Zn::new(65537);
-    let R = ComplexFFTBasedRingBase::<_, OddCyclotomicFFT<_, bluestein::BluesteinFFT<_, _, _, _>, _>, _>::new(Fp, 9, Global);
+    let R = DefaultOddCyclotomicCCFFTRingBase::new(Fp, 9);
     generic_test_free_algebra_axioms(R);
 }
 
 #[test]
 fn test_cyclotomic_ring_axioms() {
     let Fp = Zn::new(65537);
-    let R = ComplexFFTBasedRingBase::<_, OddCyclotomicFFT<_, bluestein::BluesteinFFT<_, _, _, _>, _>, _>::new(Fp, 9, Global);
+    let R = DefaultOddCyclotomicCCFFTRingBase::new(Fp, 9);
     generic_test_cyclotomic_ring_axioms(R);
 }
 
 #[test]
 fn test_fft_output_indices() {
     let Fp = Zn::new(257);
-    let S = ComplexFFTBasedRingBase::<_, OddCyclotomicFFT<_, bluestein::BluesteinFFT<_, _, _, _>, _>, _>::new(Fp, 7, Global);
+    let S = DefaultOddCyclotomicCCFFTRingBase::new(Fp, 7);
 
     assert_eq!(vec![1, 2, 3, 4, 5, 6], S.get_ring().generalized_fft().fft_output_indices().collect::<Vec<_>>());
 }

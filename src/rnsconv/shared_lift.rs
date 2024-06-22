@@ -34,10 +34,10 @@ pub struct AlmostExactSharedBaseConversion<A = Global>
 impl<A> AlmostExactSharedBaseConversion<A>
     where A: Allocator + Clone
 {
-    pub fn new(shared_moduli: Vec<Zn>, additional_in_moduli: Vec<Zn>, additional_out_moduli: Vec<Zn>, allocator: A) -> Self {
+    pub fn new_with(shared_moduli: Vec<Zn>, additional_in_moduli: Vec<Zn>, additional_out_moduli: Vec<Zn>, allocator: A) -> Self {
         let in_moduli = shared_moduli.iter().cloned().chain(additional_in_moduli.into_iter()).collect::<Vec<_>>();
         let out_moduli = shared_moduli.into_iter().chain(additional_out_moduli.iter().cloned()).collect::<Vec<_>>();
-        let conversion = UsedBaseConversion::new(in_moduli, additional_out_moduli, allocator);
+        let conversion = UsedBaseConversion::new_with(in_moduli, additional_out_moduli, allocator);
         Self {
             out_moduli: out_moduli,
             conversion: conversion
@@ -84,7 +84,7 @@ impl<A> RNSOperation for AlmostExactSharedBaseConversion<A>
 fn test_rns_shared_base_conversion() {
     let from = vec![Zn::new(17), Zn::new(97), Zn::new(113)];
     let to = vec![Zn::new(17), Zn::new(97), Zn::new(113), Zn::new(257)];
-    let table = AlmostExactSharedBaseConversion::new(from.clone(), Vec::new(), vec![to[3]], Global);
+    let table = AlmostExactSharedBaseConversion::new_with(from.clone(), Vec::new(), vec![to[3]], Global);
 
     for k in -(17 * 97 * 113 / 4)..=(17 * 97 * 113 / 4) {
         let x = from.iter().map(|Zn| Zn.int_hom().map(k)).collect::<Vec<_>>();
