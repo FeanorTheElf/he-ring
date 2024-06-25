@@ -72,7 +72,7 @@ impl<R, F> Pow2CyclotomicFFT<R, F>
     }
 }
 
-impl<R, F> GeneralizedFFT<R::Type> for Pow2CyclotomicFFT<R, F> 
+impl<R, F> RingDecomposition<R::Type> for Pow2CyclotomicFFT<R, F> 
     where R: RingStore,
         R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         F: FFTAlgorithm<R::Type>
@@ -98,7 +98,7 @@ impl<R, F> GeneralizedFFT<R::Type> for Pow2CyclotomicFFT<R, F>
     }
 }
 
-impl<R1, R2, F1, F2> GeneralizedFFTIso<R1::Type, R2::Type, Pow2CyclotomicFFT<R2, F2>> for Pow2CyclotomicFFT<R1, F1>
+impl<R1, R2, F1, F2> SameNumberRing<R1::Type, R2::Type, Pow2CyclotomicFFT<R2, F2>> for Pow2CyclotomicFFT<R1, F1>
     where R1: RingStore,
         R1::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         F1: FFTAlgorithm<R1::Type>,
@@ -111,7 +111,7 @@ impl<R1, R2, F1, F2> GeneralizedFFTIso<R1::Type, R2::Type, Pow2CyclotomicFFT<R2,
     }
 }
 
-impl<R1, R2, F1, F2> GeneralizedFFTCrossIso<R2::Type, R1::Type, complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<R1, F1>> for Pow2CyclotomicFFT<R2, F2>
+impl<R1, R2, F1, F2> SameNumberRingCross<R2::Type, R1::Type, complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<R1, F1>> for Pow2CyclotomicFFT<R2, F2>
     where R1: RingStore,
         F1: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
         R1::Type: ZnRing,
@@ -120,7 +120,7 @@ impl<R1, R2, F1, F2> GeneralizedFFTCrossIso<R2::Type, R1::Type, complexfft::pow2
         F2: FFTAlgorithm<R2::Type>
 {
     fn is_isomorphic(&self, other: &complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<R1, F1>) -> bool {
-        self.rank() == <_ as complexfft::complex_fft_ring::GeneralizedFFT<_>>::rank(other)
+        self.rank() == <_ as complexfft::complex_fft_ring::RingDecomposition<_>>::rank(other)
     }
 }
 
@@ -220,7 +220,7 @@ use feanor_math::rings::zn::zn_64::Zn;
 fn edge_case_elements<'a, R, F, A>(R: &'a DoubleRNSRing<R, F, A>) -> impl 'a + Iterator<Item = El<DoubleRNSRing<R, F, A>>>
     where R: ZnRingStore,
         R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
-        F: GeneralizedFFTSelfIso<R::Type>,
+        F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
     assert_eq!(2, R.get_ring().rns_base().len());

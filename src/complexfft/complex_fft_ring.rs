@@ -17,24 +17,22 @@ use feanor_math::seq::*;
 
 const CC: Complex64 = Complex64::RING;
 
+pub(super) fn mul_assign_fft_base<R: ?Sized + RingBase, F: ?Sized + RingDecomposition<R>>(decomp: &F, lhs: &mut [R::Element], rhs: &[Complex64El], mut tmp: &mut [Complex64El], ring: &R) {
+    decomp.fft_forward(&lhs, &mut tmp, ring);
+    for i in 0..decomp.rank() {
+        CC.mul_assign_ref(&mut tmp[i], &rhs[i]);
+    }
+    decomp.fft_backward(&mut tmp, lhs, ring);
+}
+
 ///
-/// The data necessary to construct a complex-FFT based ring.
+/// A number ring `R` modulo a prime `p`, together with a way to compute the decomposition of 
+/// `R ⊗ C` into copies of `C`, for inputs that are lifts of `p`.
 /// 
-/// Mathematically speaking, this corresponds to a number field `K = Q[X]/(f)` with
-/// ring of integers `O_K` and a reduction `O_K -> O_K/(p) = Fp[X]/(f)`. Arithmetic in this ring
-/// is then provided by giving "generalized FFTs" that compute the evaluation of a polynomial
-/// `g` at all complex roots of `f` (where we assume that `f` is separable).
+/// The point is that such a decomposition can be used to compute multiplication in `Fp[X]/(f)`
+/// where `f(X)` is the generating polynomial of `R`.
 /// 
-/// More concretely, `fft_forward` should compute the map
-/// ```text
-///     Fp[X]/(f) -> C^deg(f),  g -> (lift(g)(x))_x where f(x) = 0
-/// ```
-/// and `fft_backward` should naturally compute the inverse map.
-/// 
-/// In practice, this is only sensible if `fft_forward` and `fft_backward` can be computed in 
-/// time `o(deg(f)^2)`, which would usually be the case if some FFT-techniques can be applied.
-/// 
-pub trait GeneralizedFFT<R: ?Sized + RingBase> {
+pub trait RingDecomposition<R: ?Sized + RingBase> {
 
     fn rank(&self) -> usize;
 
@@ -43,14 +41,14 @@ pub trait GeneralizedFFT<R: ?Sized + RingBase> {
     /// ```text
     ///     Fp[X]/(f) -> C^deg(f),  g -> (lift(g)(x))_x where f(x) = 0
     /// ```
-    /// For more detail, see the trait-level doc of [`GeneralizedFFT`].
+    /// For more detail, see the trait-level doc of [`RingDecomposition`].
     /// 
     fn fft_forward(&self, input: &[R::Element], destination: &mut [Complex64El], ring: &R);
 
     ///
-    /// Computes the inverse of [`fft_forward()`].
+    /// Computes the inverse of [`RingDecomposition::fft_forward()`].
     /// 
-    /// As opposed to [`fft_forward()`], this function is allowed to arbitrarily change the value
+    /// As opposed to [`RingDecomposition::fft_forward()`], this function is allowed to arbitrarily change the value
     /// stored in `input`, should that enable a more efficient implementation.
     /// 
     fn fft_backward(&self, input: &mut [Complex64El], destination: &mut [R::Element], ring: &R);
@@ -60,17 +58,12 @@ pub trait GeneralizedFFT<R: ?Sized + RingBase> {
     /// given in coefficient-representation and `rhs` is given in (complex-valued) FFT representation.
     /// 
     fn mul_assign_fft(&self, lhs: &mut [R::Element], rhs: &[Complex64El], ring: &R) {
-        let mut tmp = (0..self.rank()).map(|_| CC.zero()).collect::<Vec<_>>();
-        self.fft_forward(&lhs, &mut tmp, ring);
-        for i in 0..self.rank() {
-            CC.mul_assign_ref(&mut tmp[i], &rhs[i]);
-        }
-        self.fft_backward(&mut tmp, lhs, ring);
+        mul_assign_fft_base(self, lhs, rhs, &mut (0..self.rank()).map(|_| CC.zero()).collect::<Vec<_>>(), ring)
     }
 }
 
 ///
-/// Used as a marker that indicates whether the ring structure induced by two [`GeneralizedFFT`]s
+/// Used as a marker that indicates whether the ring structure induced by two [`RingDecomposition`]s
 /// is the same. Note that this should not consider the modulus, so really considers the number rings
 /// `Z[X]/(f(X))` without the reduction modulo `q`.
 /// 
@@ -78,19 +71,19 @@ pub trait GeneralizedFFT<R: ?Sized + RingBase> {
 /// 
 /// Note that whenever `a.is_isomorphic(b)` is true, it is necessary that also `a.rank() == b.rank()`.
 /// 
-pub trait GeneralizedFFTIso<R1: ?Sized + RingBase, R2: ?Sized + RingBase, F: ?Sized + GeneralizedFFT<R2>>: GeneralizedFFT<R1> {
+pub trait SameNumberRing<R1: ?Sized + RingBase, R2: ?Sized + RingBase, F: ?Sized + RingDecomposition<R2>>: RingDecomposition<R1> {
 
     fn is_isomorphic(&self, other: &F) -> bool;
 }
 
-pub trait GeneralizedFFTSelfIso<R: ?Sized + RingBase>: GeneralizedFFTIso<R, R, Self> {}
+pub trait RingDecompositionSelfIso<R: ?Sized + RingBase>: SameNumberRing<R, R, Self> {}
 
-impl<R: ?Sized + RingBase, F: ?Sized + GeneralizedFFT<R> + GeneralizedFFTIso<R, R, F>> GeneralizedFFTSelfIso<R> for F {}
+impl<R: ?Sized + RingBase, F: ?Sized + RingDecomposition<R> + SameNumberRing<R, R, F>> RingDecompositionSelfIso<R> for F {}
 
 ///
-/// Implementation of rings `Z[X]/(f(X), q)` that uses a [`GeneralizedFFT`] for fast arithmetic.
+/// Implementation of rings `Z[X]/(f(X), q)` that uses a [`RingDecomposition`] for fast arithmetic.
 /// 
-/// The concrete ring (i.e. the polynomial `f`) is determined by the used [`GeneralizedFFT`].
+/// The concrete ring (i.e. the polynomial `f`) is determined by the used [`RingDecomposition`].
 /// In the most general case, you can use [`ComplexFFTBasedRingBase::from_generalized_fft()`] to 
 /// create an instance for any `f`, but in the case of cyclotomics (e.g. when using [`crate::complexfft::pow2_cyclotomic::Pow2CyclotomicFFT`]),
 /// simpler creation functions are provided.
@@ -122,7 +115,7 @@ impl<R: ?Sized + RingBase, F: ?Sized + GeneralizedFFT<R> + GeneralizedFFTIso<R, 
 /// assert_eq!(16, R.n());
 /// assert_el_eq!(&R, &R.neg_one(), &R.pow(root_of_unity, 8));
 /// 
-/// // instead of this, we can also explicity create the `GeneralizedFFT`
+/// // instead of this, we can also explicity create the `RingDecomposition`
 /// let generalized_fft: Pow2CyclotomicFFT<Zn, cooley_tuckey::FFTTableCooleyTuckey<Complex64>> = Pow2CyclotomicFFT::create(
 ///     Zn::new(7),
 ///     cooley_tuckey::FFTTableCooleyTuckey::for_complex(Complex64::RING, 3)
@@ -136,7 +129,7 @@ impl<R: ?Sized + RingBase, F: ?Sized + GeneralizedFFT<R> + GeneralizedFFTIso<R, 
 pub struct CCFFTRingBase<R, F, A = Global>
     where R: RingStore,
         R::Type: ZnRing,
-        F: GeneralizedFFTSelfIso<R::Type>,
+        F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
     ring: R,
@@ -152,7 +145,7 @@ pub type CCFFTRing<R, F, A = Global> = RingValue<CCFFTRingBase<R, F, A>>;
 impl<R, F, A> CCFFTRingBase<R, F, A>
     where R: RingStore,
         R::Type: ZnRing,
-        F: GeneralizedFFTSelfIso<R::Type>,
+        F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
     pub fn from_generalized_fft(ring: R, generalized_fft: F, allocator: A) -> Self {
@@ -171,7 +164,7 @@ impl<R, F, A> CCFFTRingBase<R, F, A>
 impl<R, F, A> PartialEq for CCFFTRingBase<R, F, A>
     where R: RingStore,
         R::Type: ZnRing,
-        F: GeneralizedFFTSelfIso<R::Type>,
+        F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
     fn eq(&self, other: &Self) -> bool {
@@ -182,7 +175,7 @@ impl<R, F, A> PartialEq for CCFFTRingBase<R, F, A>
 impl<R, F, A> RingBase for CCFFTRingBase<R, F, A>
     where R: RingStore,
         R::Type: ZnRing,
-        F: GeneralizedFFTSelfIso<R::Type>,
+        F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
     type Element = Vec<El<R>, A>;
@@ -300,7 +293,7 @@ impl<R, F, A> RingBase for CCFFTRingBase<R, F, A>
 pub struct WRTCanonicalBasisElementCreator<'a, R, F, A>
     where R: RingStore,
         R::Type: ZnRing,
-        F: GeneralizedFFTSelfIso<R::Type>,
+        F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
     ring: &'a CCFFTRingBase<R, F, A>,
@@ -309,14 +302,14 @@ pub struct WRTCanonicalBasisElementCreator<'a, R, F, A>
 impl<'a, R, F, A> Copy for WRTCanonicalBasisElementCreator<'a, R, F, A>
     where R: RingStore,
         R::Type: ZnRing,
-        F: GeneralizedFFTSelfIso<R::Type>,
+        F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {}
 
 impl<'a, R, F, A> Clone for WRTCanonicalBasisElementCreator<'a, R, F, A>
     where R: RingStore,
         R::Type: ZnRing,
-        F: GeneralizedFFTSelfIso<R::Type>,
+        F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
     fn clone(&self) -> Self {
@@ -327,7 +320,7 @@ impl<'a, R, F, A> Clone for WRTCanonicalBasisElementCreator<'a, R, F, A>
 impl<'a, 'b, R, F, A> FnOnce<(&'b [El<R>],)> for WRTCanonicalBasisElementCreator<'a, R, F, A>
     where R: RingStore,
         R::Type: ZnRing,
-        F: GeneralizedFFTSelfIso<R::Type>,
+        F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
     type Output = El<CCFFTRing<R, F, A>>;
@@ -340,7 +333,7 @@ impl<'a, 'b, R, F, A> FnOnce<(&'b [El<R>],)> for WRTCanonicalBasisElementCreator
 impl<'a, 'b, R, F, A> FnMut<(&'b [El<R>],)> for WRTCanonicalBasisElementCreator<'a, R, F, A>
     where R: RingStore,
         R::Type: ZnRing,
-        F: GeneralizedFFTSelfIso<R::Type>,
+        F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
     extern "rust-call" fn call_mut(&mut self, args: (&'b [El<R>],)) -> Self::Output {
@@ -351,7 +344,7 @@ impl<'a, 'b, R, F, A> FnMut<(&'b [El<R>],)> for WRTCanonicalBasisElementCreator<
 impl<'a, 'b, R, F, A> Fn<(&'b [El<R>],)> for WRTCanonicalBasisElementCreator<'a, R, F, A>
     where R: RingStore,
         R::Type: ZnRing,
-        F: GeneralizedFFTSelfIso<R::Type>,
+        F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
     extern "rust-call" fn call(&self, args: (&'b [El<R>],)) -> Self::Output {
@@ -362,7 +355,7 @@ impl<'a, 'b, R, F, A> Fn<(&'b [El<R>],)> for WRTCanonicalBasisElementCreator<'a,
 impl<R, F, A> FiniteRing for CCFFTRingBase<R, F, A>
     where R: RingStore,
         R::Type: ZnRing,
-        F: GeneralizedFFTSelfIso<R::Type>,
+        F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
     type ElementsIter<'a> = MultiProduct<<R::Type as FiniteRing>::ElementsIter<'a>, WRTCanonicalBasisElementCreator<'a, R, F, A>, CloneRingEl<&'a R>, Self::Element>
@@ -393,7 +386,7 @@ impl<R, F, A> FiniteRing for CCFFTRingBase<R, F, A>
 impl<R, F, A> FreeAlgebra for CCFFTRingBase<R, F, A>
     where R: RingStore,
         R::Type: ZnRing,
-        F: GeneralizedFFTSelfIso<R::Type>,
+        F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
     type VectorRepresentation<'a> = CloneElFn<&'a [El<R>], El<R>, CloneRingEl<&'a R>>
@@ -417,7 +410,7 @@ impl<R, F, A> FreeAlgebra for CCFFTRingBase<R, F, A>
 impl<R, F, A> RingExtension for CCFFTRingBase<R, F, A>
     where R: RingStore,
         R::Type: ZnRing,
-        F: GeneralizedFFTSelfIso<R::Type>,
+        F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
     type BaseRing = R;
@@ -436,7 +429,7 @@ impl<R, F, A> RingExtension for CCFFTRingBase<R, F, A>
 impl<P, R, F, A> CanHomFrom<P> for CCFFTRingBase<R, F, A>
     where R: RingStore,
         R::Type: ZnRing,
-        F: GeneralizedFFTSelfIso<R::Type>,
+        F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone,
         P: PolyRing,
         R::Type: CanHomFrom<<P::BaseRing as RingStore>::Type>
@@ -462,13 +455,13 @@ impl<P, R, F, A> CanHomFrom<P> for CCFFTRingBase<R, F, A>
 impl<R1, R2, F1, F2, A1, A2> CanHomFrom<CCFFTRingBase<R2, F2, A2>> for CCFFTRingBase<R1, F1, A1>
     where R1: RingStore,
         R1::Type: ZnRing + CanHomFrom<R2::Type>,
-        F1: GeneralizedFFTSelfIso<R1::Type>,
+        F1: RingDecompositionSelfIso<R1::Type>,
         A1: Allocator + Clone,
         R2: RingStore,
         R2::Type: ZnRing,
-        F2: GeneralizedFFTSelfIso<R2::Type>,
+        F2: RingDecompositionSelfIso<R2::Type>,
         A2: Allocator + Clone,
-        F1: GeneralizedFFTIso<R1::Type, R2::Type, F2>
+        F1: SameNumberRing<R1::Type, R2::Type, F2>
 {
     type Homomorphism = <R1::Type as CanHomFrom<R2::Type>>::Homomorphism;
 
@@ -490,13 +483,13 @@ impl<R1, R2, F1, F2, A1, A2> CanHomFrom<CCFFTRingBase<R2, F2, A2>> for CCFFTRing
 impl<R1, R2, F1, F2, A1, A2> CanIsoFromTo<CCFFTRingBase<R2, F2, A2>> for CCFFTRingBase<R1, F1, A1>
     where R1: RingStore,
         R1::Type: ZnRing + CanIsoFromTo<R2::Type>,
-        F1: GeneralizedFFTSelfIso<R1::Type>,
+        F1: RingDecompositionSelfIso<R1::Type>,
         A1: Allocator + Clone,
         R2: RingStore,
         R2::Type: ZnRing,
-        F2: GeneralizedFFTSelfIso<R2::Type>,
+        F2: RingDecompositionSelfIso<R2::Type>,
         A2: Allocator + Clone,
-        F1: GeneralizedFFTIso<R1::Type, R2::Type, F2>
+        F1: SameNumberRing<R1::Type, R2::Type, F2>
 {
     type Isomorphism = <R1::Type as CanIsoFromTo<R2::Type>>::Isomorphism;
 

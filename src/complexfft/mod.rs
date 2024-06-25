@@ -14,3 +14,5 @@ pub mod pow2_cyclotomic;
 /// Contains [`odd_cyclotomic::OddCyclotomicFFT`], a [`complex_fft_ring::GeneralizedFFT`] for odd-conductor cyclotomic rings.
 /// 
 pub mod odd_cyclotomic;
+
+pub mod automorphism;

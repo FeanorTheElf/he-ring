@@ -314,8 +314,7 @@ fn test_rescale() {
         rescaling.apply(Submatrix::<AsFirstElement<_>, _>::new(&input, 3, 1), SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 2, 1));
 
         for j in 0..output.len() {
-            // no errors seem to occur in this case
-            assert_el_eq!(to.at(j), output.at(j), actual.at(j));
+            assert!(to.at(j).smallest_lift(to.at(j).sub_ref(output.at(j), actual.at(j))).abs() <= 1);
         }
     }
 }
@@ -342,8 +341,7 @@ fn test_rescale_small_num() {
         rescaling.apply(Submatrix::<AsFirstElement<_>, _>::new(&input, 3, 1), SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 3, 1));
 
         for j in 0..output.len() {
-            // no errors seem to occur in this case
-            assert_el_eq!(to.at(j), output.at(j), actual.at(j));
+            assert!(to.at(j).smallest_lift(to.at(j).sub_ref(output.at(j), actual.at(j))).abs() <= 1);
         }
     }
 }

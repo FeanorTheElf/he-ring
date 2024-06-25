@@ -16,14 +16,11 @@ use feanor_math::rings::zn::*;
 use feanor_math::seq::*;
 
 use crate::complexfft;
+use crate::complexfft::automorphism::euler_phi;
 use crate::cyclotomic::*;
 use crate::doublerns::double_rns_ring::*;
 
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
-
-fn phi(factorization: &Vec<(i64, usize)>) -> i64 {
-    ZZ.prod(factorization.iter().map(|(p, e)| (p - 1) * ZZ.pow(*p, e - 1)))
-}
 
 pub struct OddCyclotomicFFT<R, F, A = Global> 
     where R: RingStore,
@@ -47,7 +44,7 @@ impl<R, F, A> OddCyclotomicFFT<R, F, A>
 {
     fn create(ring: R, fft_table: F, allocator: A) -> Self {
         let n_factorization = algorithms::int_factor::factor(&ZZ, fft_table.len() as i64);
-        let rank = phi(&n_factorization) as usize;
+        let rank = euler_phi(&n_factorization) as usize;
 
         let poly_ring = SparsePolyRing::new(&ring, "X");
         let cyclotomic_poly = algorithms::cyclotomic::cyclotomic_polynomial(&poly_ring, fft_table.len());
@@ -84,7 +81,7 @@ impl<R, F, A> OddCyclotomicFFT<R, F, A>
     }
 }
 
-impl<R, F, A> GeneralizedFFT<R::Type> for OddCyclotomicFFT<R, F , A> 
+impl<R, F, A> RingDecomposition<R::Type> for OddCyclotomicFFT<R, F , A> 
     where R: RingStore,
         R::Type: ZnRing + CanHomFrom<BigIntRingBase> + DivisibilityRing,
         F: FFTAlgorithm<R::Type>,
@@ -132,7 +129,7 @@ impl<R, F, A> GeneralizedFFT<R::Type> for OddCyclotomicFFT<R, F , A>
     }
 }
 
-impl<R1, R2, F1, F2, A1, A2> GeneralizedFFTIso<R2::Type, R1::Type, OddCyclotomicFFT<R1, F1, A1>> for OddCyclotomicFFT<R2, F2, A2>
+impl<R1, R2, F1, F2, A1, A2> SameNumberRing<R2::Type, R1::Type, OddCyclotomicFFT<R1, F1, A1>> for OddCyclotomicFFT<R2, F2, A2>
     where R1: RingStore,
         R1::Type: ZnRing + CanHomFrom<BigIntRingBase> + DivisibilityRing,
         F1: FFTAlgorithm<R1::Type>,
@@ -147,7 +144,7 @@ impl<R1, R2, F1, F2, A1, A2> GeneralizedFFTIso<R2::Type, R1::Type, OddCyclotomic
     }
 }
 
-impl<R1, R2, F1, F2, A1, A2> GeneralizedFFTCrossIso<R2::Type, R1::Type, complexfft::odd_cyclotomic::OddCyclotomicFFT<R1, F1, A1>> for OddCyclotomicFFT<R2, F2, A2>
+impl<R1, R2, F1, F2, A1, A2> SameNumberRingCross<R2::Type, R1::Type, complexfft::odd_cyclotomic::OddCyclotomicFFT<R1, F1, A1>> for OddCyclotomicFFT<R2, F2, A2>
     where R1: RingStore,
         R1::Type: ZnRing + CanHomFrom<StaticRingBase<i64>> + DivisibilityRing,
         F1: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
@@ -296,7 +293,7 @@ use feanor_math::rings::extension::FreeAlgebraStore;
 fn edge_case_elements<'a, R, F, A>(R: &'a DoubleRNSRing<R, F, A>) -> impl 'a + Iterator<Item = El<DoubleRNSRing<R, F, A>>>
     where R: ZnRingStore,
         R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
-        F: GeneralizedFFTSelfIso<R::Type>,
+        F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
     assert_eq!(2, R.get_ring().rns_base().len());

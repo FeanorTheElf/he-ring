@@ -1,4 +1,5 @@
 use std::alloc::Allocator;
+use std::alloc::Global;
 
 use feanor_math::algorithms::fft::*;
 use feanor_math::algorithms::fft::complex_fft::FFTErrorEstimate;
@@ -29,23 +30,26 @@ const CC: Complex64 = Complex64::RING;
 /// [`super::odd_cyclotomic::OddCyclotomicFFT`] in the case that the cyclotomic conductor is odd instead
 /// of a power of two.
 /// 
-pub struct Pow2CyclotomicFFT<R, F> 
+pub struct Pow2CyclotomicFFT<R, F, A = Global> 
     where R: RingStore,
         R::Type: ZnRing,
-        F: FFTAlgorithm<Complex64Base> + FFTErrorEstimate
+        F: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
+        A: Allocator + Clone
 {
     fft_table: F,
     ring: R,
     twiddles: Vec<Complex64El>,
     inv_twiddles: Vec<Complex64El>,
+    allocator: A
 }
 
-impl<R, F> Pow2CyclotomicFFT<R, F> 
+impl<R, F, A> Pow2CyclotomicFFT<R, F, A> 
     where R: RingStore,
         R::Type: ZnRing,
-        F: FFTAlgorithm<Complex64Base> + FFTErrorEstimate
+        F: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
+        A: Allocator + Clone
 {
-    pub fn create(ring: R, fft_table: F) -> Self {
+    pub fn create(ring: R, fft_table: F, allocator: A) -> Self {
         let rank = fft_table.len() as i64;
         let log2_n = StaticRing::<i64>::RING.abs_highest_set_bit(&rank).unwrap();
         assert!(rank == (1 << log2_n));
@@ -55,14 +59,15 @@ impl<R, F> Pow2CyclotomicFFT<R, F>
             twiddles.push(CC.root_of_unity(i, rank * 2));
             inv_twiddles.push(CC.root_of_unity(-i, rank * 2));
         }
-        return Self { fft_table, ring, twiddles, inv_twiddles };
+        return Self { fft_table, ring, twiddles, inv_twiddles, allocator };
     }
 }
 
-impl<R, F> GeneralizedFFT<R::Type> for Pow2CyclotomicFFT<R, F> 
+impl<R, F, A> RingDecomposition<R::Type> for Pow2CyclotomicFFT<R, F, A> 
     where R: RingStore,
         R::Type: ZnRing,
-        F: FFTAlgorithm<Complex64Base> + FFTErrorEstimate
+        F: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
+        A: Allocator + Clone
 {
     fn fft_backward(&self, data: &mut [Complex64El], destination: &mut [El<R>], ring: &R::Type) {
         assert!(ring == self.ring.get_ring());
@@ -88,26 +93,36 @@ impl<R, F> GeneralizedFFT<R::Type> for Pow2CyclotomicFFT<R, F>
     fn rank(&self) -> usize {
         self.fft_table.len()
     }
+
+    fn mul_assign_fft(&self, lhs: &mut [El<R>], rhs: &[Complex64El], ring: &R::Type) {
+        assert!(self.ring.get_ring() == ring);
+        let mut tmp = Vec::with_capacity_in(self.rank(), self.allocator.clone());
+        tmp.resize(self.rank(), CC.zero());
+        mul_assign_fft_base(self, lhs, rhs, &mut tmp, ring);
+    }
 }
 
-impl<R1, F1, R2, F2> GeneralizedFFTIso<R2::Type, R1::Type, Pow2CyclotomicFFT<R1, F1>> for Pow2CyclotomicFFT<R2, F2>
+impl<R1, F1, R2, F2, A1, A2> SameNumberRing<R2::Type, R1::Type, Pow2CyclotomicFFT<R1, F1, A1>> for Pow2CyclotomicFFT<R2, F2, A2>
     where R1: RingStore,
         R1::Type: ZnRing,
         F1: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
         R2: RingStore,
         R2::Type: ZnRing,
-        F2: FFTAlgorithm<Complex64Base> + FFTErrorEstimate
+        F2: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
+        A1: Allocator + Clone,
+        A2: Allocator + Clone
 {
-    fn is_isomorphic(&self, other: &Pow2CyclotomicFFT<R1, F1>) -> bool {
+    fn is_isomorphic(&self, other: &Pow2CyclotomicFFT<R1, F1, A1>) -> bool {
         self.rank() == other.rank()
     }
 }
 
-impl<R, F, A> CyclotomicRing for CCFFTRingBase<R, Pow2CyclotomicFFT<R, F>, A>
+impl<R, F, A1, A2> CyclotomicRing for CCFFTRingBase<R, Pow2CyclotomicFFT<R, F, A2>, A1>
     where R: RingStore,
         R::Type: ZnRing,
         F: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
-        A: Allocator + Clone
+        A1: Allocator + Clone,
+        A2: Allocator + Clone
 {
     fn n(&self) -> usize {
         2 * self.rank()
@@ -128,7 +143,8 @@ impl<R, A> CCFFTRingBase<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckeyFFT<
                 ring.clone(),
                 Pow2CyclotomicFFT::create(
                     ring, 
-                    cooley_tuckey::CooleyTuckeyFFT::for_complex(Complex64::RING, log2_ring_degree)
+                    cooley_tuckey::CooleyTuckeyFFT::for_complex(Complex64::RING, log2_ring_degree),
+                    Global
                 ),
                 A::default()
             )

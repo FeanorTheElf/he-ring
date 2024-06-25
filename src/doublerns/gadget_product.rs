@@ -29,7 +29,7 @@ type UsedBaseConversion<A> = lift::AlmostExactBaseConversion<A>;
 /// For more details, see [`DoubleRNSRingBase::gadget_product()`].
 /// 
 pub enum GadgetProductRhsOperand<'a, F, A = Global> 
-    where F: GeneralizedFFTSelfIso<ZnBase>,
+    where F: RingDecompositionSelfIso<ZnBase>,
         A: Allocator + Clone
 {
     LKSSStyle(LKSSGadgetProductRhsOperand<'a, F, A>),
@@ -37,7 +37,7 @@ pub enum GadgetProductRhsOperand<'a, F, A = Global>
 }
 
 pub struct LKSSGadgetProductRhsOperand<'a, F, A = Global> 
-    where F: GeneralizedFFTSelfIso<ZnBase>,
+    where F: RingDecompositionSelfIso<ZnBase>,
         A: Allocator + Clone
 {
     shortened_rns_base: zn_rns::Zn<Zn, BigIntRing>,
@@ -47,7 +47,7 @@ pub struct LKSSGadgetProductRhsOperand<'a, F, A = Global>
 }
 
 impl<'a, F, A> LKSSGadgetProductRhsOperand<'a, F, A> 
-    where F: GeneralizedFFTSelfIso<ZnBase>,
+    where F: RingDecompositionSelfIso<ZnBase>,
         A: Allocator + Clone
 {
     fn at(&self, i: usize, j: usize, k: usize, l: usize) -> &ZnEl {
@@ -64,7 +64,7 @@ impl<'a, F, A> LKSSGadgetProductRhsOperand<'a, F, A>
 }
 
 impl<'a, F, A> GadgetProductRhsOperand<'a, F, A> 
-    where F: GeneralizedFFTSelfIso<ZnBase>,
+    where F: RingDecompositionSelfIso<ZnBase>,
         A: Allocator + Clone
 {
     pub fn set_rns_factor(&mut self, i: usize, el: DoubleRNSNonFFTEl<Zn, F, A>) {
@@ -82,7 +82,7 @@ impl<'a, F, A> GadgetProductRhsOperand<'a, F, A>
 /// For more details, see [`DoubleRNSRingBase::gadget_product()`].
 /// 
 pub enum GadgetProductLhsOperand<'a, F, A = Global> 
-    where F: GeneralizedFFTSelfIso<ZnBase>,
+    where F: RingDecompositionSelfIso<ZnBase>,
         A: Allocator + Clone
 {
     LKSSStyle(LKSSGadgetProductLhsOperand<'a, F, A>),
@@ -90,7 +90,7 @@ pub enum GadgetProductLhsOperand<'a, F, A = Global>
 }
 
 pub struct LKSSGadgetProductLhsOperand<'a, F, A> 
-    where F: GeneralizedFFTSelfIso<ZnBase>,
+    where F: RingDecompositionSelfIso<ZnBase>,
         A: Allocator + Clone
 {
     output_moduli_count: usize,
@@ -99,7 +99,7 @@ pub struct LKSSGadgetProductLhsOperand<'a, F, A>
 }
 
 impl<F, A> DoubleRNSRingBase<Zn, F, A> 
-    where F: GeneralizedFFTSelfIso<ZnBase>,
+    where F: RingDecompositionSelfIso<ZnBase>,
         A: Allocator + Clone
 {
     ///

@@ -1,5 +1,4 @@
-use feanor_math::algorithms::matmul::strassen::dispatch_strassen_impl;
-use feanor_math::algorithms::matmul::strassen::strassen_mem_size;
+use feanor_math::algorithms::matmul::strassen::{dispatch_strassen_impl, strassen_mem_size};
 use feanor_math::integer::*;
 use feanor_math::matrix::*;
 use feanor_math::homomorphism::*;
@@ -79,10 +78,6 @@ impl<A> AlmostExactMatrixBaseConversion<A>
             ZZbig.int_hom().map(in_rings.len() as i32)
         ].into_iter());
         assert!(ZZbig.is_lt(&max_computation_result, &ZZbig.power_of_two(i128::BITS as usize - 1)), "temporarily unreduced modular lift sum will overflow");
-        
-        // this is currently the case and makes things slightly easier; remove it later and adjust matmul code
-        assert!(pad_to_block(out_rings.len() + 1) == 1 << BLOCK_SIZE_LOG2);
-        assert!(pad_to_block(in_rings.len()) == 1 << BLOCK_SIZE_LOG2);
 
         // When computing the approximate lifted value, we can work with `gamma` in place of `Q`, where `gamma >= 4 r max(q)` (`q` runs through the input factors)
         let log2_r = ZZi64.abs_log2_ceil(&(in_rings.len() as i64)).unwrap();
@@ -173,24 +168,40 @@ impl<A> RNSOperation for AlmostExactMatrixBaseConversion<A>
         let mut output_unreduced = OwnedMatrix::from_fn_in(pad_to_block(out_len + 1), pad_to_block(col_count), |_, _| 0, self.allocator.clone());
         let mut output_unreduced = output_unreduced.data_mut();
 
-        // actually using Strassen's algorithm here doesn't make much of a difference, it is basically as fast as without
+        // actually using Strassen's algorithm here doesn't make much of a difference, it is basically as fast as without for normal
+        // parameters; however, this way we can claim superior asymptotic performance :)
         const STRASSEN_THRESHOLD_LOG2: usize = 3;
-        let mut memory = Vec::with_capacity_in(strassen_mem_size(false, BLOCK_SIZE_LOG2, 3), self.allocator.clone());
-        memory.resize(strassen_mem_size(false, BLOCK_SIZE_LOG2, STRASSEN_THRESHOLD_LOG2), 0);
+        let mem_size = strassen_mem_size(pad_to_block(in_len) > (1 << BLOCK_SIZE_LOG2), BLOCK_SIZE_LOG2, STRASSEN_THRESHOLD_LOG2);
+        let mut memory = Vec::with_capacity_in(mem_size, self.allocator.clone());
+        memory.resize(mem_size, 0);
 
-        assert!(pad_to_block(out_len + 1) == 1 << BLOCK_SIZE_LOG2);
-        assert!(pad_to_block(in_len) == 1 << BLOCK_SIZE_LOG2);
         timed!("AlmostExactMatrixBaseConversion::apply::matmul", || {
-            for j in (0..pad_to_block(col_count)).step_by(1 << BLOCK_SIZE_LOG2) {
-                dispatch_strassen_impl::<_, _, _, _, false, false, false, false>(
-                    BLOCK_SIZE_LOG2, 
-                    STRASSEN_THRESHOLD_LOG2, 
-                    TransposableSubmatrix::from(self.Q_over_q_mod_and_downscaled.data()), 
-                    TransposableSubmatrix::from(lifts.as_const().restrict_cols(j..(j + (1 << BLOCK_SIZE_LOG2)))), 
-                    TransposableSubmatrixMut::from(output_unreduced.reborrow().restrict_cols(j..(j + (1 << BLOCK_SIZE_LOG2)))), 
-                    StaticRing::<i128>::RING, 
-                    &mut memory
-                );
+            for i in 0..(pad_to_block(out_len + 1) / (1 << BLOCK_SIZE_LOG2)) {
+                for k in 0..(pad_to_block(in_len) / (1 << BLOCK_SIZE_LOG2)) {
+                    for j in (0..pad_to_block(col_count)).step_by(1 << BLOCK_SIZE_LOG2) {
+                        if k == 0 {
+                            feanor_math::algorithms::matmul::strassen::dispatch_strassen_impl::<_, _, _, _, false, false, false, false>(
+                                BLOCK_SIZE_LOG2, 
+                                STRASSEN_THRESHOLD_LOG2, 
+                                TransposableSubmatrix::from(self.Q_over_q_mod_and_downscaled.data().submatrix(i..(i + (1 << BLOCK_SIZE_LOG2)), k..(k + (1 << BLOCK_SIZE_LOG2)))), 
+                                TransposableSubmatrix::from(lifts.as_const().submatrix(k..(k + (1 << BLOCK_SIZE_LOG2)), j..(j + (1 << BLOCK_SIZE_LOG2)))), 
+                                TransposableSubmatrixMut::from(output_unreduced.reborrow().submatrix(i..(i + (1 << BLOCK_SIZE_LOG2)), j..(j + (1 << BLOCK_SIZE_LOG2)))), 
+                                StaticRing::<i128>::RING, 
+                                &mut memory
+                            );
+                        } else {   
+                            feanor_math::algorithms::matmul::strassen::dispatch_strassen_impl::<_, _, _, _, true, false, false, false>(
+                                BLOCK_SIZE_LOG2, 
+                                STRASSEN_THRESHOLD_LOG2, 
+                                TransposableSubmatrix::from(self.Q_over_q_mod_and_downscaled.data().submatrix(i..(i + (1 << BLOCK_SIZE_LOG2)), k..(k + (1 << BLOCK_SIZE_LOG2)))), 
+                                TransposableSubmatrix::from(lifts.as_const().submatrix(k..(k + (1 << BLOCK_SIZE_LOG2)), j..(j + (1 << BLOCK_SIZE_LOG2)))), 
+                                TransposableSubmatrixMut::from(output_unreduced.reborrow().submatrix(i..(i + (1 << BLOCK_SIZE_LOG2)), j..(j + (1 << BLOCK_SIZE_LOG2)))), 
+                                StaticRing::<i128>::RING, 
+                                &mut memory
+                            );
+                        }
+                    }
+                }
             }
         });
         

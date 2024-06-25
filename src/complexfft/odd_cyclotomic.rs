@@ -17,7 +17,8 @@ use feanor_math::rings::zn::zn_64;
 use feanor_math::rings::zn::{ZnRing, ZnRingStore};
 
 use super::complex_fft_ring::CCFFTRing;
-use super::complex_fft_ring::{GeneralizedFFT, CCFFTRingBase, GeneralizedFFTIso};
+use super::complex_fft_ring::{RingDecomposition, CCFFTRingBase, SameNumberRing};
+use crate::complexfft::complex_fft_ring::mul_assign_fft_base;
 use crate::cyclotomic::*;
 
 const CC: Complex64 = Complex64::RING;
@@ -144,7 +145,7 @@ impl<R, F, A> OddCyclotomicFFT<R, F, A>
     }
 }
 
-impl<R, F, A> GeneralizedFFT<R::Type> for OddCyclotomicFFT<R, F, A> 
+impl<R, F, A> RingDecomposition<R::Type> for OddCyclotomicFFT<R, F, A> 
     where R: RingStore,
         R::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>,
         F: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
@@ -190,9 +191,16 @@ impl<R, F, A> GeneralizedFFT<R::Type> for OddCyclotomicFFT<R, F, A>
     fn rank(&self) -> usize {
         self.rank
     }
+
+    fn mul_assign_fft(&self, lhs: &mut [El<R>], rhs: &[Complex64El], ring: &R::Type) {
+        assert!(self.ring.get_ring() == ring);
+        let mut tmp = Vec::with_capacity_in(self.rank(), self.allocator.clone());
+        tmp.resize(self.rank(), CC.zero());
+        mul_assign_fft_base(self, lhs, rhs, &mut tmp, ring);
+    }
 }
 
-impl<R1, F1, A1, R2, F2, A2> GeneralizedFFTIso<R2::Type, R1::Type, OddCyclotomicFFT<R1, F1, A1>> for OddCyclotomicFFT<R2, F2, A2>
+impl<R1, F1, A1, R2, F2, A2> SameNumberRing<R2::Type, R1::Type, OddCyclotomicFFT<R1, F1, A1>> for OddCyclotomicFFT<R2, F2, A2>
     where R1: RingStore,
         R1::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>,
         F1: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,

@@ -3,7 +3,7 @@
 #![feature(unboxed_closures)]
 #![feature(test)]
 #![feature(const_type_name)]
-#![feature(allocator_api)]
+#![feature(allocator_api)]#![feature(hint_assert_unchecked)]
 #![feature(ptr_alignment_type)]
 
 #![allow(non_snake_case)]
