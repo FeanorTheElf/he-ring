@@ -1,8 +1,13 @@
 use std::alloc::Allocator;
 use std::alloc::Global;
 
+use cooley_tuckey::bitreverse;
+use feanor_math::algorithms::discrete_log::discrete_log;
+use feanor_math::algorithms::eea::signed_gcd;
 use feanor_math::algorithms::fft::*;
 use feanor_math::algorithms::fft::complex_fft::FFTErrorEstimate;
+use feanor_math::assert_el_eq;
+use feanor_math::homomorphism::Homomorphism;
 use feanor_math::homomorphism::Identity;
 use feanor_math::primitive_int::*;
 use feanor_math::ring::*;
@@ -12,7 +17,9 @@ use feanor_math::rings::zn::zn_64;
 use feanor_math::rings::zn::{ZnRing, ZnRingStore};
 use feanor_math::rings::extension::*;
 use feanor_math::integer::*;
+use feanor_math::wrapper::RingElementWrapper;
 
+use super::automorphism::CyclotomicRingDecomposition;
 use super::complex_fft_ring::*;
 use crate::cyclotomic::*;
 
@@ -102,6 +109,32 @@ impl<R, F, A> RingDecomposition<R::Type> for Pow2CyclotomicFFT<R, F, A>
     }
 }
 
+impl<R, F, A> CyclotomicRingDecomposition<R::Type> for Pow2CyclotomicFFT<R, F, A> 
+    where R: RingStore,
+        R::Type: ZnRing,
+        F: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
+        A: Allocator + Clone
+{
+    fn permute_galois_action(&self, src: &[Complex64El], dst: &mut [Complex64El], galois_element: zn_64::ZnEl) {
+        let Zn = self.galois_group_mulrepr();
+        let hom = Zn.can_hom(&StaticRing::<i64>::RING).unwrap();
+        let bitlength = StaticRing::<i64>::RING.abs_log2_ceil(&(self.rank() as i64)).unwrap();
+        debug_assert_eq!(1 << bitlength, self.rank());
+
+        // the elements of src resp. dst follow an order derived from the bitreversing order of the underlying FFT
+        let index_to_galois_el = |i: usize| hom.map(2 * bitreverse(i, bitlength) as i64 + 1);
+        let galois_el_to_index = |s: zn_64::ZnEl| bitreverse((Zn.smallest_positive_lift(s) as usize - 1) / 2, bitlength);
+
+        for i in 0..self.rank() {
+            dst[i] = src[galois_el_to_index(Zn.mul(galois_element, index_to_galois_el(i)))];
+        }
+    }
+
+    fn galois_group_mulrepr(&self) -> Zn {
+        Zn::new(self.rank() as u64 * 2)
+    }
+}
+
 impl<R1, F1, R2, F2, A1, A2> SameNumberRing<R2::Type, R1::Type, Pow2CyclotomicFFT<R1, F1, A1>> for Pow2CyclotomicFFT<R2, F2, A2>
     where R1: RingStore,
         R1::Type: ZnRing,
@@ -184,5 +217,15 @@ fn test_cyclotomic_ring_axioms() {
     let Fp = Zn::new(65537);
     let R = DefaultPow2CyclotomicCCFFTRingBase::<>::new(Fp, 3);
     generic_test_cyclotomic_ring_axioms(R);
+}
 
+#[test]
+fn test_permute_galois_automorphism() {
+    let Fp = Zn::new(65537);
+    let R = DefaultPow2CyclotomicCCFFTRingBase::<>::new(Fp, 3);
+    let galois_group_ring = R.get_ring().galois_group_mulrepr();
+    assert_el_eq!(&R, &R.pow(R.canonical_gen(), 3), &R.get_ring().apply_galois_action(galois_group_ring.int_hom().map(3), R.canonical_gen()));
+    assert_el_eq!(&R, &ring_literal!(&R, [1, 0, 1, 0, 1, 0, 0, 0]), &R.get_ring().apply_galois_action(galois_group_ring.int_hom().map(3), ring_literal!(&R, [1, 0, 0, 0, -1, 0, 1, 0])));
+    assert_el_eq!(&R, &ring_literal!(&R, [1, 0, 0, 2, -1, 3, 1, 0]), &R.get_ring().apply_galois_action(galois_group_ring.int_hom().map(3), ring_literal!(&R, [1, 2, 1, 0, 1, 0, 0, 3])));
+    assert_el_eq!(&R, &ring_literal!(&R, [1, 0, 0, 0, 1, 0, 1, 0]), &R.get_ring().apply_galois_action(galois_group_ring.int_hom().map(5), ring_literal!(&R, [1, 0, 0, 0, 1, 0, -1, 0])));
 }

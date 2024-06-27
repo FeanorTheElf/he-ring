@@ -157,7 +157,8 @@ impl<R_main, R_twiddle, A> DoubleRNSRingBase<R_main, Pow2CyclotomicFFT<R_main, c
     pub fn new_with(base_ring: zn_rns::Zn<R_main, BigIntRing>, fft_rings: Vec<R_twiddle>, log2_n: usize, allocator: A) -> RingValue<Self> {
         assert_eq!(base_ring.len(), fft_rings.len());
         let ffts = fft_rings.into_iter().enumerate().map(|(i, R)| {
-            let root_of_unity = algorithms::unity_root::get_prim_root_of_unity_pow2(&R, log2_n + 1).unwrap();
+            let R_as_field = (&R).as_field().ok().unwrap();
+            let root_of_unity = R_as_field.get_ring().unwrap_element(algorithms::unity_root::get_prim_root_of_unity_pow2(&R_as_field, log2_n + 1).unwrap());
             let fft_table_root_of_unity = R.pow(R.clone_el(&root_of_unity), 2);
             let hom = base_ring.at(i).clone().into_can_hom(R).ok().unwrap();
             let root_of_unity = hom.map(root_of_unity);
@@ -195,7 +196,8 @@ impl<R, A> DoubleRNSRingBase<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckey
 {
     pub fn new_with(base_ring: zn_rns::Zn<R, BigIntRing>, log2_n: usize, allocator: A) -> RingValue<Self> {
         let ffts = base_ring.as_iter().enumerate().map(|(_, R)| {
-            let root_of_unity = algorithms::unity_root::get_prim_root_of_unity_pow2(&R, log2_n + 1).unwrap();
+            let R_as_field = R.as_field().ok().unwrap();
+            let root_of_unity = R_as_field.get_ring().unwrap_element(algorithms::unity_root::get_prim_root_of_unity_pow2(&R_as_field, log2_n + 1).unwrap());
             let fft_table_root_of_unity = R.pow(R.clone_el(&root_of_unity), 2);
             Pow2CyclotomicFFT::create(
                 R.clone(),

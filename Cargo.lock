@@ -23,7 +23,7 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 [[package]]
 name = "feanor-math"
 version = "2.0.0"
-source = "git+https://github.com/feanortheelf/feanor-math.git#d530a96d45b78f54c9f54a88beb170c798336cae"
+source = "git+https://github.com/feanortheelf/feanor-math.git#5433641ed509fa40cd6db22716bf64c883946f86"
 dependencies = [
  "libc",
  "oorandom",

@@ -247,7 +247,8 @@ impl<R_main, R_twiddle, A> DoubleRNSRingBase<
         let bluestein_log2_n0 = ZZ.abs_log2_ceil(&n.0).unwrap() + 1;
         let bluestein_log2_n1 = ZZ.abs_log2_ceil(&n.1).unwrap() + 1;
         let ffts = fft_rings.into_iter().enumerate().map(|(i, R)| {
-            let root_of_unity = algorithms::unity_root::get_prim_root_of_unity(&R, (2 * n.0 * n.1) as usize).unwrap();
+            let R_as_field = (&R).as_field().ok().unwrap();
+            let root_of_unity = R_as_field.get_ring().unwrap_element(algorithms::unity_root::get_prim_root_of_unity(&R_as_field, (2 * n.0 * n.1) as usize).unwrap());
             let hom: CanHom<R_twiddle, R_main> = base_ring.at(i).clone().into_can_hom(R.clone()).ok().unwrap();
             OddCyclotomicFFT::create(hom.codomain().clone(), factor_fft::CoprimeCooleyTuckeyFFT::new_with_hom(
                 hom.clone(),
@@ -255,7 +256,7 @@ impl<R_main, R_twiddle, A> DoubleRNSRingBase<
                 bluestein::BluesteinFFT::new_with_hom(
                     hom.clone(), 
                     R.pow(R.clone_el(&root_of_unity), n.0 as usize), 
-                    algorithms::unity_root::get_prim_root_of_unity_pow2(&R, bluestein_log2_n1).unwrap(), 
+                    R_as_field.get_ring().unwrap_element(algorithms::unity_root::get_prim_root_of_unity_pow2(&R_as_field, bluestein_log2_n1).unwrap()), 
                     n.1 as usize, 
                     bluestein_log2_n1,
                     allocator.clone()
@@ -263,7 +264,7 @@ impl<R_main, R_twiddle, A> DoubleRNSRingBase<
                 bluestein::BluesteinFFT::new_with_hom(
                     hom.clone(), 
                     R.pow(root_of_unity, n.1 as usize), 
-                    algorithms::unity_root::get_prim_root_of_unity_pow2(&R, bluestein_log2_n0).unwrap(), 
+                    R_as_field.get_ring().unwrap_element(algorithms::unity_root::get_prim_root_of_unity_pow2(&R_as_field, bluestein_log2_n0).unwrap()), 
                     n.0 as usize, 
                     bluestein_log2_n0,
                     allocator.clone()
