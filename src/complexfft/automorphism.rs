@@ -6,8 +6,10 @@ use std::cmp::max;
 use feanor_math::algorithms;
 use feanor_math::algorithms::discrete_log::discrete_log;
 use feanor_math::algorithms::eea::signed_gcd;
+use feanor_math::algorithms::fft::cooley_tuckey::bitreverse;
 use feanor_math::algorithms::int_factor;
 use feanor_math::algorithms::unity_root::get_prim_root_of_unity;
+use feanor_math::algorithms::unity_root::is_prim_root_of_unity;
 use feanor_math::homomorphism::CanHomFrom;
 use feanor_math::homomorphism::Homomorphism;
 use feanor_math::integer::int_cast;
@@ -103,7 +105,7 @@ impl<R, F, A> CCFFTRingBase<R, F, A>
     }
 
     pub fn compute_linear_transform(&self, el: &<Self as RingBase>::Element, transform: &LinearTransform<R, F, A>) -> <Self as RingBase>::Element {
-        self.sum(transform.coeffs.iter().zip(transform.galois_elements.iter()).map(|(c, s)| self.apply_galois_action(*s, self.mul_ref(c, el))))
+        <_ as RingBase>::sum(self, transform.coeffs.iter().zip(transform.galois_elements.iter()).map(|(c, s)| self.mul_ref_fst(c, self.apply_galois_action(*s, self.clone_el(el)))))
     }
 }
 
@@ -270,7 +272,7 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
             .filter_map(|x| x)
             .map(|s| ring.apply_galois_action(s, ring.clone_el(&irred_factor))));
 
-        let normalization_factor = result.slot_ring().invert(&result.get_slot_value(&unnormalized_slot_unit_vector)).unwrap();
+        let normalization_factor = result.slot_ring().invert(&result.get_slot_values(&unnormalized_slot_unit_vector).next().unwrap()).unwrap();
         let normalization_factor_wrt_basis = result.slot_ring().wrt_canonical_basis(&normalization_factor);
 
         result.slot_unit_vec = ring.mul(
@@ -285,7 +287,7 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
         &self.slot_ring
     }
 
-    fn galois_group_ring(&self) -> &Zn {
+    fn galois_group_mulrepr(&self) -> &Zn {
         &self.galois_group_ring
     }
 
@@ -311,10 +313,10 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
             'a: 'b
     {
         assert_eq!(vec.len(), self.ring.rank() / self.d);
-        let mut move_to_slot_gens = self.slot_iter(|idxs| self.galois_group_ring().prod(idxs.iter().enumerate().map(|(j, e)| self.galois_group_ring().pow(self.gens[j], *e))));
+        let mut move_to_slot_gens = self.slot_iter(|idxs| self.galois_group_mulrepr().prod(idxs.iter().enumerate().map(|(j, e)| self.galois_group_mulrepr().pow(self.gens[j], *e))));
         // currently only a "slow" O(n^2) algorithm, but we only have to run it during preprocessing;
         // maybe use an FFT later?
-        self.ring.sum(vec.map(|x| {
+        <_ as RingBase>::sum(self.ring, vec.map(|x| {
             let s = move_to_slot_gens.next().unwrap();
             let x_wrt_basis = self.slot_ring().wrt_canonical_basis(&x);
             let lift_of_x = self.ring.from_canonical_basis((0..self.ring.rank()).map(|i| if i < x_wrt_basis.len() { x_wrt_basis.at(i) } else { self.ring.base_ring().zero() }));
@@ -325,19 +327,28 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
         }))
     }
 
-    fn get_slot_value(&self, el: &El<CCFFTRing<R, F, A>>) -> El<SlotRing<'a, R, A>> {
-        // again we use only a "slow" O(n^2) algorithm, but we only have to run it during preprocessing;
-        // maybe use an FFT later?
-        let poly_ring = DensePolyRing::new(self.ring.base_ring(), "X");
-        let el_as_poly = RingRef::new(self.ring).poly_repr(&poly_ring, el, self.ring.base_ring().identity());
-        let poly_modulus = self.slot_ring().generating_poly(&poly_ring, self.ring.base_ring().identity());
-        let (_, rem) = poly_ring.div_rem_monic(el_as_poly, &poly_modulus);
-        self.slot_ring().from_canonical_basis((0..self.d).map(|i| poly_ring.base_ring().clone_el(poly_ring.coefficient_at(&rem, i))))
+    fn get_slot_values<'b>(&'b self, el: &'b El<CCFFTRing<R, F, A>>) -> impl 'b + ExactSizeIterator<Item = El<SlotRing<'a, R, A>>> {
+        let mut it_s = self.slot_iter(|idxs| {
+            let s = self.galois_group_mulrepr().prod(idxs.iter().enumerate().map(|(j, e)| self.galois_group_mulrepr().pow(self.gens[j], *e)));
+            let s_backwards = self.galois_group_mulrepr().invert(&s).unwrap();
+            return s_backwards;
+        });
+        (0..self.slot_count()).map(move |_| {
+            let el = self.ring.apply_galois_action(it_s.next().unwrap(), self.ring.clone_el(&el));
+            // again we use only a "slow" O(n^2) algorithm, but we only have to run it during preprocessing;
+            // maybe use an FFT later?
+            let poly_ring = DensePolyRing::new(self.ring.base_ring(), "X");
+            let el_as_poly = RingRef::new(self.ring).poly_repr(&poly_ring, &el, self.ring.base_ring().identity());
+            let poly_modulus = self.slot_ring().generating_poly(&poly_ring, self.ring.base_ring().identity());
+            let (_, rem) = poly_ring.div_rem_monic(el_as_poly, &poly_modulus);
+            self.slot_ring().from_canonical_basis((0..self.d).map(|i| poly_ring.base_ring().clone_el(poly_ring.coefficient_at(&rem, i))))
+        })
     }
 
     ///
     /// Computes the sparse linear transform that corresponds to the bitreversed Cooley-Tuckey bufferfly as part of
-    /// the Cooley-Tuckey FFT.
+    /// the Cooley-Tuckey FFT. Note that "bitreversed" refers to the "time"/coefficient domain of the FFT, not as usual
+    /// to the "frequency"/NTT domain.
     /// 
     /// Concretely, this is the linear transform that computes the FTs of vectors `v1, ..., vk` in `E^l` (where `E` is the slot-ring)
     /// given the FTs of `vi[even indices]` and `vi[odd indices]`. Here `m = kl = hypercube[dim]` is the total length of the hypercube
@@ -356,7 +367,7 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
         let (m, is_good) = self.dims[dim];
         let g = self.gens[dim];
         let log2_m = ZZ.abs_log2_ceil(&(m as i64)).unwrap();
-        assert!(m == 1 << log2_m);
+        assert!(m == 1 << log2_m, "pow2_bitreversed_cooley_tuckey_butterfly() only valid for hypercube dimensions that have a power-of-2 length");
         let l = blocksize;
         assert!(l > 1);
         assert!(m % l == 0);
@@ -368,13 +379,13 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
             None => self.slot_ring().zero()
         };
 
-        let forward_galois_element = self.galois_group_ring().pow(g, l / 2);
-        let backward_galois_element = self.galois_group_ring().pow(g, l / 2);
+        let forward_galois_element = self.galois_group_mulrepr().pow(g, l / 2);
+        let backward_galois_element = self.galois_group_mulrepr().invert(&forward_galois_element).unwrap();
 
         let forward_mask = self.from_slot_vec(self.slot_iter(|idxs| {
             let idx_in_block = idxs[dim] % l;
-            if idx_in_block < l / 2 {
-                Some(idx_in_block)
+            if idx_in_block >= l / 2 {
+                Some(0)
             } else {
                 None
             }
@@ -382,7 +393,7 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
 
         let diagonal_mask = self.from_slot_vec(self.slot_iter(|idxs| {
             let idx_in_block = idxs[dim] % l;
-            if idx_in_block > l / 2 {
+            if idx_in_block >= l / 2 {
                 Some(idx_in_block)
             } else {
                 Some(0)
@@ -391,8 +402,8 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
 
         let backward_mask = self.from_slot_vec(self.slot_iter(|idxs| {
             let idx_in_block = idxs[dim] % l;
-            if idx_in_block > l / 2 {
-                Some(0)
+            if idx_in_block < l / 2 {
+                Some(idx_in_block)
             } else {
                 None
             }
@@ -400,8 +411,42 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
 
         return LinearTransform { 
             coeffs: vec![diagonal_mask, forward_mask, backward_mask], 
-            galois_elements: vec![self.galois_group_ring().one(), forward_galois_element, backward_galois_element]
+            galois_elements: vec![self.galois_group_mulrepr().one(), forward_galois_element, backward_galois_element]
         };
+    }
+
+    fn pow2_bitreversed_cooley_tuckey_fft(&self, dim: usize) -> Vec<LinearTransform<R, F, A>> {
+        let (m, is_good) = self.dims[dim];
+        let log2_m = ZZ.abs_log2_ceil(&(m as i64)).unwrap();
+        assert!(m == 1 << log2_m, "pow2_bitreversed_cooley_tuckey_fft() only valid for hypercube dimensions that have a power-of-2 length");
+
+        let zeta = self.slot_ring().pow(self.slot_ring().canonical_gen(), 2 * self.d);
+        debug_assert!(is_prim_root_of_unity(self.slot_ring(), &self.slot_ring().canonical_gen(), self.ring.n()));
+        debug_assert!(is_prim_root_of_unity(self.slot_ring(), &zeta, self.slot_count()));
+
+        let mut result = Vec::new();
+        for l in 1..=log2_m {
+            result.push(self.pow2_bitreversed_cooley_tuckey_butterfly(dim, 1 << l, self.slot_ring().clone_el(&zeta)));
+        }
+        return result;
+    }
+
+    fn pow2_slots_to_coeffs(&self, dim: usize) -> Vec<LinearTransform<R, F, A>> {
+        let (m, is_good) = self.dims[dim];
+        let log2_m = ZZ.abs_log2_ceil(&(m as i64)).unwrap();
+        assert!(m == 1 << log2_m, "pow2_slots_to_coeffs() only valid for hypercube dimensions that have a power-of-2 length");
+        
+        let zeta = self.slot_ring().pow(self.slot_ring().canonical_gen(), self.d);
+        let twiddle_factor = self.from_slot_vec(self.slot_iter(|idxs| {
+            self.slot_ring().pow(self.slot_ring().clone_el(&zeta), bitreverse(idxs[dim], log2_m))
+        }));
+
+        let mut result = vec![LinearTransform {
+            coeffs: vec![twiddle_factor],
+            galois_elements: vec![self.galois_group_mulrepr().one()]
+        }];
+        result.extend(self.pow2_bitreversed_cooley_tuckey_fft(dim));
+        return result;
     }
 }
 
@@ -468,4 +513,30 @@ fn test_fft() {
     // `F23[X]/(X^16 + 1) ~ F_(23^4)^4`
     let ring = DefaultPow2CyclotomicCCFFTRingBase::new(Zn::new(23), 4);
     let hypercube = HypercubeIsomorphism::new(ring.get_ring());
+
+    let mut current = ring_literal!(&ring, [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    for x in hypercube.get_slot_values(&current) {
+        hypercube.slot_ring().println(&x);
+    }
+    println!();
+    for T in hypercube.pow2_slots_to_coeffs(0) {
+        current = ring.get_ring().compute_linear_transform(&current, &T);
+    }
+    for x in hypercube.get_slot_values(&current) {
+        hypercube.slot_ring().println(&x);
+    }
+    println!();
+
+    let R = hypercube.slot_ring();
+    let zeta = R.pow(R.canonical_gen(), 8);
+    let theta = R.canonical_gen();
+    let a = R.one();
+    let b = R.add(R.int_hom().map(1), R.mul(R.pow(R.clone_el(&theta), 2), R.int_hom().map(7)));
+    let c = R.add(R.int_hom().map(4), R.mul(R.pow(R.clone_el(&theta), 2), R.int_hom().map(12)));
+    let d = R.add(R.int_hom().map(19), R.mul(R.pow(R.clone_el(&theta), 2), R.int_hom().map(7)));
+
+    let zeta = hypercube.slot_ring().pow(hypercube.slot_ring().canonical_gen(), 4);
+    for i in (1..8).step_by(2) {
+        hypercube.slot_ring().println(&hypercube.slot_ring().sum((0..4).map(|j| hypercube.slot_ring().pow(hypercube.slot_ring().clone_el(&zeta), i * j))));
+    }
 }
