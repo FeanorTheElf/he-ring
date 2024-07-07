@@ -2,22 +2,18 @@ use std::alloc::Allocator;
 use std::alloc::Global;
 
 use cooley_tuckey::bitreverse;
-use feanor_math::algorithms::discrete_log::discrete_log;
-use feanor_math::algorithms::eea::signed_gcd;
 use feanor_math::algorithms::fft::*;
 use feanor_math::algorithms::fft::complex_fft::FFTErrorEstimate;
-use feanor_math::assert_el_eq;
 use feanor_math::homomorphism::Homomorphism;
 use feanor_math::homomorphism::Identity;
 use feanor_math::primitive_int::*;
 use feanor_math::ring::*;
 use feanor_math::rings::float_complex::Complex64Base;
 use feanor_math::rings::float_complex::{Complex64, Complex64El};
-use feanor_math::rings::zn::zn_64;
+use feanor_math::rings::zn::zn_64::*;
 use feanor_math::rings::zn::{ZnRing, ZnRingStore};
 use feanor_math::rings::extension::*;
 use feanor_math::integer::*;
-use feanor_math::wrapper::RingElementWrapper;
 
 use super::automorphism::CyclotomicRingDecomposition;
 use super::complex_fft_ring::*;
@@ -115,7 +111,7 @@ impl<R, F, A> CyclotomicRingDecomposition<R::Type> for Pow2CyclotomicFFT<R, F, A
         F: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
         A: Allocator + Clone
 {
-    fn permute_galois_action(&self, src: &[Complex64El], dst: &mut [Complex64El], galois_element: zn_64::ZnEl) {
+    fn permute_galois_action(&self, src: &[Complex64El], dst: &mut [Complex64El], galois_element: ZnEl) {
         let Zn = self.galois_group_mulrepr();
         let hom = Zn.can_hom(&StaticRing::<i64>::RING).unwrap();
         let bitlength = StaticRing::<i64>::RING.abs_log2_ceil(&(self.rank() as i64)).unwrap();
@@ -123,7 +119,7 @@ impl<R, F, A> CyclotomicRingDecomposition<R::Type> for Pow2CyclotomicFFT<R, F, A
 
         // the elements of src resp. dst follow an order derived from the bitreversing order of the underlying FFT
         let index_to_galois_el = |i: usize| hom.map(2 * bitreverse(i, bitlength) as i64 + 1);
-        let galois_el_to_index = |s: zn_64::ZnEl| bitreverse((Zn.smallest_positive_lift(s) as usize - 1) / 2, bitlength);
+        let galois_el_to_index = |s: ZnEl| bitreverse((Zn.smallest_positive_lift(s) as usize - 1) / 2, bitlength);
 
         for i in 0..self.rank() {
             dst[i] = src[galois_el_to_index(Zn.mul(galois_element, index_to_galois_el(i)))];
@@ -162,8 +158,8 @@ impl<R, F, A1, A2> CyclotomicRing for CCFFTRingBase<R, Pow2CyclotomicFFT<R, F, A
     }
 }
 
-pub type DefaultPow2CyclotomicCCFFTRingBase<R = zn_64::Zn> = CCFFTRingBase<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckeyFFT<Complex64Base, Complex64Base, Identity<Complex64>>>>;
-pub type DefaultPow2CyclotomicCCFFTRing<R = zn_64::Zn> = CCFFTRing<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckeyFFT<Complex64Base, Complex64Base, Identity<Complex64>>>>;
+pub type DefaultPow2CyclotomicCCFFTRingBase<R = Zn> = CCFFTRingBase<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckeyFFT<Complex64Base, Complex64Base, Identity<Complex64>>>>;
+pub type DefaultPow2CyclotomicCCFFTRing<R = Zn> = CCFFTRing<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckeyFFT<Complex64Base, Complex64Base, Identity<Complex64>>>>;
 
 impl<R, A> CCFFTRingBase<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckeyFFT<Complex64Base, Complex64Base, Identity<Complex64>>>, A>
     where R: RingStore + Clone,
@@ -189,6 +185,8 @@ impl<R, A> CCFFTRingBase<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckeyFFT<
 use feanor_math::rings::extension::generic_test_free_algebra_axioms;
 #[cfg(test)]
 use feanor_math::rings::zn::zn_64::Zn;
+#[cfg(test)]
+use feanor_math::assert_el_eq;
 
 #[test]
 fn test_ring_axioms() {

@@ -288,8 +288,6 @@ impl<A> RNSOperation for AlmostExactRescaling<A>
 }
 
 #[cfg(test)]
-use feanor_math::assert_el_eq;
-#[cfg(test)]
 use feanor_math::homomorphism::*;
 
 #[test]

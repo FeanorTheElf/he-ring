@@ -1,4 +1,4 @@
-use feanor_math::algorithms::matmul::strassen::{dispatch_strassen_impl, strassen_mem_size};
+use feanor_math::algorithms::matmul::strassen::strassen_mem_size;
 use feanor_math::integer::*;
 use feanor_math::matrix::*;
 use feanor_math::homomorphism::*;

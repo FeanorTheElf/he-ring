@@ -49,5 +49,7 @@ pub mod complexfft;
 /// 
 pub mod doublerns;
 
+pub mod lintransform;
+
 #[cfg(test)]
 pub mod bfv;

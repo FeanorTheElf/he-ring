@@ -1,8 +1,7 @@
-use feanor_math::primitive_int::*;
 use feanor_math::ring::*;
 use feanor_math::rings::zn::zn_64::*;
 
-use super::double_rns_ring::{DoubleRNSEl, DoubleRNSRingBase, RingDecomposition};
+use super::double_rns_ring::RingDecomposition;
 
 pub trait CyclotomicRingDecomposition<R: ?Sized + RingBase>: RingDecomposition<R> {
 
