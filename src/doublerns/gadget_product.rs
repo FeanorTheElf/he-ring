@@ -131,7 +131,7 @@ impl<F, A> DoubleRNSRingBase<Zn, F, A>
 
     ///
     /// The number of moduli we need when performing the internal inner product
-    /// during the KLSS-style product (ia.cr/2023/413)
+    /// during the KLSS-style product [https://ia.cr/2023/413]
     /// 
     fn get_gadget_product_modulo_count(&self) -> usize {
         let p_max = self.rns_base().as_iter().map(|Fp| int_cast(Fp.integer_ring().clone_el(Fp.modulus()), StaticRing::<i64>::RING, Fp.integer_ring())).max().unwrap();
@@ -349,7 +349,7 @@ impl<F, A> DoubleRNSRingBase<Zn, F, A>
     ///
     /// The gadget product without final FFT. See [`Self::gadget_product()`] for a description.
     /// 
-    /// The implementation uses the KLSS-style algorithm (ia.cr/2023/413).
+    /// The implementation uses the KLSS-style algorithm [https://ia.cr/2023/413].
     /// 
     pub fn gadget_product_base(&self, lhs: &GadgetProductLhsOperand<F, A>, rhs: &GadgetProductRhsOperand<F, A>) -> DoubleRNSNonFFTEl<Zn, F, A> {
         match (lhs, rhs) {

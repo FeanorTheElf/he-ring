@@ -210,7 +210,6 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
         let normalization_factor = poly_ring.base_ring().invert(poly_ring.lc(&slot_generating_poly).unwrap()).unwrap();
         poly_ring.inclusion().mul_assign_map(&mut slot_generating_poly, normalization_factor);
         debug_assert!(poly_ring.checked_div(&cyclotomic_polynomial(&poly_ring, ring.n()), &slot_generating_poly).is_some());
-        poly_ring.println(&slot_generating_poly);
 
         let hom = ring.base_ring().can_hom(tmp_slot_ring.base_ring()).unwrap();
         let mut slot_ring_modulus = (0..d).map(|i| {
@@ -266,6 +265,10 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
 
     pub fn len(&self, dim_index: usize) -> usize {
         self.dims[dim_index].0
+    }
+
+    pub fn dims(&self) -> usize {
+        self.dims.len()
     }
 
     pub fn slot_ring<'b>(&'b self) -> &'b SlotRing<'a, R, A> {
