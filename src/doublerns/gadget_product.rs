@@ -233,28 +233,27 @@ impl<F, A> DoubleRNSRingBase<Zn, F, A>
     /// ```
     /// # use feanor_math::ring::*;
     /// # use feanor_math::assert_el_eq;
-    /// # use feanor_math::default_memory_provider;
     /// # use feanor_math::homomorphism::*;
     /// # use feanor_math::rings::zn::*;
-    /// # use feanor_math::rings::zn::zn_64::Zn;
+    /// # use feanor_math::rings::zn::zn_64::*;
     /// # use feanor_math::rings::finite::*;
     /// # use feanor_math::integer::BigIntRing;
-    /// # use feanor_math::algorithms::fft::cooley_tuckey::FFTTableCooleyTuckey;
+    /// # use feanor_math::algorithms::fft::cooley_tuckey::CooleyTuckeyFFT;
     /// # use he_ring::doublerns::double_rns_ring::DoubleRNSRingBase;
     /// # use he_ring::doublerns::pow2_cyclotomic::Pow2CyclotomicFFT;
     /// # use feanor_math::rings::extension::FreeAlgebraStore;
-    /// # use feanor_math::vector::VectorView;
+    /// # use feanor_math::seq::*;
     /// let rns_base = vec![Zn::new(17), Zn::new(97), Zn::new(113)];
-    /// let ring = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<FFTTableCooleyTuckey<_>>, _>::new(zn_rns::Zn::new(rns_base.clone(), BigIntRing::RING), rns_base, 3);
+    /// let ring = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<Zn, CooleyTuckeyFFT<ZnBase, ZnBase, Identity<Zn>>>>::new(zn_rns::Zn::new(rns_base.clone(), BigIntRing::RING), 3);
     /// let mut rng = oorandom::Rand64::new(1);
     /// 
     /// // build the right-hand side operand
     /// let rhs = ring.random_element(|| rng.rand_u64());
-    /// let mut rhs_op = ring.get_ring().gadget_product_rhs_zero();
+    /// let mut rhs_op = ring.get_ring().gadget_product_rhs_empty();
     /// let gadget_vector = |i: usize| ring.base_ring().get_ring().from_congruence((0..3).map(|j| ring.base_ring().get_ring().at(j).int_hom().map(if i == j { 1 } else { 0 })));
     /// for i in 0..3 {
     ///     // set the i-th component to `gadget_vector(i) * rhs`, for now without noise
-    ///     rhs_op.set_rns_factor(i, ring.inclusion().mul_ref_map(&rhs, &gadget_vector(i)));
+    ///     rhs_op.set_rns_factor(i, ring.get_ring().undo_fft(ring.inclusion().mul_ref_map(&rhs, &gadget_vector(i))));
     /// }
     /// 
     /// // compute the gadget product
@@ -267,33 +266,31 @@ impl<F, A> DoubleRNSRingBase<Zn, F, A>
     /// ```
     /// # use feanor_math::ring::*;
     /// # use feanor_math::assert_el_eq;
-    /// # use feanor_math::default_memory_provider;
     /// # use feanor_math::homomorphism::*;
     /// # use feanor_math::rings::zn::*;
-    /// # use feanor_math::rings::zn::zn_64::Zn;
-    /// # use feanor_math::algorithms::fft::cooley_tuckey::FFTTableCooleyTuckey;
+    /// # use feanor_math::rings::zn::zn_64::*;
+    /// # use feanor_math::algorithms::fft::cooley_tuckey::CooleyTuckeyFFT;
     /// # use he_ring::doublerns::double_rns_ring::DoubleRNSRingBase;
     /// # use he_ring::doublerns::pow2_cyclotomic::Pow2CyclotomicFFT;
     /// # use feanor_math::rings::extension::FreeAlgebraStore;
-    /// # use feanor_math::vector::VectorView;
     /// # use feanor_math::integer::BigIntRing;
     /// # use feanor_math::rings::finite::*;
     /// # use feanor_math::integer::int_cast;
     /// # use feanor_math::primitive_int::StaticRing;
-    /// # use feanor_math::vector::vec_fn::VectorFn;
+    /// # use feanor_math::seq::*;
     /// let rns_base = vec![Zn::new(17), Zn::new(97), Zn::new(113)];
-    /// let ring = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<FFTTableCooleyTuckey<_>>, _>::new(zn_rns::Zn::new(rns_base.clone(), BigIntRing::RING), rns_base, 3);
+    /// let ring = DoubleRNSRingBase::<Zn, Pow2CyclotomicFFT<Zn, CooleyTuckeyFFT<ZnBase, ZnBase, Identity<Zn>>>>::new(zn_rns::Zn::new(rns_base.clone(), BigIntRing::RING), 3);
     /// 
     /// let mut rng = oorandom::Rand64::new(1);
     /// 
     /// // build the right-hand side operand
     /// let rhs = ring.random_element(|| rng.rand_u64());
-    /// let mut error = || ring.get_ring().sample_from_coefficient_distribution(|| (rng.rand_u64() % 3) as i32 - 1);
-    /// let mut rhs_op = ring.get_ring().gadget_product_rhs_zero();
+    /// let mut error = || ring.get_ring().do_fft(ring.get_ring().sample_from_coefficient_distribution(|| (rng.rand_u64() % 3) as i32 - 1));
+    /// let mut rhs_op = ring.get_ring().gadget_product_rhs_empty();
     /// let gadget_vector = |i: usize| ring.base_ring().get_ring().from_congruence((0..3).map(|j| ring.base_ring().get_ring().at(j).int_hom().map(if i == j { 1 } else { 0 })));
     /// for i in 0..3 {
     ///     // set the i-th component to `gadget_vector(i) * rhs`, with possibly some noise included
-    ///     rhs_op.set_rns_factor(i, ring.add(ring.inclusion().mul_ref_map(&rhs, &gadget_vector(i)), error()));
+    ///     rhs_op.set_rns_factor(i, ring.get_ring().undo_fft(ring.add(ring.inclusion().mul_ref_map(&rhs, &gadget_vector(i)), error())));
     /// }
     /// 
     /// // compute the gadget product

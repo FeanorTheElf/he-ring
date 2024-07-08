@@ -105,19 +105,19 @@ impl<A> RNSOperation for AlmostExactRescalingConvert<A>
 /// # Examples
 /// ```
 /// #![feature(const_type_name)]
+/// #![feature(allocator_api)]
+/// # use std::alloc::Global;
 /// # use feanor_math::ring::*;
-/// # use feanor_math::rings::zn::zn_42::*;
-/// # use feanor_math::mempool::*;
+/// # use feanor_math::rings::zn::zn_64::*;
 /// # use feanor_math::assert_el_eq;
 /// # use feanor_math::homomorphism::*;
-/// # use feanor_math::matrix::submatrix::*;
-/// # use feanor_math::default_memory_provider;
+/// # use feanor_math::matrix::*;
 /// # use he_ring::rnsconv::*;
 /// # use he_ring::rnsconv::bfv_rescale::AlmostExactRescaling;
 /// let from = vec![Zn::new(17), Zn::new(19), Zn::new(23)];
 /// let from_modulus = 17 * 19 * 23;
 /// let to = vec![Zn::new(29)];
-/// let rescaling = AlmostExactRescaling::new(from.clone(), to.clone(), 3);
+/// let rescaling = AlmostExactRescaling::new_with(from.clone(), to.clone(), 3, Global);
 /// let mut output = [to[0].zero()];
 ///
 /// let x = 1000;
@@ -126,14 +126,16 @@ impl<A> RNSOperation for AlmostExactRescalingConvert<A>
 ///     &to[0],
 ///     &to[0].int_hom().map(/* rounded division */ (x * 29 + from_modulus / 2) / from_modulus),
 ///     &output[0]);
-/// 
-/// // here we get an error of -1
-/// let x = 1152;
-/// rescaling.apply(Submatrix::<AsFirstElement<_>, _>::new(&[from[0].int_hom().map(x), from[1].int_hom().map(x), from[2].int_hom().map(x)], 3, 1), SubmatrixMut::<AsFirstElement<_>, _>::new(&mut output, 1, 1));
-/// assert_el_eq!(
-///     &to[0],
-///     &to[0].int_hom().map(/* rounded division */ (x * 29 + from_modulus / 2) / from_modulus + 1),
-///     &output[0]);
+/// ```
+/// We sometimes get an error of `+/- 1`
+/// ```should_panikc
+/// for x in 1000..2000 {
+///     rescaling.apply(Submatrix::<AsFirstElement<_>, _>::new(&[from[0].int_hom().map(x), from[1].int_hom().map(x), from[2].int_hom().map(x)], 3, 1), SubmatrixMut::<AsFirstElement<_>, _>::new(&mut output, 1, 1));
+///     assert_el_eq!(
+///         &to[0],
+///         &to[0].int_hom().map(/* rounded division */ (x * 29 + from_modulus / 2) / from_modulus + 1),
+///         &output[0]);
+/// }
 /// ```
 /// 
 pub struct AlmostExactRescaling<A>

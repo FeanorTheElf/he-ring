@@ -31,7 +31,6 @@ use crate::cyclotomic::CyclotomicRing;
 use oorandom;
 
 use super::complex_fft_ring::*;
-use super::pow2_cyclotomic::DefaultPow2CyclotomicCCFFTRingBase;
 
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
 
@@ -98,19 +97,34 @@ impl<R, F, A> CCFFTRingBase<R, F, A>
     }
 }
 
-pub fn compute_hypercube_structure(n: i64, p: i64) -> (
-    Vec<(usize, bool)>,
-    Vec<ZnEl>,
-    Zn
-) {
-    // the unit group (Z/nZ)* decomposes as X (Z/niZ)*
+pub struct HypercubeDimension {
+    length: usize,
+    generator: ZnEl,
+    is_good: bool,
+    factor_n: (i64, usize)
+}
+
+impl HypercubeDimension {
+
+    pub fn len(&self) -> usize {
+        self.length
+    }
+
+    pub fn corresponding_factor_n(&self) -> i64 {
+        ZZ.pow(self.factor_n.0, self.factor_n.1)
+    }
+}
+
+pub fn compute_hypercube_structure(n: i64, p: i64) -> (Vec<HypercubeDimension>, Zn) {
+    // the unit group (Z/nZ)* decomposes as X (Z/niZ)*; this gives rise to the natural hypercube structure,
+    // although technically many possible hypercube structures are possible
     let factorization = int_factor::factor(&ZZ, n);
     let Zn_rns = zn_rns::Zn::new(factorization.iter().map(|(q, k)| Zn::new(ZZ.pow(*q, *k) as u64)).collect(), ZZ);
     let Zn = Zn::new(n as u64);
     let iso = Zn.into_can_hom(zn_big::Zn::new(ZZ, n)).ok().unwrap().compose((&Zn_rns).into_can_iso(zn_big::Zn::new(ZZ, n)).ok().unwrap());
+    let from_crt = |index: usize, value: ZnEl| iso.map(Zn_rns.from_congruence((0..factorization.len()).map(|j| if j == index { value } else { Zn_rns.at(j).one() })));
 
     let mut dims = Vec::new();
-    let mut gens = Vec::new();
     for (i, (q, k)) in factorization.iter().enumerate() {
         let Zqk = Zn_rns.at(i);
         if *q == 2 {
@@ -127,19 +141,31 @@ pub fn compute_hypercube_structure(n: i64, p: i64) -> (
                 if p % 4 == 1 {
                     // `p` is in `<g1>`
                     let logg1_p = unit_group_dlog(Zqk, g1, ord_g1, Zqk.can_hom(&ZZ).unwrap().map(p)).unwrap();
-                    dims.push((2, true));
-                    gens.push(iso.map(Zn_rns.from_congruence((0..factorization.len()).map(|j| if i == j { g2 } else { Zn_rns.at(j).one() }))));
+                    dims.push(HypercubeDimension {
+                        length: 2, 
+                        is_good: true, 
+                        generator: from_crt(i, g2),
+                        factor_n: (2, 2)
+                    });
                     let ord_p = ord_g1 / signed_gcd(logg1_p, ord_g1, ZZ);
                     if ord_p != ord_g1 {
-                        dims.push(((ord_g1 / ord_p) as usize, ord_p == 1));
-                        gens.push(iso.map(Zn_rns.from_congruence((0..factorization.len()).map(|j| if i == j { g1 } else { Zn_rns.at(j).one() }))));
+                        dims.push(HypercubeDimension {
+                            length: (ord_g1 / ord_p) as usize, 
+                            is_good: ord_p == 1, 
+                            generator: from_crt(i, g1),
+                            factor_n: (2, k - 2)
+                        });
                     }
                 } else {
                     // `<p, g1> = (Z/2^kZ)*` and `p * g2 in <g1>`
                     let logg1_pg2 = unit_group_dlog(Zqk, g1, ord_g1, Zqk.mul(Zqk.can_hom(&ZZ).unwrap().map(p), g2)).unwrap();
                     let ord_p = max(2, ord_g1 / signed_gcd(logg1_pg2, ord_g1, ZZ));
-                    dims.push(((2 * ord_g1 / ord_p) as usize, false));
-                    gens.push(iso.map(Zn_rns.from_congruence((0..factorization.len()).map(|j| if i == j { g1 } else { Zn_rns.at(j).one() }))));
+                    dims.push(HypercubeDimension {
+                        length: (2 * ord_g1 / ord_p) as usize,
+                        is_good: false, 
+                        generator: from_crt(i, g1),
+                        factor_n: (2, *k)
+                    });
                 }
             }
         } else {
@@ -154,16 +180,24 @@ pub fn compute_hypercube_structure(n: i64, p: i64) -> (
             }
             if signed_gcd(ord_g / ord_p, ord_p, &ZZ) == 1 {
                 // good dimension
-                dims.push(((ord_g / ord_p) as usize, true));
                 let local_gen = Zqk.pow(g, ord_p as usize);
-                gens.push(iso.map(Zn_rns.from_congruence((0..factorization.len()).map(|j| if i == j { local_gen } else { Zn_rns.at(j).one() }))));
+                dims.push(HypercubeDimension {
+                    length: (ord_g / ord_p) as usize, 
+                    is_good: true, 
+                    generator: from_crt(i, local_gen),
+                    factor_n: (*q, *k)
+                });
             } else {
-                dims.push(((ord_g / ord_p) as usize, false));
-                gens.push(iso.map(Zn_rns.from_congruence((0..factorization.len()).map(|j| if i == j { g } else { Zn_rns.at(j).one() }))));
+                dims.push(HypercubeDimension {
+                    length: (ord_g / ord_p) as usize, 
+                    is_good: false,
+                    generator: from_crt(i, g),
+                    factor_n: (*q, *k)
+                });
             }
         }
     }
-    return (dims, gens, Zn);
+    return (dims, Zn);
 }
 
 pub type SlotRing<'a, R, A> = FreeAlgebraImpl<&'a R, Vec<El<R>>, A>;
@@ -177,8 +211,7 @@ pub struct HypercubeIsomorphism<'a, R, F, A>
     ring: &'a CCFFTRingBase<R, F, A>,
     slot_unit_vec: El<CCFFTRing<R, F, A>>,
     slot_ring: FreeAlgebraImpl<&'a R, Vec<El<R>>, A>,
-    dims: Vec<(usize, /* is good dim? */ bool)>,
-    gens: Vec<ZnEl>,
+    dims: Vec<HypercubeDimension>,
     galois_group_ring: Zn,
     d: usize
 }
@@ -192,11 +225,12 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
 {
     pub fn new(ring: &'a CCFFTRingBase<R, F, A>) -> Self {
         let p = int_cast(ring.base_ring().integer_ring().clone_el(ring.base_ring().modulus()), ZZ, ring.base_ring().integer_ring());
-        let (dims, gens, galois_group_ring) = compute_hypercube_structure(ring.n() as i64, p);
+        let (dims, galois_group_ring) = compute_hypercube_structure(ring.n() as i64, p);
         let frobenius = galois_group_ring.can_hom(&ZZ).unwrap().map(p);
-        let slot_count: usize = dims.iter().map(|(m, _)| *m).product();
+        let slot_count: usize = dims.iter().map(|dim| dim.length).product();
         let d = ring.rank() / slot_count;
 
+        // first task: compute a nice representation of the slot ring
         let tmp_slot_ring = GFdyn(ZZ.pow(p, d) as u64);
         let root_of_unity = get_prim_root_of_unity(&tmp_slot_ring, ring.n()).unwrap();
 
@@ -219,6 +253,7 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
             return hom.map(coeff_wrt_basis.at(0));
         }).collect::<Vec<_>>();
 
+        // second task: compute one unit vector w.r.t. the CRT isomorphism, used to later compute the whole isomorphism
         // an irreducible factor of `Phi_n` in `Zp[X]/(Phi_n)`, thus zero in the first slot and nonzero in all others
         let irred_factor = ring.from_canonical_basis((0..ring.rank()).map(|i| if i < slot_ring_modulus.len() { 
             ring.base_ring().clone_el(&slot_ring_modulus[i])
@@ -236,7 +271,6 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
         let mut result = HypercubeIsomorphism {
             d: d,
             dims: dims,
-            gens: gens,
             ring: ring,
             galois_group_ring: galois_group_ring,
             slot_ring: slot_ring,
@@ -247,7 +281,7 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
         let unnormalized_slot_unit_vector = ring.prod(result.slot_iter(|idxs| if idxs.iter().all(|x| *x == 0) {
             None
         } else {
-            Some(galois_group_ring.prod(result.gens.iter().enumerate().map(|(i, g)| galois_group_ring.pow(*g, idxs[i]))))
+            Some(galois_group_ring.prod(result.dims.iter().enumerate().map(|(i, dim)| galois_group_ring.pow(dim.generator, idxs[i]))))
         })
             .filter_map(|x| x)
             .map(|s| ring.apply_galois_action(s, ring.clone_el(&irred_factor))));
@@ -264,10 +298,14 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
     }
 
     pub fn len(&self, dim_index: usize) -> usize {
-        self.dims[dim_index].0
+        self.dims[dim_index].length
     }
 
-    pub fn dims(&self) -> usize {
+    pub fn dim(&self, dim_index: usize) -> &HypercubeDimension {
+        &self.dims[dim_index]
+    }
+
+    pub fn dim_count(&self) -> usize {
         self.dims.len()
     }
 
@@ -284,7 +322,7 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
     }
 
     pub fn slot_count(&self) -> usize {
-        self.dims.iter().map(|(m, _)| *m).product()
+        self.dims.iter().map(|dim| dim.length).product()
     }
 
     pub fn slot_iter<'b, G, T>(&'b self, for_slot: G) -> impl 'b + ExactSizeIterator<Item = T>
@@ -292,7 +330,7 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
             T: 'b
     {
         let mut it = multi_cartesian_product(
-            self.dims.iter().map(|(m, _)| (0..*m)),
+            self.dims.iter().map(|dim| (0..dim.length)),
             for_slot,
             |_, x| *x
         );
@@ -305,7 +343,7 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
             'a: 'b
     {
         assert_eq!(vec.len(), self.ring.rank() / self.d);
-        let mut move_to_slot_gens = self.slot_iter(|idxs| self.galois_group_mulrepr().prod(idxs.iter().enumerate().map(|(j, e)| self.galois_forward(j, *e as i64))));
+        let mut move_to_slot_gens = self.slot_iter(|idxs| self.galois_group_mulrepr().prod(idxs.iter().enumerate().map(|(j, e)| self.shift_galois_element(j, *e as i64))));
         // currently only a "slow" O(n^2) algorithm, but we only have to run it during preprocessing;
         // maybe use an FFT later?
         <_ as RingBase>::sum(self.ring, vec.map(|x| {
@@ -320,7 +358,7 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
     }
 
     pub fn get_slot_values<'b>(&'b self, el: &'b El<CCFFTRing<R, F, A>>) -> impl 'b + ExactSizeIterator<Item = El<SlotRing<'a, R, A>>> {
-        let mut move_to_slot_gens = self.slot_iter(|idxs| self.galois_group_mulrepr().prod(idxs.iter().enumerate().map(|(j, e)| self.galois_forward(j, -(*e as i64)))));
+        let mut move_to_slot_gens = self.slot_iter(|idxs| self.galois_group_mulrepr().prod(idxs.iter().enumerate().map(|(j, e)| self.shift_galois_element(j, -(*e as i64)))));
         (0..self.slot_count()).map(move |_| {
             let el = self.ring.apply_galois_action(move_to_slot_gens.next().unwrap(), self.ring.clone_el(&el));
             // again we use only a "slow" O(n^2) algorithm, but we only have to run it during preprocessing;
@@ -333,8 +371,8 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
         })
     }
 
-    pub fn galois_forward(&self, dim_index: usize, steps: i64) -> ZnEl {
-        let g = self.gens[dim_index];
+    pub fn shift_galois_element(&self, dim_index: usize, steps: i64) -> ZnEl {
+        let g = self.dims[dim_index].generator;
         let forward_galois_element = self.galois_group_mulrepr().pow(g, steps.abs() as usize);
         if steps > 0 {
             self.galois_group_mulrepr().invert(&forward_galois_element).unwrap()
@@ -346,62 +384,72 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
 
 #[cfg(test)]
 use feanor_math::assert_el_eq;
+#[cfg(test)]
+use crate::complexfft::pow2_cyclotomic::DefaultPow2CyclotomicCCFFTRingBase;
 
 #[test]
 fn test_compute_hypercube_structure_pow2() {
     {
-        let (dims, gens, Z_2n) = compute_hypercube_structure(1024, 3);
+        let (dims, Z_2n) = compute_hypercube_structure(1024, 3);
         assert_eq!(1, dims.len());
-        assert_eq!(&(2, false), &dims[0]);
-        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(3), 256, gens[0]).is_none());
-        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(3), 256, Z_2n.pow(gens[0], 2)).is_some());
+        assert_eq!(2, dims[0].length);
+        assert_eq!(false, dims[0].is_good);
+        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(3), 256, dims[0].generator).is_none());
+        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(3), 256, Z_2n.pow(dims[0].generator, 2)).is_some());
     }
     {
-        let (dims, gens, Z_2n) = compute_hypercube_structure(1024, 23);
+        let (dims, Z_2n) = compute_hypercube_structure(1024, 23);
         assert_eq!(1, dims.len());
-        assert_eq!(&(4, false), &dims[0]);
-        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(23), 128, Z_2n.pow(gens[0], 2)).is_none());
-        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(23), 128, Z_2n.pow(gens[0], 4)).is_some());
+        assert_eq!(4, dims[0].length);
+        assert_eq!(false, dims[0].is_good);
+        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(23), 128, Z_2n.pow(dims[0].generator, 2)).is_none());
+        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(23), 128, Z_2n.pow(dims[0].generator, 4)).is_some());
     }
     {
-        let (dims, gens, Z_2n) = compute_hypercube_structure(1024, 13);
+        let (dims, Z_2n) = compute_hypercube_structure(1024, 13);
         assert_eq!(1, dims.len());
-        assert_eq!(&(2, true), &dims[0]);
-        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(13), 256, gens[0]).is_none());
-        assert_eq!(Some(0), unit_group_dlog(&Z_2n, Z_2n.int_hom().map(13), 256, Z_2n.pow(gens[0], 2)));
+        assert_eq!(2, dims[0].length);
+        assert_eq!(true, dims[0].is_good);
+        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(13), 256, dims[0].generator).is_none());
+        assert_eq!(Some(0), unit_group_dlog(&Z_2n, Z_2n.int_hom().map(13), 256, Z_2n.pow(dims[0].generator, 2)));
     }
     {
-        let (dims, gens, Z_2n) = compute_hypercube_structure(1024, 17);
+        let (dims, Z_2n) = compute_hypercube_structure(1024, 17);
         assert_eq!(2, dims.len());
-        assert_eq!(&(2, true), &dims[0]);
-        assert_eq!(&(4, false), &dims[1]);
-        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(17), 64, gens[0]).is_none());
-        assert_eq!(Some(0), unit_group_dlog(&Z_2n, Z_2n.int_hom().map(17), 64, Z_2n.pow(gens[0], 2)));
-        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(17), 64, Z_2n.pow(gens[1], 2)).is_none());
-        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(17), 64, Z_2n.pow(gens[1], 4)).is_some());
+        assert_eq!(2, dims[0].length);
+        assert_eq!(true, dims[0].is_good);
+        assert_eq!(4, dims[1].length);
+        assert_eq!(false, dims[1].is_good);
+        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(17), 64, dims[0].generator).is_none());
+        assert_eq!(Some(0), unit_group_dlog(&Z_2n, Z_2n.int_hom().map(17), 64, Z_2n.pow(dims[0].generator, 2)));
+        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(17), 64, Z_2n.pow(dims[1].generator, 2)).is_none());
+        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(17), 64, Z_2n.pow(dims[1].generator, 4)).is_some());
     }
 }
 
 #[test]
 fn test_compute_hypercube_structure_odd() {
     {
-        let (dims, _gens, _Zn) = compute_hypercube_structure(257, 3);
+        let (dims, _Zn) = compute_hypercube_structure(257, 3);
         assert_eq!(0, dims.len());
     }
     {
-        let (dims, gens, Zn) = compute_hypercube_structure(257, 11);
+        let (dims, Zn) = compute_hypercube_structure(257, 11);
         assert_eq!(1, dims.len());
-        assert_eq!(&(4, false), &dims[0]);
-        assert!(unit_group_dlog(&Zn, Zn.int_hom().map(11), 64, Zn.pow(gens[0], 2)).is_none());
-        assert!(unit_group_dlog(&Zn, Zn.int_hom().map(11), 64, Zn.pow(gens[0], 4)).is_some());
+        assert_eq!(4, dims[0].length);
+        assert_eq!(false, dims[0].is_good);
+        assert!(unit_group_dlog(&Zn, Zn.int_hom().map(11), 64, Zn.pow(dims[0].generator, 2)).is_none());
+        assert!(unit_group_dlog(&Zn, Zn.int_hom().map(11), 64, Zn.pow(dims[0].generator, 4)).is_some());
     }
     {
-        let (dims, gens, Zn) = compute_hypercube_structure(257 * 101, 13);
+        let (dims, Zn) = compute_hypercube_structure(257 * 101, 13);
         assert_eq!(2, dims.len());
-        assert_eq!(&(2, false), &dims[0]);
-        assert_eq!(&(2, false), &dims[1]);
-        assert!(unit_group_dlog(&Zn, Zn.int_hom().map(13), 3200, gens[0]).is_none());
-        assert!(unit_group_dlog(&Zn, Zn.int_hom().map(13), 3200, gens[1]).is_none());
+        assert_eq!(2, dims[0].length);
+        assert_eq!(false, dims[0].is_good);
+        assert_eq!(2, dims[1].length);
+        assert_eq!(false, dims[1].is_good);
+        assert!(unit_group_dlog(&Zn, Zn.int_hom().map(13), 3200, dims[0].generator).is_none());
+        assert!(unit_group_dlog(&Zn, Zn.int_hom().map(13), 3200, dims[1].generator).is_none());
     }
 }
 
@@ -415,16 +463,16 @@ fn test_rotation() {
     assert_el_eq!(
         &ring, 
         &hypercube.from_slot_vec([0, 0, 1, 0].into_iter().map(|n| hypercube.slot_ring().int_hom().map(n))),
-        &ring.get_ring().apply_galois_action(hypercube.galois_forward(0, 1), ring.clone_el(&current))
+        &ring.get_ring().apply_galois_action(hypercube.shift_galois_element(0, 1), ring.clone_el(&current))
     );
     assert_el_eq!(
         &ring, 
         &hypercube.from_slot_vec([0, 0, 0, 1].into_iter().map(|n| hypercube.slot_ring().int_hom().map(n))),
-        &ring.get_ring().apply_galois_action(hypercube.galois_forward(0, 2), ring.clone_el(&current))
+        &ring.get_ring().apply_galois_action(hypercube.shift_galois_element(0, 2), ring.clone_el(&current))
     );
     assert_el_eq!(
         &ring, 
         &hypercube.from_slot_vec([1, 0, 0, 0].into_iter().map(|n| hypercube.slot_ring().int_hom().map(n))),
-        &ring.get_ring().apply_galois_action(hypercube.galois_forward(0, -1), ring.clone_el(&current))
+        &ring.get_ring().apply_galois_action(hypercube.shift_galois_element(0, -1), ring.clone_el(&current))
     );
 }

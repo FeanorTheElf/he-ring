@@ -91,22 +91,24 @@ impl<R: ?Sized + RingBase, F: ?Sized + RingDecomposition<R> + SameNumberRing<R, 
 /// # Example
 /// 
 /// ```
+/// #![feature(allocator_api)]
+/// # use std::alloc::Global;
 /// # use feanor_math::ring::*;
 /// # use feanor_math::rings::zn::*;
 /// # use feanor_math::rings::zn::zn_64::*;
 /// # use feanor_math::primitive_int::StaticRing;
 /// # use feanor_math::integer::*;
-/// # use feanor_math::mempool::DefaultMemoryProvider;
 /// # use feanor_math::algorithms::fft::*;
-/// # use feanor_math::{default_memory_provider, assert_el_eq};
+/// # use feanor_math::assert_el_eq;
 /// # use feanor_math::homomorphism::Homomorphism;
-/// # use feanor_math::rings::float_complex::Complex64;
+/// # use feanor_math::rings::float_complex::*;
 /// # use feanor_math::rings::extension::FreeAlgebra;
 /// # use feanor_math::rings::extension::FreeAlgebraStore;
+/// # use feanor_math::homomorphism::Identity;
 /// # use he_ring::complexfft::complex_fft_ring::*;
 /// # use he_ring::cyclotomic::*;
 /// # use he_ring::complexfft::pow2_cyclotomic::Pow2CyclotomicFFT;
-/// type TheRing = ComplexFFTBasedRing<Pow2CyclotomicFFT<Zn, cooley_tuckey::FFTTableCooleyTuckey<Complex64>>>;
+/// type TheRing = CCFFTRing<Zn, Pow2CyclotomicFFT<Zn, cooley_tuckey::CooleyTuckeyFFT<Complex64Base, Complex64Base, Identity<Complex64>>>>;
 /// 
 /// // the ring `F7[X]/(X^8 + 1)`
 /// let R = <TheRing as RingStore>::Type::new(Zn::new(7), 3);
@@ -116,11 +118,12 @@ impl<R: ?Sized + RingBase, F: ?Sized + RingDecomposition<R> + SameNumberRing<R, 
 /// assert_el_eq!(&R, &R.neg_one(), &R.pow(root_of_unity, 8));
 /// 
 /// // instead of this, we can also explicity create the `RingDecomposition`
-/// let generalized_fft: Pow2CyclotomicFFT<Zn, cooley_tuckey::FFTTableCooleyTuckey<Complex64>> = Pow2CyclotomicFFT::create(
+/// let generalized_fft: Pow2CyclotomicFFT<Zn, cooley_tuckey::CooleyTuckeyFFT<Complex64Base, Complex64Base, Identity<Complex64>>> = Pow2CyclotomicFFT::create(
 ///     Zn::new(7),
-///     cooley_tuckey::FFTTableCooleyTuckey::for_complex(Complex64::RING, 3)
+///     cooley_tuckey::CooleyTuckeyFFT::for_complex(Complex64::RING, 3),
+///     Global
 /// );
-/// let R = RingValue::from(<TheRing as RingStore>::Type::from_generalized_fft(generalized_fft));
+/// let R = RingValue::from(<TheRing as RingStore>::Type::from_generalized_fft(Zn::new(7), generalized_fft, Global));
 /// assert_eq!(8, R.rank());
 /// assert_eq!(16, R.n());
 /// assert_el_eq!(&R, &R.neg_one(), &R.pow(R.canonical_gen(), 8));

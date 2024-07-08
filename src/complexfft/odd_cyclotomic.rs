@@ -48,17 +48,17 @@ fn phi(factorization: &Vec<(i64, usize)>) -> i64 {
 /// # use feanor_math::rings::zn::zn_64::*;
 /// # use feanor_math::primitive_int::StaticRing;
 /// # use feanor_math::integer::*;
-/// # use feanor_math::mempool::DefaultMemoryProvider;
 /// # use feanor_math::algorithms::fft::*;
-/// # use feanor_math::{default_memory_provider, assert_el_eq};
+/// # use feanor_math::assert_el_eq;
 /// # use feanor_math::homomorphism::Homomorphism;
-/// # use feanor_math::rings::float_complex::Complex64;
+/// # use feanor_math::rings::float_complex::*;
 /// # use feanor_math::rings::extension::FreeAlgebra;
+/// # use feanor_math::homomorphism::Identity;
 /// # use feanor_math::rings::extension::FreeAlgebraStore;
 /// # use he_ring::complexfft::complex_fft_ring::*;
 /// # use he_ring::cyclotomic::*;
 /// # use he_ring::complexfft::odd_cyclotomic::OddCyclotomicFFT;
-/// type TheRing = ComplexFFTBasedRing<OddCyclotomicFFT<Zn, bluestein::FFTTableBluestein<Complex64>>>;
+/// type TheRing = CCFFTRing<Zn, OddCyclotomicFFT<Zn, bluestein::BluesteinFFT<Complex64Base, Complex64Base, Identity<Complex64>>>>;
 /// 
 /// // the ring `F7[X]/(Phi_15(X)) = F7[X]/(X^8 - X^7 + X^5 - X^4 + X^3 - X + 1)`
 /// let R = <TheRing as RingStore>::Type::new(Zn::new(7), 15);

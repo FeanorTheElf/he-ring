@@ -22,22 +22,21 @@ I did not have practical considerations (like side-channel resistance) in mind, 
 
 To demonstrate the use of this library, we give an example implementation of the BFV fully homomorphic encryption scheme.
 ```rust
+#![feature(allocator_api)]
+use std::alloc::Global;
+
 use feanor_math::ring::*;
 use feanor_math::rings::zn::*;
 use feanor_math::rings::zn::zn_64::*;
 use feanor_math::primitive_int::StaticRing;
 use feanor_math::integer::*;
-use feanor_math::rings::poly::dense_poly::DensePolyRing;
-use feanor_math::rings::poly::*;
 use feanor_math::algorithms::miller_rabin::is_prime;
-use feanor_math::mempool::DefaultMemoryProvider;
 use feanor_math::algorithms::fft::*;
-use feanor_math::{default_memory_provider, assert_el_eq};
-use feanor_math::homomorphism::Homomorphism;
-use feanor_math::vector::VectorView;
+use feanor_math::assert_el_eq;
+use feanor_math::homomorphism::{Homomorphism, Identity};
 use feanor_math::rings::extension::FreeAlgebraStore;
-use feanor_math::vector::vec_fn::VectorFn;
-use feanor_math::rings::float_complex::Complex64;
+use feanor_math::seq::*;
+use feanor_math::rings::float_complex::{Complex64, Complex64Base};
 
 use he_ring::*;
 
@@ -47,13 +46,13 @@ use rand_distr::StandardNormal;
 
 // in the spirit of feanor-math, all rings are highly generic and extensible using the type system.
 // here we define the ring types we will use to implement the scheme. 
-pub type PlaintextRing = complexfft::complex_fft_ring::ComplexFFTBasedRing<complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<Zn, cooley_tuckey::FFTTableCooleyTuckey<Complex64>>>;
-pub type FFTTable = doublerns::pow2_cyclotomic::Pow2CyclotomicFFT<cooley_tuckey::FFTTableCooleyTuckey<ZnFastmul>>;
+pub type PlaintextRing = complexfft::complex_fft_ring::CCFFTRing<Zn, complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<Zn, cooley_tuckey::CooleyTuckeyFFT<Complex64Base, Complex64Base, Identity<Complex64>>>>;
+pub type FFTTable = doublerns::pow2_cyclotomic::Pow2CyclotomicFFT<Zn, cooley_tuckey::CooleyTuckeyFFT<ZnBase, ZnBase, Identity<Zn>>>;
 pub type CiphertextRing = doublerns::double_rns_ring::DoubleRNSRing<Zn, FFTTable>;
 
 pub type Ciphertext = (El<CiphertextRing>, El<CiphertextRing>);
 pub type SecretKey = El<CiphertextRing>;
-pub type GadgetProductOperand<'a> = doublerns::gadget_product::GadgetProductRhsOperand<'a, Zn, FFTTable>;
+pub type GadgetProductOperand<'a> = doublerns::gadget_product::GadgetProductRhsOperand<'a, FFTTable>;
 pub type KeySwitchKey<'a> = (GadgetProductOperand<'a>, GadgetProductOperand<'a>);
 pub type RelinKey<'a> = (GadgetProductOperand<'a>, GadgetProductOperand<'a>);
 
@@ -62,9 +61,9 @@ pub type RelinKey<'a> = (GadgetProductOperand<'a>, GadgetProductOperand<'a>);
 // this in a fast-RNS-conversion manner requires precomputing all kinds of data, encapsulated by `MulConversionData`.
 //
 pub struct MulConversionData {
-    to_C_mul: rnsconv::approx_lift::AlmostExactBaseConversion<Zn>,
-    scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert<Zn>
-};
+    to_C_mul: rnsconv::lift::AlmostExactBaseConversion,
+    scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert
+}
 
 const ZZbig: BigIntRing = BigIntRing::RING;
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
@@ -82,18 +81,17 @@ pub fn sample_primes_in_arithmetic_progression(n: u64) -> impl Iterator<Item = u
 pub fn create_ciphertext_rings(log2_ring_degree: usize, ciphertext_moduli_count: usize) -> (CiphertextRing, CiphertextRing) {
     let mut primes = sample_primes_in_arithmetic_progression(2 << log2_ring_degree).map(|p| p as u64);
 
-    let rns_base = zn_rns::Zn::new(primes.by_ref().take(ciphertext_moduli_count).map(Zn::new).collect(), ZZbig ,default_memory_provider!());
+    let rns_base = zn_rns::Zn::new(primes.by_ref().take(ciphertext_moduli_count).map(Zn::new).collect(), ZZbig);
     
     let rns_base_mul = zn_rns::Zn::new(
-        rns_base.get_ring().iter().map(|R| *R.modulus() as u64).chain(
+        rns_base.get_ring().as_iter().map(|R| *R.modulus() as u64).chain(
             primes.take(ciphertext_moduli_count)
         ).map(Zn::new).collect(), 
-        ZZbig, 
-        default_memory_provider!()
+        ZZbig
     );
 
-    let C = <CiphertextRing as RingStore>::Type::new(rns_base.clone(), rns_base.get_ring().iter().cloned().map(ZnFastmul::new).collect(), log2_ring_degree,default_memory_provider!());
-    let C_mul = <CiphertextRing as RingStore>::Type::new(rns_base_mul.clone(), rns_base_mul.get_ring().iter().cloned().map(ZnFastmul::new).collect(), log2_ring_degree,default_memory_provider!());
+    let C = <CiphertextRing as RingStore>::Type::new(rns_base.clone(), log2_ring_degree);
+    let C_mul = <CiphertextRing as RingStore>::Type::new(rns_base_mul.clone(), log2_ring_degree);
     return (C, C_mul);
 }
 
@@ -107,18 +105,16 @@ pub fn create_plaintext_ring(log2_ring_degree: usize, plaintext_modulus: i64) ->
 //
 pub fn create_multiplication_rescale(P: &PlaintextRing, C: &CiphertextRing, C_mul: &CiphertextRing) -> MulConversionData {
     MulConversionData {
-        to_C_mul: rnsconv::approx_lift::AlmostExactBaseConversion::new(
-            C.get_ring().rns_base().iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
-            C_mul.get_ring().rns_base().iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
-            default_memory_provider!(),
-            default_memory_provider!()
+        to_C_mul: rnsconv::lift::AlmostExactBaseConversion::new_with(
+            C.get_ring().rns_base().as_iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
+            C_mul.get_ring().rns_base().as_iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(),
+            Global
         ),
-        scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert::new(
-            C_mul.get_ring().rns_base().iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
+        scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert::new_with(
+            C_mul.get_ring().rns_base().as_iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
             Some(P.base_ring()).into_iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
-            C.get_ring().rns_base().len(), 
-            default_memory_provider!(),
-            default_memory_provider!()
+            C.get_ring().rns_base().len(),
+            Global
         )
     }
 }
@@ -126,13 +122,13 @@ pub fn create_multiplication_rescale(P: &PlaintextRing, C: &CiphertextRing, C_mu
 pub fn gen_sk<R: Rng + CryptoRng>(C: &CiphertextRing, mut rng: R) -> SecretKey {
     // we sample uniform ternary secrets 
     let result = C.get_ring().sample_from_coefficient_distribution(|| (rng.next_u32() % 3) as i32 - 1);
-    return result;
+    return C.get_ring().do_fft(result);
 }
 
 pub fn enc_sym_zero<R: Rng + CryptoRng>(C: &CiphertextRing, mut rng: R, sk: &SecretKey) -> Ciphertext {
     let a = C.get_ring().sample_uniform(|| rng.next_u64());
     let b = C.mul_ref(&a, &sk);
-    let e = C.get_ring().sample_from_coefficient_distribution(|| (rng.sample::<f64, _>(StandardNormal) * 3.2).round() as i32);
+    let e = C.get_ring().do_fft(C.get_ring().sample_from_coefficient_distribution(|| (rng.sample::<f64, _>(StandardNormal) * 3.2).round() as i32));
     return (C.add(C.negate(b), e), a);
 }
 
@@ -205,8 +201,8 @@ pub fn hom_mul(C: &CiphertextRing, C_mul: &CiphertextRing, lhs: &Ciphertext, rhs
 }
 
 pub fn gen_switch_key<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing, mut rng: R, old_sk: &SecretKey, new_sk: &SecretKey) -> KeySwitchKey<'a> {
-    let mut res_0 = C.get_ring().gadget_product_rhs_zero();
-    let mut res_1 = C.get_ring().gadget_product_rhs_zero();
+    let mut res_0 = C.get_ring().gadget_product_rhs_empty();
+    let mut res_1 = C.get_ring().gadget_product_rhs_empty();
     for i in 0..C.get_ring().rns_base().len() {
         let (c0, c1) = enc_sym_zero(C, &mut rng, new_sk);
         let factor = C.base_ring().get_ring().from_congruence((0..C.get_ring().rns_base().len()).map(|i2| {
@@ -215,8 +211,8 @@ pub fn gen_switch_key<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing, mut rng: R,
         }));
         let mut payload = C.clone_el(old_sk);
         C.inclusion().mul_assign_map_ref(&mut payload, &factor);
-        res_0.set_rns_factor(i, C.add(payload, c0));
-        res_1.set_rns_factor(i, c1);
+        res_0.set_rns_factor(i, C.get_ring().undo_fft(C.add(payload, c0)));
+        res_1.set_rns_factor(i, C.get_ring().undo_fft(c1));
     }
     return (res_0, res_1);
 }

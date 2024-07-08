@@ -50,6 +50,7 @@ pub mod complexfft;
 pub mod doublerns;
 
 pub mod lintransform;
+pub mod digitextract;
 
 #[cfg(test)]
 pub mod bfv;
