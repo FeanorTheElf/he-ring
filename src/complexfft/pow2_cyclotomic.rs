@@ -182,8 +182,6 @@ impl<R, A> CCFFTRingBase<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckeyFFT<
 }
 
 #[cfg(test)]
-use feanor_math::rings::extension::generic_test_free_algebra_axioms;
-#[cfg(test)]
 use feanor_math::rings::zn::zn_64::Zn;
 #[cfg(test)]
 use feanor_math::assert_el_eq;
@@ -207,7 +205,7 @@ fn test_ring_axioms() {
 fn test_free_algebra_axioms() {
     let Fp = Zn::new(65537);
     let R = DefaultPow2CyclotomicCCFFTRingBase::<>::new(Fp, 3);
-    generic_test_free_algebra_axioms(R);
+    feanor_math::rings::extension::generic_tests::test_free_algebra_axioms(R);
 }
 
 #[test]

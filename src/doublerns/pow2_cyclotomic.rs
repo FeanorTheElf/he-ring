@@ -214,8 +214,6 @@ impl<R, A> DoubleRNSRingBase<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckey
 }
 
 #[cfg(test)]
-use feanor_math::rings::extension::generic_test_free_algebra_axioms;
-#[cfg(test)]
 use feanor_math::rings::zn::zn_64::Zn;
 
 #[cfg(test)]
@@ -261,12 +259,12 @@ fn test_divisibility_axioms() {
 fn test_free_algebra_axioms() {
     let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
     let R = DefaultPow2CyclotomicDoubleRNSRingBase::new(rns_base, 3);
-    generic_test_free_algebra_axioms(R);
+    feanor_math::rings::extension::generic_tests::test_free_algebra_axioms(R);
 }
 
 #[test]
 fn test_cyclotomic_ring_axioms() {
     let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
     let R = DefaultPow2CyclotomicDoubleRNSRingBase::new(rns_base, 3);
-    generic_test_cyclotomic_ring_axioms(R);
+    feanor_math::rings::extension::generic_tests::test_free_algebra_axioms(R);
 }

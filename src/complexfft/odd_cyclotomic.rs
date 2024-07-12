@@ -16,6 +16,7 @@ use feanor_math::rings::poly::sparse_poly::SparsePolyRing;
 use feanor_math::rings::zn::zn_64;
 use feanor_math::rings::zn::{ZnRing, ZnRingStore};
 
+use super::automorphism::CyclotomicRingDecomposition;
 use super::complex_fft_ring::CCFFTRing;
 use super::complex_fft_ring::{RingDecomposition, CCFFTRingBase, SameNumberRing};
 use crate::complexfft::complex_fft_ring::mul_assign_fft_base;
@@ -76,7 +77,8 @@ pub struct OddCyclotomicFFT<R, F, A = Global>
 {
     ring: R,
     fft_table: F,
-    n_factorization: Vec<(i64, usize)>,
+    /// contains `usize::MAX` whenenver the fft output index corresponds to a non-primitive root of unity, and an index otherwise
+    fft_output_indices_to_indices: Vec<usize>,
     zeta_pow_rank: HashMap<usize, Complex64El>,
     rank: usize,
     allocator: A    
@@ -91,22 +93,12 @@ impl<R, F, A> OddCyclotomicFFT<R, F, A>
     ///
     /// Computing this "generalized FFT" requires evaluating a polynomial at all primitive
     /// `n`-th roots of unity. However, the base FFT will compute the evaluation at all `n`-th
-    /// roots of unity. This function gives an iterator over the indices (indices into the output of
-    /// the base FFT) that correspond to the primitive roots. Note that the base FFT is used via
-    /// [`FFTTable::unordered_fft()`], so this is nontrivial.
+    /// roots of unity. This function gives an iterator over the index pairs `(i, j)`, where `i` 
+    /// is an index into the vector of evaluations, and `j` is an index into the output of the base 
+    /// FFT.
     /// 
-    fn fft_output_indices<'a>(&'a self) -> impl 'a + Iterator<Item = usize> {
-        (0..self.rank()).scan(-1, move |state: &mut i64, _| {
-            *state += 1;
-            let mut power = self.fft_table.unordered_fft_permutation(*state as usize) as i64;
-            while self.n_factorization.iter().any(|(p, _)| power % *p == 0) {
-                *state += 1;
-                power = self.fft_table.unordered_fft_permutation(*state as usize) as i64;
-            }
-            debug_assert!(*state >= 0);
-            debug_assert!(*state < self.fft_table.len() as i64);
-            return Some(*state as usize);
-        })
+    fn fft_output_indices<'a>(&'a self) -> impl 'a + Iterator<Item = (usize, usize)> {
+        self.fft_output_indices_to_indices.iter().enumerate().filter_map(|(i, j)| if *j == usize::MAX { None } else { Some((*j, i)) })
     }
 }
 
@@ -130,7 +122,16 @@ impl<R, F, A> OddCyclotomicFFT<R, F, A>
             }
         }
 
-        return Self { ring, fft_table, n_factorization, zeta_pow_rank, rank, allocator };
+        let fft_output_indices_to_indices = (0..fft_table.len()).scan(0, |state, i| {
+            if n_factorization.iter().all(|(p, _)| i as i64 % *p != 0) {
+                *state += 1;
+                return Some(*state - 1);
+            } else {
+                return Some(usize::MAX);
+            }
+        }).collect::<Vec<_>>();
+
+        return Self { ring, fft_table, zeta_pow_rank, rank, allocator, fft_output_indices_to_indices };
     }
 }
 
@@ -155,7 +156,7 @@ impl<R, F, A> RingDecomposition<R::Type> for OddCyclotomicFFT<R, F, A>
         assert!(self.ring.get_ring() == ring);
         let mut tmp = Vec::with_capacity_in(self.fft_table.len(), self.allocator.clone());
         tmp.extend((0..self.fft_table.len()).map(|_| CC.zero()));
-        for (j, i) in self.fft_output_indices().enumerate() {
+        for (j, i) in self.fft_output_indices() {
             tmp[i] = data[j];
         }
         self.fft_table.unordered_inv_fft(&mut tmp[..], CC.get_ring());
@@ -183,7 +184,7 @@ impl<R, F, A> RingDecomposition<R::Type> for OddCyclotomicFFT<R, F, A>
         }
 
         self.fft_table.unordered_fft(&mut tmp[..], CC.get_ring());
-        for (j, i) in self.fft_output_indices().enumerate() {
+        for (j, i) in self.fft_output_indices() {
             destination[j] = tmp[i];
         }
     }
@@ -197,6 +198,28 @@ impl<R, F, A> RingDecomposition<R::Type> for OddCyclotomicFFT<R, F, A>
         let mut tmp = Vec::with_capacity_in(self.rank(), self.allocator.clone());
         tmp.resize(self.rank(), CC.zero());
         mul_assign_fft_base(self, lhs, rhs, &mut tmp, ring);
+    }
+}
+
+impl<R, F, A> CyclotomicRingDecomposition<R::Type> for OddCyclotomicFFT<R, F, A> 
+    where R: RingStore,
+        R::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>,
+        F: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
+        A: Allocator + Clone
+{
+    fn galois_group_mulrepr(&self) -> zn_64::Zn {
+        zn_64::Zn::new(self.fft_table.len() as u64)
+    }
+
+    fn permute_galois_action(&self, src: &[Complex64El], dst: &mut [Complex64El], galois_element: El<zn_64::Zn>) {
+        let Zn = self.galois_group_mulrepr();
+        let hom = Zn.can_hom(&StaticRing::<i64>::RING).unwrap();
+        
+        for (j, i) in self.fft_output_indices() {
+            dst[j] = src[self.fft_output_indices_to_indices[self.fft_table.unordered_fft_permutation_inv(
+                Zn.smallest_positive_lift(Zn.mul(galois_element, hom.map(self.fft_table.unordered_fft_permutation(i) as i64))) as usize
+            )]];
+        }
     }
 }
 
@@ -252,9 +275,9 @@ impl<R, A> CCFFTRingBase<R, OddCyclotomicFFT<R, bluestein::BluesteinFFT<Complex6
 }
 
 #[cfg(test)]
-use feanor_math::rings::extension::generic_test_free_algebra_axioms;
-#[cfg(test)]
 use feanor_math::rings::zn::zn_64::Zn;
+#[cfg(test)]
+use feanor_math::assert_el_eq;
 
 #[test]
 fn test_ring_axioms() {
@@ -275,7 +298,7 @@ fn test_ring_axioms() {
 fn test_free_algebra_axioms() {
     let Fp = Zn::new(65537);
     let R = DefaultOddCyclotomicCCFFTRingBase::new(Fp, 9);
-    generic_test_free_algebra_axioms(R);
+    feanor_math::rings::extension::generic_tests::test_free_algebra_axioms(R);
 }
 
 #[test]
@@ -290,5 +313,25 @@ fn test_fft_output_indices() {
     let Fp = Zn::new(257);
     let S = DefaultOddCyclotomicCCFFTRingBase::new(Fp, 7);
 
-    assert_eq!(vec![1, 2, 3, 4, 5, 6], S.get_ring().generalized_fft().fft_output_indices().collect::<Vec<_>>());
+    assert_eq!(vec![(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6)], S.get_ring().generalized_fft().fft_output_indices().collect::<Vec<_>>());
+}
+
+#[test]
+fn test_permute_galois_automorphism() {
+    let Fp = Zn::new(257);
+    let R = DefaultOddCyclotomicCCFFTRingBase::new(Fp, 7);
+    let hom = R.get_ring().galois_group_mulrepr().into_int_hom();
+
+    assert_el_eq!(R, ring_literal!(&R, [0, 0, 1, 0, 0, 0]), R.get_ring().apply_galois_action(hom.map(2), ring_literal!(&R, [0, 1, 0, 0, 0, 0])));
+    assert_el_eq!(R, ring_literal!(&R, [0, 0, 0, 1, 0, 0]), R.get_ring().apply_galois_action(hom.map(3), ring_literal!(&R, [0, 1, 0, 0, 0, 0])));
+    assert_el_eq!(R, ring_literal!(&R, [0, 0, 0, 0, 1, 0]), R.get_ring().apply_galois_action(hom.map(2), ring_literal!(&R, [0, 0, 1, 0, 0, 0])));
+    assert_el_eq!(R, ring_literal!(&R, [-1, -1, -1, -1, -1, -1]), R.get_ring().apply_galois_action(hom.map(3), ring_literal!(&R, [0, 0, 1, 0, 0, 0])));
+
+    let R = DefaultOddCyclotomicCCFFTRingBase::new(Fp, 15);
+    let hom = R.get_ring().galois_group_mulrepr().into_int_hom();
+
+    assert_el_eq!(R, ring_literal!(&R, [0, 0, 1, 0, 0, 0, 0, 0]), R.get_ring().apply_galois_action(hom.map(2), ring_literal!(&R, [0, 1, 0, 0, 0, 0, 0, 0])));
+    assert_el_eq!(R, ring_literal!(&R, [0, 0, 0, 0, 1, 0, 0, 0]), R.get_ring().apply_galois_action(hom.map(4), ring_literal!(&R, [0, 1, 0, 0, 0, 0, 0, 0])));
+    assert_el_eq!(R, ring_literal!(&R, [-1, 1, 0, -1, 1, -1, 0, 1]), R.get_ring().apply_galois_action(hom.map(8), ring_literal!(&R, [0, 1, 0, 0, 0, 0, 0, 0])));
+    assert_el_eq!(R, ring_literal!(&R, [-1, 1, 0, -1, 1, -1, 0, 1]), R.get_ring().apply_galois_action(hom.map(2), ring_literal!(&R, [0, 0, 0, 0, 1, 0, 0, 0])));
 }

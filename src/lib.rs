@@ -12,7 +12,7 @@
 
 #![doc = include_str!("../Readme.md")]
 
-#[cfg(test)]
+#[macro_export]
 macro_rules! ring_literal {
     ($ring:expr, $iter:expr) => {
         {

@@ -284,8 +284,6 @@ impl<R_main, R_twiddle, A> DoubleRNSRingBase<
 #[cfg(test)]
 use feanor_math::assert_el_eq;
 #[cfg(test)]
-use feanor_math::rings::extension::generic_test_free_algebra_axioms;
-#[cfg(test)]
 use feanor_math::rings::zn::zn_64::Zn;
 #[cfg(test)]
 use feanor_math::rings::extension::FreeAlgebraStore;
@@ -355,7 +353,7 @@ fn test_divisibility_axioms() {
 fn test_free_algebra_axioms() {
     let rns_base = zn_rns::Zn::new(vec![Zn::new(577), Zn::new(1153)], BigIntRing::RING);
     let R = DefaultOddCyclotomicDoubleRNSRingBase::new(rns_base, 9);
-    generic_test_free_algebra_axioms(R);
+    feanor_math::rings::extension::generic_tests::test_free_algebra_axioms(R);
 }
 
 #[test]

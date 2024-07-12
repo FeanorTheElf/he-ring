@@ -66,8 +66,7 @@ fn unit_group_dlog(ring: &Zn, base: ZnEl, order: i64, value: ZnEl) -> Option<i64
 pub trait CyclotomicRingDecomposition<R: ?Sized + RingBase>: RingDecomposition<R> {
 
     ///
-    /// Returns `Z/nZ` such that the galois group of this number ring
-    /// is `(Z/nZ)*`
+    /// Returns `Z/nZ` such that the galois group of this number ring is `(Z/nZ)*`
     /// 
     fn galois_group_mulrepr(&self) -> Zn;
 
@@ -100,7 +99,6 @@ impl<R, F, A> CCFFTRingBase<R, F, A>
 pub struct HypercubeDimension {
     length: usize,
     generator: ZnEl,
-    is_good: bool,
     factor_n: (i64, usize)
 }
 
@@ -143,7 +141,6 @@ pub fn compute_hypercube_structure(n: i64, p: i64) -> (Vec<HypercubeDimension>, 
                     let logg1_p = unit_group_dlog(Zqk, g1, ord_g1, Zqk.can_hom(&ZZ).unwrap().map(p)).unwrap();
                     dims.push(HypercubeDimension {
                         length: 2, 
-                        is_good: true, 
                         generator: from_crt(i, g2),
                         factor_n: (2, 2)
                     });
@@ -151,7 +148,6 @@ pub fn compute_hypercube_structure(n: i64, p: i64) -> (Vec<HypercubeDimension>, 
                     if ord_p != ord_g1 {
                         dims.push(HypercubeDimension {
                             length: (ord_g1 / ord_p) as usize, 
-                            is_good: ord_p == 1, 
                             generator: from_crt(i, g1),
                             factor_n: (2, k - 2)
                         });
@@ -162,7 +158,6 @@ pub fn compute_hypercube_structure(n: i64, p: i64) -> (Vec<HypercubeDimension>, 
                     let ord_p = max(2, ord_g1 / signed_gcd(logg1_pg2, ord_g1, ZZ));
                     dims.push(HypercubeDimension {
                         length: (2 * ord_g1 / ord_p) as usize,
-                        is_good: false, 
                         generator: from_crt(i, g1),
                         factor_n: (2, *k)
                     });
@@ -183,14 +178,12 @@ pub fn compute_hypercube_structure(n: i64, p: i64) -> (Vec<HypercubeDimension>, 
                 let local_gen = Zqk.pow(g, ord_p as usize);
                 dims.push(HypercubeDimension {
                     length: (ord_g / ord_p) as usize, 
-                    is_good: true, 
                     generator: from_crt(i, local_gen),
                     factor_n: (*q, *k)
                 });
             } else {
                 dims.push(HypercubeDimension {
                     length: (ord_g / ord_p) as usize, 
-                    is_good: false,
                     generator: from_crt(i, g),
                     factor_n: (*q, *k)
                 });
