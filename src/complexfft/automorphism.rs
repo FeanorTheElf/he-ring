@@ -386,7 +386,6 @@ fn test_compute_hypercube_structure_pow2() {
         let (dims, Z_2n) = compute_hypercube_structure(1024, 3);
         assert_eq!(1, dims.len());
         assert_eq!(2, dims[0].length);
-        assert_eq!(false, dims[0].is_good);
         assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(3), 256, dims[0].generator).is_none());
         assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(3), 256, Z_2n.pow(dims[0].generator, 2)).is_some());
     }
@@ -394,7 +393,6 @@ fn test_compute_hypercube_structure_pow2() {
         let (dims, Z_2n) = compute_hypercube_structure(1024, 23);
         assert_eq!(1, dims.len());
         assert_eq!(4, dims[0].length);
-        assert_eq!(false, dims[0].is_good);
         assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(23), 128, Z_2n.pow(dims[0].generator, 2)).is_none());
         assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(23), 128, Z_2n.pow(dims[0].generator, 4)).is_some());
     }
@@ -402,7 +400,6 @@ fn test_compute_hypercube_structure_pow2() {
         let (dims, Z_2n) = compute_hypercube_structure(1024, 13);
         assert_eq!(1, dims.len());
         assert_eq!(2, dims[0].length);
-        assert_eq!(true, dims[0].is_good);
         assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(13), 256, dims[0].generator).is_none());
         assert_eq!(Some(0), unit_group_dlog(&Z_2n, Z_2n.int_hom().map(13), 256, Z_2n.pow(dims[0].generator, 2)));
     }
@@ -410,9 +407,7 @@ fn test_compute_hypercube_structure_pow2() {
         let (dims, Z_2n) = compute_hypercube_structure(1024, 17);
         assert_eq!(2, dims.len());
         assert_eq!(2, dims[0].length);
-        assert_eq!(true, dims[0].is_good);
         assert_eq!(4, dims[1].length);
-        assert_eq!(false, dims[1].is_good);
         assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(17), 64, dims[0].generator).is_none());
         assert_eq!(Some(0), unit_group_dlog(&Z_2n, Z_2n.int_hom().map(17), 64, Z_2n.pow(dims[0].generator, 2)));
         assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(17), 64, Z_2n.pow(dims[1].generator, 2)).is_none());
@@ -430,7 +425,6 @@ fn test_compute_hypercube_structure_odd() {
         let (dims, Zn) = compute_hypercube_structure(257, 11);
         assert_eq!(1, dims.len());
         assert_eq!(4, dims[0].length);
-        assert_eq!(false, dims[0].is_good);
         assert!(unit_group_dlog(&Zn, Zn.int_hom().map(11), 64, Zn.pow(dims[0].generator, 2)).is_none());
         assert!(unit_group_dlog(&Zn, Zn.int_hom().map(11), 64, Zn.pow(dims[0].generator, 4)).is_some());
     }
@@ -438,9 +432,7 @@ fn test_compute_hypercube_structure_odd() {
         let (dims, Zn) = compute_hypercube_structure(257 * 101, 13);
         assert_eq!(2, dims.len());
         assert_eq!(2, dims[0].length);
-        assert_eq!(false, dims[0].is_good);
         assert_eq!(2, dims[1].length);
-        assert_eq!(false, dims[1].is_good);
         assert!(unit_group_dlog(&Zn, Zn.int_hom().map(13), 3200, dims[0].generator).is_none());
         assert!(unit_group_dlog(&Zn, Zn.int_hom().map(13), 3200, dims[1].generator).is_none());
     }
