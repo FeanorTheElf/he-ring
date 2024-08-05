@@ -276,14 +276,24 @@ impl ArithCircuit {
         self.multiplications.len()
     }
 
-    pub fn mul_depth(&self) -> usize {
+    pub fn mul_depth(&self, output: usize) -> usize {
         let mut mul_depths = (0..self.input_count).map(|_| 0).collect::<Vec<_>>();
         for mul in &self.multiplications {
             mul_depths.push(
                 mul.lhs.factors.iter().enumerate().chain(mul.rhs.factors.iter().enumerate()).filter(|(_, c)| c.is_some()).map(|(j, _)| mul_depths[j]).max().unwrap_or(0) + 1
             );
         }
-        return *mul_depths.last().unwrap_or(&0);
+        return self.output_transforms[output].factors.iter().enumerate().filter(|(_, c)| c.is_some()).map(|(j, _)| mul_depths[j]).max().unwrap_or(0);
+    }
+
+    pub fn max_mul_depth(&self) -> usize {
+        let mut mul_depths = (0..self.input_count).map(|_| 0).collect::<Vec<_>>();
+        for mul in &self.multiplications {
+            mul_depths.push(
+                mul.lhs.factors.iter().enumerate().chain(mul.rhs.factors.iter().enumerate()).filter(|(_, c)| c.is_some()).map(|(j, _)| mul_depths[j]).max().unwrap_or(0) + 1
+            );
+        }
+        return *mul_depths.iter().max().unwrap_or(&0);
     }
 }
 
@@ -294,7 +304,8 @@ fn test_circuit_mul_depth() {
     let xy = ArithCircuit::mul();
     let x_sqr_add_xy = ArithCircuit::add().compose(&x_sqr.tensor(&xy).compose(&ArithCircuit::select(2, &[0, 0, 1])));
     let result = ArithCircuit::mul().compose(&x_sqr_add_xy.output_twice());
-    assert_eq!(2, result.mul_depth());
+    assert_eq!(2, result.max_mul_depth());
+    assert_eq!(2, result.mul_depth(0));
     assert_eq!(3, result.mul_count());
 }
 
