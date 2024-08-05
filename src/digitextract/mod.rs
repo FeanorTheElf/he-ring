@@ -226,7 +226,7 @@ impl ArithCircuit {
 
         let map_transform = |t: &LinTransform| {
             let input_transform = LinTransform {
-                constant: None,
+                constant: t.constant,
                 factors: t.factors[0..self.input_count].iter().copied().collect()
             };
             let mut result = input_transform.compose(&first.output_transforms);
@@ -266,7 +266,8 @@ impl ArithCircuit {
         for mul in &self.multiplications {
             let lhs = mul.lhs.evaluate(&inputs, &current, &ring, &hom);
             let rhs = mul.rhs.evaluate(&inputs, &current, &ring, &hom);
-            current.push(ring.mul(lhs, rhs));
+            let prod = ring.mul(lhs, rhs);
+            current.push(prod);
         }
         return self.output_transforms.iter().map(move |t| t.evaluate(inputs, &current, &ring, &hom));
     }
@@ -339,4 +340,28 @@ fn test_circuit_tensor_compose() {
             assert_eq!(StaticRing::<i64>::RING.pow(x * y * (2 * x + 3 * y) + 1, 2), w_1_sqr.evaluate(&[x, y], StaticRing::<i64>::RING).next().unwrap());
         }
     }
+}
+
+#[test]
+fn test_giant_step_circuit() {
+    let powers = ArithCircuit::identity(1).tensor(&ArithCircuit::mul()).tensor(&ArithCircuit::mul()).compose(&ArithCircuit::mul().output_times(4).tensor(&ArithCircuit::identity(1))).compose(&ArithCircuit::identity(1).output_times(3));
+    assert_eq!(vec![4, 16, 8], powers.evaluate(&[2], StaticRing::<i64>::RING).collect::<Vec<_>>());
+
+    let permuted_baby_step_dupl_input = ArithCircuit::constant(1).tensor(&ArithCircuit::identity(1)).tensor(&powers);
+    assert_eq!(vec![1, 2, 4, 16, 8], permuted_baby_step_dupl_input.evaluate(&[2, 2], StaticRing::<i64>::RING).collect::<Vec<_>>());
+
+    let copy_input = ArithCircuit::identity(1).output_twice();
+    assert_eq!(vec![2, 2], copy_input.evaluate(&[2], StaticRing::<i64>::RING).collect::<Vec<_>>());
+
+    let permuted_baby_steps = permuted_baby_step_dupl_input.compose(&copy_input);
+    assert_eq!(vec![1, 2, 4, 16, 8], permuted_baby_steps.evaluate(&[2], StaticRing::<i64>::RING).collect::<Vec<_>>());
+
+    let baby_steps = ArithCircuit::select(5, &[0, 1, 2, 4, 3]).compose(&permuted_baby_steps);
+    assert_eq!(1, baby_steps.input_count());
+    assert_eq!(5, baby_steps.output_count());
+    assert_eq!(vec![1, 2, 4, 8, 16], baby_steps.evaluate(&[2], StaticRing::<i64>::RING).collect::<Vec<_>>());
+
+    let giant_steps_before_baby_steps = ArithCircuit::constant(1).tensor(&ArithCircuit::identity(1));
+    let baby_and_giant_steps = ArithCircuit::identity(4).tensor(&giant_steps_before_baby_steps).compose(&baby_steps);
+    assert_eq!(vec![1, 2, 4, 8, 1, 16], baby_and_giant_steps.evaluate(&[2], StaticRing::<i64>::RING).collect::<Vec<_>>());
 }

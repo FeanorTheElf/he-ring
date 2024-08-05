@@ -56,7 +56,10 @@ pub fn precomputed_p_2(e: usize) -> ArithCircuit {
     };
 }
 
-fn low_depth_paterson_stockmeyer<P>(poly_ring: P, polys: &[El<P>]) -> ArithCircuit
+///
+/// A low-depth variant of Paterson-Stockmeyer evaluation of polynomials
+/// 
+pub fn low_depth_paterson_stockmeyer<P>(poly_ring: P, polys: &[El<P>]) -> ArithCircuit
     where P: RingStore,
         P::Type: PolyRing,
         <<P::Type as RingExtension>::BaseRing as RingStore>::Type: ZnRing + DivisibilityRing
@@ -84,48 +87,74 @@ fn low_depth_paterson_stockmeyer<P>(poly_ring: P, polys: &[El<P>]) -> ArithCircu
     }
 
     let baby_steps = root_floor(&StaticRing::<i64>::RING, max_deg as i64, 2) as usize + 1;
-    println!("{}", baby_steps);
-    let giant_steps = (max_deg - 1) / baby_steps + 1;
-    debug_assert!((giant_steps - 1) * baby_steps + baby_steps - 1 >= max_deg);
-    debug_assert!((giant_steps - 1) * baby_steps <= max_deg);
+    let giant_steps = max_deg / baby_steps + 1;
+    let giant_steps_half = giant_steps / 2 + 1;
+    assert!((giant_steps - 1) * baby_steps + baby_steps > max_deg);
+    assert!((giant_steps - 1) * baby_steps <= max_deg);
 
     // now baby_step_circuit computes (1, x, x^2, ..., x^(baby_steps - 1))
     let baby_step_circuit = compute_power_circuit(baby_steps + 1);
     assert_eq!(baby_steps - 1, baby_step_circuit.mul_count());
     assert_eq!(StaticRing::<i64>::RING.abs_log2_ceil(&(baby_steps as i64)).unwrap() as usize, baby_step_circuit.mul_depth());
 
-    let all_poly_parts: Vec<Vec<ArithCircuit>> = polys.iter().map(|f| (0..((poly_ring.degree(f).unwrap_or(0) - 1) / baby_steps + 1)).map(|i| ArithCircuit::linear_transform(&(0..baby_steps).map(|j|
+    let all_poly_parts: Vec<Vec<ArithCircuit>> = polys.iter().map(|f| (0..(poly_ring.degree(f).unwrap() / baby_steps + 1)).map(|i| ArithCircuit::linear_transform(&(0..baby_steps).map(|j|
         int_cast(poly_ring.base_ring().smallest_lift(poly_ring.base_ring().clone_el(poly_ring.coefficient_at(f, i * baby_steps + j))), StaticRing::<i64>::RING, poly_ring.base_ring().integer_ring())
     ).collect::<Vec<_>>())).collect()).collect();
 
     // giant_step_circuit computes (1, x, ..., x^(baby_steps - 1), 1, x^baby_steps, x^(2 baby_steps), ..., x^(giant_steps * baby_steps - baby_steps))
-    let giant_step_circuit = ArithCircuit::identity(baby_steps).tensor(&compute_power_circuit(giant_steps)).compose(&baby_step_circuit);
-    assert_eq!(baby_steps - 1 + giant_steps - 2, giant_step_circuit.mul_count());
-    assert_eq!(StaticRing::<i64>::RING.abs_log2_ceil(&(giant_steps as i64 - 1)).unwrap() as usize, giant_step_circuit.mul_depth() - baby_step_circuit.mul_depth());
+    let giant_step_circuit = ArithCircuit::identity(baby_steps).tensor(&compute_power_circuit(giant_steps_half)).compose(&baby_step_circuit);
+    assert_eq!(baby_steps - 1 + giant_steps_half - 2, giant_step_circuit.mul_count());
+    assert_eq!(StaticRing::<i64>::RING.abs_log2_ceil(&(giant_steps_half as i64 - 1)).unwrap() as usize, giant_step_circuit.mul_depth() - baby_step_circuit.mul_depth());
     assert_eq!(giant_step_circuit.input_count(), 1);
-    assert_eq!(giant_step_circuit.output_count(), baby_steps + giant_steps);
+    assert_eq!(giant_step_circuit.output_count(), baby_steps + giant_steps_half);
+
+    let select_baby_steps = ArithCircuit::select(baby_steps + giant_steps_half, &(0..baby_steps).collect::<Vec<_>>());
 
     let mut result = ArithCircuit::empty();
     for (poly, poly_parts) in polys.iter().zip(all_poly_parts.iter()) {
 
-        let mut compute_poly_circuit = poly_parts[0].compose(&ArithCircuit::select(baby_steps + giant_steps, &(0..baby_steps).collect::<Vec<_>>()));
+        let mut compute_poly_circuit = poly_parts[0].compose(&select_baby_steps);
+        let highest_block = poly_ring.degree(poly).unwrap() / baby_steps;
         
-        for (i, part) in poly_parts.iter().enumerate().skip(1) {
-            assert_eq!(giant_steps + baby_steps, compute_poly_circuit.input_count());
+        for i in 1..=(highest_block / 2) {
+            assert_eq!(baby_steps + giant_steps_half, compute_poly_circuit.input_count());
             assert_eq!(1, compute_poly_circuit.output_count());
 
-            assert_eq!(baby_steps, part.input_count());
-            assert_eq!(1, part.output_count());
+            let low_part = &poly_parts[i];
+            let high_part = &poly_parts[i + highest_block / 2];
 
-            let part_times_power = ArithCircuit::mul().compose(
-                &part.tensor(&ArithCircuit::identity(1)).compose(&ArithCircuit::select(baby_steps + giant_steps, &(0..baby_steps).chain([baby_steps + i].into_iter()).collect::<Vec<_>>()))
-            );
-            assert_eq!(giant_steps + baby_steps, part_times_power.input_count());
-            assert_eq!(1, part_times_power.output_count());
-            compute_poly_circuit = ArithCircuit::add().compose(&compute_poly_circuit.tensor(&part_times_power))
-                .compose(&ArithCircuit::identity(baby_steps + giant_steps).output_twice());
+            let compute_part = ArithCircuit::mul().compose(
+                &ArithCircuit::add().compose(
+                    &low_part.compose(&select_baby_steps).tensor(
+                        &ArithCircuit::mul().compose(&high_part.compose(&select_baby_steps).tensor(&ArithCircuit::select(baby_steps + giant_steps_half, &[baby_steps + highest_block / 2])))
+                    )
+                ).tensor(&ArithCircuit::select(baby_steps + giant_steps_half, &[baby_steps + i]))
+            ).compose(&ArithCircuit::identity(baby_steps + giant_steps_half).output_times(4));
+
+            compute_poly_circuit = ArithCircuit::add().compose(&compute_poly_circuit.tensor(&compute_part))
+                .compose(&ArithCircuit::identity(baby_steps + giant_steps_half).output_twice());
         }
-        assert_eq!((poly_ring.degree(poly).unwrap_or(0) - 1) / baby_steps, compute_poly_circuit.mul_count());
+
+        if highest_block == 1 {
+            let compute_part = ArithCircuit::mul().compose(
+                &poly_parts[highest_block].compose(&select_baby_steps).tensor(
+                    &ArithCircuit::select(baby_steps + giant_steps_half, &[baby_steps + 1])
+                )
+            ).compose(&ArithCircuit::identity(baby_steps + giant_steps_half).output_times(2));  
+            compute_poly_circuit = ArithCircuit::add().compose(&compute_poly_circuit.tensor(&compute_part))
+                .compose(&ArithCircuit::identity(baby_steps + giant_steps_half).output_twice());
+        } else 
+        if highest_block % 2 == 1 {
+            let highest_block_power = ArithCircuit::mul().compose(&ArithCircuit::select(baby_steps + giant_steps_half, &[baby_steps + highest_block / 2]).tensor(
+                &ArithCircuit::select(baby_steps + giant_steps_half, &[baby_steps + highest_block / 2 + 1])
+            )).compose(&ArithCircuit::identity(baby_steps + giant_steps_half).output_twice());
+            let compute_part = ArithCircuit::mul().compose(
+                &poly_parts[highest_block].compose(&select_baby_steps).tensor(&highest_block_power)
+            ).compose(&ArithCircuit::identity(baby_steps + giant_steps_half).output_twice());
+            compute_poly_circuit = ArithCircuit::add().compose(&compute_poly_circuit.tensor(&compute_part))
+                .compose(&ArithCircuit::identity(baby_steps + giant_steps_half).output_twice());
+        }
+
         result = result.tensor(&compute_poly_circuit);
     }
     let result = result.compose(&giant_step_circuit.output_times(polys.len()));
@@ -133,10 +162,6 @@ fn low_depth_paterson_stockmeyer<P>(poly_ring: P, polys: &[El<P>]) -> ArithCircu
     assert_eq!(
         StaticRing::<i64>::RING.abs_log2_ceil(&(giant_steps as i64 - 1)).unwrap() as usize + StaticRing::<i64>::RING.abs_log2_ceil(&(baby_steps as i64)).unwrap() as usize + 1, 
         result.mul_depth()
-    );
-    assert_eq!(
-        baby_steps - 1 + giant_steps - 2 + polys.iter().map(|f| (poly_ring.degree(f).unwrap_or(0) - 1) / baby_steps).sum::<usize>(), 
-        result.mul_count()
     );
     return result;
 }
@@ -267,7 +292,7 @@ fn test_paterson_stockmeyer() {
     let poly = P.from_terms([(1, 0), (2, 3), (3, 4), (4, 5), (8, 7)].into_iter().map(|(c, d)| (Zn.int_hom().map(c), d)));
     let circuit = low_depth_paterson_stockmeyer(&P, &[P.clone_el(&poly)]);
     assert_eq!(4, circuit.mul_depth());
-    assert_eq!(5, circuit.mul_count());
+    assert_eq!(4, circuit.mul_count());
 
     for x in Zn.elements() {
         assert_el_eq!(Zn, P.evaluate(&poly, &x, &P.base_ring().identity()), circuit.evaluate(&[x], P.base_ring()).next().unwrap());
@@ -284,11 +309,24 @@ fn test_paterson_stockmeyer_multiple_polys() {
     let g = P.from_terms([(2, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6), (7, 7), (8, 8), (9, 9)].into_iter().map(|(c, d)| (Zn.int_hom().map(c), d)));
     let circuit = low_depth_paterson_stockmeyer(&P, &[P.clone_el(&f), P.clone_el(&g)]);
     assert_eq!(4, circuit.mul_depth());
-    assert_eq!(7, circuit.mul_count());
+    assert_eq!(6, circuit.mul_count());
 
     for x in Zn.elements() {
         let mut result_it = circuit.evaluate(std::slice::from_ref(&x), P.base_ring());
         assert_el_eq!(Zn, P.evaluate(&f, &x, &P.base_ring().identity()), result_it.next().unwrap());
         assert_el_eq!(Zn, P.evaluate(&g, &x, &P.base_ring().identity()), result_it.next().unwrap());
     }
+
+    // 1 + X^12
+    let h = P.from_terms([(1, 0), (3, 6), (7, 9), (1, 12)].into_iter().map(|(c, d)| (Zn.int_hom().map(c), d)));let circuit = low_depth_paterson_stockmeyer(&P, &[P.clone_el(&f), P.clone_el(&g), P.clone_el(&h)]);
+    assert_eq!(5, circuit.mul_depth());
+    assert_eq!(11, circuit.mul_count());
+
+    for x in Zn.elements() {
+        let mut result_it = circuit.evaluate(std::slice::from_ref(&x), P.base_ring());
+        assert_el_eq!(Zn, P.evaluate(&f, &x, &P.base_ring().identity()), result_it.next().unwrap());
+        assert_el_eq!(Zn, P.evaluate(&g, &x, &P.base_ring().identity()), result_it.next().unwrap());
+        assert_el_eq!(Zn, P.evaluate(&h, &x, &P.base_ring().identity()), result_it.next().unwrap());
+    }
+
 }
