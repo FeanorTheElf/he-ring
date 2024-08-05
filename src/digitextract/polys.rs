@@ -1,0 +1,294 @@
+use std::alloc::Global;
+use std::cmp::min;
+
+use feanor_math::algorithms::int_bisect::root_floor;
+use feanor_math::algorithms::int_factor::is_prime_power;
+use feanor_math::algorithms::interpolate::interpolate;
+use feanor_math::divisibility::*;
+use feanor_math::homomorphism::Homomorphism;
+use feanor_math::integer::{int_cast, BigIntRing, IntegerRingStore};
+use feanor_math::primitive_int::StaticRing;
+use feanor_math::ring::*;
+use feanor_math::rings::finite::FiniteRingStore;
+use feanor_math::seq::*;
+use feanor_math::rings::poly::{PolyRing, PolyRingStore};
+use feanor_math::rings::zn::{ZnRing, ZnRingStore};
+
+use crate::digitextract::ArithCircuit;
+
+///
+/// Returns the best arithmetic circuit that computes a function
+/// ```text
+/// digitex: Z/2^eZ -> (Z/2^eZ)^log(e)
+/// ```
+/// that satisfies `digitex(x)[i] = (x mod 2) mod 2^(2^i)`.
+/// `e` must be a power of two.
+/// 
+/// Uses a lookup-table, consisting mainly of the values from [https://ia.cr/2022/1364], except for
+/// `e = 16`, where there seemed to be a mistake in the paper.
+/// 
+pub fn precomputed_p_2(e: usize) -> ArithCircuit {
+    let log2_e = StaticRing::<i64>::RING.abs_log2_ceil(&(e as i64)).unwrap();
+    assert_eq!(e, 1 << log2_e);
+    
+    let id = ArithCircuit::linear_transform(&[1]);
+    let f0 = id.clone();
+    let f1 = id.tensor(&ArithCircuit::mul()).compose(&ArithCircuit::select(1, &[0, 0, 0]).compose(&f0));
+    let f2 = id.tensor(&id).tensor(&ArithCircuit::mul()).compose(&ArithCircuit::select(2, &[0, 1, 1, 1]).compose(&f1));
+    
+    let f3_comp = ArithCircuit::add().compose(&ArithCircuit::linear_transform(&[112]).tensor(
+        &ArithCircuit::mul().compose(&ArithCircuit::linear_transform(&[94, 121]).output_twice())
+    )).compose(&ArithCircuit::select(2, &[0, 0, 1]));
+    let f3 = id.tensor(&id).tensor(&id).tensor(&f3_comp).compose(&ArithCircuit::select(3, &[0, 1, 2, 1, 2]).compose(&f2));
+
+    let f4_comp = ArithCircuit::add().compose(&ArithCircuit::linear_transform(&[1984, 528, 22620]).tensor(
+        &ArithCircuit::mul().compose(&ArithCircuit::linear_transform(&[226, 113]).tensor(&ArithCircuit::linear_transform(&[8, 2, 301])))
+    )).compose(&ArithCircuit::select(3, &[0, 1, 2, 1, 2, 0, 1, 2]));
+    let f4 = id.tensor(&id).tensor(&id).tensor(&id).tensor(&f4_comp).compose(&ArithCircuit::select(4, &[0, 1, 2, 3, 1, 2, 3]).compose(&f3));
+
+    return match log2_e {
+        0 => f0,
+        1 => f1,
+        2 => f2,
+        3 => f3,
+        4 => f4,
+        5.. => panic!("no table entry for {}", e)
+    };
+}
+
+fn low_depth_paterson_stockmeyer<P>(poly_ring: P, polys: &[El<P>]) -> ArithCircuit
+    where P: RingStore,
+        P::Type: PolyRing,
+        <<P::Type as RingExtension>::BaseRing as RingStore>::Type: ZnRing + DivisibilityRing
+{
+    let max_deg = polys.iter().map(|f| poly_ring.degree(f).unwrap_or(0)).max().unwrap();
+
+    fn compute_power_circuit(deg_exclusive: usize) -> ArithCircuit {
+        let mut result = ArithCircuit::constant(1).tensor(&ArithCircuit::identity(1));
+        while result.output_count() < deg_exclusive {
+            let n = result.output_count();
+            let mut next_circuit = ArithCircuit::identity(n);
+            for i in 1..=min(deg_exclusive - n, n - 1) {
+                next_circuit = next_circuit.tensor(
+                    &ArithCircuit::mul().compose(
+                        &ArithCircuit::select(n, &[n - 1, i])
+                    )
+                );
+            }
+            assert_eq!(next_circuit.input_count(), (min(deg_exclusive - n, n - 1) + 1) * n);
+            assert_eq!(next_circuit.output_count(), min(deg_exclusive - n, n - 1) + n);
+            result = next_circuit.compose(&result.output_times(min(deg_exclusive - n, n - 1) + 1));
+        }
+        assert!(result.output_count() == deg_exclusive);
+        return result;
+    }
+
+    let baby_steps = root_floor(&StaticRing::<i64>::RING, max_deg as i64, 2) as usize + 1;
+    println!("{}", baby_steps);
+    let giant_steps = (max_deg - 1) / baby_steps + 1;
+    debug_assert!((giant_steps - 1) * baby_steps + baby_steps - 1 >= max_deg);
+    debug_assert!((giant_steps - 1) * baby_steps <= max_deg);
+
+    // now baby_step_circuit computes (1, x, x^2, ..., x^(baby_steps - 1))
+    let baby_step_circuit = compute_power_circuit(baby_steps + 1);
+    assert_eq!(baby_steps - 1, baby_step_circuit.mul_count());
+    assert_eq!(StaticRing::<i64>::RING.abs_log2_ceil(&(baby_steps as i64)).unwrap() as usize, baby_step_circuit.mul_depth());
+
+    let all_poly_parts: Vec<Vec<ArithCircuit>> = polys.iter().map(|f| (0..((poly_ring.degree(f).unwrap_or(0) - 1) / baby_steps + 1)).map(|i| ArithCircuit::linear_transform(&(0..baby_steps).map(|j|
+        int_cast(poly_ring.base_ring().smallest_lift(poly_ring.base_ring().clone_el(poly_ring.coefficient_at(f, i * baby_steps + j))), StaticRing::<i64>::RING, poly_ring.base_ring().integer_ring())
+    ).collect::<Vec<_>>())).collect()).collect();
+
+    // giant_step_circuit computes (1, x, ..., x^(baby_steps - 1), 1, x^baby_steps, x^(2 baby_steps), ..., x^(giant_steps * baby_steps - baby_steps))
+    let giant_step_circuit = ArithCircuit::identity(baby_steps).tensor(&compute_power_circuit(giant_steps)).compose(&baby_step_circuit);
+    assert_eq!(baby_steps - 1 + giant_steps - 2, giant_step_circuit.mul_count());
+    assert_eq!(StaticRing::<i64>::RING.abs_log2_ceil(&(giant_steps as i64 - 1)).unwrap() as usize, giant_step_circuit.mul_depth() - baby_step_circuit.mul_depth());
+    assert_eq!(giant_step_circuit.input_count(), 1);
+    assert_eq!(giant_step_circuit.output_count(), baby_steps + giant_steps);
+
+    let mut result = ArithCircuit::empty();
+    for (poly, poly_parts) in polys.iter().zip(all_poly_parts.iter()) {
+
+        let mut compute_poly_circuit = poly_parts[0].compose(&ArithCircuit::select(baby_steps + giant_steps, &(0..baby_steps).collect::<Vec<_>>()));
+        
+        for (i, part) in poly_parts.iter().enumerate().skip(1) {
+            assert_eq!(giant_steps + baby_steps, compute_poly_circuit.input_count());
+            assert_eq!(1, compute_poly_circuit.output_count());
+
+            assert_eq!(baby_steps, part.input_count());
+            assert_eq!(1, part.output_count());
+
+            let part_times_power = ArithCircuit::mul().compose(
+                &part.tensor(&ArithCircuit::identity(1)).compose(&ArithCircuit::select(baby_steps + giant_steps, &(0..baby_steps).chain([baby_steps + i].into_iter()).collect::<Vec<_>>()))
+            );
+            assert_eq!(giant_steps + baby_steps, part_times_power.input_count());
+            assert_eq!(1, part_times_power.output_count());
+            compute_poly_circuit = ArithCircuit::add().compose(&compute_poly_circuit.tensor(&part_times_power))
+                .compose(&ArithCircuit::identity(baby_steps + giant_steps).output_twice());
+        }
+        assert_eq!((poly_ring.degree(poly).unwrap_or(0) - 1) / baby_steps, compute_poly_circuit.mul_count());
+        result = result.tensor(&compute_poly_circuit);
+    }
+    let result = result.compose(&giant_step_circuit.output_times(polys.len()));
+
+    assert_eq!(
+        StaticRing::<i64>::RING.abs_log2_ceil(&(giant_steps as i64 - 1)).unwrap() as usize + StaticRing::<i64>::RING.abs_log2_ceil(&(baby_steps as i64)).unwrap() as usize + 1, 
+        result.mul_depth()
+    );
+    assert_eq!(
+        baby_steps - 1 + giant_steps - 2 + polys.iter().map(|f| (poly_ring.degree(f).unwrap_or(0) - 1) / baby_steps).sum::<usize>(), 
+        result.mul_count()
+    );
+    return result;
+}
+
+fn digit_extraction_poly<P>(poly_ring: P) -> El<P>
+    where P: RingStore,
+        P::Type: PolyRing,
+        <<P::Type as RingExtension>::BaseRing as RingStore>::Type: ZnRing + DivisibilityRing
+{
+    let Zn = poly_ring.base_ring();
+    let (p, e) = is_prime_power(Zn.integer_ring(), Zn.modulus()).unwrap();
+    let p = int_cast(p, StaticRing::<i64>::RING, Zn.integer_ring()) as usize;
+    let hom = Zn.can_hom(Zn.integer_ring()).unwrap().compose(Zn.integer_ring().can_hom(&StaticRing::<i64>::RING).unwrap());
+    let mut current = poly_ring.pow(poly_ring.indeterminate(), p);
+    for i in 1..e {
+        let mut correction = interpolate(
+            &poly_ring, 
+            (0..p).map_fn(|j| hom.map(j as i64)), 
+            (0..p).map_fn(|j| Zn.checked_div(
+                &Zn.sub(poly_ring.evaluate(&current, &hom.map(j as i64), &Zn.identity()), hom.map(j as i64)), 
+                &Zn.pow(hom.map(p as i64), i as usize)
+            ).unwrap()),
+            Global
+        ).unwrap();
+        poly_ring.inclusion().mul_assign_map_ref(&mut correction, &Zn.pow(hom.map(p as i64), i as usize));
+        poly_ring.sub_assign(&mut current, correction);
+    }
+    return current;
+}
+
+///
+/// Computes `min { n | n! % k == 0 }`
+/// 
+pub fn mu(k: i64) -> i64 {
+    const ZZbig: BigIntRing = BigIntRing::RING;
+    let mut n = 1;
+    let mut n_fac = ZZbig.one();
+    while ZZbig.checked_div(&n_fac, &int_cast(k, &ZZbig, &StaticRing::<i64>::RING)).is_none() {
+        n += 1;
+        ZZbig.mul_assign(&mut n_fac, int_cast(n, &ZZbig, &StaticRing::<i64>::RING));
+    }
+    return n;
+}
+
+pub fn falling_factorial_poly<P>(poly_ring: P, m: usize) -> El<P>
+    where P: RingStore,
+        P::Type: PolyRing
+{
+    poly_ring.prod((0..m).map(|j| poly_ring.sub(poly_ring.indeterminate(), poly_ring.int_hom().map(j as i32))))
+}
+
+///
+/// Returns the lowest-degree polynomial `f` such that `f(x) = lift(x mod p) mod p^k`.
+/// 
+pub fn digit_retain_poly<P>(poly_ring: P, k: usize) -> El<P>
+    where P: RingStore,
+        P::Type: PolyRing,
+        <<P::Type as RingExtension>::BaseRing as RingStore>::Type: ZnRing + DivisibilityRing
+{
+    let Zn = poly_ring.base_ring();
+    let hom = Zn.can_hom(Zn.integer_ring()).unwrap().compose(Zn.integer_ring().can_hom(&StaticRing::<i64>::RING).unwrap());
+    let (p, _) = is_prime_power(Zn.integer_ring(), Zn.modulus()).unwrap();
+    let p = int_cast(p, StaticRing::<i64>::RING, Zn.integer_ring());
+    let f = digit_extraction_poly(&poly_ring);
+    let mut current = poly_ring.indeterminate();
+    for _ in 1..k {
+        current = poly_ring.evaluate(&f, &current, &poly_ring.inclusion());
+    }
+
+    let mut current_e = 0;
+    while Zn.checked_div(poly_ring.lc(&current).unwrap(), &Zn.pow(hom.map(p), current_e)).is_some() {
+        current = poly_ring.div_rem_monic(current, &falling_factorial_poly(&poly_ring, mu(StaticRing::<i64>::RING.pow(p, k - current_e)) as usize)).1;
+        current_e += 1;
+    }
+    return current;
+}
+
+#[cfg(test)]
+use feanor_math::rings::zn::zn_64::Zn;
+#[cfg(test)]
+use feanor_math::assert_el_eq;
+#[cfg(test)]
+use feanor_math::rings::poly::dense_poly::DensePolyRing;
+
+#[test]
+fn test_digit_extraction_p_2() {
+    let circuit = precomputed_p_2(16);
+    let ring = Zn::new(1 << 16);
+    let hom = ring.can_hom(&StaticRing::<i64>::RING).unwrap();
+    for x in 0..(1 << 16) {
+        for (i, actual) in (0..=4).zip(circuit.evaluate(&[hom.map(x)], &ring)) {
+            assert_eq!(x % 2, ring.smallest_positive_lift(actual) % (1 << (1 << i)));
+        }
+    }
+}
+
+#[test]
+fn test_digit_extraction_poly() {
+    let Zn = Zn::new(17 * 17 * 17);
+    let P = DensePolyRing::new(Zn, "X");
+    let digit_extract = digit_extraction_poly(&P);
+    for k in 0..(17 * 17 * 17) {
+        assert_eq!(k % 17, Zn.smallest_positive_lift(P.evaluate(&digit_extract, &Zn.coerce(&StaticRing::<i64>::RING, k), &Zn.identity())) % (17 * 17));
+    }
+    for k_low in 0..17 {
+        for k_high in (0..(17 * 17 * 17)).step_by(17 * 17) {
+            assert_el_eq!(&Zn, &Zn.coerce(&StaticRing::<i64>::RING, k_low), &P.evaluate(&digit_extract, &Zn.coerce(&StaticRing::<i64>::RING, k_low + k_high), &Zn.identity()));
+        }
+    }
+}
+
+#[test]
+fn test_digit_retain_poly() {
+    let Zn = Zn::new(17 * 17 * 17);
+    let P = DensePolyRing::new(Zn, "X");
+    let digit_retain = digit_retain_poly(&P, 3);
+    assert_eq!(Some(33), P.degree(&digit_retain));
+    for k in 0..(17 * 17 * 17) {
+        assert_el_eq!(&Zn, &Zn.coerce(&StaticRing::<i64>::RING, k % 17), &P.evaluate(&digit_retain, &Zn.coerce(&StaticRing::<i64>::RING, k), &Zn.identity()));
+    }
+}
+
+#[test]
+fn test_paterson_stockmeyer() {
+    let Zn = Zn::new(17);
+    let P = DensePolyRing::new(Zn, "X");
+    // 1 + 2 X^3 + 3 X^4 + 4 X^5 + 8 X^7
+    let poly = P.from_terms([(1, 0), (2, 3), (3, 4), (4, 5), (8, 7)].into_iter().map(|(c, d)| (Zn.int_hom().map(c), d)));
+    let circuit = low_depth_paterson_stockmeyer(&P, &[P.clone_el(&poly)]);
+    assert_eq!(4, circuit.mul_depth());
+    assert_eq!(5, circuit.mul_count());
+
+    for x in Zn.elements() {
+        assert_el_eq!(Zn, P.evaluate(&poly, &x, &P.base_ring().identity()), circuit.evaluate(&[x], P.base_ring()).next().unwrap());
+    }
+}
+
+#[test]
+fn test_paterson_stockmeyer_multiple_polys() {
+    let Zn = Zn::new(17);
+    let P = DensePolyRing::new(Zn, "X");
+    // 1 + 2 X^3 + 3 X^4 + 4 X^5 + 8 X^7
+    let f = P.from_terms([(1, 0), (2, 3), (3, 4), (4, 5), (8, 7)].into_iter().map(|(c, d)| (Zn.int_hom().map(c), d)));
+    // 2 + X + 2 X^2 + 3 X^3 + 4 X^4 + 5 X^5 + 6 X^6 + 7 X^7 + 8 X^8 + 9 X^9
+    let g = P.from_terms([(2, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6), (7, 7), (8, 8), (9, 9)].into_iter().map(|(c, d)| (Zn.int_hom().map(c), d)));
+    let circuit = low_depth_paterson_stockmeyer(&P, &[P.clone_el(&f), P.clone_el(&g)]);
+    assert_eq!(4, circuit.mul_depth());
+    assert_eq!(7, circuit.mul_count());
+
+    for x in Zn.elements() {
+        let mut result_it = circuit.evaluate(std::slice::from_ref(&x), P.base_ring());
+        assert_el_eq!(Zn, P.evaluate(&f, &x, &P.base_ring().identity()), result_it.next().unwrap());
+        assert_el_eq!(Zn, P.evaluate(&g, &x, &P.base_ring().identity()), result_it.next().unwrap());
+    }
+}

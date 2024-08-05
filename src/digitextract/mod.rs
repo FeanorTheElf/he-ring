@@ -5,7 +5,7 @@ use feanor_math::primitive_int::{StaticRing, StaticRingBase};
 use feanor_math::ring::*;
 use feanor_math::algorithms::matmul::ComputeInnerProduct;
 
-pub mod precomputed;
+pub mod polys;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct LinTransform {
@@ -89,6 +89,14 @@ impl ArithCircuit {
         }
     }
 
+    pub fn empty() -> ArithCircuit {
+        ArithCircuit {
+            input_count: 0,
+            multiplications: Vec::new(),
+            output_transforms: Vec::new()
+        }
+    }
+
     pub fn constant(c: i64) -> ArithCircuit {
         ArithCircuit {
             input_count: 0,
@@ -144,6 +152,17 @@ impl ArithCircuit {
 
     pub fn output_twice(&self) -> ArithCircuit {
         self.output_times(2)
+    }
+
+    pub fn identity(wire_count: usize) -> ArithCircuit {
+        ArithCircuit {
+            input_count: wire_count,
+            multiplications: Vec::new(),
+            output_transforms: (0..wire_count).map(|i| LinTransform {
+                constant: None,
+                factors: (0..wire_count).map(|j| if j == i { NonZeroI64::new(1) } else { None }).collect()
+            }).collect()
+        }
     }
 
     pub fn select(input_wire_count: usize, output_wires: &[usize]) -> ArithCircuit {
@@ -251,6 +270,31 @@ impl ArithCircuit {
         }
         return self.output_transforms.iter().map(move |t| t.evaluate(inputs, &current, &ring, &hom));
     }
+
+    pub fn mul_count(&self) -> usize {
+        self.multiplications.len()
+    }
+
+    pub fn mul_depth(&self) -> usize {
+        let mut mul_depths = (0..self.input_count).map(|_| 0).collect::<Vec<_>>();
+        for mul in &self.multiplications {
+            mul_depths.push(
+                mul.lhs.factors.iter().enumerate().chain(mul.rhs.factors.iter().enumerate()).filter(|(_, c)| c.is_some()).map(|(j, _)| mul_depths[j]).max().unwrap_or(0) + 1
+            );
+        }
+        return *mul_depths.last().unwrap_or(&0);
+    }
+}
+
+#[test]
+fn test_circuit_mul_depth() {
+    let x = ArithCircuit::identity(1);
+    let x_sqr = ArithCircuit::mul().compose(&x.output_twice());
+    let xy = ArithCircuit::mul();
+    let x_sqr_add_xy = ArithCircuit::add().compose(&x_sqr.tensor(&xy).compose(&ArithCircuit::select(2, &[0, 0, 1])));
+    let result = ArithCircuit::mul().compose(&x_sqr_add_xy.output_twice());
+    assert_eq!(2, result.mul_depth());
+    assert_eq!(3, result.mul_count());
 }
 
 #[test]
