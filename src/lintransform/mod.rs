@@ -99,7 +99,7 @@ pub struct CompiledLinearTransform<R, F, A>
 {
     baby_step_galois_elements: Vec<ZnEl>,
     giant_step_galois_elements: Vec<Option<ZnEl>>,
-    coeffs: Vec<Vec<El<CCFFTRing<R, F, A>>>>,
+    coeffs: Vec<Vec<Option<El<CCFFTRing<R, F, A>>>>>,
     one: El<CCFFTRing<R, F, A>>
 }
 
@@ -140,28 +140,38 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
         let mut baby_step_dims = 0;
         let mut baby_steps = 1;
         for i in 0..H.dim_count() {
-            baby_step_dims += 1;
-            baby_steps *= sizes[i];
-            if baby_steps >= preferred_baby_steps as i64 {
+            let new_steps = baby_steps * sizes[i];
+            if new_steps >= preferred_baby_steps as i64 {
                 break;
             }
+            baby_step_dims += 1;
+            baby_steps = new_steps;
         }
+        let mixed_dim_i = baby_step_dims;
+        let giant_step_start_dim = mixed_dim_i + 1;
+        let mixed_dim_baby_steps = (preferred_baby_steps as i64 - 1) / baby_steps + 1;
 
-        let giant_steps_galois_els = multi_cartesian_product((baby_step_dims..H.dim_count()).map(|i| (min_step[i]..=max_step[i]).step_by(gcd_step[i] as usize)), |indices| {
+        let giant_step_range_iters = [(min_step[mixed_dim_i]..=max_step[mixed_dim_i]).step_by((gcd_step[mixed_dim_i] * mixed_dim_baby_steps) as usize)].into_iter()
+            .chain((giant_step_start_dim..H.dim_count()).map(|i| (min_step[i]..=max_step[i]).step_by(gcd_step[i] as usize)));
+
+        let baby_step_range_iters = (0..baby_step_dims).map(|i| (min_step[i]..=max_step[i]).step_by(gcd_step[i] as usize))
+            .chain([(0..=((mixed_dim_baby_steps - 1) * gcd_step[mixed_dim_i])).step_by(gcd_step[mixed_dim_i] as usize)]);
+
+        let giant_steps_galois_els = multi_cartesian_product(giant_step_range_iters, |indices| {
             H.galois_group_mulrepr().prod(indices.iter().enumerate().map(|(i, s)| H.shift_galois_element(i + baby_step_dims, *s)))
         }, |_, x| *x)
             .map(|g_el| if H.galois_group_mulrepr().is_one(&g_el) { None } else { Some(g_el) })
             .collect::<Vec<_>>();
 
-        let baby_steps_galois_els = multi_cartesian_product((0..baby_step_dims).map(|i| (min_step[i]..=max_step[i]).step_by(gcd_step[i] as usize)), move |indices| {
+        let baby_steps_galois_els = multi_cartesian_product(baby_step_range_iters, move |indices| {
             H.galois_group_mulrepr().prod(indices.iter().enumerate().map(|(i, s)| H.shift_galois_element(i, *s)))
         }, |_, x| *x).collect::<Vec<_>>();
 
         let compiled_coeffs = giant_steps_galois_els.iter().map(|gs_el| baby_steps_galois_els.iter().map(|bs_el| {
             let gs_el = gs_el.unwrap_or(H.galois_group_mulrepr().one());
             let total_el = H.galois_group_mulrepr().mul(gs_el, *bs_el);
-            let coeff = &lin_transform.data.iter().filter(|(g, _, _)| H.galois_group_mulrepr().eq_el(g, &total_el)).next().unwrap().1;
-            let result = H.ring().get_ring().apply_galois_action(H.galois_group_mulrepr().invert(&gs_el).unwrap(), H.ring().clone_el(coeff));
+            let coeff = &lin_transform.data.iter().filter(|(g, _, _)| H.galois_group_mulrepr().eq_el(g, &total_el)).next().map(|(_, c, _)| c).and_then(|c| if H.ring().is_zero(c) { None } else { Some(c) });
+            let result = coeff.map(|c| H.ring().get_ring().apply_galois_action(H.galois_group_mulrepr().invert(&gs_el).unwrap(), H.ring().clone_el(c)));
             return result;
         }).collect::<Vec<_>>()).collect::<Vec<_>>();
 
@@ -194,7 +204,9 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
         for (gs_el, coeffs) in self.giant_step_galois_elements.iter().zip(self.coeffs.iter()) {
             let mut giant_step_result = zero_fn();
             for (coeff, x) in coeffs.iter().zip(baby_steps.iter()) {
-                add_scaled_fn(&mut giant_step_result, x, coeff);
+                if let Some(c) = coeff {
+                    add_scaled_fn(&mut giant_step_result, x, c);
+                }
             }
             let summand = if let Some(gs_el) = gs_el {
                 let summand = apply_galois_fn(&giant_step_result, &[*gs_el]);
@@ -237,6 +249,16 @@ fn test_compile() {
     assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 5, 0, 3, 0, 7, 0, 2, 0, 6, 0, 4, 0, 8, 0, 9, 0, 13, 0, 11, 0, 15, 0, 10, 0, 14, 0, 12, 0, 16, 0]), &current);
 
     let compiled_composed_transform = CompiledLinearTransform::create_from_merged(&H, &pow2_slots_to_coeffs_thin(&H), 2);
+    let mut current = H.from_slot_vec((1..17).into_iter().map(|n| H.slot_ring().int_hom().map(n)));
+    current = compiled_composed_transform.evaluate(&current, &ring);
+    assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 5, 0, 3, 0, 7, 0, 2, 0, 6, 0, 4, 0, 8, 0, 9, 0, 13, 0, 11, 0, 15, 0, 10, 0, 14, 0, 12, 0, 16, 0]), &current);
+
+    let compiled_composed_transform = CompiledLinearTransform::create_from_merged(&H, &pow2_slots_to_coeffs_thin(&H), 3);
+    let mut current = H.from_slot_vec((1..17).into_iter().map(|n| H.slot_ring().int_hom().map(n)));
+    current = compiled_composed_transform.evaluate(&current, &ring);
+    assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 5, 0, 3, 0, 7, 0, 2, 0, 6, 0, 4, 0, 8, 0, 9, 0, 13, 0, 11, 0, 15, 0, 10, 0, 14, 0, 12, 0, 16, 0]), &current);
+
+    let compiled_composed_transform = CompiledLinearTransform::create_from_merged(&H, &pow2_slots_to_coeffs_thin(&H), 5);
     let mut current = H.from_slot_vec((1..17).into_iter().map(|n| H.slot_ring().int_hom().map(n)));
     current = compiled_composed_transform.evaluate(&current, &ring);
     assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 5, 0, 3, 0, 7, 0, 2, 0, 6, 0, 4, 0, 8, 0, 9, 0, 13, 0, 11, 0, 15, 0, 10, 0, 14, 0, 12, 0, 16, 0]), &current);
