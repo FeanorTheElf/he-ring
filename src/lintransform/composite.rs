@@ -25,17 +25,23 @@ fn column_dwt<R, F, A, G>(H: &HypercubeIsomorphism<R, F, A>, dim_index: usize, r
     let zeta = H.slot_ring().pow(H.slot_ring().canonical_gen(), H.ring().n() / H.dim(dim_index).corresponding_factor_n() as usize);
     let hom = H.galois_group_mulrepr().can_hom(&StaticRing::<i64>::RING).unwrap();
     vec![LinearTransform {
-        galois_elements: ((1 - m)..m).map(|s| H.shift_galois_element(dim_index, s)).collect(),
-        coeffs: ((1 - m)..m).map(|s| H.from_slot_vec(H.slot_iter(|idxs| if idxs[dim_index] as i64 >= s && idxs[dim_index] as i64 - s < m {
-            H.slot_ring().pow(H.slot_ring().clone_el(&zeta), {
-                let res = H.galois_group_mulrepr().smallest_positive_lift(H.galois_group_mulrepr().prod([
-                H.shift_galois_element(dim_index, -(idxs[dim_index] as i64)),
-                hom.map(idxs[dim_index] as i64 - s),
-                row_autos(idxs)
-            ].into_iter())) as usize; res })
-        } else {
-            H.slot_ring().zero()
-        }))).collect()
+        data: ((1 - m)..m).map(|s| {
+            let coeff = H.from_slot_vec(H.slot_iter(|idxs| if idxs[dim_index] as i64 >= s && idxs[dim_index] as i64 - s < m {
+                H.slot_ring().pow(H.slot_ring().clone_el(&zeta), {
+                    let res = H.galois_group_mulrepr().smallest_positive_lift(H.galois_group_mulrepr().prod([
+                    H.shift_galois_element(dim_index, -(idxs[dim_index] as i64)),
+                    hom.map(idxs[dim_index] as i64 - s),
+                    row_autos(idxs)
+                ].into_iter())) as usize; res })
+            } else {
+                H.slot_ring().zero()
+            }));
+            return (
+                H.shift_galois_element(dim_index, s),
+                coeff, 
+                (0..H.dim_count()).map(|i| if i == dim_index { s } else { 0 }).collect()
+            );
+        }).collect()
     }]
 }
 

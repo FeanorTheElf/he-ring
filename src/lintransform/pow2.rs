@@ -109,9 +109,24 @@ fn pow2_bitreversed_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'b, R
         }
     }).map(&pow_of_zeta));
 
-    return LinearTransform { 
-        coeffs: vec![diagonal_mask, forward_mask, backward_mask], 
-        galois_elements: vec![H.galois_group_mulrepr().one(), forward_galois_element, backward_galois_element]
+    return LinearTransform {
+        data: vec![
+            (
+                H.galois_group_mulrepr().one(),
+                diagonal_mask,
+                (0..H.dim_count()).map(|_| 0).collect()
+            ),
+            (
+                forward_galois_element,
+                forward_mask,
+                (0..H.dim_count()).map(|i| if i == dim_index { l as i64 / 2 } else { 0 }).collect()
+            ),
+            (
+                backward_galois_element,
+                backward_mask,
+                (0..H.dim_count()).map(|i| if i == dim_index { -(l as i64 / 2) } else { 0 }).collect()
+            )
+        ]
     };
 }
 
@@ -189,20 +204,27 @@ pub fn pow2_slots_to_coeffs_thin<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> 
         let zeta4 = H.slot_ring().pow(H.slot_ring().canonical_gen(), H.ring().n() / 4);
 
         result.push(LinearTransform {
-            galois_elements: vec![H.galois_group_mulrepr().one(), H.galois_group_mulrepr().neg_one()],
-            coeffs: vec![
-                H.from_slot_vec(H.slot_iter(|idxs| if idxs[0] == 0 {
-                    H.slot_ring().one()
-                } else {
-                    debug_assert!(idxs[0] == 1);
-                    H.slot_ring().negate(H.slot_ring().clone_el(&zeta4))
-                })), 
-                H.from_slot_vec(H.slot_iter(|idxs| if idxs[0] == 0 {
-                    H.slot_ring().clone_el(&zeta4)
-                } else {
-                    debug_assert!(idxs[0] == 1);
-                    H.slot_ring().one()
-                }))
+            data: vec![
+                (
+                    H.galois_group_mulrepr().one(),
+                    H.from_slot_vec(H.slot_iter(|idxs| if idxs[0] == 0 {
+                        H.slot_ring().one()
+                    } else {
+                        debug_assert!(idxs[0] == 1);
+                        H.slot_ring().negate(H.slot_ring().clone_el(&zeta4))
+                    })),
+                    vec![0, 0]
+                ), 
+                (
+                    H.galois_group_mulrepr().neg_one(),
+                    H.from_slot_vec(H.slot_iter(|idxs| if idxs[0] == 0 {
+                        H.slot_ring().clone_el(&zeta4)
+                    } else {
+                        debug_assert!(idxs[0] == 1);
+                        H.slot_ring().one()
+                    })),
+                    vec![1, 0]
+                )
             ]
         });
 

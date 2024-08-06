@@ -289,7 +289,15 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
 
         return result;
     }
+}
 
+impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
+    where R: RingStore,
+        R::Type: ZnRing,
+        F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
+        A: Allocator + Clone,
+        CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>
+{
     pub fn len(&self, dim_index: usize) -> usize {
         self.dims[dim_index].length
     }

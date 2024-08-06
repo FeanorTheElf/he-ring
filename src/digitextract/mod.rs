@@ -15,6 +15,24 @@ struct LinTransform {
 
 impl LinTransform {
 
+    pub fn evaluate_generic<T, AddScaled, FromI64>(&self, first_inputs: &[T], second_inputs: &[T], add_scaled: &mut AddScaled, from: &mut FromI64) -> T
+        where AddScaled: FnMut(T, &T, i64) -> T,
+            FromI64: FnMut(i64) -> T
+    {
+        assert_eq!(self.factors.len(), first_inputs.len() + second_inputs.len());
+        let mut result = from(self.constant.map(|x| x.into()).unwrap_or(0));
+        for (i, c) in self.factors.iter().enumerate() {
+            if let Some(c) = c {
+                if i < first_inputs.len() {
+                    result = add_scaled(result, &first_inputs[i], (*c).into());
+                } else {
+                    result = add_scaled(result, &second_inputs[i - first_inputs.len()], (*c).into());
+                }
+            }
+        }
+        return result;
+    }
+
     fn evaluate<R, H>(&self, first_inputs: &[El<R>], second_inputs: &[El<R>], ring: R, hom: H) -> El<R>
         where R: RingStore,
             H: Homomorphism<StaticRingBase<i64>, R::Type>
@@ -270,6 +288,22 @@ impl ArithCircuit {
             current.push(prod);
         }
         return self.output_transforms.iter().map(move |t| t.evaluate(inputs, &current, &ring, &hom));
+    }
+
+    pub fn evaluate_generic<'a, T, AddScaled, Mul, FromI64>(&'a self, inputs: &'a [T], mut add_scaled_fn: AddScaled, mut mul_fn: Mul, mut from_fn: FromI64) -> impl 'a + Iterator<Item = T>
+        where AddScaled: 'a + FnMut(T, &T, i64) -> T,
+            Mul: 'a + FnMut(T, T) -> T,
+            FromI64: 'a + FnMut(i64) -> T
+    {
+        assert_eq!(inputs.len(), self.input_count());
+        let mut current = Vec::new();
+        for mul in &self.multiplications {
+            let lhs = mul.lhs.evaluate_generic(inputs, &current, &mut add_scaled_fn, &mut from_fn);
+            let rhs = mul.rhs.evaluate_generic(inputs, &current, &mut add_scaled_fn, &mut from_fn);
+            let prod = mul_fn(lhs, rhs);
+            current.push(prod);
+        }
+        return self.output_transforms.iter().map(move |t| t.evaluate_generic(inputs, &current, &mut add_scaled_fn, &mut from_fn));
     }
 
     pub fn mul_count(&self) -> usize {

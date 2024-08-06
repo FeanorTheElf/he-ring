@@ -35,9 +35,11 @@ use rand::thread_rng;
 use rand::{Rng, CryptoRng};
 use rand_distr::StandardNormal;
 
+pub mod bootstrap;
+
 type PlaintextZn = zn_64::Zn;
 type PlaintextFFT = cooley_tuckey::CooleyTuckeyFFT<Complex64Base, Complex64Base, Identity<Complex64>>;
-pub type PlaintextRing = CCFFTRing<PlaintextZn, crate::complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<Zn, PlaintextFFT>>;
+pub type PlaintextRing = CCFFTRing<PlaintextZn, crate::complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<PlaintextZn, PlaintextFFT>>;
 
 type CiphertextAllocator = AllocArc<DynLayoutMempool>;
 type CiphertextZn = zn_64::Zn;
@@ -72,74 +74,85 @@ fn max_prime_congruent_one_lt_bound(n: i64, bound: i64) -> Option<i64> {
     return None;
 }
 
-pub fn create_ciphertext_rings(log2_ring_degree: usize, q_min_bits: usize, q_max_bits: usize) -> (CiphertextRing, CiphertextRing) {
-    let approx_moduli_size = (1 << 58) + 1;
+#[derive(Clone, Debug)]
+pub struct Pow2BFVParams {
+    t: i64,
+    log2_q_min: usize,
+    log2_q_max: usize,
+    log2_N: usize
+}
 
-    let mut rns_base_components = Vec::new();
-    let mut p = max_prime_congruent_one_lt_bound(2 << log2_ring_degree, approx_moduli_size).unwrap();
-    let mut current_bits = (p as f64).log2();
-    while current_bits < q_max_bits as f64 {
-        rns_base_components.push(p);
-        p = max_prime_congruent_one_lt_bound(2 << log2_ring_degree, p).unwrap();
-        current_bits += (p as f64).log2();
-    }
-    current_bits -= (*rns_base_components.last().unwrap() as f64).log2();
-    let remaining_size = 2f64.powf(q_max_bits as f64 - current_bits).floor() as i64;
-    if let Some(p) = max_prime_congruent_one_lt_bound(2 << log2_ring_degree, remaining_size) {
-        rns_base_components.push(p);
-        current_bits += (p as f64).log2();
-    }
-    rns_base_components.reverse();
+impl Pow2BFVParams {
 
-    let rns_base = zn_rns::Zn::new(
-        rns_base_components.into_iter().map(|p| p as u64).map(Zn::new).collect(), 
-        ZZbig
-    );
-    let Q = ZZbig.prod(rns_base.as_iter().map(|Fp: &Zn| int_cast(*Fp.modulus(), ZZbig, ZZ)));
-    assert!(ZZbig.is_geq(&Q, &ZZbig.power_of_two(q_min_bits)), "Failed to find a suitable ciphertext modulus within the given range");
+    pub fn create_ciphertext_rings(&self) -> (CiphertextRing, CiphertextRing) {
+        let approx_moduli_size = (1 << 58) + 1;
     
-    let mut current_mul_bits = 0.;
-    let primes = (0..)
-        .map(|k| approx_moduli_size + (k << (log2_ring_degree + 1)))
-        .filter(|p| is_prime(ZZ, p, 10));
-    let rns_base_mul = zn_rns::Zn::new(
-        rns_base.as_iter().map(|R: &RingValue<ZnBase>| *R.modulus()).chain(
-            primes.take_while(|p| if current_mul_bits >= current_bits as f64 + 1. {
-                false
-            } else {
-                current_mul_bits += (*p as f64).log2();
-                true
-            })
-        ).map(|p| p as u64).map(Zn::new).collect(), 
-        ZZbig
-    );
-    assert!(ZZbig.is_geq(&ZZbig.prod(rns_base_mul.as_iter().map(|Fp: &Zn| int_cast(*Fp.modulus(), ZZbig, ZZ))), &ZZbig.pow(ZZbig.mul(Q, ZZbig.int_hom().map(2)), 2)), "Failed to find a suitable ciphertext modulus within the given range");
-
-    let allocator = AllocArc(Arc::new(DynLayoutMempool::new_in(Alignment::of::<u128>(), Global)));
-    let C = <CiphertextRing as RingStore>::Type::new_with(rns_base.clone(), rns_base.as_iter().map(|R| CiphertextFastmulZn::new(*R)).collect(), log2_ring_degree, allocator.clone());
-    let C_mul = <CiphertextRing as RingStore>::Type::new_with(rns_base_mul.clone(), rns_base_mul.as_iter().map(|R| CiphertextFastmulZn::new(*R)).collect(), log2_ring_degree, allocator.clone());
-    return (C, C_mul);
-}
-
-pub fn create_plaintext_ring(log2_ring_degree: usize, plaintext_modulus: i64) -> PlaintextRing {
-    return <PlaintextRing as RingStore>::Type::new(Zn::new(plaintext_modulus as u64), log2_ring_degree);
-}
-
-pub fn create_multiplication_rescale(P: &PlaintextRing, C: &CiphertextRing, C_mul: &CiphertextRing) -> MulConversionData {
-    let allocator = C.get_ring().allocator().clone();
-    MulConversionData {
-        lift_to_C_mul: rnsconv::shared_lift::AlmostExactSharedBaseConversion::new_with(
-            C.get_ring().rns_base().as_iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
-            Vec::new(),
-            C_mul.get_ring().rns_base().as_iter().skip(C.get_ring().rns_base().len()).map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(),
-            allocator.clone()
-        ),
-        scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert::new_with(
-            C_mul.get_ring().rns_base().as_iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
-            Some(P.base_ring()).into_iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
-            C.get_ring().rns_base().len(),
-            allocator
-        )
+        let mut rns_base_components = Vec::new();
+        let mut p = max_prime_congruent_one_lt_bound(2 << self.log2_N, approx_moduli_size).unwrap();
+        let mut current_bits = (p as f64).log2();
+        while current_bits < self.log2_q_max as f64 {
+            rns_base_components.push(p);
+            p = max_prime_congruent_one_lt_bound(2 << self.log2_N, p).unwrap();
+            current_bits += (p as f64).log2();
+        }
+        current_bits -= (*rns_base_components.last().unwrap() as f64).log2();
+        let remaining_size = 2f64.powf(self.log2_q_max as f64 - current_bits).floor() as i64;
+        if let Some(p) = max_prime_congruent_one_lt_bound(2 << self.log2_N, remaining_size) {
+            rns_base_components.push(p);
+            current_bits += (p as f64).log2();
+        }
+        rns_base_components.reverse();
+    
+        let rns_base = zn_rns::Zn::new(
+            rns_base_components.into_iter().map(|p| p as u64).map(Zn::new).collect(), 
+            ZZbig
+        );
+        let Q = ZZbig.prod(rns_base.as_iter().map(|Fp: &Zn| int_cast(*Fp.modulus(), ZZbig, ZZ)));
+        assert!(ZZbig.is_geq(&Q, &ZZbig.power_of_two(self.log2_q_min)), "Failed to find a suitable ciphertext modulus within the given range");
+        
+        let mut current_mul_bits = 0.;
+        let primes = (0..)
+            .map(|k| approx_moduli_size + (k << (self.log2_N + 1)))
+            .filter(|p| is_prime(ZZ, p, 10));
+        let rns_base_mul = zn_rns::Zn::new(
+            rns_base.as_iter().map(|R: &RingValue<ZnBase>| *R.modulus()).chain(
+                primes.take_while(|p| if current_mul_bits >= current_bits as f64 + 1. {
+                    false
+                } else {
+                    current_mul_bits += (*p as f64).log2();
+                    true
+                })
+            ).map(|p| p as u64).map(Zn::new).collect(), 
+            ZZbig
+        );
+        assert!(ZZbig.is_geq(&ZZbig.prod(rns_base_mul.as_iter().map(|Fp: &Zn| int_cast(*Fp.modulus(), ZZbig, ZZ))), &ZZbig.pow(ZZbig.mul(Q, ZZbig.int_hom().map(2)), 2)), "Failed to find a suitable ciphertext modulus within the given range");
+    
+        let allocator = AllocArc(Arc::new(DynLayoutMempool::new_in(Alignment::of::<u128>(), Global)));
+        let C = <CiphertextRing as RingStore>::Type::new_with(rns_base.clone(), rns_base.as_iter().map(|R| CiphertextFastmulZn::new(*R)).collect(), self.log2_N, allocator.clone());
+        let C_mul = <CiphertextRing as RingStore>::Type::new_with(rns_base_mul.clone(), rns_base_mul.as_iter().map(|R| CiphertextFastmulZn::new(*R)).collect(), self.log2_N, allocator.clone());
+        return (C, C_mul);
+    }
+    
+    pub fn create_plaintext_ring(&self) -> PlaintextRing {
+        return <PlaintextRing as RingStore>::Type::new(Zn::new(self.t as u64), self.log2_N);
+    }
+    
+    pub fn create_multiplication_rescale(&self, P: &PlaintextRing, C: &CiphertextRing, C_mul: &CiphertextRing) -> MulConversionData {
+        let allocator = C.get_ring().allocator().clone();
+        MulConversionData {
+            lift_to_C_mul: rnsconv::shared_lift::AlmostExactSharedBaseConversion::new_with(
+                C.get_ring().rns_base().as_iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
+                Vec::new(),
+                C_mul.get_ring().rns_base().as_iter().skip(C.get_ring().rns_base().len()).map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(),
+                allocator.clone()
+            ),
+            scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert::new_with(
+                C_mul.get_ring().rns_base().as_iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
+                Some(P.base_ring()).into_iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
+                C.get_ring().rns_base().len(),
+                allocator
+            )
+        }
     }
 }
 
@@ -264,12 +277,15 @@ pub fn key_switch(C: &CiphertextRing, ct: &Ciphertext, switch_key: &KeySwitchKey
 fn run_bfv() {
     let mut rng = thread_rng();
     
-    let log2_ring_degree = 15;
-    let q_bitlength = 800;
-    let plaintext_modulus = 3;
+    let params = Pow2BFVParams {
+        t: 3,
+        log2_q_min: 790,
+        log2_q_max: 800,
+        log2_N: 15
+    };
     
-    let P = create_plaintext_ring(log2_ring_degree, plaintext_modulus);
-    let (C, C_mul) = create_ciphertext_rings(log2_ring_degree, q_bitlength - 10, q_bitlength);
+    let P = params.create_plaintext_ring();
+    let (C, C_mul) = params.create_ciphertext_rings();
     println!("Created rings, RNS base length is {}", C.base_ring().get_ring().len());
     
     let sk = gen_sk(&C, &mut rng);
@@ -278,7 +294,7 @@ fn run_bfv() {
     let ct = enc_sym(&P, &C, &mut rng, &m, &sk);
     println!("Encrypted message");
     
-    let mul_rescale_data = create_multiplication_rescale(&P, &C, &C_mul);
+    let mul_rescale_data = params.create_multiplication_rescale(&P, &C, &C_mul);
     let relin_key = gen_rk(&C, &mut rng, &sk);
     println!("Created relin key");
 
