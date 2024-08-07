@@ -8,16 +8,17 @@ use polys::poly_to_circuit;
 use crate::complexfft::automorphism::HypercubeIsomorphism;
 use crate::{digitextract::*, lintransform::pow2::pow2_slots_to_coeffs_thin};
 use crate::digitextract::polys::digit_retain_poly;
-use crate::lintransform::LinearTransform;
+use crate::lintransform::CompiledLinearTransform;
 
 use super::{PlaintextFFT, PlaintextZn, Pow2BFVParams, ZZ};
 
 pub struct Pow2BFVThinBootstrapParams {
     params: Pow2BFVParams,
+    r: usize,
     e: usize,
     // the k-th circuit works modulo `e - k` and outputs values `yi` such that `yi = lift(x mod p) mod p^(i + 2)` for `0 <= i < v - k - 2` as well as a final `y'` with `y' = lift(x mod p)`
     digit_extract_circuits: Vec<ArithCircuit>,
-    linear_transform: Vec<LinearTransform<PlaintextZn, crate::complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<PlaintextZn, PlaintextFFT>, Global>>
+    linear_transform: Vec<CompiledLinearTransform<PlaintextZn, crate::complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<PlaintextZn, PlaintextFFT>, Global>>
 }
 
 impl Pow2BFVThinBootstrapParams {
@@ -35,13 +36,16 @@ impl Pow2BFVThinBootstrapParams {
         }).collect::<Vec<_>>();
 
         let plaintext_ring = params.create_plaintext_ring();
-        let linear_transform = pow2_slots_to_coeffs_thin(&HypercubeIsomorphism::new(plaintext_ring.get_ring()));
+        let H = HypercubeIsomorphism::new(plaintext_ring.get_ring());
+        let linear_transform = pow2_slots_to_coeffs_thin(&H);
+        let compiled_linear_transform = linear_transform.into_iter().map(|T| CompiledLinearTransform::compile(&H, T)).collect();
 
         return Self {
             params: params,
             e: e,
+            r: r,
             digit_extract_circuits: digit_extraction_circuits,
-            linear_transform: linear_transform
+            linear_transform: compiled_linear_transform
         };
     }
 }

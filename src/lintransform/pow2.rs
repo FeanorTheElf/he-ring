@@ -283,7 +283,7 @@ fn test_pow2_slots_to_coeffs_thin() {
     let ring = DefaultPow2CyclotomicCCFFTRingBase::new(Zn::new(97), 5);
     let H = HypercubeIsomorphism::new(ring.get_ring());
     
-    let mut current = H.from_slot_vec((1..17).into_iter().map(|n| H.slot_ring().int_hom().map(n)));
+    let mut current = H.from_slot_vec((1..17).map(|n| H.slot_ring().int_hom().map(n)));
     for T in pow2_slots_to_coeffs_thin(&H) {
         current = ring.get_ring().compute_linear_transform(&current, &T);
     }
