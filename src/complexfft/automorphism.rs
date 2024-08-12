@@ -5,7 +5,7 @@ use feanor_math::algorithms::cyclotomic::cyclotomic_polynomial;
 use feanor_math::algorithms::discrete_log::discrete_log;
 use feanor_math::algorithms::eea::signed_gcd;
 use feanor_math::algorithms::int_factor;
-use feanor_math::algorithms::unity_root::get_prim_root_of_unity;
+use feanor_math::algorithms::int_factor::is_prime_power;
 use feanor_math::homomorphism::CanHomFrom;
 use feanor_math::homomorphism::Homomorphism;
 use feanor_math::integer::int_cast;
@@ -24,7 +24,7 @@ use feanor_math::rings::zn::*;
 use feanor_math::rings::poly::PolyRingStore;
 use feanor_math::seq::*;
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
-use feanor_math::rings::extension::galois_field::{GFdyn, GaloisFieldDyn};
+use feanor_math::rings::extension::galois_field::*;
 use feanor_math::wrapper::RingElementWrapper;
 
 use crate::cyclotomic::CyclotomicRing;
@@ -33,7 +33,6 @@ use oorandom;
 use super::complex_fft_ring::*;
 
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
-
 
 pub fn euler_phi(factorization: &[(i64, usize)]) -> i64 {
     ZZ.prod(factorization.iter().map(|(p, e)| (p - 1) * ZZ.pow(*p, e - 1)))
@@ -111,6 +110,23 @@ impl HypercubeDimension {
     pub fn corresponding_factor_n(&self) -> i64 {
         ZZ.pow(self.factor_n.0, self.factor_n.1)
     }
+}
+
+fn get_prim_root_of_unity(ring: &GaloisRingDyn, m: usize) -> El<GaloisRingDyn> {
+    let (p, e) = is_prime_power(&ZZ, &ring.characteristic(&ZZ).unwrap()).unwrap();
+    let galois_field = galois_field_dyn(p, ring.rank());
+    let rou = feanor_math::algorithms::unity_root::get_prim_root_of_unity(&galois_field, m).unwrap();
+    let red_map = ReductionMap::new(ring.base_ring(), galois_field.base_ring()).unwrap();
+    let mut result = ring.from_canonical_basis(galois_field.wrt_canonical_basis(&rou).into_iter().map(|x| red_map.smallest_lift(x)));
+    for _ in 0..e {
+        let delta = ring.checked_div(
+            &ring.sub(ring.pow(ring.clone_el(&result), m), ring.one()),
+            &ring.inclusion().mul_map(ring.pow(ring.clone_el(&result), m - 1), ring.base_ring().coerce(&ZZ, m as i64)) 
+        ).unwrap();
+        ring.sub_assign(&mut result, delta);
+    }
+    assert!(ring.is_one(&ring.pow(ring.clone_el(&result), m)));
+    return result;
 }
 
 pub fn compute_hypercube_structure(n: i64, p: i64) -> (Vec<HypercubeDimension>, Zn) {
@@ -211,23 +227,22 @@ pub struct HypercubeIsomorphism<'a, R, F, A>
 
 impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
     where R: RingStore,
-        R::Type: ZnRing + CanHomFrom<<<<GaloisFieldDyn as RingStore>::Type as RingExtension>::BaseRing as RingStore>::Type>,
+        R::Type: ZnRing + CanHomFrom<<<<GaloisRingDyn as RingStore>::Type as RingExtension>::BaseRing as RingStore>::Type>,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone,
         CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>
 {
     pub fn new(ring: &'a CCFFTRingBase<R, F, A>) -> Self {
-        let p = int_cast(ring.base_ring().integer_ring().clone_el(ring.base_ring().modulus()), ZZ, ring.base_ring().integer_ring());
+        let t = int_cast(ring.base_ring().integer_ring().clone_el(ring.base_ring().modulus()), ZZ, ring.base_ring().integer_ring());
+        let (p, e) = is_prime_power(&ZZ, &t).unwrap();
         let (dims, galois_group_ring) = compute_hypercube_structure(ring.n() as i64, p);
         let frobenius = galois_group_ring.can_hom(&ZZ).unwrap().map(p);
         let slot_count: usize = dims.iter().map(|dim| dim.length).product();
         let d = ring.rank() / slot_count;
 
         // first task: compute a nice representation of the slot ring
-        let tmp_slot_ring = GFdyn(ZZ.pow(p, d) as u64);
-        let root_of_unity = get_prim_root_of_unity(&tmp_slot_ring, ring.n()).unwrap();
-
-        // once we support p^e moduli, use Hensel lifting here
+        let tmp_slot_ring = galois_ring_dyn(p, e, d);
+        let root_of_unity = get_prim_root_of_unity(&tmp_slot_ring, ring.n());
 
         let poly_ring = SparsePolyRing::new(&tmp_slot_ring, "X");
         let mut slot_generating_poly = poly_ring.prod((0..d).map(|i| poly_ring.sub(
@@ -468,4 +483,22 @@ fn test_rotation() {
         &hypercube.from_slot_vec([1, 0, 0, 0].into_iter().map(|n| hypercube.slot_ring().int_hom().map(n))),
         &ring.get_ring().apply_galois_action(hypercube.shift_galois_element(0, -1), ring.clone_el(&current))
     );
+}
+
+#[test]
+fn test_hypercube_galois_ring() {
+    
+    // `F(23^3)[X]/(X^16 + 1) ~ GF(23, 3, 4)^4`
+    let ring = DefaultPow2CyclotomicCCFFTRingBase::new(Zn::new(23 * 23 * 23), 4);
+    let hypercube = HypercubeIsomorphism::new(ring.get_ring());
+    
+    let a = hypercube.slot_ring().from_canonical_basis([1, 2, 0, 1].into_iter().map(|x| hypercube.slot_ring().base_ring().int_hom().map(x)));
+    let base = hypercube.from_slot_vec([None, Some(hypercube.slot_ring().clone_el(&a)), None, None].into_iter().map(|x| x.unwrap_or(hypercube.slot_ring().zero())));
+    let actual = ring.pow(ring.clone_el(&base), 2);
+    let expected = hypercube.from_slot_vec([None, Some(hypercube.slot_ring().pow(hypercube.slot_ring().clone_el(&a), 2)), None, None].into_iter().map(|x| x.unwrap_or(hypercube.slot_ring().zero())));
+    assert_el_eq!(ring, expected, actual);
+
+    let actual = ring.get_ring().apply_galois_action(hypercube.shift_galois_element(0, 1), base);
+    let expected = hypercube.from_slot_vec([None, None, Some(hypercube.slot_ring().clone_el(&a)), None].into_iter().map(|x| x.unwrap_or(hypercube.slot_ring().zero())));
+    assert_el_eq!(ring, expected, actual);
 }

@@ -1,23 +1,24 @@
 
 use std::alloc::Allocator;
+use std::alloc::Global;
 use std::ops::Range;
 
 use feanor_math::algorithms::eea::signed_gcd;
 use feanor_math::assert_el_eq;
 use feanor_math::divisibility::DivisibilityRingStore;
 use feanor_math::iters::multi_cartesian_product;
+use feanor_math::matrix::OwnedMatrix;
 use feanor_math::primitive_int::*;
 use feanor_math::ring::*;
+use feanor_math::rings::extension::*;
 use feanor_math::rings::zn::zn_64::*;
 use feanor_math::rings::zn::*;
 use feanor_math::seq::*;
-use feanor_math::homomorphism::Homomorphism;
-use pow2::pow2_slots_to_coeffs_thin;
-use crate::complexfft::pow2_cyclotomic::DefaultPow2CyclotomicCCFFTRingBase;
+use feanor_math::algorithms::linsolve::LinSolveRing;
 
 use crate::complexfft::automorphism::*;
 use crate::complexfft::complex_fft_ring::*;
-use crate::cyclotomic::CyclotomicRing;
+use crate::cyclotomic::*;
 
 pub mod pow2;
 pub mod composite;
@@ -41,7 +42,96 @@ impl<R, F, A> LinearTransform<R, F, A>
         A: Allocator + Clone,
         CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>
 {
+    pub fn switch_ring(&self, H_from: &HypercubeIsomorphism<R, F, A>, to: &CCFFTRingBase<R, F, A>) -> Self {
+        self.check_valid(H_from);
+        assert_eq!(H_from.ring().n(), to.n());
+        let from = H_from.ring();
+        let red_map = ReductionMap::new(from.base_ring(), to.base_ring()).unwrap();
+        let hom = |x: &El<CCFFTRing<R, F, A>>| to.from_canonical_basis(H_from.ring().wrt_canonical_basis(x).into_iter().map(|x| red_map.map(x)));
+        Self {
+            data: self.data.iter().map(|(g, coeff, steps)| (*g, hom(coeff), steps.clone())).collect()
+        }
+    }
+
+    pub fn inverse(&self, H: &HypercubeIsomorphism<R, F, A>) -> Self {
+        self.check_valid(H);
+        let original_automorphisms = self.data.iter().map(|(g, _, _)| g);
+        let inverse_automorphisms = original_automorphisms.clone().map(|g| H.galois_group_mulrepr().invert(g).unwrap()).collect::<Vec<_>>();
+        let mut composed_automorphisms = original_automorphisms.clone().flat_map(|g| inverse_automorphisms.iter().map(|s| H.galois_group_mulrepr().mul_ref(g, s))).collect::<Vec<_>>();
+        composed_automorphisms.sort_unstable_by_key(|g| H.galois_group_mulrepr().smallest_positive_lift(*g));
+        composed_automorphisms.dedup_by(|a, b| H.galois_group_mulrepr().eq_el(a, b));
+
+        let mut matrix: OwnedMatrix<_> = OwnedMatrix::zero(composed_automorphisms.len(), inverse_automorphisms.len(), H.ring());
+        for (i, g) in original_automorphisms.enumerate() {
+            for (j, s) in inverse_automorphisms.iter().enumerate() {
+                let row_index = composed_automorphisms.binary_search_by_key(
+                    &H.galois_group_mulrepr().smallest_positive_lift(H.galois_group_mulrepr().mul_ref(g, s)), 
+                    |g| H.galois_group_mulrepr().smallest_positive_lift(*g)
+                ).unwrap();
+                let entry = H.ring().get_ring().apply_galois_action(*s, H.ring().clone_el(&self.data[i].1));
+                *matrix.at_mut(row_index, j) = entry;
+            }
+        }
+
+        let mut matrix_by_slots = (0..matrix.row_count()).map(|i| (0..matrix.col_count()).map(|j| H.get_slot_values(matrix.at(i, j))).collect::<Vec<_>>()).collect::<Vec<_>>();
+        let mut result_by_slots = (0..inverse_automorphisms.len()).map(|_| Vec::new()).collect::<Vec<_>>();
+        let mut lhs: OwnedMatrix<_> = OwnedMatrix::zero(matrix.row_count(), matrix.col_count(), H.slot_ring());
+        let mut rhs: OwnedMatrix<_> = OwnedMatrix::zero(matrix.row_count(), 1, H.slot_ring());
+        let mut sol: OwnedMatrix<_> = OwnedMatrix::zero(matrix.col_count(), 1, H.slot_ring());
+        for _ in H.slot_iter(|_indices| ()) {
+            for i in 0..matrix.row_count() {
+                for j in 0..matrix.col_count() {
+                    *lhs.at_mut(i, j) = matrix_by_slots[i][j].next().unwrap();
+                }
+            }
+            assert!(H.galois_group_mulrepr().is_one(&composed_automorphisms[0]));
+            *rhs.at_mut(0, 0) = H.slot_ring().one();
+            for j in 1..matrix.row_count() {
+                *rhs.at_mut(j, 0) = H.slot_ring().zero();
+            }
+            H.slot_ring().get_ring().solve_right(lhs.data_mut(), rhs.data_mut(), sol.data_mut(), Global).assert_solved();
+            for j in 0..matrix.col_count() {
+                result_by_slots[j].push(H.slot_ring().clone_el(sol.at(j, 0)));
+            }
+        }
+
+        let result = result_by_slots.into_iter().map(|coeff_by_slots| H.from_slot_vec(coeff_by_slots.into_iter())).collect::<Vec<_>>();
+
+        #[cfg(test)] {
+            let sol = Submatrix::<AsFirstElement<_>, _>::new(&result, matrix.col_count(), 1);
+            let mut check: OwnedMatrix<_> = OwnedMatrix::zero(matrix.row_count(), 1, H.ring());
+            STANDARD_MATMUL.matmul(TransposableSubmatrix::from(matrix.data()), TransposableSubmatrix::from(sol), TransposableSubmatrixMut::from(check.data_mut()), H.ring().get_ring());
+            assert!(H.ring().is_one(check.at(0, 0)));
+            for i in 1..matrix.row_count() {
+                assert!(H.ring().is_zero(check.at(i, 0)));
+            }
+        }
+
+        let mut result = Self {
+            data: self.data.iter().zip(result.into_iter()).map(|((g, _, steps), coeff)| (
+                H.galois_group_mulrepr().invert(g).unwrap(),
+                coeff,
+                steps.into_iter().map(|k| -k).collect()
+            )).collect()
+        };
+        result.optimize(H);
+
+        #[cfg(test)] {
+            let check = self.compose(&result, H);
+            assert_eq!(1, check.data.len());
+            assert!(H.galois_group_mulrepr().is_one(&check.data[0].0));
+            assert!(H.ring().is_one(&check.data[0].1));
+        }
+
+        return result;
+    }
+
     fn check_valid(&self, H: &HypercubeIsomorphism<R, F, A>) {
+        for (i, (g, _, _)) in self.data.iter().enumerate() {
+            for (j, (s, _, _)) in self.data.iter().enumerate() {
+                assert!(i == j || !H.galois_group_mulrepr().eq_el(g, s));
+            }
+        }
         for (g, _, steps) in &self.data {
             assert_el_eq!(
                 H.galois_group_mulrepr(),
@@ -52,13 +142,17 @@ impl<R, F, A> LinearTransform<R, F, A>
     }
 
     fn compose(&self, run_first: &LinearTransform<R, F, A>, H: &HypercubeIsomorphism<R, F, A>) -> Self {
-        Self {
+        self.check_valid(H);
+        run_first.check_valid(H);
+        let mut result = Self {
             data: self.data.iter().flat_map(|(self_g, self_coeff, self_indices)| run_first.data.iter().map(|(first_g, first_coeff, first_indices)| (
                 H.galois_group_mulrepr().mul_ref(self_g, first_g), 
                 H.ring().mul_ref_snd(H.ring().get_ring().apply_galois_action(*self_g, H.ring().clone_el(first_coeff)), self_coeff),
                 self_indices.iter().zip(first_indices).map(|(self_i, first_i)| self_i + first_i).collect()
             ))).collect()
-        }
+        };
+        result.optimize(&H);
+        return result;
     }
 
     fn identity(H: &HypercubeIsomorphism<R, F, A>) -> Self {
@@ -77,6 +171,7 @@ impl<R, F, A> LinearTransform<R, F, A>
                 return false;
             }
         });
+        self.data.retain(|(_, coeff, _)| !H.ring().is_zero(coeff));
     }
 }
 
@@ -122,6 +217,7 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
         CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>
 {
     fn compute_automorphisms_per_dimension(H: &HypercubeIsomorphism<R, F, A>, lin_transform: &LinearTransform<R, F, A>) -> (Vec<i64>, Vec<i64>, Vec<i64>, Vec<i64>) {
+        lin_transform.check_valid(H);
         
         let mut max_step: Vec<i64> = Vec::new();
         let mut min_step: Vec<i64> = Vec::new();
@@ -183,8 +279,8 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
         };
     }
 
-    pub fn compile(H: &HypercubeIsomorphism<R, F, A>, mut lin_transform: LinearTransform<R, F, A>) -> Self {
-        lin_transform.optimize(H);
+    pub fn compile(H: &HypercubeIsomorphism<R, F, A>, lin_transform: LinearTransform<R, F, A>) -> Self {
+        lin_transform.check_valid(H);
 
         let (_, _, _, sizes) = Self::compute_automorphisms_per_dimension(H, &lin_transform);
 
@@ -206,8 +302,8 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
         Self::create_from(H, lin_transforms.iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H)), preferred_baby_steps)
     }
 
-    pub fn create_from(H: &HypercubeIsomorphism<R, F, A>, mut lin_transform: LinearTransform<R, F, A>, preferred_baby_steps: usize) -> CompiledLinearTransform<R, F, A> {
-        lin_transform.optimize(H);
+    pub fn create_from(H: &HypercubeIsomorphism<R, F, A>, lin_transform: LinearTransform<R, F, A>, preferred_baby_steps: usize) -> CompiledLinearTransform<R, F, A> {
+        lin_transform.check_valid(H);
 
         let (max_step, min_step, gcd_step, sizes) = Self::compute_automorphisms_per_dimension(H, &lin_transform);
 
@@ -260,6 +356,10 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
         }, || ring.zero())
     }
     
+    pub fn required_galois_keys<'a>(&'a self) -> impl 'a + Iterator<Item = &'a ZnEl> {
+        self.baby_step_galois_elements.iter().chain(self.giant_step_galois_elements.iter().filter_map(|x| x.as_ref()))
+    }
+
     pub fn evaluate_generic<T, AddScaled, ApplyGalois, Zero>(&self, input: &T, mut add_scaled_fn: AddScaled, mut apply_galois_fn: ApplyGalois, mut zero_fn: Zero) -> T
         where AddScaled: FnMut(&mut T, &T, &El<CCFFTRing<R, F, A>>),
             ApplyGalois: FnMut(&T, &[ZnEl]) -> Vec<T>,
@@ -288,6 +388,16 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
         return result;
     }
 }
+
+use feanor_math::algorithms::matmul::MatmulAlgorithm;
+use feanor_math::algorithms::matmul::STANDARD_MATMUL;
+use feanor_math::matrix::AsFirstElement;
+use feanor_math::matrix::Submatrix;
+use feanor_math::matrix::TransposableSubmatrix;
+use feanor_math::matrix::TransposableSubmatrixMut;
+use feanor_math::homomorphism::Homomorphism;
+use pow2::pow2_slots_to_coeffs_thin;
+use crate::complexfft::pow2_cyclotomic::DefaultPow2CyclotomicCCFFTRingBase;
 
 #[test]
 fn test_compile() {
@@ -351,4 +461,28 @@ fn test_compose() {
     current = ring.get_ring().compute_linear_transform(&current, &composed_transform);
 
     assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 5, 0, 3, 0, 7, 0, 2, 0, 6, 0, 4, 0, 8, 0, 9, 0, 13, 0, 11, 0, 15, 0, 10, 0, 14, 0, 12, 0, 16, 0]), &current);
+}
+
+#[test]
+fn test_invert() {
+    let ring = DefaultPow2CyclotomicCCFFTRingBase::new(Zn::new(23), 5);
+    let H = HypercubeIsomorphism::new(ring.get_ring());
+    let composed_transform = pow2_slots_to_coeffs_thin(&H).into_iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H));
+    let inv_transform = composed_transform.inverse(&H);
+
+    let current = ring_literal!(&ring, [1, 0, 0, 0, 3, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    let actual = ring.get_ring().compute_linear_transform(&current, &inv_transform);
+    let expected = H.from_slot_vec([1, 2, 3, 4].into_iter().map(|n| H.slot_ring().int_hom().map(n)));
+    assert_el_eq!(&ring, &expected, &actual);
+    
+    let ring = DefaultPow2CyclotomicCCFFTRingBase::new(Zn::new(97), 5);
+    let H = HypercubeIsomorphism::new(ring.get_ring());
+    let composed_transform = pow2_slots_to_coeffs_thin(&H).into_iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H));
+    let inv_transform = composed_transform.inverse(&H);
+    
+    let current = ring_literal!(&ring, [1, 0, 5, 0, 3, 0, 7, 0, 2, 0, 6, 0, 4, 0, 8, 0, 9, 0, 13, 0, 11, 0, 15, 0, 10, 0, 14, 0, 12, 0, 16, 0]);
+    let actual = ring.get_ring().compute_linear_transform(&current, &inv_transform);
+    let expected = H.from_slot_vec((1..17).map(|n| H.slot_ring().int_hom().map(n)));
+
+    assert_el_eq!(&ring, &expected, &actual);
 }

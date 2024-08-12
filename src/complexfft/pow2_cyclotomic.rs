@@ -112,17 +112,17 @@ impl<R, F, A> CyclotomicRingDecomposition<R::Type> for Pow2CyclotomicFFT<R, F, A
         A: Allocator + Clone
 {
     fn permute_galois_action(&self, src: &[Complex64El], dst: &mut [Complex64El], galois_element: ZnEl) {
-        let Zn = self.galois_group_mulrepr();
-        let hom = Zn.can_hom(&StaticRing::<i64>::RING).unwrap();
+        let Gal = self.galois_group_mulrepr();
+        let hom = Gal.can_hom(&StaticRing::<i64>::RING).unwrap();
         let bitlength = StaticRing::<i64>::RING.abs_log2_ceil(&(self.rank() as i64)).unwrap();
         debug_assert_eq!(1 << bitlength, self.rank());
 
         // the elements of src resp. dst follow an order derived from the bitreversing order of the underlying FFT
         let index_to_galois_el = |i: usize| hom.map(2 * bitreverse(i, bitlength) as i64 + 1);
-        let galois_el_to_index = |s: ZnEl| bitreverse((Zn.smallest_positive_lift(s) as usize - 1) / 2, bitlength);
+        let galois_el_to_index = |s: ZnEl| bitreverse((Gal.smallest_positive_lift(s) as usize - 1) / 2, bitlength);
 
         for i in 0..self.rank() {
-            dst[i] = src[galois_el_to_index(Zn.mul(galois_element, index_to_galois_el(i)))];
+            dst[i] = src[galois_el_to_index(Gal.mul(galois_element, index_to_galois_el(i)))];
         }
     }
 

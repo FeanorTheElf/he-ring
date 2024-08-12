@@ -290,7 +290,7 @@ impl ArithCircuit {
         return self.output_transforms.iter().map(move |t| t.evaluate(inputs, &current, &ring, &hom));
     }
 
-    pub fn evaluate_generic<'a, T, AddScaled, Mul, FromI64>(&'a self, inputs: &'a [T], mut add_scaled_fn: AddScaled, mut mul_fn: Mul, mut from_fn: FromI64) -> impl 'a + Iterator<Item = T>
+    pub fn evaluate_generic<'a, T, AddScaled, Mul, FromI64>(&'a self, inputs: &'a [T], mut add_scaled_fn: AddScaled, mut mul_fn: Mul, mut from_fn: FromI64) -> impl 'a + ExactSizeIterator<Item = T>
         where AddScaled: 'a + FnMut(T, &T, i64) -> T,
             Mul: 'a + FnMut(T, T) -> T,
             FromI64: 'a + FnMut(i64) -> T

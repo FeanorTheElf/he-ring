@@ -11,5 +11,6 @@ pub trait CyclotomicRingDecomposition<R: ?Sized + RingBase>: RingDecomposition<R
     /// 
     fn galois_group_mulrepr(&self) -> Zn;
 
-    fn permute_galois_action(&self, src: &[R::Element], dst: &mut [R::Element], galois_element: ZnEl);
+    fn permute_galois_action<S>(&self, src: &[R::Element], dst: &mut [R::Element], galois_element: ZnEl, ring: S)
+        where S: RingStore<Type = R>;
 }

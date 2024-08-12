@@ -15,6 +15,7 @@ use feanor_math::rings::zn::*;
 use feanor_math::homomorphism::*;
 use feanor_math::primitive_int::*;
 use feanor_math::seq::*;
+use feanor_math::rings::zn::zn_64::*;
 
 use crate::complexfft::complex_fft_ring;
 use crate::rnsconv::*;
@@ -221,6 +222,43 @@ impl<R, F, A> DoubleRNSRingBase<R, F, A>
             generalized_fft: PhantomData,
             allocator: PhantomData
         }
+    }
+
+    pub fn non_fft_from(&self, x: El<<Self as RingExtension>::BaseRing>) -> DoubleRNSNonFFTEl<R, F, A> {
+        let mut result = Vec::with_capacity_in(self.element_len(), self.allocator.clone());
+        let x = self.base_ring().get_congruence(&x);
+        for (i, Zp) in self.rns_base().as_iter().enumerate() {
+            result.push(Zp.clone_el(x.at(i)));
+            for _ in 1..self.rank() {
+                result.push(Zp.zero());
+            }
+        }
+        DoubleRNSNonFFTEl {
+            data: result,
+            generalized_fft: PhantomData,
+            allocator: PhantomData
+        }
+    }
+
+    pub fn galois_group_mulrepr(&self) -> Zn
+        where F: CyclotomicRingDecomposition<R::Type>
+    {
+        self.generalized_fft()[0].galois_group_mulrepr()
+    }
+
+    pub fn apply_galois_action(&self, el: &<Self as RingBase>::Element, g: ZnEl) -> <Self as RingBase>::Element
+        where F: CyclotomicRingDecomposition<R::Type>
+    {
+        let mut result = self.zero();
+        for (i, Zp) in self.rns_base().as_iter().enumerate() {
+            self.generalized_fft()[i].permute_galois_action(
+                &el.data[(i * self.rank())..((i + 1) * self.rank())],
+                &mut result.data[(i * self.rank())..((i + 1) * self.rank())],
+                g,
+                Zp
+            );
+        }
+        return result;
     }
 
     pub fn do_fft(&self, mut element: DoubleRNSNonFFTEl<R, F, A>) -> DoubleRNSEl<R, F, A> {
@@ -831,6 +869,8 @@ use crate::feanor_math::rings::zn::zn_64::Zn;
 use crate::complexfft::pow2_cyclotomic::DefaultPow2CyclotomicCCFFTRingBase;
 #[cfg(test)]
 use crate::doublerns::pow2_cyclotomic::DefaultPow2CyclotomicDoubleRNSRingBase;
+
+use super::automorphism::CyclotomicRingDecomposition;
 
 #[test]
 fn test_almost_exact_convert_from() {

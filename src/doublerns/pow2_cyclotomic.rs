@@ -1,3 +1,4 @@
+use cooley_tuckey::bitreverse;
 use feanor_math::algorithms::fft::complex_fft::FFTErrorEstimate;
 use feanor_math::algorithms;
 use feanor_math::algorithms::fft::*;
@@ -8,14 +9,17 @@ use feanor_math::homomorphism::*;
 use feanor_math::integer::*;
 use feanor_math::rings::float_complex::Complex64Base;
 use feanor_math::rings::zn::zn_64;
+use feanor_math::rings::zn::zn_64::ZnEl;
 use feanor_math::seq::*;
 use feanor_math::rings::zn::{ZnRing, ZnRingStore, zn_rns};
 use feanor_math::rings::extension::*;
+use feanor_math::rings::zn::zn_64::Zn;
 
 use std::alloc::Allocator;
 
 use crate::complexfft;
 use crate::cyclotomic::*;
+use super::automorphism::CyclotomicRingDecomposition;
 use super::double_rns_ring::*;
 
 ///
@@ -124,6 +128,33 @@ impl<R1, R2, F1, F2> SameNumberRingCross<R2::Type, R1::Type, complexfft::pow2_cy
     }
 }
 
+impl<R, F> CyclotomicRingDecomposition<R::Type> for Pow2CyclotomicFFT<R, F> 
+    where R: RingStore,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F: FFTAlgorithm<R::Type>
+{
+    fn permute_galois_action<S>(&self, src: &[<R::Type as RingBase>::Element], dst: &mut [<R::Type as RingBase>::Element], galois_element: ZnEl, ring: S)
+        where S: RingStore<Type = R::Type>
+    {
+        let Gal = self.galois_group_mulrepr();
+        let hom = Gal.can_hom(&StaticRing::<i64>::RING).unwrap();
+        let bitlength = StaticRing::<i64>::RING.abs_log2_ceil(&(self.rank() as i64)).unwrap();
+        debug_assert_eq!(1 << bitlength, self.rank());
+
+        // the elements of src resp. dst follow an order derived from the bitreversing order of the underlying FFT
+        let index_to_galois_el = |i: usize| hom.map(2 * bitreverse(i, bitlength) as i64 + 1);
+        let galois_el_to_index = |s: ZnEl| bitreverse((Gal.smallest_positive_lift(s) as usize - 1) / 2, bitlength);
+
+        for i in 0..self.rank() {
+            dst[i] = ring.clone_el(&src[galois_el_to_index(Gal.mul(galois_element, index_to_galois_el(i)))]);
+        }
+    }
+
+    fn galois_group_mulrepr(&self) -> Zn {
+        Zn::new(self.rank() as u64 * 2)
+    }
+}
+
 impl<R, F, A> CyclotomicRing for DoubleRNSRingBase<R, Pow2CyclotomicFFT<R, F>, A>
     where R: ZnRingStore,
         R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
@@ -214,9 +245,6 @@ impl<R, A> DoubleRNSRingBase<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckey
 }
 
 #[cfg(test)]
-use feanor_math::rings::zn::zn_64::Zn;
-
-#[cfg(test)]
 fn edge_case_elements<'a, R, F, A>(R: &'a DoubleRNSRing<R, F, A>) -> impl 'a + Iterator<Item = El<DoubleRNSRing<R, F, A>>>
     where R: ZnRingStore,
         R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
@@ -267,4 +295,12 @@ fn test_cyclotomic_ring_axioms() {
     let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
     let R = DefaultPow2CyclotomicDoubleRNSRingBase::new(rns_base, 3);
     feanor_math::rings::extension::generic_tests::test_free_algebra_axioms(R);
+}
+
+#[test]
+fn test_permute_galois_automorphism() {
+    let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
+    let R = DefaultPow2CyclotomicDoubleRNSRingBase::new(rns_base, 3);
+    assert_el_eq!(R, R.pow(R.canonical_gen(), 3), R.get_ring().apply_galois_action(&R.canonical_gen(), R.get_ring().galois_group_mulrepr().int_hom().map(3)));
+    assert_el_eq!(R, R.pow(R.canonical_gen(), 6), R.get_ring().apply_galois_action(&R.pow(R.canonical_gen(), 2), R.get_ring().galois_group_mulrepr().int_hom().map(3)));
 }
