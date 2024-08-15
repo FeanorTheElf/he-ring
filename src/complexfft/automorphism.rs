@@ -1,7 +1,6 @@
 use std::alloc::Allocator;
 use std::cmp::max;
 
-use feanor_math::algorithms::cyclotomic::cyclotomic_polynomial;
 use feanor_math::algorithms::discrete_log::discrete_log;
 use feanor_math::algorithms::eea::signed_gcd;
 use feanor_math::algorithms::int_factor;
@@ -18,7 +17,6 @@ use feanor_math::rings::extension::extension_impl::FreeAlgebraImpl;
 use feanor_math::rings::finite::FiniteRingStore;
 use feanor_math::rings::float_complex::Complex64;
 use feanor_math::rings::float_complex::Complex64El;
-use feanor_math::rings::poly::sparse_poly::SparsePolyRing;
 use feanor_math::rings::zn::zn_64::*;
 use feanor_math::rings::zn::*;
 use feanor_math::rings::poly::PolyRingStore;
@@ -233,6 +231,8 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
         CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>
 {
     pub fn new(ring: &'a CCFFTRingBase<R, F, A>) -> Self {
+
+        println!("computing hypercube structure...");
         let t = int_cast(ring.base_ring().integer_ring().clone_el(ring.base_ring().modulus()), ZZ, ring.base_ring().integer_ring());
         let (p, e) = is_prime_power(&ZZ, &t).unwrap();
         let (dims, galois_group_ring) = compute_hypercube_structure(ring.n() as i64, p);
@@ -241,17 +241,23 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
         let d = ring.rank() / slot_count;
 
         // first task: compute a nice representation of the slot ring
+        println!("getting temporary slot ring...");
+        println!("{}, {}, {}", p, e, d);
         let tmp_slot_ring = galois_ring_dyn(p, e, d);
+        println!("getting root of unity...");
         let root_of_unity = get_prim_root_of_unity(&tmp_slot_ring, ring.n());
 
-        let poly_ring = SparsePolyRing::new(&tmp_slot_ring, "X");
-        let mut slot_generating_poly = poly_ring.prod((0..d).map(|i| poly_ring.sub(
-            poly_ring.indeterminate(),
-            poly_ring.inclusion().map(tmp_slot_ring.pow(tmp_slot_ring.clone_el(&root_of_unity), galois_group_ring.smallest_positive_lift(galois_group_ring.pow(frobenius, i)) as usize))
-        )));
+        println!("computing slot-generating polynomial...");
+        let poly_ring = DensePolyRing::new(&tmp_slot_ring, "X");
+        println!("Computing product");
+        let mut slot_generating_poly = poly_ring.prod((0..d).scan(tmp_slot_ring.clone_el(&root_of_unity), |current_root_of_unity, _| {
+            let result = poly_ring.sub(poly_ring.indeterminate(), poly_ring.inclusion().map_ref(current_root_of_unity));
+            *current_root_of_unity = tmp_slot_ring.pow(tmp_slot_ring.clone_el(current_root_of_unity), galois_group_ring.smallest_positive_lift(frobenius) as usize);
+            return Some(result);
+        }));
+        println!("normalizing slot generating poly...");
         let normalization_factor = poly_ring.base_ring().invert(poly_ring.lc(&slot_generating_poly).unwrap()).unwrap();
         poly_ring.inclusion().mul_assign_map(&mut slot_generating_poly, normalization_factor);
-        debug_assert!(poly_ring.checked_div(&cyclotomic_polynomial(&poly_ring, ring.n()), &slot_generating_poly).is_some());
 
         let hom = ring.base_ring().can_hom(tmp_slot_ring.base_ring()).unwrap();
         let mut slot_ring_modulus = (0..d).map(|i| {
@@ -263,6 +269,7 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
 
         // second task: compute one unit vector w.r.t. the CRT isomorphism, used to later compute the whole isomorphism
         // an irreducible factor of `Phi_n` in `Zp[X]/(Phi_n)`, thus zero in the first slot and nonzero in all others
+        println!("computing the slot unit vector...");
         let irred_factor = ring.from_canonical_basis((0..ring.rank()).map(|i| if i < slot_ring_modulus.len() { 
             ring.base_ring().clone_el(&slot_ring_modulus[i])
         } else if i == slot_ring_modulus.len() {

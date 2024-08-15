@@ -42,6 +42,23 @@ impl<R, F, A> LinearTransform<R, F, A>
         A: Allocator + Clone,
         CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>
 {
+    pub fn eq(&self, other: &Self, H: &HypercubeIsomorphism<R, F, A>) -> bool {
+        self.check_valid(H);
+        other.check_valid(H);
+        if self.data.len() != other.data.len() {
+            return false;
+        }
+        for (self_d, other_d) in self.data.iter().zip(other.data.iter()) {
+            if !H.galois_group_mulrepr().eq_el(&self_d.0, &other_d.0) {
+                return false;
+            }
+            if !H.ring().eq_el(&self_d.1, &other_d.1) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     pub fn switch_ring(&self, H_from: &HypercubeIsomorphism<R, F, A>, to: &CCFFTRingBase<R, F, A>) -> Self {
         self.check_valid(H_from);
         assert_eq!(H_from.ring().n(), to.n());

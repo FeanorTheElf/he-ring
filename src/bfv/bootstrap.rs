@@ -15,6 +15,7 @@ use polys::poly_to_circuit;
 use rand::thread_rng;
 
 use crate::complexfft::automorphism::HypercubeIsomorphism;
+use crate::lintransform::pow2::pow2_coeffs_to_slots_thin;
 use crate::rnsconv;
 use crate::{digitextract::*, lintransform::pow2::pow2_slots_to_coeffs_thin};
 use crate::digitextract::polys::digit_retain_poly;
@@ -80,20 +81,24 @@ impl Pow2BFVThinBootstrapParams {
         let v = ((s_can_norm as f64 + 1.).log2() / (p as f64).log2()).ceil() as usize;
         let e = r + v;
 
+        println!("preparing digit extraction polys...");
         let digit_extraction_circuits = (1..=v).rev().map(|remaining_v| {
             let poly_ring = DensePolyRing::new(PlaintextZn::new(ZZ.pow(p, remaining_v + r) as u64), "X");
             poly_to_circuit(&poly_ring, &(2..=remaining_v).chain([r + remaining_v].into_iter()).map(|j| digit_retain_poly(&poly_ring, j)).collect::<Vec<_>>())
         }).collect::<Vec<_>>();
 
+        println!("creating hypercube...");
         let plaintext_ring = <PlaintextRing as RingStore>::Type::new(PlaintextZn::new(ZZ.pow(p, e) as u64), params.log2_N);
         let H = HypercubeIsomorphism::new(plaintext_ring.get_ring());
-        let slots_to_coeffs_thin = pow2_slots_to_coeffs_thin(&H);
-        let compiled_coeffs_to_slots_thin = slots_to_coeffs_thin.iter().rev().map(|T| CompiledLinearTransform::compile(&H, T.inverse(&H))).collect();
+
+        println!("compiling linear transforms...");
+        let compiled_coeffs_to_slots_thin = pow2_coeffs_to_slots_thin(&H).into_iter().map(|T| CompiledLinearTransform::compile(&H, T)).collect();
 
         let original_plaintext_ring = params.create_plaintext_ring();
         let original_H = HypercubeIsomorphism::new(original_plaintext_ring.get_ring());
-        let compiled_slots_to_coeffs_thin = slots_to_coeffs_thin.into_iter().map(|T| CompiledLinearTransform::compile(&original_H, T.switch_ring(&H, original_plaintext_ring.get_ring()))).collect();
+        let compiled_slots_to_coeffs_thin = pow2_slots_to_coeffs_thin(&H).into_iter().map(|T| CompiledLinearTransform::compile(&original_H, T.switch_ring(&H, original_plaintext_ring.get_ring()))).collect();
 
+        println!("done");
         return Self {
             params: params,
             e: e,
@@ -205,6 +210,8 @@ impl Pow2BFVThinBootstrapParams {
         );
         let cancelled_out_irrelevant_coeffs = hom_mul_plain(&P_main, C, &P.inclusion().map(undo_trace_scaling), cancelled_out_irrelevant_coeffs);
 
+        debug_dec_print(P_main, C, &cancelled_out_irrelevant_coeffs);
+
         let moved_back_to_slots = self.coeffs_to_slots_thin.iter().fold(cancelled_out_irrelevant_coeffs, |current, T| T.evaluate_generic(
             &current, 
             |lhs, rhs, factor| {
@@ -215,6 +222,8 @@ impl Pow2BFVThinBootstrapParams {
             },
             || (C.get_ring().non_fft_zero(), C.get_ring().non_fft_zero())
         ));
+        
+        debug_dec_print_slots(P_main, C, &moved_back_to_slots);
 
         let digit_extraction_input = hom_add_plain(P_main, C, &P.inclusion().map(rounding_divisor_half), moved_back_to_slots);
 
@@ -289,6 +298,59 @@ fn test_bfv_thin_bootstrapping() {
         &rk, 
         &gk
     );
+
+    assert_el_eq!(P, P.int_hom().map(2), dec(&P, &C, res_ct, &sk));
+}
+
+#[test]
+
+#[ignore]
+fn run_bfv_thin_bootstrapping() {
+    let mut rng = thread_rng();
+    
+    let params = Pow2BFVParams {
+        t: 17,
+        log2_q_min: 790,
+        log2_q_max: 800,
+        log2_N: 15
+    };
+    println!("Preparing bootstrapper...");
+
+    let bootstrapper = Pow2BFVThinBootstrapParams::create_for(params.clone());
+    
+    println!("Preparing utility data...");
+
+    let P = params.create_plaintext_ring();
+    let (C, C_mul) = params.create_ciphertext_rings();
+    let bootstrapping_data = bootstrapper.create_all_bootstrapping_data(&C, &C_mul);
+    
+    println!("Generating keys...");
+
+    let sk = gen_sk(&C, &mut rng);
+    let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, gen_gk(&C, &mut rng, &sk, g))).collect::<Vec<_>>();
+    let rk = gen_rk(&C, &mut rng, &sk);
+    
+    println!("Preparing message...");
+
+    let m = P.int_hom().map(2);
+    let ct = enc_sym(&P, &C, &mut rng, &m, &sk);
+
+    println!("Running bootstrapping...");
+
+    let start = Instant::now();
+    let res_ct = bootstrapper.bootstrap_thin(
+        &C, 
+        &C_mul, 
+        &P, 
+        &bootstrapping_data.plaintext_ring_hierarchy, 
+        &bootstrapping_data.multiplication_rescale_hierarchy, 
+        &bootstrapping_data.mod_switch, 
+        ct, 
+        &rk, 
+        &gk
+    );
+    let end = Instant::now();
+    println!("Bootstrapping done in {} ms", (end - start).as_millis());
 
     assert_el_eq!(P, P.int_hom().map(2), dec(&P, &C, res_ct, &sk));
 }

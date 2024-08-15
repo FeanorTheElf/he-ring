@@ -16,7 +16,7 @@ bench = true
 
 [dependencies]
 bytemuck = "1.16.0"
-feanor-math = { git = "https://github.com/feanortheelf/feanor-math.git", features = ["generic_tests", "unstable-enable"] }
+feanor-math = { version = "=2.2.0", features = ["generic_tests", "unstable-enable"] }
 feanor-mempool = "2.1.0"
 oorandom = "11.1.3"
 
