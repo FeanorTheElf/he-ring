@@ -418,7 +418,7 @@ impl<R, F, A> SerializableElementRing for CCFFTRingBase<R, F, A>
         let mut result = Vec::with_capacity_in(self.rank(), self.allocator.clone());
         feanor_math::serialization::deserialize_seq_helper(deserializer, |x| {
             result.push(x);
-        }, DeserializeWithRing::new(self.base_ring()));
+        }, DeserializeWithRing::new(self.base_ring()))?;
         if result.len() != self.rank() {
             return Err(de::Error::custom(format!("expected {} elements, got {}", self.rank(), result.len())));
         }

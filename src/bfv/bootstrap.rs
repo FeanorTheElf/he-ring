@@ -269,6 +269,8 @@ impl Pow2BFVThinBootstrapParams {
         ));
         let end = Instant::now();
         println!("done in {} ms and {} key switches", (end - start).as_millis(), key_switches);
+
+        debug_dec_print_slots(P_main, C, &moved_back_to_slots);
         
         let digit_extraction_input = hom_add_plain(P_main, C, &P.inclusion().map(rounding_divisor_half), moved_back_to_slots);
 
@@ -306,6 +308,7 @@ impl Pow2BFVThinBootstrapParams {
             );
             let mut lowest_digit = lowest_digit.collect::<Vec<_>>();
             assert_eq!(k - self.r, lowest_digit.len());
+            debug_dec_print_slots(P_main, C, lowest_digit.last().unwrap());
             result = hom_sub(C, result, &lowest_digit.pop().unwrap());
             digit_extracted.push(lowest_digit);
             let end = Instant::now();
@@ -317,7 +320,7 @@ impl Pow2BFVThinBootstrapParams {
 }
 
 #[test]
-fn test_bfv_thin_bootstrapping() {
+fn test_bfv_thin_bootstrapping_17() {
     let mut rng = thread_rng();
     
     let params = Pow2BFVParams {
@@ -354,6 +357,43 @@ fn test_bfv_thin_bootstrapping() {
 }
 
 #[test]
+fn test_bfv_thin_bootstrapping_257() {
+    let mut rng = thread_rng();
+    
+    let params = Pow2BFVParams {
+        t: 257,
+        log2_q_min: 790,
+        log2_q_max: 800,
+        log2_N: 10
+    };
+    let bootstrapper = Pow2BFVThinBootstrapParams::create_for(params.clone(), None);
+    
+    let P = params.create_plaintext_ring();
+    let (C, C_mul) = params.create_ciphertext_rings();
+    let bootstrapping_data = bootstrapper.create_all_bootstrapping_data(&C, &C_mul);
+    
+    let sk = gen_sk(&C, &mut rng);
+    let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, gen_gk(&C, &mut rng, &sk, g))).collect::<Vec<_>>();
+    let rk = gen_rk(&C, &mut rng, &sk);
+    
+    let m = P.int_hom().map(2);
+    let ct = enc_sym(&P, &C, &mut rng, &m, &sk);
+    let res_ct = bootstrapper.bootstrap_thin(
+        &C, 
+        &C_mul, 
+        &P, 
+        &bootstrapping_data.plaintext_ring_hierarchy, 
+        &bootstrapping_data.multiplication_rescale_hierarchy, 
+        &bootstrapping_data.mod_switch, 
+        ct, 
+        &rk, 
+        &gk
+    );
+
+    assert_el_eq!(P, P.int_hom().map(2), dec(&P, &C, res_ct, &sk));
+}
+
+#[test]
 
 #[ignore]
 fn run_bfv_thin_bootstrapping() {
@@ -361,8 +401,8 @@ fn run_bfv_thin_bootstrapping() {
     
     let params = Pow2BFVParams {
         t: 257,
-        log2_q_min: 1990,
-        log2_q_max: 2000,
+        log2_q_min: 790,
+        log2_q_max: 800,
         log2_N: 15
     };
     println!("Preparing bootstrapper...");
