@@ -66,9 +66,6 @@ pub fn poly_to_circuit<P>(poly_ring: P, polys: &[El<P>]) -> ArithCircuit
     
     let baby_steps = (1..max_deg).filter(|bs| {
             let (depths, _) = low_depth_paterson_stockmeyer_cost((&degrees).into_fn(|d| *d), *bs);
-
-            #[cfg(test)] { low_depth_paterson_stockmeyer(&poly_ring, polys, *bs); }
-
             (0..optimal_depths.len()).all(|i| depths.at(i) <= optimal_depths[i] + 1)
         })
         .min_by_key(|bs| low_depth_paterson_stockmeyer_cost((&degrees).into_fn(|d| *d), *bs).1)
@@ -108,7 +105,7 @@ pub fn low_depth_paterson_stockmeyer_cost<V>(degrees: V, baby_steps: usize) -> (
 pub fn low_depth_paterson_stockmeyer<P>(poly_ring: P, polys: &[El<P>], baby_steps: usize) -> ArithCircuit
     where P: RingStore,
         P::Type: PolyRing,
-        <<P::Type as RingExtension>::BaseRing as RingStore>::Type: ZnRing + DivisibilityRing
+        <<P::Type as RingExtension>::BaseRing as RingStore>::Type: ZnRing
 {
     let ZZ = StaticRing::<i64>::RING;
     let max_deg = polys.iter().map(|f| poly_ring.degree(f).unwrap_or(0)).max().unwrap();

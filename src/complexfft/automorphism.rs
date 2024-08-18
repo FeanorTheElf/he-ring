@@ -1,22 +1,44 @@
 use std::alloc::Allocator;
+use std::cell::Ref;
+use std::cell::RefCell;
 use std::cmp::max;
+use std::fs::File;
+use std::io::BufReader;
+use std::io::BufWriter;
+use std::time::Instant;
+use std::alloc::Global;
 
+use de::DeserializeSeed;
+use de::Visitor;
+use feanor_math::rings::poly::PolyRing;
+use feanor_math::serialization::DeserializeWithRing;
+use feanor_math::serialization::SerializableElementRing;
+use feanor_math::serialization::SerializeWithRing;
+use ser::SerializeStruct;
+use serde::*;
+
+use feanor_math::algorithms::convolution::fft::FFTRNSBasedConvolution;
+use feanor_math::algorithms::convolution::fft::FFTRNSBasedConvolutionZn;
 use feanor_math::algorithms::discrete_log::discrete_log;
 use feanor_math::algorithms::eea::signed_gcd;
 use feanor_math::algorithms::int_factor;
 use feanor_math::algorithms::int_factor::is_prime_power;
-use feanor_math::homomorphism::CanHomFrom;
 use feanor_math::homomorphism::Homomorphism;
 use feanor_math::integer::int_cast;
+use feanor_math::delegate::DelegateRing;
 use feanor_math::iters::multi_cartesian_product;
+use feanor_math::local::PrincipalLocalRing;
 use feanor_math::primitive_int::*;
 use feanor_math::ring::*;
+use feanor_math::rings::extension::impl_new::FreeAlgebraImpl;
 use feanor_math::divisibility::*;
 use feanor_math::rings::extension::*;
-use feanor_math::rings::extension::extension_impl::FreeAlgebraImpl;
+use feanor_math::rings::finite::FiniteRing;
 use feanor_math::rings::finite::FiniteRingStore;
 use feanor_math::rings::float_complex::Complex64;
 use feanor_math::rings::float_complex::Complex64El;
+use feanor_math::rings::local::AsLocalPIR;
+use feanor_math::rings::local::AsLocalPIRBase;
 use feanor_math::rings::zn::zn_64::*;
 use feanor_math::rings::zn::*;
 use feanor_math::rings::poly::PolyRingStore;
@@ -24,8 +46,12 @@ use feanor_math::seq::*;
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
 use feanor_math::rings::extension::galois_field::*;
 use feanor_math::wrapper::RingElementWrapper;
+use sparse::SparseHashMapVector;
+use feanor_math::integer::BigIntRing;
+use feanor_math::integer::IntegerRingStore;
 
-use crate::cyclotomic::CyclotomicRing;
+use crate::cyclotomic::*;
+use crate::StdZn;
 use oorandom;
 
 use super::complex_fft_ring::*;
@@ -93,6 +119,46 @@ impl<R, F, A> CCFFTRingBase<R, F, A>
     }
 }
 
+pub struct PowerTable<R>
+    where R: RingStore
+{
+    ring: R,
+    exponent_ring: Zn,
+    powers: RefCell<Vec<El<R>>>
+}
+
+impl<R> PowerTable<R>
+    where R: RingStore
+{
+    pub fn new(ring: R, base: El<R>, order_of_base: usize) -> Self {
+        debug_assert!(ring.is_one(&ring.pow(ring.clone_el(&base), order_of_base)));
+        Self {
+            powers: RefCell::new(vec![ring.one(), base]),
+            ring: ring,
+            exponent_ring: Zn::new(order_of_base as u64),
+        }
+    }
+
+    pub fn get_power<'a>(&'a self, power: i64) -> Ref<'a, El<R>> {
+        let power = self.exponent_ring.smallest_positive_lift(self.exponent_ring.coerce(&StaticRing::<i64>::RING, power)) as usize;
+        let mut powers = self.powers.borrow_mut();
+        while powers.len() <= power {
+            let new = self.ring.mul_ref(powers.last().unwrap(), &powers[1]);
+            powers.push(new);
+        }
+        drop(powers);
+        return Ref::map(self.powers.borrow(), |powers| &powers[power]);
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct HypercubeDimensionSerializable {
+    length: usize,
+    generator: i64,
+    factor_n: (i64, usize)
+}
+
+#[derive(Clone)]
 pub struct HypercubeDimension {
     length: usize,
     generator: ZnEl,
@@ -110,10 +176,25 @@ impl HypercubeDimension {
     }
 }
 
-fn get_prim_root_of_unity(ring: &GaloisRingDyn, m: usize) -> El<GaloisRingDyn> {
+fn get_prim_root_of_unity<R>(ring: R, m: usize) -> El<R>
+    where R: RingStore,
+        R::Type: FiniteRing + FreeAlgebra + DivisibilityRing,
+        <<R::Type as RingExtension>::BaseRing as RingStore>::Type: PrincipalLocalRing + StdZn
+{
     let (p, e) = is_prime_power(&ZZ, &ring.characteristic(&ZZ).unwrap()).unwrap();
-    let galois_field = galois_field_dyn(p, ring.rank());
+    let max_log2_len = ZZ.abs_log2_ceil(&(ring.rank() as i64)).unwrap() + 1;
+    let galois_field = RingValue::from(galois_field_dyn(p, ring.rank()).get_ring().get_delegate().clone()).set_convolution(
+        FFTRNSBasedConvolutionZn::from(FFTRNSBasedConvolution::<<<R::Type as RingExtension>::BaseRing as RingStore>::Type>::new_with(max_log2_len, BigIntRing::RING, Global))
+    ).as_field().ok().unwrap();
+
+    println!("finding root of unity in galois field...");
+    let start = Instant::now();
     let rou = feanor_math::algorithms::unity_root::get_prim_root_of_unity(&galois_field, m).unwrap();
+    let end = Instant::now();
+    println!("done in {} ms", (end - start).as_millis());
+
+    println!("performing hensel lifting...");
+    let start = Instant::now();
     let red_map = ReductionMap::new(ring.base_ring(), galois_field.base_ring()).unwrap();
     let mut result = ring.from_canonical_basis(galois_field.wrt_canonical_basis(&rou).into_iter().map(|x| red_map.smallest_lift(x)));
     for _ in 0..e {
@@ -123,6 +204,8 @@ fn get_prim_root_of_unity(ring: &GaloisRingDyn, m: usize) -> El<GaloisRingDyn> {
         ).unwrap();
         ring.sub_assign(&mut result, delta);
     }
+    let end = Instant::now();
+    println!("done in {} ms", (end - start).as_millis());
     assert!(ring.is_one(&ring.pow(ring.clone_el(&result), m)));
     return result;
 }
@@ -207,32 +290,319 @@ pub fn compute_hypercube_structure(n: i64, p: i64) -> (Vec<HypercubeDimension>, 
     return (dims, Zn);
 }
 
-pub type SlotRing<'a, R, A> = FreeAlgebraImpl<&'a R, Vec<El<R>>, A>;
+pub type SlotRing<'a, R, A> = AsLocalPIR<FreeAlgebraImpl<&'a R, SparseHashMapVector<&'a R>, A, FFTRNSBasedConvolutionZn>>;
 
+///
+/// Encapsulates the isomorphism
+/// ```text
+/// Z[X] / (Phi_n(X), p)  ->  F_(p^d) ^ G
+/// ```
+/// where `G = Gal(K / Q) / <p>` with `K = Q[X]/(Phi_n(X))` and `d = phi(n) / #G`.
+/// 
+/// This becomes a hypercube by considering the decomposition
+/// ```text
+/// Gal(K / Q) = Z/nZ* = Z/(p1^e1)Z* x ... x Z/(pr^er)Z*
+/// ```
+/// where `n = p1^e1 ... pr^er`. Note that when `pi = 2`, we have
+/// `Z/2^eZ* = Z/2^(e - 2)Z x Z/2Z` (thus giving two hypercube dimensions).
+/// If `pi != 2` on the other hand, we find that `Z/(p^e)Z*` is cyclic, thus
+/// giving one hypercube dimension.
+/// 
+/// Note that this is the "natural" way to write `Gal(K / Q)` as a hypercube,
+/// but other ways would be possible to, since many decompositions of `Gal(K / Q)`
+/// are conceivable.
+/// 
 pub struct HypercubeIsomorphism<'a, R, F, A>
     where R: RingStore,
-        R::Type: ZnRing,
+        R::Type: StdZn,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
     ring: &'a CCFFTRingBase<R, F, A>,
     slot_unit_vec: El<CCFFTRing<R, F, A>>,
-    slot_ring: FreeAlgebraImpl<&'a R, Vec<El<R>>, A>,
+    slot_ring: SlotRing<'a, R, A>,
     dims: Vec<HypercubeDimension>,
     galois_group_ring: Zn,
     d: usize
 }
 
+pub struct HypercubeIsomorphismSerializable<'a, R, F, A>
+    where R: RingStore,
+        R::Type: StdZn,
+        F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
+        A: Allocator + Clone,
+        CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>
+{
+    t: i64,
+    n: usize,
+    slot_rank: usize,
+    slot_ring_modulus: SerializeWithRing<'a, DensePolyRing<&'a R>>,
+    slot_unit_vec: SerializeWithRing<'a, RingRef<'a, CCFFTRingBase<R, F, A>>>,
+    galois_group_ring_modulus: u64,
+    dims: Vec<HypercubeDimensionSerializable>
+}
+
+impl<'a, R, F, A> Serialize for HypercubeIsomorphismSerializable<'a, R, F, A>
+    where R: RingStore,
+        R::Type: StdZn,
+        F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
+        A: Allocator + Clone,
+        CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where S: Serializer
+    {
+        let mut out = serializer.serialize_struct("HypercubeIsomorphism", 7)?;
+        out.serialize_field("t", &self.t)?;
+        out.serialize_field("n", &self.n)?;
+        out.serialize_field("slot_rank", &self.slot_rank)?;
+        out.serialize_field("slot_ring_modulus", &self.slot_ring_modulus)?;
+        out.serialize_field("slot_unit_vec", &self.slot_unit_vec)?;
+        out.serialize_field("galois_group_ring_modulus", &self.galois_group_ring_modulus)?;
+        out.serialize_field("dims", &self.dims)?;
+        return out.end();
+    }
+}
+
+pub struct HypercubeIsomorphismDeserializable<'a, R, F, A>
+    where R: RingStore,
+        R::Type: StdZn,
+        F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
+        A: Allocator + Clone,
+        CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>
+{
+    t: i64,
+    n: usize,
+    slot_rank: usize,
+    slot_ring_modulus: El<DensePolyRing<&'a R>>,
+    slot_unit_vec: El<CCFFTRing<R, F, A>>,
+    galois_group_ring_modulus: u64,
+    dims: Vec<HypercubeDimensionSerializable>,
+    ring: &'a CCFFTRingBase<R, F, A>,
+    poly_ring: DensePolyRing<&'a R>
+}
+
+impl<'a, 'de, R, F, A> DeserializeSeed<'de> for &'a CCFFTRingBase<R, F, A>
+    where R: RingStore,
+        R::Type: StdZn,
+        F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
+        A: Allocator + Clone,
+        CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>
+{
+    type Value = HypercubeIsomorphismDeserializable<'a, R, F, A>;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+        where D: Deserializer<'de>
+    {
+        struct FieldsVisitor<'a, R, F, A>
+            where R: RingStore,
+                R::Type: StdZn,
+                F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
+                A: Allocator + Clone,
+                CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>
+        {
+            poly_ring: DensePolyRing<&'a R>,
+            ring: &'a CCFFTRingBase<R, F, A>
+        }
+
+        impl<'a, 'de, R, F, A> Visitor<'de> for FieldsVisitor<'a, R, F, A>
+            where R: RingStore,
+                R::Type: StdZn,
+                F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
+                A: Allocator + Clone,
+                CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>
+        {
+            type Value = HypercubeIsomorphismDeserializable<'a, R, F, A>;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(formatter, "struct `HypercubeIsomorphism` with fields `slot_rank`, `slot_ring_modulus`, `slot_unit_vec`, `galois_group_ring_modulus`, `dims`")
+            }
+
+            fn visit_seq<S>(self, mut seq: S) -> Result<Self::Value, S::Error>
+                where S: de::SeqAccess<'de>
+            {
+                let t: i64 = seq.next_element()?.ok_or_else(|| de::Error::invalid_length(0, &self))?;
+                let n: usize = seq.next_element()?.ok_or_else(|| de::Error::invalid_length(1, &self))?;
+                let slot_rank: usize = seq.next_element()?.ok_or_else(|| de::Error::invalid_length(2, &self))?;
+                let slot_ring_modulus = seq.next_element_seed(DeserializeWithRing::new(&self.poly_ring))?.ok_or_else(|| de::Error::invalid_length(3, &self))?;
+                let slot_unit_vec = seq.next_element_seed(DeserializeWithRing::new(RingRef::new(self.ring)))?.ok_or_else(|| de::Error::invalid_length(4, &self))?;
+                let galois_group_ring_modulus: u64 = seq.next_element()?.ok_or_else(|| de::Error::invalid_length(5, &self))?;
+                let dims: Vec<HypercubeDimensionSerializable> = seq.next_element()?.ok_or_else(|| de::Error::invalid_length(6, &self))?;
+                let ring = self.ring;
+                let poly_ring = self.poly_ring;
+                return Ok(HypercubeIsomorphismDeserializable {
+                    slot_rank, slot_ring_modulus, slot_unit_vec, galois_group_ring_modulus, dims, ring, poly_ring, t, n
+                });
+            }
+
+            fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+                where M: de::MapAccess<'de>
+            {
+                #[allow(non_camel_case_types)]
+                #[derive(Deserialize)]
+                enum Field {
+                    t,
+                    n,
+                    slot_rank,
+                    slot_ring_modulus,
+                    slot_unit_vec,
+                    galois_group_ring_modulus,
+                    dims
+                }
+                let mut t = None;
+                let mut n = None;
+                let mut slot_rank = None;
+                let mut slot_ring_modulus = None;
+                let mut slot_unit_vec = None;
+                let mut galois_group_ring_modulus = None;
+                let mut dims = None;
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::t => {
+                            if t.is_some() {
+                                return Err(de::Error::duplicate_field("t"));
+                            }
+                            t = Some(map.next_value()?);
+                        },
+                        Field::n => {
+                            if n.is_some() {
+                                return Err(de::Error::duplicate_field("n"));
+                            }
+                            n = Some(map.next_value()?);
+                        },
+                        Field::slot_rank => {
+                            if slot_rank.is_some() {
+                                return Err(de::Error::duplicate_field("slot_rank"));
+                            }
+                            slot_rank = Some(map.next_value()?);
+                        },
+                        Field::slot_ring_modulus => {
+                            if slot_ring_modulus.is_some() {
+                                return Err(de::Error::duplicate_field("slot_ring_modulus"));
+                            }
+                            slot_ring_modulus = Some(map.next_value_seed(DeserializeWithRing::new(&self.poly_ring))?);
+                        },
+                        Field::slot_unit_vec => {
+                            if slot_unit_vec.is_some() {
+                                return Err(de::Error::duplicate_field("slot_unit_vec"));
+                            }
+                            slot_unit_vec = Some(map.next_value_seed(DeserializeWithRing::new(RingRef::new(self.ring)))?);
+                        },
+                        Field::galois_group_ring_modulus => {
+                            if galois_group_ring_modulus.is_some() {
+                                return Err(de::Error::duplicate_field("galois_group_ring_modulus"));
+                            }
+                            galois_group_ring_modulus = Some(map.next_value()?);
+                        },
+                        Field::dims => {
+                            if dims.is_some() {
+                                return Err(de::Error::duplicate_field("dims"));
+                            }
+                            dims = Some(map.next_value()?);
+                        }
+                    }
+                }
+                let t = t.ok_or_else(|| de::Error::missing_field("t"))?;
+                let n = n.ok_or_else(|| de::Error::missing_field("n"))?;
+                let slot_rank = slot_rank.ok_or_else(|| de::Error::missing_field("slot_rank"))?;
+                let slot_ring_modulus = slot_ring_modulus.ok_or_else(|| de::Error::missing_field("slot_ring_modulus"))?;
+                let slot_unit_vec = slot_unit_vec.ok_or_else(|| de::Error::missing_field("slot_unit_vec"))?;
+                let galois_group_ring_modulus = galois_group_ring_modulus.ok_or_else(|| de::Error::missing_field("galois_group_ring_modulus"))?;
+                let dims = dims.ok_or_else(|| de::Error::missing_field("dims"))?;
+                let ring = self.ring;
+                let poly_ring = self.poly_ring;
+                return Ok(HypercubeIsomorphismDeserializable {
+                    slot_rank, slot_ring_modulus, slot_unit_vec, galois_group_ring_modulus, dims, ring, poly_ring, t, n
+                });
+            }
+        }
+        deserializer.deserialize_struct("HypercubeIsomorphism", &["slot_rank", "slot_ring_modulus", "slot_unit_vec", "galois_group_ring_modulus", "dims"], FieldsVisitor {
+            poly_ring: DensePolyRing::new(self.base_ring(), "X"),
+            ring: self
+        })
+    }
+}
+
+
+impl<'a, R, F, A> From<HypercubeIsomorphismDeserializable<'a, R, F, A>> for HypercubeIsomorphism<'a, R, F, A>
+    where R: RingStore,
+        R::Type: StdZn,
+        F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
+        A: Allocator + Clone,
+        CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>
+{
+    fn from(value: HypercubeIsomorphismDeserializable<'a, R, F, A>) -> Self {
+        let t = int_cast(value.ring.base_ring().integer_ring().clone_el(value.ring.base_ring().modulus()), ZZ, value.ring.base_ring().integer_ring());
+        assert_eq!(t, value.t);
+        assert_eq!(value.n, value.ring.n());
+        let (p, e) = is_prime_power(&ZZ, &t).unwrap();
+
+        let galois_group_ring = Zn::new(value.galois_group_ring_modulus);
+        let hom = galois_group_ring.can_hom(&StaticRing::<i64>::RING).unwrap();
+
+        let mut slot_ring_modulus = SparseHashMapVector::new(value.slot_rank, value.ring.base_ring());
+        for (coeff, i) in value.poly_ring.terms(&value.slot_ring_modulus) {
+            if i != value.slot_rank {
+                *slot_ring_modulus.at_mut(i) = value.poly_ring.base_ring().clone_el(coeff);
+            }
+        }
+        let max_log2_len = ZZ.abs_log2_ceil(&(value.slot_rank as i64)).unwrap() + 1;
+        let slot_ring = FreeAlgebraImpl::new_with(value.ring.base_ring(), value.slot_rank, slot_ring_modulus, value.ring.allocator().clone(), FFTRNSBasedConvolution::new_with(max_log2_len, BigIntRing::RING, Global).into());
+        let max_ideal_gen = slot_ring.inclusion().map(slot_ring.base_ring().coerce(&ZZ, p));
+        let slot_ring: SlotRing<'a, R, A> = AsLocalPIR::from(AsLocalPIRBase::promise_is_local_pir(slot_ring, max_ideal_gen, Some(e)));
+
+        Self {
+            d: value.slot_rank,
+            ring: value.ring,
+            slot_unit_vec: value.slot_unit_vec,
+            slot_ring: slot_ring,
+            dims: value.dims.into_iter().map(|d| HypercubeDimension {
+                factor_n: d.factor_n,
+                generator: hom.map(d.generator),
+                length: d.length
+            }).collect(),
+            galois_group_ring: galois_group_ring
+        }
+    }
+}
+
 impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
     where R: RingStore,
-        R::Type: ZnRing + CanHomFrom<<<<GaloisRingDyn as RingStore>::Type as RingExtension>::BaseRing as RingStore>::Type>,
+        R::Type: StdZn,
+        F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
+        A: Allocator + Clone,
+        CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>
+{
+    fn with_serializable<G>(&self, op: G)
+        where G: FnOnce(HypercubeIsomorphismSerializable<R, F, A>)
+    {
+        let poly_ring = DensePolyRing::new(self.ring.base_ring(), "X");
+
+        op(HypercubeIsomorphismSerializable {
+            t: int_cast(self.ring().base_ring().integer_ring().clone_el(self.ring().base_ring().modulus()), &StaticRing::<i64>::RING, self.ring().base_ring().integer_ring()),
+            n: self.ring().n(),
+            dims: self.dims.iter().map(|d| HypercubeDimensionSerializable {
+                factor_n: d.factor_n,
+                length: d.length,
+                generator: self.galois_group_mulrepr().smallest_positive_lift(d.generator) as i64
+            }).collect(),
+            galois_group_ring_modulus: *self.galois_group_mulrepr().modulus() as u64,
+            slot_rank: self.d,
+            slot_ring_modulus: SerializeWithRing::new(&self.slot_ring().generating_poly(&poly_ring, &poly_ring.base_ring().identity()), poly_ring),
+            slot_unit_vec: SerializeWithRing::new(&self.slot_unit_vec, self.ring())
+        });
+    }
+}
+
+impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
+    where R: RingStore,
+        R::Type: StdZn,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone,
         CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>
 {
     pub fn new(ring: &'a CCFFTRingBase<R, F, A>) -> Self {
 
-        println!("computing hypercube structure...");
         let t = int_cast(ring.base_ring().integer_ring().clone_el(ring.base_ring().modulus()), ZZ, ring.base_ring().integer_ring());
         let (p, e) = is_prime_power(&ZZ, &t).unwrap();
         let (dims, galois_group_ring) = compute_hypercube_structure(ring.n() as i64, p);
@@ -241,47 +611,62 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
         let d = ring.rank() / slot_count;
 
         // first task: compute a nice representation of the slot ring
-        println!("getting temporary slot ring...");
-        println!("{}, {}, {}", p, e, d);
-        let tmp_slot_ring = galois_ring_dyn(p, e, d);
-        println!("getting root of unity...");
-        let root_of_unity = get_prim_root_of_unity(&tmp_slot_ring, ring.n());
+        println!("creating temporary slot ring...");
+        let start = Instant::now();
+        let max_log2_len = ZZ.abs_log2_ceil(&(d as i64)).unwrap() + 1;
+        let tmp_slot_ring = RingValue::from(galois_ring_dyn(p, e, d).get_ring().get_delegate().clone()).set_convolution(FFTRNSBasedConvolutionZn::from(FFTRNSBasedConvolution::<R::Type>::new_with(max_log2_len, BigIntRing::RING, Global)));
+        let end = Instant::now();
+        println!("done in {} ms", (end - start).as_millis());
 
-        println!("computing slot-generating polynomial...");
+        println!("finding root of unity...");
+        let start = Instant::now();
+        let root_of_unity = get_prim_root_of_unity(&tmp_slot_ring, ring.n());
+        let end = Instant::now();
+        println!("done in {} ms", (end - start).as_millis());
+
+        println!("computing root of unity minpoly...");
+        let start = Instant::now();
         let poly_ring = DensePolyRing::new(&tmp_slot_ring, "X");
-        println!("Computing product");
         let mut slot_generating_poly = poly_ring.prod((0..d).scan(tmp_slot_ring.clone_el(&root_of_unity), |current_root_of_unity, _| {
             let result = poly_ring.sub(poly_ring.indeterminate(), poly_ring.inclusion().map_ref(current_root_of_unity));
             *current_root_of_unity = tmp_slot_ring.pow(tmp_slot_ring.clone_el(current_root_of_unity), galois_group_ring.smallest_positive_lift(frobenius) as usize);
             return Some(result);
         }));
-        println!("normalizing slot generating poly...");
+        let end = Instant::now();
+        println!("done in {} ms", (end - start).as_millis());
+
+        println!("normalizing root of unity minpoly...");
+        let start = Instant::now();
         let normalization_factor = poly_ring.base_ring().invert(poly_ring.lc(&slot_generating_poly).unwrap()).unwrap();
         poly_ring.inclusion().mul_assign_map(&mut slot_generating_poly, normalization_factor);
+        let end = Instant::now();
+        println!("done in {} ms", (end - start).as_millis());
 
         let hom = ring.base_ring().can_hom(tmp_slot_ring.base_ring()).unwrap();
-        let mut slot_ring_modulus = (0..d).map(|i| {
-            let coeff = poly_ring.coefficient_at(&slot_generating_poly, i);
+        let mut slot_ring_modulus = SparseHashMapVector::new(d, ring.base_ring());
+        for (coeff, i) in poly_ring.terms(&slot_generating_poly) {
             let coeff_wrt_basis = tmp_slot_ring.wrt_canonical_basis(&coeff);
             assert!((1..tmp_slot_ring.rank()).all(|i| tmp_slot_ring.base_ring().is_zero(&coeff_wrt_basis.at(i))));
-            return hom.map(coeff_wrt_basis.at(0));
-        }).collect::<Vec<_>>();
+            if i != tmp_slot_ring.rank() {
+                *slot_ring_modulus.at_mut(i) = hom.map(coeff_wrt_basis.at(0));
+            }
+        }
 
         // second task: compute one unit vector w.r.t. the CRT isomorphism, used to later compute the whole isomorphism
         // an irreducible factor of `Phi_n` in `Zp[X]/(Phi_n)`, thus zero in the first slot and nonzero in all others
-        println!("computing the slot unit vector...");
         let irred_factor = ring.from_canonical_basis((0..ring.rank()).map(|i| if i < slot_ring_modulus.len() { 
-            ring.base_ring().clone_el(&slot_ring_modulus[i])
+            ring.base_ring().clone_el(slot_ring_modulus.at(i))
         } else if i == slot_ring_modulus.len() {
             ring.base_ring().one()
         } else {
             ring.base_ring().zero()
         }));
 
-        for i in 0..d {
-            ring.base_ring().negate_inplace(&mut slot_ring_modulus[i]);
-        }
-        let slot_ring = FreeAlgebraImpl::new_with(ring.base_ring(), slot_ring_modulus, ring.allocator().clone());
+        slot_ring_modulus.scan(|_, x| ring.base_ring().negate_inplace(x));
+        let max_log2_len = ZZ.abs_log2_ceil(&(d as i64)).unwrap() + 1;
+        let slot_ring = FreeAlgebraImpl::new_with(ring.base_ring(), tmp_slot_ring.rank(), slot_ring_modulus, ring.allocator().clone(), FFTRNSBasedConvolution::new_with(max_log2_len, BigIntRing::RING, Global).into());
+        let max_ideal_gen = slot_ring.inclusion().map(slot_ring.base_ring().coerce(&ZZ, p));
+        let slot_ring = AsLocalPIR::from(AsLocalPIRBase::promise_is_local_pir(slot_ring, max_ideal_gen, Some(e)));
 
         let mut result = HypercubeIsomorphism {
             d: d,
@@ -292,6 +677,8 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
             slot_unit_vec: ring.zero()
         };
 
+        println!("computing slot unit vector...");
+        let start = Instant::now();
         // nonzero in the first slot and zero in all others
         let unnormalized_slot_unit_vector = ring.prod(result.slot_iter(|idxs| if idxs.iter().all(|x| *x == 0) {
             None
@@ -300,7 +687,11 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
         })
             .filter_map(|x| x)
             .map(|s| ring.apply_galois_action(s, ring.clone_el(&irred_factor))));
+        let end = Instant::now();
+        println!("done in {} ms", (end - start).as_millis());
 
+        println!("normalizing slot unit vector...");
+        let start = Instant::now();
         let normalization_factor = result.slot_ring().invert(&result.get_slot_values(&unnormalized_slot_unit_vector).next().unwrap()).unwrap();
         let normalization_factor_wrt_basis = result.slot_ring().wrt_canonical_basis(&normalization_factor);
 
@@ -308,6 +699,8 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
             ring.from_canonical_basis((0..ring.rank()).map(|i| if i < normalization_factor_wrt_basis.len() { normalization_factor_wrt_basis.at(i) } else { ring.base_ring().zero() })),
             unnormalized_slot_unit_vector
         );
+        let end = Instant::now();
+        println!("done in {} ms", (end - start).as_millis());
 
         return result;
     }
@@ -315,11 +708,58 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
 
 impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
     where R: RingStore,
-        R::Type: ZnRing,
+        R::Type: StdZn,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone,
         CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>
 {
+    pub fn reduce_modulus<'b>(&self, new_ring: &'b CCFFTRingBase<R, F, A>) -> HypercubeIsomorphism<'b, R, F, A> {
+        assert_eq!(new_ring.n(), self.ring().n());
+        let t = int_cast(self.ring.base_ring().integer_ring().clone_el(self.ring.base_ring().modulus()), ZZ, self.ring.base_ring().integer_ring());
+        let (p, e) = is_prime_power(&ZZ, &t).unwrap();
+        let self_ring = self.ring();
+        let red_map = ReductionMap::new(self_ring.base_ring(), new_ring.base_ring()).unwrap();
+
+        let poly_ring = DensePolyRing::new(self.slot_ring().base_ring(), "X");
+        let slot_ring_modulus = self.slot_ring().generating_poly(&poly_ring, &poly_ring.base_ring().identity());
+        let mut new_slot_ring_modulus = SparseHashMapVector::new(self.slot_ring().rank(), new_ring.base_ring());
+        for (c, i) in poly_ring.terms(&slot_ring_modulus) {
+            if i != self.slot_ring().rank() {
+                *new_slot_ring_modulus.at_mut(i) = new_ring.base_ring().negate(red_map.map_ref(c));
+            }
+        }
+
+        let max_log2_len = ZZ.abs_log2_ceil(&(self.slot_ring().rank() as i64)).unwrap() + 1;
+        let slot_ring = FreeAlgebraImpl::new_with(new_ring.base_ring(), self.slot_ring().rank(), new_slot_ring_modulus, new_ring.allocator().clone(), FFTRNSBasedConvolution::new_with(max_log2_len, BigIntRing::RING, Global).into());
+        let max_ideal_gen = slot_ring.inclusion().map(slot_ring.base_ring().coerce(&ZZ, p));
+        let slot_ring = AsLocalPIR::from(AsLocalPIRBase::promise_is_local_pir(slot_ring, max_ideal_gen, Some(e)));
+
+        let slot_unit_vec = new_ring.from_canonical_basis(self_ring.wrt_canonical_basis(&self.slot_unit_vec).into_iter().map(|x| red_map.map(x)));
+
+        return HypercubeIsomorphism {
+            d: self.d,
+            dims: self.dims.clone(),
+            galois_group_ring: self.galois_group_ring.clone(),
+            ring: new_ring,
+            slot_unit_vec: slot_unit_vec,
+            slot_ring: slot_ring
+        };
+    }
+
+    pub fn save(&self, filename: &str) {
+        self.with_serializable(|data|
+            serde_json::to_writer_pretty(
+                BufWriter::new(File::create(filename).unwrap()), 
+                &data
+            ).unwrap()
+        );
+    }
+
+    pub fn load(filename: &str, ring: &'a CCFFTRingBase<R, F, A>) -> Self {
+        let mut deserializer = serde_json::Deserializer::from_reader(BufReader::new(File::open(filename).unwrap()));
+        return <_ as DeserializeSeed>::deserialize(ring, &mut deserializer).unwrap().into();
+    }
+
     pub fn len(&self, dim_index: usize) -> usize {
         self.dims[dim_index].length
     }
@@ -360,24 +800,31 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
         (0..self.slot_count()).map(move |_| it.next().unwrap())
     }
 
-    pub fn from_slot_vec<'b, I>(&self, vec: I) -> El<CCFFTRing<R, F, A>>
-        where I: ExactSizeIterator<Item = El<SlotRing<'b, R, A>>>,
-            R: 'b,
-            'a: 'b
+    pub fn from_slot_vec<I>(&self, vec: I) -> El<CCFFTRing<R, F, A>>
+        where I: ExactSizeIterator<Item = El<SlotRing<'a, R, A>>>
     {
         assert_eq!(vec.len(), self.ring.rank() / self.d);
-        let mut move_to_slot_gens = self.slot_iter(|idxs| self.galois_group_mulrepr().prod(idxs.iter().enumerate().map(|(j, e)| self.shift_galois_element(j, *e as i64))));
-        // currently only a "slow" O(n^2) algorithm, but we only have to run it during preprocessing;
-        // maybe use an FFT later?
-        <_ as RingBase>::sum(self.ring, vec.map(|x| {
-            let s = move_to_slot_gens.next().unwrap();
-            let x_wrt_basis = self.slot_ring().wrt_canonical_basis(&x);
-            let lift_of_x = self.ring.from_canonical_basis((0..self.ring.rank()).map(|i| if i < x_wrt_basis.len() { x_wrt_basis.at(i) } else { self.ring.base_ring().zero() }));
-            self.ring.apply_galois_action(
-                s,
-                self.ring.mul_ref_fst(&self.slot_unit_vec, lift_of_x)
-            )
-        }))
+        let move_to_slot_gens = self.slot_iter(|idxs| self.galois_group_mulrepr().prod(idxs.iter().enumerate().map(|(j, e)| self.shift_galois_element(j, *e as i64))));
+        
+        let CC = Complex64::RING;
+        let mut sum = (0..self.ring.rank()).map(|_| CC.zero()).collect::<Vec<_>>();
+        let mut tmp1 = (0..self.ring.rank()).map(|_| CC.zero()).collect::<Vec<_>>();
+        let mut tmp2 = (0..self.ring.rank()).map(|_| CC.zero()).collect::<Vec<_>>();
+        for (s, x) in move_to_slot_gens.zip(vec) {
+            if !self.slot_ring().is_zero(&x) {
+                let x_wrt_basis = self.slot_ring().wrt_canonical_basis(&x);
+                let mut lift_of_x = self.ring.from_canonical_basis((0..self.ring.rank()).map(|i| if i < x_wrt_basis.len() { x_wrt_basis.at(i) } else { self.ring.base_ring().zero() }));
+                self.ring.mul_assign_ref(&mut lift_of_x, &self.slot_unit_vec);
+                self.ring.generalized_fft().fft_forward(self.ring.data(&lift_of_x), &mut tmp1, self.ring.base_ring().get_ring());
+                self.ring.generalized_fft().permute_galois_action(&tmp1, &mut tmp2, s);
+                for i in 0..self.ring.rank() {
+                    CC.add_assign(&mut sum[i], tmp2[i]);
+                }
+            }
+        }
+        let mut result = self.ring.zero();
+        self.ring.generalized_fft().fft_backward(&mut sum, self.ring.data_mut(&mut result), self.ring.base_ring().get_ring());
+        return result;
     }
 
     pub fn get_slot_values<'b>(&'b self, el: &'b El<CCFFTRing<R, F, A>>) -> impl 'b + ExactSizeIterator<Item = El<SlotRing<'a, R, A>>> {

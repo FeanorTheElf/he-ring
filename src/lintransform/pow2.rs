@@ -1,20 +1,19 @@
-
+use std::time::Instant;
 use std::alloc::Allocator;
 
 use feanor_math::algorithms::unity_root::is_prim_root_of_unity;
-use feanor_math::homomorphism::CanHomFrom;
 use feanor_math::homomorphism::Homomorphism;
 use feanor_math::integer::IntegerRingStore;
 use feanor_math::ring::*;
 use feanor_math::rings::extension::*;
 use feanor_math::rings::zn::zn_64::*;
 use feanor_math::rings::zn::*;
-use feanor_math::rings::extension::galois_field::GaloisFieldDyn;
 use feanor_math::assert_el_eq;
 
 use crate::complexfft::automorphism::*;
 use crate::complexfft::complex_fft_ring::*;
 use crate::cyclotomic::*;
+use crate::StdZn;
 use super::*;
 
 ///
@@ -49,7 +48,7 @@ use super::*;
 /// 
 fn pow2_bitreversed_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'b, R, F, A>, dim_index: usize, l: usize, root_of_unity_4l: El<SlotRing<'b, R, A>>, row_autos: G) -> LinearTransform<R, F, A>
     where R: RingStore,
-        R::Type: ZnRing + CanHomFrom<<<<GaloisFieldDyn as RingStore>::Type as RingExtension>::BaseRing as RingStore>::Type>,
+        R::Type: StdZn,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone,
         CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>,
@@ -66,16 +65,15 @@ fn pow2_bitreversed_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'b, R
     let l = l;
     assert!(l > 1);
     assert!(m % l == 0);
-    let zeta = root_of_unity_4l;
-    assert_el_eq!(H.slot_ring(), &H.slot_ring().neg_one(), &H.slot_ring().pow(H.slot_ring().clone_el(&zeta), 2 * l));
+    let zeta_power_table = PowerTable::new(H.slot_ring(), root_of_unity_4l, 4 * l);
 
     enum TwiddleFactor {
         Zero, PosPowerZeta(ZnEl), NegPowerZeta(ZnEl)
     }
 
     let pow_of_zeta = |factor: TwiddleFactor| match factor {
-        TwiddleFactor::PosPowerZeta(pow) => H.slot_ring().pow(H.slot_ring().clone_el(&zeta), H.galois_group_mulrepr().smallest_positive_lift(pow) as usize),
-        TwiddleFactor::NegPowerZeta(pow) => H.slot_ring().negate(H.slot_ring().pow(H.slot_ring().clone_el(&zeta), H.galois_group_mulrepr().smallest_positive_lift(pow) as usize)),
+        TwiddleFactor::PosPowerZeta(pow) => H.slot_ring().clone_el(&zeta_power_table.get_power(H.galois_group_mulrepr().smallest_positive_lift(pow))),
+        TwiddleFactor::NegPowerZeta(pow) => H.slot_ring().negate(H.slot_ring().clone_el(&zeta_power_table.get_power(H.galois_group_mulrepr().smallest_positive_lift(pow)))),
         TwiddleFactor::Zero => H.slot_ring().zero()
     };
 
@@ -137,7 +135,7 @@ fn pow2_bitreversed_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'b, R
 /// 
 fn pow2_bitreversed_inv_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'b, R, F, A>, dim_index: usize, l: usize, root_of_unity_4l: El<SlotRing<'b, R, A>>, row_autos: G) -> LinearTransform<R, F, A>
     where R: RingStore,
-        R::Type: ZnRing + CanHomFrom<<<<GaloisFieldDyn as RingStore>::Type as RingExtension>::BaseRing as RingStore>::Type>,
+        R::Type: StdZn,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone,
         CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>,
@@ -154,16 +152,15 @@ fn pow2_bitreversed_inv_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'
     let l = l;
     assert!(l > 1);
     assert!(m % l == 0);
-    let zeta = root_of_unity_4l;
-    assert_el_eq!(H.slot_ring(), &H.slot_ring().neg_one(), &H.slot_ring().pow(H.slot_ring().clone_el(&zeta), 2 * l));
+    let zeta_power_table = PowerTable::new(H.slot_ring(), root_of_unity_4l, 4 * l);
 
     enum TwiddleFactor {
         Zero, PosPowerZeta(ZnEl), NegPowerZeta(ZnEl)
     }
 
     let pow_of_zeta = |factor: TwiddleFactor| match factor {
-        TwiddleFactor::PosPowerZeta(pow) => H.slot_ring().pow(H.slot_ring().clone_el(&zeta), H.galois_group_mulrepr().smallest_positive_lift(pow) as usize),
-        TwiddleFactor::NegPowerZeta(pow) => H.slot_ring().negate(H.slot_ring().pow(H.slot_ring().clone_el(&zeta), H.galois_group_mulrepr().smallest_positive_lift(pow) as usize)),
+        TwiddleFactor::PosPowerZeta(pow) => H.slot_ring().clone_el(&zeta_power_table.get_power(H.galois_group_mulrepr().smallest_positive_lift(pow))),
+        TwiddleFactor::NegPowerZeta(pow) => H.slot_ring().negate(H.slot_ring().clone_el(&zeta_power_table.get_power(H.galois_group_mulrepr().smallest_positive_lift(pow)))),
         TwiddleFactor::Zero => H.slot_ring().zero()
     };
 
@@ -223,7 +220,7 @@ fn pow2_bitreversed_inv_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'
     };
     result.optimize(&H);
     #[cfg(debug_assertions)] {
-        let expected = pow2_bitreversed_dwt_butterfly(H, dim_index, l, zeta, row_autos).inverse(&H);
+        let expected = pow2_bitreversed_dwt_butterfly(H, dim_index, l, H.slot_ring().clone_el(&zeta_power_table.get_power(1)), row_autos).inverse(&H);
         
         for (d, c, _) in &expected.data {
             println!("{}, {}", H.galois_group_mulrepr().format(d), H.ring().format(c));
@@ -253,7 +250,7 @@ fn pow2_bitreversed_inv_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'
 /// 
 fn pow2_bitreversed_dwt<R, F, A, G>(H: &HypercubeIsomorphism<R, F, A>, dim_index: usize, row_autos: G) -> Vec<LinearTransform<R, F, A>>
     where R: RingStore,
-        R::Type: ZnRing + CanHomFrom<<<<GaloisFieldDyn as RingStore>::Type as RingExtension>::BaseRing as RingStore>::Type>,
+        R::Type: StdZn,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone,
         CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>,
@@ -265,6 +262,7 @@ fn pow2_bitreversed_dwt<R, F, A, G>(H: &HypercubeIsomorphism<R, F, A>, dim_index
     assert!((H.ring().n() / m) % 4 == 0, "pow2_bitreversed_dwt() only possible if there is a 4m-th primitive root of unity");
 
     let zeta = H.slot_ring().pow(H.slot_ring().canonical_gen(), H.ring().n() / m / 4);
+
     debug_assert!(is_prim_root_of_unity(H.slot_ring(), &H.slot_ring().canonical_gen(), H.ring().n()));
     debug_assert!(is_prim_root_of_unity(H.slot_ring(), &zeta, 4 * m));
 
@@ -287,7 +285,7 @@ fn pow2_bitreversed_dwt<R, F, A, G>(H: &HypercubeIsomorphism<R, F, A>, dim_index
 /// 
 fn pow2_bitreversed_inv_dwt<R, F, A, G>(H: &HypercubeIsomorphism<R, F, A>, dim_index: usize, row_autos: G) -> Vec<LinearTransform<R, F, A>>
     where R: RingStore,
-        R::Type: ZnRing + CanHomFrom<<<<GaloisFieldDyn as RingStore>::Type as RingExtension>::BaseRing as RingStore>::Type>,
+        R::Type: StdZn,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone,
         CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>,
@@ -329,7 +327,7 @@ fn pow2_bitreversed_inv_dwt<R, F, A, G>(H: &HypercubeIsomorphism<R, F, A>, dim_i
 /// 
 pub fn pow2_slots_to_coeffs_thin<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> Vec<LinearTransform<R, F, A>>
     where R: RingStore,
-        R::Type: ZnRing + CanHomFrom<<<<GaloisFieldDyn as RingStore>::Type as RingExtension>::BaseRing as RingStore>::Type>,
+        R::Type: StdZn,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone,
         CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>
@@ -388,7 +386,7 @@ pub fn pow2_slots_to_coeffs_thin<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> 
 /// 
 pub fn pow2_coeffs_to_slots_thin<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> Vec<LinearTransform<R, F, A>>
     where R: RingStore,
-        R::Type: ZnRing + CanHomFrom<<<<GaloisFieldDyn as RingStore>::Type as RingExtension>::BaseRing as RingStore>::Type>,
+        R::Type: StdZn,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone,
         CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>

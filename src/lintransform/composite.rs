@@ -2,20 +2,20 @@ use std::alloc::Allocator;
 
 use feanor_math::homomorphism::*;
 use feanor_math::ring::*;
-use feanor_math::rings::extension::galois_field::GaloisFieldDyn;
 use feanor_math::rings::zn::zn_64::*;
 use feanor_math::rings::zn::*;
 use feanor_math::rings::extension::FreeAlgebraStore;
-use feanor_math::primitive_int::StaticRing;
+use feanor_math::primitive_int::*;
 
 use crate::complexfft::automorphism::*;
 use crate::complexfft::complex_fft_ring::*;
 use crate::cyclotomic::*;
+use crate::StdZn;
 use super::LinearTransform;
 
 fn column_dwt<R, F, A, G>(H: &HypercubeIsomorphism<R, F, A>, dim_index: usize, row_autos: G) -> Vec<LinearTransform<R, F, A>>
     where R: RingStore,
-        R::Type: ZnRing + CanHomFrom<<<<GaloisFieldDyn as RingStore>::Type as RingExtension>::BaseRing as RingStore>::Type>,
+        R::Type: StdZn,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone,
         CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>,
@@ -162,7 +162,7 @@ fn column_dwt<R, F, A, G>(H: &HypercubeIsomorphism<R, F, A>, dim_index: usize, r
 /// 
 pub fn odd_slots_to_powcoeffs_thin<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> Vec<LinearTransform<R, F, A>>
     where R: RingStore,
-        R::Type: ZnRing + CanHomFrom<<<<GaloisFieldDyn as RingStore>::Type as RingExtension>::BaseRing as RingStore>::Type>,
+        R::Type: StdZn,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone,
         CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>

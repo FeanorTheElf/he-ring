@@ -14,6 +14,12 @@ use feanor_math::rings::poly::dense_poly::DensePolyRing;
 use feanor_math::rings::zn::*;
 use feanor_math::homomorphism::*;
 use feanor_math::seq::*;
+use feanor_math::serialization::DeserializeWithRing;
+use feanor_math::serialization::SerializableElementRing;
+use feanor_math::serialization::SerializeWithRing;
+use serde::de;
+use serde::Deserializer;
+use serde::Serializer;
 
 const CC: Complex64 = Complex64::RING;
 
@@ -161,6 +167,14 @@ impl<R, F, A> CCFFTRingBase<R, F, A>
 
     pub fn allocator(&self) -> &A {
         &self.allocator
+    }
+
+    pub(super) fn data_mut<'a>(&self, el: &'a mut <Self as RingBase>::Element) -> &'a mut [El<R>] {
+        &mut el[..]
+    }
+
+    pub(super) fn data<'a>(&self, el: &'a <Self as RingBase>::Element) -> &'a [El<R>] {
+        &el[..]
     }
 }
 
@@ -386,6 +400,32 @@ impl<R, F, A> FiniteRing for CCFFTRingBase<R, F, A>
     }
 }
 
+impl<R, F, A> SerializableElementRing for CCFFTRingBase<R, F, A>
+    where R: RingStore,
+        R::Type: ZnRing + SerializableElementRing,
+        F: RingDecompositionSelfIso<R::Type>,
+        A: Allocator + Clone
+{
+    fn serialize<S>(&self, el: &Self::Element, serializer: S) -> Result<S::Ok, S::Error>
+        where S: Serializer
+    {
+        feanor_math::serialization::serialize_seq_helper(serializer, el.iter().map(|x| SerializeWithRing::new(x, self.base_ring())))
+    }
+
+    fn deserialize<'de, D>(&self, deserializer: D) -> Result<Self::Element, D::Error>
+        where D: Deserializer<'de> 
+    {
+        let mut result = Vec::with_capacity_in(self.rank(), self.allocator.clone());
+        feanor_math::serialization::deserialize_seq_helper(deserializer, |x| {
+            result.push(x);
+        }, DeserializeWithRing::new(self.base_ring()));
+        if result.len() != self.rank() {
+            return Err(de::Error::custom(format!("expected {} elements, got {}", self.rank(), result.len())));
+        }
+        return Ok(result);
+    }
+}
+
 impl<R, F, A> FreeAlgebra for CCFFTRingBase<R, F, A>
     where R: RingStore,
         R::Type: ZnRing,
@@ -407,6 +447,15 @@ impl<R, F, A> FreeAlgebra for CCFFTRingBase<R, F, A>
 
     fn wrt_canonical_basis<'a>(&'a self, el: &'a Self::Element) -> Self::VectorRepresentation<'a> {
         (&el[..]).into_fn(CloneRingEl(self.base_ring()))
+    }
+
+    fn from_canonical_basis<V>(&self, vec: V) -> Self::Element
+        where V: ExactSizeIterator + DoubleEndedIterator + Iterator<Item = El<Self::BaseRing>>
+    {
+        assert_eq!(self.rank(), vec.len());
+        let mut result = Vec::with_capacity_in(self.rank(), self.allocator.clone());
+        result.extend(vec);
+        return result;
     }
 }
 

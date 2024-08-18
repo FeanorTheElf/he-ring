@@ -6,6 +6,7 @@ use std::ops::Range;
 use feanor_math::algorithms::eea::signed_gcd;
 use feanor_math::assert_el_eq;
 use feanor_math::divisibility::DivisibilityRingStore;
+use feanor_math::homomorphism::CanHomFrom;
 use feanor_math::iters::multi_cartesian_product;
 use feanor_math::matrix::OwnedMatrix;
 use feanor_math::primitive_int::*;
@@ -19,6 +20,7 @@ use feanor_math::algorithms::linsolve::LinSolveRing;
 use crate::complexfft::automorphism::*;
 use crate::complexfft::complex_fft_ring::*;
 use crate::cyclotomic::*;
+use crate::StdZn;
 
 pub mod pow2;
 pub mod composite;
@@ -27,7 +29,7 @@ const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
 
 pub struct LinearTransform<R, F, A>
     where R: RingStore,
-        R::Type: ZnRing,
+        R::Type: StdZn,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone,
         CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>
@@ -37,7 +39,7 @@ pub struct LinearTransform<R, F, A>
 
 impl<R, F, A> LinearTransform<R, F, A>
     where R: RingStore,
-        R::Type: ZnRing,
+        R::Type: StdZn,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone,
         CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>
@@ -117,7 +119,7 @@ impl<R, F, A> LinearTransform<R, F, A>
         #[cfg(test)] {
             let sol = Submatrix::<AsFirstElement<_>, _>::new(&result, matrix.col_count(), 1);
             let mut check: OwnedMatrix<_> = OwnedMatrix::zero(matrix.row_count(), 1, H.ring());
-            STANDARD_MATMUL.matmul(TransposableSubmatrix::from(matrix.data()), TransposableSubmatrix::from(sol), TransposableSubmatrixMut::from(check.data_mut()), H.ring().get_ring());
+            STANDARD_MATMUL.matmul(TransposableSubmatrix::from(matrix.data()), TransposableSubmatrix::from(sol), TransposableSubmatrixMut::from(check.data_mut()), H.ring());
             assert!(H.ring().is_one(check.at(0, 0)));
             for i in 1..matrix.row_count() {
                 assert!(H.ring().is_zero(check.at(i, 0)));
@@ -194,7 +196,7 @@ impl<R, F, A> LinearTransform<R, F, A>
 
 impl<R, F, A> CCFFTRingBase<R, F, A> 
     where R: RingStore,
-        R::Type: ZnRing,
+        R::Type: StdZn,
         F: RingDecompositionSelfIso<R::Type> + CyclotomicRingDecomposition<R::Type>,
         A: Allocator + Clone,
         CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>
@@ -206,7 +208,7 @@ impl<R, F, A> CCFFTRingBase<R, F, A>
 
 pub struct CompiledLinearTransform<R, F, A>
     where R: RingStore,
-        R::Type: ZnRing,
+        R::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone,
         CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>
@@ -228,7 +230,7 @@ pub struct BabyStepGiantStepParams {
 
 impl<R, F, A> CompiledLinearTransform<R, F, A>
     where R: RingStore,
-        R::Type: ZnRing,
+        R::Type: StdZn,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone,
         CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>

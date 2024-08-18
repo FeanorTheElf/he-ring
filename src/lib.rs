@@ -12,6 +12,21 @@
 
 #![doc = include_str!("../Readme.md")]
 
+use std::cell::RefCell;
+
+use feanor_math::integer::BigIntRingBase;
+use feanor_math::primitive_int::StaticRing;
+use feanor_math::primitive_int::StaticRingBase;
+use feanor_math::ring::*;
+use feanor_math::homomorphism::*;
+use feanor_math::rings::extension::galois_field::GaloisFieldDyn;
+use feanor_math::rings::local::AsLocalPIRBase;
+use feanor_math::rings::zn::zn_64;
+use feanor_math::rings::zn::zn_64::Zn;
+use feanor_math::rings::zn::ZnRingStore;
+use feanor_math::rings::zn::{FromModulusCreateableZnRing, ZnRing};
+use feanor_math::serialization::SerializableElementRing;
+
 #[macro_export]
 macro_rules! ring_literal {
     ($ring:expr, $iter:expr) => {
@@ -25,6 +40,25 @@ macro_rules! ring_literal {
 
 extern crate feanor_math;
 extern crate test;
+
+pub trait StdZn: ZnRing 
+    + FromModulusCreateableZnRing 
+    + CanHomFrom<<<<GaloisFieldDyn as RingStore>::Type as RingExtension>::BaseRing as RingStore>::Type> 
+    + CanHomFrom<AsLocalPIRBase<zn_64::Zn>>
+    + CanHomFrom<StaticRingBase<i64>>
+    + CanHomFrom<BigIntRingBase>
+    + SerializableElementRing
+{}
+
+impl<R> StdZn for R
+    where R: ZnRing 
+    + FromModulusCreateableZnRing 
+    + CanHomFrom<<<<GaloisFieldDyn as RingStore>::Type as RingExtension>::BaseRing as RingStore>::Type> 
+    + CanHomFrom<AsLocalPIRBase<zn_64::Zn>>
+    + CanHomFrom<StaticRingBase<i64>>
+    + CanHomFrom<BigIntRingBase>
+    + SerializableElementRing
+{}
 
 #[macro_use]
 pub mod profiling;
