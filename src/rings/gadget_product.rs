@@ -16,6 +16,7 @@ use std::marker::PhantomData;
 
 use super::double_rns_ring::*;
 use crate::rnsconv::*;
+use crate::rings::decomposition::*;
 
 // don't use the matrix one here, as in our case, one dimension is very small (e.g. 3), and the matrix
 // version pads to multiples of 16
@@ -123,7 +124,7 @@ impl<F, A> DoubleRNSRingBase<Zn, F, A>
             result.push(part);
             for k in 0..output_moduli_count {
                 let ring_i = self.rns_base().len() - output_moduli_count + k;
-                self.generalized_fft().at(ring_i).fft_forward(&mut result.last_mut().unwrap()[(k * self.rank())..((k + 1) * self.rank())], self.rns_base().at(ring_i).get_ring());
+                self.ring_decompositions().at(ring_i).fft_forward(&mut result.last_mut().unwrap()[(k * self.rank())..((k + 1) * self.rank())], self.rns_base().at(ring_i).get_ring());
             }
         }
         return result;
@@ -170,7 +171,7 @@ impl<F, A> DoubleRNSRingBase<Zn, F, A>
                 let mut data = Vec::with_capacity_in(self.rns_base().len(), self.allocator().clone());
                 for part in self.gadget_decompose(el, self.rns_base().len()).into_iter() {
                     data.push(DoubleRNSEl {
-                        generalized_fft: PhantomData,
+                        ring_decompositions: PhantomData,
                         allocator: PhantomData,
                         data: part
                     })
@@ -329,7 +330,7 @@ impl<F, A> DoubleRNSRingBase<Zn, F, A>
                 });
                 timed!("gadget_product_lkss::ffts", || {
                     for k in 0..output_moduli_count {
-                        self.generalized_fft()[self.rns_base().len() - output_moduli_count + k].fft_backward(&mut summand[(k * self.rank())..((k + 1) * self.rank())], shortened_rns_base.at(k).get_ring());
+                        self.ring_decompositions()[self.rns_base().len() - output_moduli_count + k].fft_backward(&mut summand[(k * self.rank())..((k + 1) * self.rank())], shortened_rns_base.at(k).get_ring());
                     }
                 });
                 timed!("gadget_product_lkss::lifting", || {
@@ -361,7 +362,7 @@ impl<F, A> DoubleRNSRingBase<Zn, F, A>
 }
 
 #[cfg(test)]
-use crate::doublerns::pow2_cyclotomic::*;
+use crate::rings::pow2_cyclotomic::*;
 #[cfg(test)]
 use crate::profiling::print_all_timings;
 #[cfg(test)]

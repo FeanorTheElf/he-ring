@@ -1,5 +1,4 @@
 use cooley_tuckey::bitreverse;
-use feanor_math::algorithms::fft::complex_fft::FFTErrorEstimate;
 use feanor_math::algorithms;
 use feanor_math::algorithms::fft::*;
 use feanor_math::primitive_int::StaticRing;
@@ -7,7 +6,6 @@ use feanor_math::ring::*;
 use feanor_math::assert_el_eq;
 use feanor_math::homomorphism::*;
 use feanor_math::integer::*;
-use feanor_math::rings::float_complex::Complex64Base;
 use feanor_math::rings::zn::zn_64;
 use feanor_math::rings::zn::zn_64::ZnEl;
 use feanor_math::seq::*;
@@ -17,10 +15,9 @@ use feanor_math::rings::zn::zn_64::Zn;
 
 use std::alloc::Allocator;
 
-use crate::complexfft;
 use crate::cyclotomic::*;
-use super::automorphism::CyclotomicRingDecomposition;
 use super::double_rns_ring::*;
+use crate::rings::decomposition::*;
 
 ///
 /// [`GeneralizedFFT`] corresponding to the evaluation at all primitive `2n`-th roots of unity,
@@ -42,7 +39,7 @@ use super::double_rns_ring::*;
 pub struct Pow2CyclotomicFFT<R, F> 
     where R: RingStore,
         R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
-        F: FFTAlgorithm<R::Type>
+        F: FFTAlgorithm<R::Type> + PartialEq
 {
     fft_table: F,
     twiddles: Vec<El<R>>,
@@ -53,7 +50,7 @@ pub struct Pow2CyclotomicFFT<R, F>
 impl<R, F> Pow2CyclotomicFFT<R, F> 
     where R: RingStore,
         R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
-        F: FFTAlgorithm<R::Type>
+        F: FFTAlgorithm<R::Type> + PartialEq
 {
     pub fn create(ring: R, fft_table: F, root_of_unity: El<R>) -> Self {
         let rank = fft_table.len() as i64;
@@ -79,8 +76,12 @@ impl<R, F> Pow2CyclotomicFFT<R, F>
 impl<R, F> RingDecomposition<R::Type> for Pow2CyclotomicFFT<R, F> 
     where R: RingStore,
         R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
-        F: FFTAlgorithm<R::Type>
+        F: FFTAlgorithm<R::Type> + PartialEq
 {
+    fn expansion_factor(&self) -> i64 {
+        self.rank() as i64
+    }
+
     fn fft_backward(&self, data: &mut [El<R>], ring: &R::Type) {
         assert!(ring == self.ring.get_ring());
         self.fft_table.unordered_inv_fft(&mut data[..], ring);
@@ -102,36 +103,40 @@ impl<R, F> RingDecomposition<R::Type> for Pow2CyclotomicFFT<R, F>
     }
 }
 
-impl<R1, R2, F1, F2> SameNumberRing<R1::Type, R2::Type, Pow2CyclotomicFFT<R2, F2>> for Pow2CyclotomicFFT<R1, F1>
+impl<R1, R2, F1, F2> IsomorphismInfo<R1::Type, R2::Type, Pow2CyclotomicFFT<R2, F2>> for Pow2CyclotomicFFT<R1, F1>
     where R1: RingStore,
         R1::Type: ZnRing + CanHomFrom<BigIntRingBase>,
-        F1: FFTAlgorithm<R1::Type>,
+        F1: FFTAlgorithm<R1::Type> + PartialEq + PartialEq<F2>,
         R2: RingStore,
-        R2::Type: ZnRing + CanHomFrom<BigIntRingBase>,
-        F2: FFTAlgorithm<R2::Type>
+        R2::Type: ZnRing + CanHomFrom<BigIntRingBase> + PartialEq<R1::Type>,
+        F2: FFTAlgorithm<R2::Type> + PartialEq
 {
-    fn is_isomorphic(&self, other: &Pow2CyclotomicFFT<R2, F2>) -> bool {
+    fn is_same_number_ring(&self, other: &Pow2CyclotomicFFT<R2, F2>) -> bool {
         self.rank() == other.rank()
+    }
+
+    fn is_exactly_same(&self, other: &Pow2CyclotomicFFT<R2, F2>) -> bool {
+        self.is_same_number_ring(other) && other.ring.get_ring() == self.ring.get_ring() && self.fft_table == other.fft_table
     }
 }
 
-impl<R1, R2, F1, F2> SameNumberRingCross<R2::Type, R1::Type, complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<R1, F1>> for Pow2CyclotomicFFT<R2, F2>
-    where R1: RingStore,
-        F1: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
-        R1::Type: ZnRing,
-        R2: RingStore,
-        R2::Type: ZnRing + CanHomFrom<BigIntRingBase>,
-        F2: FFTAlgorithm<R2::Type>
-{
-    fn is_isomorphic(&self, other: &complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<R1, F1>) -> bool {
-        self.rank() == <_ as complexfft::complex_fft_ring::RingDecomposition<_>>::rank(other)
-    }
-}
+// impl<R1, R2, F1, F2> SameNumberRingCross<R2::Type, R1::Type, complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<R1, F1>> for Pow2CyclotomicFFT<R2, F2>
+//     where R1: RingStore,
+//         F1: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
+//         R1::Type: ZnRing,
+//         R2: RingStore,
+//         R2::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+//         F2: FFTAlgorithm<R2::Type>
+// {
+//     fn is_isomorphic(&self, other: &complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<R1, F1>) -> bool {
+//         self.rank() == <_ as complexfft::complex_fft_ring::RingDecomposition<_>>::rank(other)
+//     }
+// }
 
 impl<R, F> CyclotomicRingDecomposition<R::Type> for Pow2CyclotomicFFT<R, F> 
     where R: RingStore,
         R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
-        F: FFTAlgorithm<R::Type>
+        F: FFTAlgorithm<R::Type> + PartialEq
 {
     fn permute_galois_action<S>(&self, src: &[<R::Type as RingBase>::Element], dst: &mut [<R::Type as RingBase>::Element], galois_element: ZnEl, ring: S)
         where S: RingStore<Type = R::Type>
@@ -158,7 +163,7 @@ impl<R, F> CyclotomicRingDecomposition<R::Type> for Pow2CyclotomicFFT<R, F>
 impl<R, F, A> CyclotomicRing for DoubleRNSRingBase<R, Pow2CyclotomicFFT<R, F>, A>
     where R: ZnRingStore,
         R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
-        F: FFTAlgorithm<R::Type>,
+        F: FFTAlgorithm<R::Type> + PartialEq,
         A: Allocator + Clone
 {
     fn n(&self) -> usize {
@@ -199,7 +204,7 @@ impl<R_main, R_twiddle, A> DoubleRNSRingBase<R_main, Pow2CyclotomicFFT<R_main, c
                 root_of_unity
             )
         }).collect();
-        RingValue::from(Self::from_generalized_ffts(
+        RingValue::from(Self::from_ring_decompositions(
             base_ring,
             ffts,
             allocator
@@ -236,7 +241,7 @@ impl<R, A> DoubleRNSRingBase<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckey
                 root_of_unity
             )
         }).collect();
-        RingValue::from(Self::from_generalized_ffts(
+        RingValue::from(Self::from_ring_decompositions(
             base_ring,
             ffts,
             allocator

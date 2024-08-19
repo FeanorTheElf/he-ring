@@ -1,31 +1,29 @@
 use std::alloc::{Allocator, Global};
 use std::collections::HashMap;
 
-use feanor_math::algorithms::fft::complex_fft::FFTErrorEstimate;
 use feanor_math::algorithms::{fft::*, self};
 use feanor_math::integer::IntegerRingStore;
 use feanor_math::integer::*;
-use feanor_math::rings::float_complex::Complex64Base;
 use feanor_math::rings::poly::*;
 use feanor_math::divisibility::DivisibilityRing;
-use feanor_math::primitive_int::{StaticRing, StaticRingBase};
+use feanor_math::primitive_int::*;
 use feanor_math::ring::*;
 use feanor_math::homomorphism::*;
 use feanor_math::rings::poly::sparse_poly::SparsePolyRing;
 use feanor_math::rings::zn::*;
 use feanor_math::seq::*;
 
-use crate::complexfft;
 use crate::complexfft::automorphism::euler_phi;
 use crate::cyclotomic::*;
-use crate::doublerns::double_rns_ring::*;
+use crate::rings::double_rns_ring::*;
+use crate::rings::decomposition::*;
 
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
 
 pub struct OddCyclotomicFFT<R, F, A = Global> 
     where R: RingStore,
         R::Type: ZnRing + CanHomFrom<BigIntRingBase> + DivisibilityRing,
-        F: FFTAlgorithm<R::Type>,
+        F: FFTAlgorithm<R::Type> + PartialEq,
         A: Allocator + Clone
 {
     ring: R,
@@ -39,7 +37,7 @@ pub struct OddCyclotomicFFT<R, F, A = Global>
 impl<R, F, A> OddCyclotomicFFT<R, F, A> 
     where R: RingStore,
         R::Type: ZnRing + CanHomFrom<BigIntRingBase> + DivisibilityRing,
-        F: FFTAlgorithm<R::Type>,
+        F: FFTAlgorithm<R::Type> + PartialEq,
         A: Allocator + Clone
 {
     fn create(ring: R, fft_table: F, allocator: A) -> Self {
@@ -63,7 +61,7 @@ impl<R, F, A> OddCyclotomicFFT<R, F, A>
 impl<R, F, A> OddCyclotomicFFT<R, F, A> 
     where R: RingStore,
         R::Type: ZnRing + CanHomFrom<BigIntRingBase> + DivisibilityRing,
-        F: FFTAlgorithm<R::Type>,
+        F: FFTAlgorithm<R::Type> + PartialEq,
         A: Allocator + Clone
 {
     fn fft_output_indices<'a>(&'a self) -> impl 'a + Iterator<Item = usize> {
@@ -84,9 +82,18 @@ impl<R, F, A> OddCyclotomicFFT<R, F, A>
 impl<R, F, A> RingDecomposition<R::Type> for OddCyclotomicFFT<R, F , A> 
     where R: RingStore,
         R::Type: ZnRing + CanHomFrom<BigIntRingBase> + DivisibilityRing,
-        F: FFTAlgorithm<R::Type>,
+        F: FFTAlgorithm<R::Type> + PartialEq,
         A: Allocator + Clone
 {
+    fn expansion_factor(&self) -> i64 {
+        // an overestimate, but at least simple:
+        // taking the complex DWT of `(a_i)` gives elements of size `n * max |a_i|`,
+        // after multiplying we are at elements of size `n^2 * max |a_i| * max |b_i|`
+        // and after the final DWT we have elements of size `n^3 * max |a_i| * max |b_i|`;
+        let complex_dwt_operator_norm = self.rank() as i64;
+        ZZ.pow(complex_dwt_operator_norm, 3)
+    }
+
     fn fft_backward(&self, data: &mut [El<R>], ring: &R::Type) {
         assert!(ring == self.ring.get_ring());
         let mut tmp = Vec::with_capacity_in(self.fft_table.len(), self.allocator.clone());
@@ -129,45 +136,49 @@ impl<R, F, A> RingDecomposition<R::Type> for OddCyclotomicFFT<R, F , A>
     }
 }
 
-impl<R1, R2, F1, F2, A1, A2> SameNumberRing<R2::Type, R1::Type, OddCyclotomicFFT<R1, F1, A1>> for OddCyclotomicFFT<R2, F2, A2>
+impl<R1, R2, F1, F2, A1, A2> IsomorphismInfo<R2::Type, R1::Type, OddCyclotomicFFT<R1, F1, A1>> for OddCyclotomicFFT<R2, F2, A2>
     where R1: RingStore,
-        R1::Type: ZnRing + CanHomFrom<BigIntRingBase> + DivisibilityRing,
-        F1: FFTAlgorithm<R1::Type>,
+        R1::Type: ZnRing + CanHomFrom<BigIntRingBase> + DivisibilityRing + PartialEq<R2::Type>,
+        F1: FFTAlgorithm<R1::Type> + PartialEq,
         R2: RingStore,
         R2::Type: ZnRing + CanHomFrom<BigIntRingBase> + DivisibilityRing,
-        F2: FFTAlgorithm<R2::Type>,
+        F2: FFTAlgorithm<R2::Type> + PartialEq + PartialEq<F1>,
         A1: Allocator + Clone,
         A2: Allocator + Clone
 {
-    fn is_isomorphic(&self, other: &OddCyclotomicFFT<R1, F1, A1>) -> bool {
+    fn is_same_number_ring(&self, other: &OddCyclotomicFFT<R1, F1, A1>) -> bool {
         self.fft_table.len() == other.fft_table.len()
+    }
+
+    fn is_exactly_same(&self, other: &OddCyclotomicFFT<R1, F1, A1>) -> bool {
+        self.is_same_number_ring(other) && other.ring.get_ring() == self.ring.get_ring() && self.fft_table == other.fft_table
     }
 }
 
-impl<R1, R2, F1, F2, A1, A2> SameNumberRingCross<R2::Type, R1::Type, complexfft::odd_cyclotomic::OddCyclotomicFFT<R1, F1, A1>> for OddCyclotomicFFT<R2, F2, A2>
-    where R1: RingStore,
-        R1::Type: ZnRing + CanHomFrom<StaticRingBase<i64>> + DivisibilityRing,
-        F1: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
-        R2: RingStore,
-        R2::Type: ZnRing + CanHomFrom<BigIntRingBase> + DivisibilityRing,
-        F2: FFTAlgorithm<R2::Type>,
-        A1: Allocator + Clone,
-        A2: Allocator + Clone
-{
-    fn is_isomorphic(&self, other: &complexfft::odd_cyclotomic::OddCyclotomicFFT<R1, F1, A1>) -> bool {
-        self.fft_table.len() == other.n()
-    }
-}
+// impl<R1, R2, F1, F2, A1, A2> SameNumberRingCross<R2::Type, R1::Type, complexfft::odd_cyclotomic::OddCyclotomicFFT<R1, F1, A1>> for OddCyclotomicFFT<R2, F2, A2>
+//     where R1: RingStore,
+//         R1::Type: ZnRing + CanHomFrom<StaticRingBase<i64>> + DivisibilityRing,
+//         F1: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
+//         R2: RingStore,
+//         R2::Type: ZnRing + CanHomFrom<BigIntRingBase> + DivisibilityRing,
+//         F2: FFTAlgorithm<R2::Type>,
+//         A1: Allocator + Clone,
+//         A2: Allocator + Clone
+// {
+//     fn is_isomorphic(&self, other: &complexfft::odd_cyclotomic::OddCyclotomicFFT<R1, F1, A1>) -> bool {
+//         self.fft_table.len() == other.n()
+//     }
+// }
 
 impl<R, F, A1, A2> CyclotomicRing for DoubleRNSRingBase<R, OddCyclotomicFFT<R, F, A1>, A2>
     where R: RingStore,
         R::Type: ZnRing + CanHomFrom<BigIntRingBase> + DivisibilityRing,
-        F: FFTAlgorithm<R::Type>,
+        F: FFTAlgorithm<R::Type> + PartialEq,
         A1: Allocator + Clone,
         A2: Allocator + Clone
 {
     fn n(&self) -> usize {
-        self.generalized_fft()[0].fft_table.len()
+        self.ring_decompositions()[0].fft_table.len()
     }
 }
 
@@ -190,7 +201,7 @@ impl<R_main, R_twiddle, A> DoubleRNSRingBase<R_main, OddCyclotomicFFT<R_main, bl
             )
         }).collect();
         RingValue::from(
-            Self::from_generalized_ffts(
+            Self::from_ring_decompositions(
                 base_ring,
                 ffts, 
                 allocator
@@ -217,7 +228,7 @@ impl<R, A> DoubleRNSRingBase<R, OddCyclotomicFFT<R, bluestein::BluesteinFFT<R::T
             )
         }).collect();
         RingValue::from(
-            Self::from_generalized_ffts(
+            Self::from_ring_decompositions(
                 base_ring,
                 ffts, 
                 allocator
@@ -272,7 +283,7 @@ impl<R_main, R_twiddle, A> DoubleRNSRingBase<
             ), allocator.clone())
         }).collect();
         RingValue::from(
-            Self::from_generalized_ffts(
+            Self::from_ring_decompositions(
                 base_ring,
                 ffts, 
                 allocator

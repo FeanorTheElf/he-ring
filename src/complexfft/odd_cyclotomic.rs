@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use feanor_math::algorithms::fft::*;
 use feanor_math::algorithms;
-use feanor_math::integer::int_cast;
+use feanor_math::integer::*;
 use feanor_math::rings::float_complex::Complex64Base;
 use feanor_math::rings::poly::*;
 use feanor_math::algorithms::fft::complex_fft::FFTErrorEstimate;
@@ -112,6 +112,8 @@ impl<R, F, A> OddCyclotomicFFT<R, F, A>
         let n_factorization = algorithms::int_factor::factor(&ZZ, fft_table.len() as i64);
         let rank = phi(&n_factorization) as usize;
 
+        let modulus = ring.integer_ring().to_float_approx(ring.modulus());
+        assert!(fft_table.expected_absolute_error(modulus * modulus, modulus * modulus * f64::EPSILON + fft_table.expected_absolute_error(modulus, 0.)) < 0.5);
         let poly_ring = SparsePolyRing::new(&ring, "X");
         let cyclotomic_poly = algorithms::cyclotomic::cyclotomic_polynomial(&poly_ring, fft_table.len());
         assert_eq!(poly_ring.degree(&cyclotomic_poly).unwrap(), rank);

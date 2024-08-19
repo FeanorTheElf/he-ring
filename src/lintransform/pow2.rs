@@ -1,4 +1,3 @@
-use std::time::Instant;
 use std::alloc::Allocator;
 
 use feanor_math::algorithms::unity_root::is_prim_root_of_unity;

@@ -1,9 +1,13 @@
 
+pub mod decomposition;
+
 ///
 /// Contains the main implementation [`double_rns_ring::DoubleRNSRing`], which implements most ring operations
-/// for any ring that supports conversion from and to double-RNS-representation (via [`double_rns_ring::GeneralizedFFT`]).
+/// for any ring that supports conversion from and to double-RNS-representation.
 ///  
 pub mod double_rns_ring;
+
+pub mod ntt_ring;
 
 ///
 /// Contains the [`double_rns_ring::GeneralizedFFT`] for power-of-two cyclotomics [`pow2_cyclotomic::Pow2CyclotomicFFT`].
@@ -19,5 +23,3 @@ pub mod gadget_product;
 /// Contains the [`double_rns_ring::GeneralizedFFT`] for odd-conductor cyclotomics [`odd_cyclotomic::OddCyclotomicFFT`].
 /// 
 pub mod odd_cyclotomic;
-
-pub mod automorphism;

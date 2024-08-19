@@ -13,63 +13,11 @@ use feanor_math::ring::*;
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
 use feanor_math::rings::zn::*;
 use feanor_math::homomorphism::*;
-use feanor_math::primitive_int::*;
 use feanor_math::seq::*;
 use feanor_math::rings::zn::zn_64::*;
 
-use crate::complexfft::complex_fft_ring;
+use crate::rings::decomposition::*;
 use crate::rnsconv::*;
-
-///
-/// A number ring `R` modulo a prime `p`, together with a way to compute the decomposition of 
-/// `R/pR` into prime fields `Fp`. This of course requires that the generating polynomial of `R`
-/// splits modulo `p`.
-/// 
-pub trait RingDecomposition<R: ?Sized + RingBase> {
-
-    ///
-    /// Rank of the ring `R`
-    /// 
-    fn rank(&self) -> usize;
-
-    ///
-    /// Computes the decomposition isomorphism
-    /// ```text
-    /// Z[X]/(f(X), p) -> Zp x ... x Zp,    g -> (g(x))_x where f(x) = 0
-    /// ```
-    /// For a more detailed explanation, see the trait-level doc [`RingDecomposition`].
-    /// 
-    fn fft_forward(&self, data: &mut [R::Element], ring: &R);
-
-    ///
-    /// Computes the inverse of [`RingDecomposition::fft_forward()`].
-    /// 
-    fn fft_backward(&self, data: &mut [R::Element], ring: &R);
-}
-
-///
-/// Used as a marker that indicates whether two [`RingDecomposition`]s are decompositions of the
-/// same number ring. Note that this explicitly should not compare the prime moduli `p`, nor the
-/// actual choice/ordering of the decomposition isomorphism.
-/// 
-pub trait SameNumberRing<R1: ?Sized + RingBase, R2: ?Sized + RingBase, F: RingDecomposition<R2>>: RingDecomposition<R1> {
-
-    fn is_isomorphic(&self, other: &F) -> bool;
-}
-
-///
-/// Used as a marker that indicates whether a [`RingDecomposition`]s and a [`complex_fft_ring::RingDecomposition`] 
-/// are decompositions of the same number ring. Note that this explicitly should not compare the prime moduli `p`, 
-/// nor the actual choice/ordering of the decomposition isomorphism.
-/// 
-pub trait SameNumberRingCross<R1: ?Sized + RingBase, R2: ?Sized + RingBase, F: complex_fft_ring::RingDecomposition<R2>>: RingDecomposition<R1> {
-
-    fn is_isomorphic(&self, other: &F) -> bool;
-}
-
-pub trait RingDecompositionSelfIso<R: ?Sized + RingBase>: Sized + SameNumberRing<R, R, Self> {}
-
-impl<R: ?Sized + RingBase, F: RingDecomposition<R> + SameNumberRing<R, R, F>> RingDecompositionSelfIso<R> for F {}
 
 ///
 /// The ring `R/qR` specified by a collection of [`RingDecomposition`] for all prime factors `p | q`. 
@@ -77,7 +25,7 @@ impl<R: ?Sized + RingBase, F: RingDecomposition<R> + SameNumberRing<R, R, F>> Ri
 /// 
 /// When necessary, it is also possible by using [`DoubleRNSRingBase::do_fft()`] and
 /// [`DoubleRNSRingBase::undo_fft()`] to work with ring elements not in double-RNS-representation,
-/// but note that arithmetic operations are not available for those.
+/// but note that multiplication is not available for those.
 /// 
 pub struct DoubleRNSRingBase<R, F, A = Global> 
     where R: ZnRingStore,
@@ -85,7 +33,7 @@ pub struct DoubleRNSRingBase<R, F, A = Global>
         F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
-    generalized_ffts: Vec<F>,
+    ring_decompositions: Vec<F>,
     scalar_ring: zn_rns::Zn<R, BigIntRing>,
     allocator: A
 }
@@ -98,7 +46,7 @@ pub struct DoubleRNSEl<R, F, A>
         F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
-    pub(super) generalized_fft: PhantomData<F>,
+    pub(super) ring_decompositions: PhantomData<F>,
     pub(super) allocator: PhantomData<A>,
     pub(super) data: Vec<El<R>, A>
 }
@@ -109,7 +57,7 @@ pub struct DoubleRNSNonFFTEl<R, F, A = Global>
         F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
-    generalized_fft: PhantomData<F>,
+    ring_decompositions: PhantomData<F>,
     allocator: PhantomData<A>,
     data: Vec<El<R>, A>
 }
@@ -120,18 +68,18 @@ impl<R, F, A> DoubleRNSRingBase<R, F, A>
         F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
-    pub fn from_generalized_ffts(rns_base: zn_rns::Zn<R, BigIntRing>, data: Vec<F>, allocator: A) -> Self {
-        assert!(data.len() > 0);
-        for i in 0..data.len() {
-            assert!(data[i].is_isomorphic(&data[0]));
-            assert_eq!(data[i].rank(), data[0].rank());
+    pub fn from_ring_decompositions(rns_base: zn_rns::Zn<R, BigIntRing>, ring_decompositions: Vec<F>, allocator: A) -> Self {
+        assert!(ring_decompositions.len() > 0);
+        for i in 0..ring_decompositions.len() {
+            assert!(ring_decompositions[i].is_same_number_ring(&ring_decompositions[0]));
+            assert_eq!(ring_decompositions[i].rank(), ring_decompositions[0].rank());
         }
         let scalar_ring = rns_base;
-        Self { generalized_ffts: data, allocator, scalar_ring }
+        Self { ring_decompositions, allocator, scalar_ring }
     }
 
-    pub fn generalized_fft(&self) -> &Vec<F> {
-        &self.generalized_ffts
+    pub fn ring_decompositions(&self) -> &Vec<F> {
+        &self.ring_decompositions
     }
 
     pub fn rns_base(&self) -> &zn_rns::ZnBase<R, BigIntRing> {
@@ -202,12 +150,12 @@ impl<R, F, A> DoubleRNSRingBase<R, F, A>
         assert_eq!(element.data.len(), self.element_len());
         timed!("undo_fft", || {
             for i in 0..self.rns_base().len() {
-                self.generalized_ffts[i].fft_backward(&mut element.data[(i * self.rank())..((i + 1) * self.rank())], self.rns_base().at(i).get_ring());
+                self.ring_decompositions[i].fft_backward(&mut element.data[(i * self.rank())..((i + 1) * self.rank())], self.rns_base().at(i).get_ring());
             }
         });
         DoubleRNSNonFFTEl {
             data: element.data,
-            generalized_fft: PhantomData,
+            ring_decompositions: PhantomData,
             allocator: PhantomData
         }
     }
@@ -219,7 +167,7 @@ impl<R, F, A> DoubleRNSRingBase<R, F, A>
     pub fn non_fft_zero(&self) -> DoubleRNSNonFFTEl<R, F, A> {
         DoubleRNSNonFFTEl {
             data: self.zero().data,
-            generalized_fft: PhantomData,
+            ring_decompositions: PhantomData,
             allocator: PhantomData
         }
     }
@@ -235,7 +183,7 @@ impl<R, F, A> DoubleRNSRingBase<R, F, A>
         }
         DoubleRNSNonFFTEl {
             data: result,
-            generalized_fft: PhantomData,
+            ring_decompositions: PhantomData,
             allocator: PhantomData
         }
     }
@@ -243,7 +191,7 @@ impl<R, F, A> DoubleRNSRingBase<R, F, A>
     pub fn galois_group_mulrepr(&self) -> Zn
         where F: CyclotomicRingDecomposition<R::Type>
     {
-        self.generalized_fft()[0].galois_group_mulrepr()
+        self.ring_decompositions()[0].galois_group_mulrepr()
     }
 
     pub fn apply_galois_action(&self, el: &<Self as RingBase>::Element, g: ZnEl) -> <Self as RingBase>::Element
@@ -251,7 +199,7 @@ impl<R, F, A> DoubleRNSRingBase<R, F, A>
     {
         let mut result = self.zero();
         for (i, Zp) in self.rns_base().as_iter().enumerate() {
-            self.generalized_fft()[i].permute_galois_action(
+            self.ring_decompositions()[i].permute_galois_action(
                 &el.data[(i * self.rank())..((i + 1) * self.rank())],
                 &mut result.data[(i * self.rank())..((i + 1) * self.rank())],
                 g,
@@ -265,12 +213,12 @@ impl<R, F, A> DoubleRNSRingBase<R, F, A>
         assert_eq!(element.data.len(), self.element_len());
         timed!("do_fft", || {
             for i in 0..self.rns_base().len() {
-                self.generalized_ffts[i].fft_forward(&mut element.data[(i * self.rank())..((i + 1) * self.rank())], self.rns_base().at(i).get_ring());
+                self.ring_decompositions[i].fft_forward(&mut element.data[(i * self.rank())..((i + 1) * self.rank())], self.rns_base().at(i).get_ring());
             }
         });
         DoubleRNSEl {
             data: element.data,
-            generalized_fft: PhantomData,
+            ring_decompositions: PhantomData,
             allocator: PhantomData
         }
     }
@@ -281,7 +229,7 @@ impl<R, F, A> DoubleRNSRingBase<R, F, A>
         el: &DoubleRNSNonFFTEl<R2, F2, A2>, 
         op: &Op
     ) -> DoubleRNSNonFFTEl<R, F, A> 
-        where F: SameNumberRing<R::Type, R2::Type, F2>,
+        where F: IsomorphismInfo<R::Type, R2::Type, F2>,
             // the constraings for DoubleRNSRingBase<R2, F2, A2> 
             R2: ZnRingStore<Type = R::Type>,
             R::Type: CanIsoFromTo<R2::Type> + SelfIso,
@@ -290,7 +238,7 @@ impl<R, F, A> DoubleRNSRingBase<R, F, A>
             // constraints for Op
             Op: RNSOperation<RingType = R::Type>
     {
-        assert!(self.generalized_fft()[0].is_isomorphic(&from.generalized_fft()[0]));
+        assert!(self.ring_decompositions()[0].is_same_number_ring(&from.ring_decompositions()[0]));
         debug_assert_eq!(self.rank(), from.rank());
         assert_eq!(self.rns_base().len(), op.output_rings().len());
         assert_eq!(from.rns_base().len(), op.input_rings().len());
@@ -308,63 +256,63 @@ impl<R, F, A> DoubleRNSRingBase<R, F, A>
         })
     }
 
-    pub fn exact_convert_from_cfft<F2, A2>(
-        &self, 
-        from: &complex_fft_ring::CCFFTRingBase<R, F2, A2>, 
-        element: &<complex_fft_ring::CCFFTRingBase<R, F2, A2> as RingBase>::Element
-    ) -> DoubleRNSNonFFTEl<R, F, A> 
-        where R: RingStore,
-            R::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>, 
-            F: SameNumberRingCross<R::Type, R::Type, F2>,
-            // the constraings for DoubleRNSRingBase<R::Type, F2, A2>
-            F2: complex_fft_ring::RingDecompositionSelfIso<R::Type>,
-            A2: Allocator + Clone
-    {
-        assert!(<_ as SameNumberRingCross<_, _, _>>::is_isomorphic(&self.generalized_fft()[0], &from.generalized_fft()));
-        debug_assert_eq!(self.rank(), from.rank());
+    // pub fn exact_convert_from_cfft<F2, A2>(
+    //     &self, 
+    //     from: &complex_fft_ring::CCFFTRingBase<R, F2, A2>, 
+    //     element: &<complex_fft_ring::CCFFTRingBase<R, F2, A2> as RingBase>::Element
+    // ) -> DoubleRNSNonFFTEl<R, F, A> 
+    //     where R: RingStore,
+    //         R::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>, 
+    //         F: SameNumberRingCross<R::Type, R::Type, F2>,
+    //         // the constraings for DoubleRNSRingBase<R::Type, F2, A2>
+    //         F2: complex_fft_ring::RingDecompositionSelfIso<R::Type>,
+    //         A2: Allocator + Clone
+    // {
+    //     assert!(<_ as SameNumberRingCross<_, _, _>>::is_isomorphic(&self.generalized_fft()[0], &from.generalized_fft()));
+    //     debug_assert_eq!(self.rank(), from.rank());
 
-        let mut result = self.non_fft_zero();
-        for j in 0..self.rank() {
-            let x = int_cast(from.base_ring().smallest_lift(from.base_ring().clone_el(&element[j])), &StaticRing::<i32>::RING, from.base_ring().integer_ring());
-            for i in 0..self.rns_base().len() {
-                result.data[j + i * self.rank()] = self.rns_base().at(i).int_hom().map(x);
-            }
-        }
-        return result;
-    }
+    //     let mut result = self.non_fft_zero();
+    //     for j in 0..self.rank() {
+    //         let x = int_cast(from.base_ring().smallest_lift(from.base_ring().clone_el(&element[j])), &StaticRing::<i32>::RING, from.base_ring().integer_ring());
+    //         for i in 0..self.rns_base().len() {
+    //             result.data[j + i * self.rank()] = self.rns_base().at(i).int_hom().map(x);
+    //         }
+    //     }
+    //     return result;
+    // }
 
-    pub fn perform_rns_op_to_cfft<F2, A2, Op>(
-        &self, 
-        to: &complex_fft_ring::CCFFTRingBase<R, F2, A2>, 
-        element: &DoubleRNSNonFFTEl<R, F, A>, 
-        op: &Op
-    ) -> <complex_fft_ring::CCFFTRingBase<R, F2, A2> as RingBase>::Element 
-        where R: RingStore,
-            R::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>, 
-            F: SameNumberRingCross<R::Type, R::Type, F2>,
-            R::Type: SelfIso,
-            // the constraings for DoubleRNSRingBase<R::Type, F2, A2>
-            F2: complex_fft_ring::RingDecompositionSelfIso<R::Type>,
-            A2: Allocator + Clone, 
-            Op: RNSOperation<RingType = R::Type>
-    {
-        assert!(<_ as SameNumberRingCross<_, _, _>>::is_isomorphic(&self.generalized_fft()[0], &to.generalized_fft()));
-        debug_assert_eq!(self.rank(), to.rank());
-        assert_eq!(self.rns_base().len(), op.input_rings().len());
-        assert_eq!(1, op.output_rings().len());
+    // pub fn perform_rns_op_to_cfft<F2, A2, Op>(
+    //     &self, 
+    //     to: &complex_fft_ring::CCFFTRingBase<R, F2, A2>, 
+    //     element: &DoubleRNSNonFFTEl<R, F, A>, 
+    //     op: &Op
+    // ) -> <complex_fft_ring::CCFFTRingBase<R, F2, A2> as RingBase>::Element 
+    //     where R: RingStore,
+    //         R::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>, 
+    //         F: SameNumberRingCross<R::Type, R::Type, F2>,
+    //         R::Type: SelfIso,
+    //         // the constraings for DoubleRNSRingBase<R::Type, F2, A2>
+    //         F2: complex_fft_ring::RingDecompositionSelfIso<R::Type>,
+    //         A2: Allocator + Clone, 
+    //         Op: RNSOperation<RingType = R::Type>
+    // {
+    //     assert!(<_ as SameNumberRingCross<_, _, _>>::is_isomorphic(&self.generalized_fft()[0], &to.generalized_fft()));
+    //     debug_assert_eq!(self.rank(), to.rank());
+    //     assert_eq!(self.rns_base().len(), op.input_rings().len());
+    //     assert_eq!(1, op.output_rings().len());
 
-        timed!("perform_rns_op_to_cfft", || {
-            for i in 0..self.rns_base().len() {
-                assert!(self.rns_base().at(i).get_ring() == op.input_rings().at(i).get_ring());
-            }
-            assert!(to.base_ring().get_ring() == op.output_rings().at(0).get_ring());
+    //     timed!("perform_rns_op_to_cfft", || {
+    //         for i in 0..self.rns_base().len() {
+    //             assert!(self.rns_base().at(i).get_ring() == op.input_rings().at(i).get_ring());
+    //         }
+    //         assert!(to.base_ring().get_ring() == op.output_rings().at(0).get_ring());
             
-            let mut result = to.zero();
-            let result_matrix = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut result, 1, to.rank());
-            op.apply(self.as_matrix(element), result_matrix);
-            return result;
-        })
-    }
+    //         let mut result = to.zero();
+    //         let result_matrix = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut result, 1, to.rank());
+    //         op.apply(self.as_matrix(element), result_matrix);
+    //         return result;
+    //     })
+    // }
 
     pub fn sample_from_coefficient_distribution<G: FnMut() -> i32>(&self, mut distribution: G) -> DoubleRNSNonFFTEl<R, F, A> {
         let mut result = self.non_fft_zero();
@@ -395,7 +343,7 @@ impl<R, F, A> DoubleRNSRingBase<R, F, A>
         result.extend((0..self.element_len()).map(|i| self.rns_base().at(i / self.rank()).clone_el(&val.data[i])));
         DoubleRNSNonFFTEl {
             data: result,
-            generalized_fft: PhantomData,
+            ring_decompositions: PhantomData,
             allocator: PhantomData
         }
     }
@@ -444,7 +392,7 @@ impl<R, F, A> PartialEq for DoubleRNSRingBase<R, F, A>
         A: Allocator + Clone
 {
     fn eq(&self, other: &Self) -> bool {
-        self.scalar_ring.get_ring() == other.scalar_ring.get_ring() && self.generalized_ffts[0].is_isomorphic(&other.generalized_ffts[0])
+        self.scalar_ring.get_ring() == other.scalar_ring.get_ring() && self.ring_decompositions[0].is_exactly_same(&other.ring_decompositions[0])
     }
 }
 
@@ -462,7 +410,7 @@ impl<R, F, A> RingBase for DoubleRNSRingBase<R, F, A>
         result.extend((0..self.element_len()).map(|i| self.rns_base().at(i / self.rank()).clone_el(&val.data[i])));
         DoubleRNSEl {
             data: result,
-            generalized_fft: PhantomData,
+            ring_decompositions: PhantomData,
             allocator: PhantomData
         }
     }
@@ -523,7 +471,7 @@ impl<R, F, A> RingBase for DoubleRNSRingBase<R, F, A>
         result.extend(self.rns_base().as_iter().flat_map(|Zp| (0..self.rank()).map(|_| Zp.zero())));
         return DoubleRNSEl {
             data: result,
-            generalized_fft: PhantomData,
+            ring_decompositions: PhantomData,
             allocator: PhantomData
         };
     }
@@ -578,7 +526,7 @@ impl<R, F, A> DivisibilityRing for DoubleRNSRingBase<R, F, A>
                 result.push(Zp.checked_div(&lhs.data[i * self.rank() + j], &rhs.data[i * self.rank() + j])?);
             }
         }
-        return Some(DoubleRNSEl { data: result, generalized_fft: PhantomData, allocator: PhantomData })
+        return Some(DoubleRNSEl { data: result, ring_decompositions: PhantomData, allocator: PhantomData })
     }
 
     fn is_unit(&self, x: &Self::Element) -> bool {
@@ -629,7 +577,7 @@ impl<R, F, A> FreeAlgebra for DoubleRNSRingBase<R, F, A>
     }
 
     fn rank(&self) -> usize {
-        self.generalized_ffts[0].rank()
+        self.ring_decompositions[0].rank()
     }
 
     fn wrt_canonical_basis<'a>(&'a self, el: &'a Self::Element) -> Self::VectorRepresentation<'a> {
@@ -679,7 +627,7 @@ impl<R, F, A> RingExtension for DoubleRNSRingBase<R, F, A>
         }
         return DoubleRNSEl {
             data: result,
-            generalized_fft: PhantomData,
+            ring_decompositions: PhantomData,
             allocator: PhantomData
         };
     }
@@ -785,14 +733,14 @@ impl<R1, R2, F1, F2, A1, A2> CanHomFrom<DoubleRNSRingBase<R2, F2, A2>> for Doubl
         A2: Allocator + Clone,
 
         R1::Type: CanHomFrom<R2::Type>,
-        F1: SameNumberRing<R1::Type, R2::Type, F2>
+        F1: IsomorphismInfo<R1::Type, R2::Type, F2>
 {
     type Homomorphism = Vec<<R1::Type as CanHomFrom<R2::Type>>::Homomorphism>;
 
     fn has_canonical_hom(&self, from: &DoubleRNSRingBase<R2, F2, A2>) -> Option<Self::Homomorphism> {
-        if self.rns_base().len() == from.rns_base().len() && self.generalized_ffts[0].is_isomorphic(&from.generalized_ffts[0]) {
+        if self.rns_base().len() == from.rns_base().len() && self.ring_decompositions[0].is_exactly_same(&from.ring_decompositions[0]) {
             debug_assert!(self.rank() == from.rank());
-            debug_assert!(self.generalized_ffts.iter().zip(from.generalized_ffts.iter()).all(|(l, r)| l.is_isomorphic(r)));
+            debug_assert!(self.ring_decompositions.iter().zip(from.ring_decompositions.iter()).all(|(l, r)| l.is_exactly_same(r)));
             (0..self.rns_base().len()).map(|i| self.rns_base().at(i).get_ring().has_canonical_hom(from.rns_base().at(i).get_ring()).ok_or(())).collect::<Result<Vec<_>, ()>>().ok()
         } else {
             None
@@ -812,7 +760,7 @@ impl<R1, R2, F1, F2, A1, A2> CanHomFrom<DoubleRNSRingBase<R2, F2, A2>> for Doubl
         }
         DoubleRNSEl {
             data: result,
-            generalized_fft: PhantomData,
+            ring_decompositions: PhantomData,
             allocator: PhantomData
         }
     }
@@ -830,14 +778,14 @@ impl<R1, R2, F1, F2, A1, A2> CanIsoFromTo<DoubleRNSRingBase<R2, F2, A2>> for Dou
         A2: Allocator + Clone,
 
         R1::Type: CanIsoFromTo<R2::Type>,
-        F1: SameNumberRing<R1::Type, R2::Type, F2>
+        F1: IsomorphismInfo<R1::Type, R2::Type, F2>
 {
     type Isomorphism = Vec<<R1::Type as CanIsoFromTo<R2::Type>>::Isomorphism>;
 
     fn has_canonical_iso(&self, from: &DoubleRNSRingBase<R2, F2, A2>) -> Option<Self::Isomorphism> {
-        if self.rns_base().len() == from.rns_base().len() && self.generalized_ffts[0].is_isomorphic(&from.generalized_ffts[0]) {
+        if self.rns_base().len() == from.rns_base().len() && self.ring_decompositions[0].is_exactly_same(&from.ring_decompositions[0]) {
             debug_assert!(self.rank() == from.rank());
-            debug_assert!(self.generalized_ffts.iter().zip(from.generalized_ffts.iter()).all(|(l, r)| l.is_isomorphic(r)));
+            debug_assert!(self.ring_decompositions.iter().zip(from.ring_decompositions.iter()).all(|(l, r)| l.is_exactly_same(r)));
             (0..self.rns_base().len()).map(|i| self.rns_base().at(i).get_ring().has_canonical_iso(from.rns_base().at(i).get_ring()).ok_or(())).collect::<Result<Vec<_>, ()>>().ok()
         } else {
             None
@@ -853,7 +801,7 @@ impl<R1, R2, F1, F2, A1, A2> CanIsoFromTo<DoubleRNSRingBase<R2, F2, A2>> for Dou
         }
         DoubleRNSEl {
             data: result,
-            generalized_fft: PhantomData,
+            ring_decompositions: PhantomData,
             allocator: PhantomData
         }
     }
@@ -866,11 +814,11 @@ use crate::rnsconv::lift::*;
 #[cfg(test)]
 use crate::feanor_math::rings::zn::zn_64::Zn;
 #[cfg(test)]
-use crate::complexfft::pow2_cyclotomic::DefaultPow2CyclotomicCCFFTRingBase;
-#[cfg(test)]
-use crate::doublerns::pow2_cyclotomic::DefaultPow2CyclotomicDoubleRNSRingBase;
+use crate::rings::pow2_cyclotomic::DefaultPow2CyclotomicDoubleRNSRingBase;
 
-use super::automorphism::CyclotomicRingDecomposition;
+//
+// Most tests are done in the implementations of the corresponding ring decompositions
+//
 
 #[test]
 fn test_almost_exact_convert_from() {
@@ -885,17 +833,5 @@ fn test_almost_exact_convert_from() {
     assert_el_eq!(&R2, &R2.canonical_gen(), &R2.get_ring().do_fft(R2.get_ring().perform_rns_op_from(R1.get_ring(), &R1.get_ring().undo_fft(R1.canonical_gen()), &converter)));
     for i in (-4 * 97)..=(4 * 97) {
         assert_el_eq!(&R2, &R2.int_hom().map(i), &R2.get_ring().do_fft(R2.get_ring().perform_rns_op_from(R1.get_ring(), &R1.get_ring().undo_fft(R1.int_hom().map(i)), &converter)));
-    }
-}
-
-#[test]
-fn test_almost_exact_convert_to_cfft() {
-    let rns_base1 = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
-    let R1 = DefaultPow2CyclotomicDoubleRNSRingBase::new(rns_base1, 3);
-    let R2 = DefaultPow2CyclotomicCCFFTRingBase::new(Zn::new(7), 3);
-    let converter = AlmostExactBaseConversion::new_with(R1.base_ring().get_ring().as_iter().cloned().collect(), vec![R2.base_ring().clone()], Global);
-    assert_el_eq!(&R2, &R2.canonical_gen(), &R1.get_ring().perform_rns_op_to_cfft(R2.get_ring(), &R1.get_ring().undo_fft(R1.canonical_gen()), &converter));
-    for i in (-4 * 97)..=(4 * 97) {
-        assert_el_eq!(&R2, &R2.int_hom().map(i), &R1.get_ring().perform_rns_op_to_cfft(R2.get_ring(), &R1.get_ring().undo_fft(R1.int_hom().map(i)), &converter));
     }
 }

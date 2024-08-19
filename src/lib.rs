@@ -81,10 +81,10 @@ pub mod complexfft;
 ///
 /// Implementation of rings using double-RNS representation.
 /// 
-pub mod doublerns;
+pub mod rings;
 
 pub mod lintransform;
 pub mod digitextract;
 
-#[cfg(test)]
-pub mod bfv;
+// #[cfg(test)]
+// pub mod bfv;

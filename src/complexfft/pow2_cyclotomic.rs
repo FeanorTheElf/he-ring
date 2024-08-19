@@ -57,7 +57,7 @@ impl<R, F, A> Pow2CyclotomicFFT<R, F, A>
         let log2_n = StaticRing::<i64>::RING.abs_highest_set_bit(&rank).unwrap();
         assert!(rank == (1 << log2_n));
         let modulus = ring.integer_ring().to_float_approx(ring.modulus());
-        // assert!(fft_table.expected_absolute_error(modulus * modulus, modulus * modulus * f64::EPSILON + fft_table.expected_absolute_error(modulus, 0.)) < 0.5);
+        assert!(fft_table.expected_absolute_error(modulus * modulus, modulus * modulus * f64::EPSILON + fft_table.expected_absolute_error(modulus, 0.)) < 0.5);
         let mut twiddles = Vec::with_capacity(rank as usize);
         let mut inv_twiddles = Vec::with_capacity(rank as usize);
         for i in 0..rank {
