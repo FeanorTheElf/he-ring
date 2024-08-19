@@ -14,8 +14,8 @@ use feanor_math::rings::poly::dense_poly::DensePolyRing;
 use feanor_math::rings::zn::*;
 use feanor_math::homomorphism::*;
 use feanor_math::seq::*;
-use feanor_math::rings::zn::zn_64::*;
 
+use crate::cyclotomic::CyclotomicRing;
 use crate::rings::decomposition::*;
 use crate::rnsconv::*;
 
@@ -186,27 +186,6 @@ impl<R, F, A> DoubleRNSRingBase<R, F, A>
             ring_decompositions: PhantomData,
             allocator: PhantomData
         }
-    }
-
-    pub fn galois_group_mulrepr(&self) -> Zn
-        where F: CyclotomicRingDecomposition<R::Type>
-    {
-        self.ring_decompositions()[0].galois_group_mulrepr()
-    }
-
-    pub fn apply_galois_action(&self, el: &<Self as RingBase>::Element, g: ZnEl) -> <Self as RingBase>::Element
-        where F: CyclotomicRingDecomposition<R::Type>
-    {
-        let mut result = self.zero();
-        for (i, Zp) in self.rns_base().as_iter().enumerate() {
-            self.ring_decompositions()[i].permute_galois_action(
-                &el.data[(i * self.rank())..((i + 1) * self.rank())],
-                &mut result.data[(i * self.rank())..((i + 1) * self.rank())],
-                g,
-                Zp
-            );
-        }
-        return result;
     }
 
     pub fn do_fft(&self, mut element: DoubleRNSNonFFTEl<R, F, A>) -> DoubleRNSEl<R, F, A> {
@@ -556,6 +535,30 @@ impl<'a, R, F, A> VectorFn<El<zn_rns::Zn<R, BigIntRing>>> for DoubleRNSRingBaseE
 
     fn at(&self, i: usize) -> El<zn_rns::Zn<R, BigIntRing>> {
         self.ring.rns_base().from_congruence(self.inv_fft_data.data[i..].iter().step_by(self.ring.rank()).enumerate().map(|(i, x)| self.ring.rns_base().at(i).clone_el(x)))
+    }
+}
+
+impl<R, F, A> CyclotomicRing for DoubleRNSRingBase<R, F, A>
+    where R: ZnRingStore,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        F: RingDecompositionSelfIso<R::Type> + CyclotomicRingDecomposition<R::Type>,
+        A: Allocator + Clone
+{
+    fn n(&self) -> usize {
+        *self.ring_decompositions()[0].galois_group_mulrepr().modulus() as usize
+    }
+
+    fn apply_galois_action(&self, el: &Self::Element, g: zn_64::ZnEl) -> Self::Element {
+        let mut result = self.zero();
+        for (i, Zp) in self.rns_base().as_iter().enumerate() {
+            self.ring_decompositions()[i].permute_galois_action(
+                &el.data[(i * self.rank())..((i + 1) * self.rank())],
+                &mut result.data[(i * self.rank())..((i + 1) * self.rank())],
+                g,
+                Zp
+            );
+        }
+        return result;
     }
 }
 

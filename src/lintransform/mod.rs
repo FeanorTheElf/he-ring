@@ -6,7 +6,6 @@ use std::ops::Range;
 use feanor_math::algorithms::eea::signed_gcd;
 use feanor_math::assert_el_eq;
 use feanor_math::divisibility::DivisibilityRingStore;
-use feanor_math::homomorphism::CanHomFrom;
 use feanor_math::iters::multi_cartesian_product;
 use feanor_math::matrix::OwnedMatrix;
 use feanor_math::primitive_int::*;
@@ -16,14 +15,16 @@ use feanor_math::rings::zn::zn_64::*;
 use feanor_math::rings::zn::*;
 use feanor_math::seq::*;
 use feanor_math::algorithms::linsolve::LinSolveRing;
+use feanor_math::homomorphism::*;
 
-use crate::complexfft::automorphism::*;
-use crate::complexfft::complex_fft_ring::*;
 use crate::cyclotomic::*;
+use crate::rings::decomposition::*;
+use crate::rings::slots::*;
+use crate::rings::ntt_ring::*;
 use crate::StdZn;
 
 pub mod pow2;
-pub mod composite;
+// pub mod composite;
 
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
 
@@ -32,9 +33,9 @@ pub struct LinearTransform<R, F, A>
         R::Type: StdZn,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone,
-        CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>
+        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
 {
-    data: Vec<(ZnEl, El<CCFFTRing<R, F, A>>, Vec<i64>)>
+    data: Vec<(ZnEl, El<NTTRing<R, F, A>>, Vec<i64>)>
 }
 
 impl<R, F, A> LinearTransform<R, F, A>
@@ -42,7 +43,7 @@ impl<R, F, A> LinearTransform<R, F, A>
         R::Type: StdZn,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone,
-        CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>
+        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
 {
     pub fn eq(&self, other: &Self, H: &HypercubeIsomorphism<R, F, A>) -> bool {
         self.check_valid(H);
@@ -61,12 +62,12 @@ impl<R, F, A> LinearTransform<R, F, A>
         return true;
     }
 
-    pub fn switch_ring(&self, H_from: &HypercubeIsomorphism<R, F, A>, to: &CCFFTRingBase<R, F, A>) -> Self {
+    pub fn switch_ring(&self, H_from: &HypercubeIsomorphism<R, F, A>, to: &NTTRingBase<R, F, A>) -> Self {
         self.check_valid(H_from);
         assert_eq!(H_from.ring().n(), to.n());
         let from = H_from.ring();
         let red_map = ReductionMap::new(from.base_ring(), to.base_ring()).unwrap();
-        let hom = |x: &El<CCFFTRing<R, F, A>>| to.from_canonical_basis(H_from.ring().wrt_canonical_basis(x).into_iter().map(|x| red_map.map(x)));
+        let hom = |x: &El<NTTRing<R, F, A>>| to.from_canonical_basis(H_from.ring().wrt_canonical_basis(x).into_iter().map(|x| red_map.map(x)));
         Self {
             data: self.data.iter().map(|(g, coeff, steps)| (*g, hom(coeff), steps.clone())).collect()
         }
@@ -87,7 +88,7 @@ impl<R, F, A> LinearTransform<R, F, A>
                     &H.galois_group_mulrepr().smallest_positive_lift(H.galois_group_mulrepr().mul_ref(g, s)), 
                     |g| H.galois_group_mulrepr().smallest_positive_lift(*g)
                 ).unwrap();
-                let entry = H.ring().get_ring().apply_galois_action(*s, H.ring().clone_el(&self.data[i].1));
+                let entry = H.ring().get_ring().apply_galois_action(&self.data[i].1, *s);
                 *matrix.at_mut(row_index, j) = entry;
             }
         }
@@ -166,7 +167,7 @@ impl<R, F, A> LinearTransform<R, F, A>
         let mut result = Self {
             data: self.data.iter().flat_map(|(self_g, self_coeff, self_indices)| run_first.data.iter().map(|(first_g, first_coeff, first_indices)| (
                 H.galois_group_mulrepr().mul_ref(self_g, first_g), 
-                H.ring().mul_ref_snd(H.ring().get_ring().apply_galois_action(*self_g, H.ring().clone_el(first_coeff)), self_coeff),
+                H.ring().mul_ref_snd(H.ring().get_ring().apply_galois_action(first_coeff, *self_g), self_coeff),
                 self_indices.iter().zip(first_indices).map(|(self_i, first_i)| self_i + first_i).collect()
             ))).collect()
         };
@@ -194,29 +195,29 @@ impl<R, F, A> LinearTransform<R, F, A>
     }
 }
 
-impl<R, F, A> CCFFTRingBase<R, F, A> 
+impl<R, F, A> NTTRingBase<R, F, A> 
     where R: RingStore,
         R::Type: StdZn,
         F: RingDecompositionSelfIso<R::Type> + CyclotomicRingDecomposition<R::Type>,
         A: Allocator + Clone,
-        CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>
+        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
 {
     pub fn compute_linear_transform(&self, el: &<Self as RingBase>::Element, transform: &LinearTransform<R, F, A>) -> <Self as RingBase>::Element {
-        <_ as RingBase>::sum(self, transform.data.iter().map(|(s, c, _)| self.mul_ref_fst(c, self.apply_galois_action(*s, self.clone_el(el)))))
+        <_ as RingBase>::sum(self, transform.data.iter().map(|(s, c, _)| self.mul_ref_fst(c, self.apply_galois_action(el, *s))))
     }
 }
 
 pub struct CompiledLinearTransform<R, F, A>
     where R: RingStore,
-        R::Type: ZnRing + CanHomFrom<StaticRingBase<i64>>,
+        R::Type: StdZn,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone,
-        CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>
+        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
 {
     baby_step_galois_elements: Vec<ZnEl>,
     giant_step_galois_elements: Vec<Option<ZnEl>>,
-    coeffs: Vec<Vec<Option<El<CCFFTRing<R, F, A>>>>>,
-    one: El<CCFFTRing<R, F, A>>
+    coeffs: Vec<Vec<Option<El<NTTRing<R, F, A>>>>>,
+    one: El<NTTRing<R, F, A>>
 }
 
 pub struct BabyStepGiantStepParams {
@@ -233,7 +234,7 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
         R::Type: StdZn,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone,
-        CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>
+        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
 {
     fn compute_automorphisms_per_dimension(H: &HypercubeIsomorphism<R, F, A>, lin_transform: &LinearTransform<R, F, A>) -> (Vec<i64>, Vec<i64>, Vec<i64>, Vec<i64>) {
         lin_transform.check_valid(H);
@@ -353,7 +354,7 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
             let gs_el = gs_el.unwrap_or(H.galois_group_mulrepr().one());
             let total_el = H.galois_group_mulrepr().mul(gs_el, *bs_el);
             let coeff = &lin_transform.data.iter().filter(|(g, _, _)| H.galois_group_mulrepr().eq_el(g, &total_el)).next().map(|(_, c, _)| c).and_then(|c| if H.ring().is_zero(c) { None } else { Some(c) });
-            let result = coeff.map(|c| H.ring().get_ring().apply_galois_action(H.galois_group_mulrepr().invert(&gs_el).unwrap(), H.ring().clone_el(c)));
+            let result = coeff.map(|c| H.ring().get_ring().apply_galois_action(c, H.galois_group_mulrepr().invert(&gs_el).unwrap()));
             return result;
         }).collect::<Vec<_>>()).collect::<Vec<_>>();
 
@@ -365,13 +366,13 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
         };
     }
 
-    pub fn evaluate<S>(&self, input: &El<CCFFTRing<R, F, A>>, ring: S) -> El<CCFFTRing<R, F, A>>
-        where S: RingStore<Type = CCFFTRingBase<R, F, A>>
+    pub fn evaluate<S>(&self, input: &El<NTTRing<R, F, A>>, ring: S) -> El<NTTRing<R, F, A>>
+        where S: RingStore<Type = NTTRingBase<R, F, A>>
     {
         self.evaluate_generic(input, |a, b, c| {
             ring.add_assign(a, ring.mul_ref(b, c));
         }, |x, galois_els| {
-            galois_els.iter().map(|el| ring.get_ring().apply_galois_action(*el, ring.clone_el(x))).collect()
+            galois_els.iter().map(|el| ring.get_ring().apply_galois_action(x, *el)).collect()
         }, || ring.zero())
     }
     
@@ -380,7 +381,7 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
     }
 
     pub fn evaluate_generic<T, AddScaled, ApplyGalois, Zero>(&self, input: &T, mut add_scaled_fn: AddScaled, mut apply_galois_fn: ApplyGalois, mut zero_fn: Zero) -> T
-        where AddScaled: FnMut(&mut T, &T, &El<CCFFTRing<R, F, A>>),
+        where AddScaled: FnMut(&mut T, &T, &El<NTTRing<R, F, A>>),
             ApplyGalois: FnMut(&T, &[ZnEl]) -> Vec<T>,
             Zero: FnMut() -> T
     {
@@ -408,19 +409,26 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
     }
 }
 
+#[cfg(test)]
 use feanor_math::algorithms::matmul::MatmulAlgorithm;
+#[cfg(test)]
 use feanor_math::algorithms::matmul::STANDARD_MATMUL;
+#[cfg(test)]
 use feanor_math::matrix::AsFirstElement;
+#[cfg(test)]
 use feanor_math::matrix::Submatrix;
+#[cfg(test)]
 use feanor_math::matrix::TransposableSubmatrix;
+#[cfg(test)]
 use feanor_math::matrix::TransposableSubmatrixMut;
-use feanor_math::homomorphism::Homomorphism;
+#[cfg(test)]
 use pow2::pow2_slots_to_coeffs_thin;
-use crate::complexfft::pow2_cyclotomic::DefaultPow2CyclotomicCCFFTRingBase;
+#[cfg(test)]
+use crate::rings::pow2_cyclotomic::*;
 
 #[test]
 fn test_compile() {
-    let ring = DefaultPow2CyclotomicCCFFTRingBase::new(Zn::new(23), 5);
+    let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(23), 5);
     let H = HypercubeIsomorphism::new(ring.get_ring());
     let compiled_transform = pow2_slots_to_coeffs_thin(&H).into_iter().map(|T| CompiledLinearTransform::create_from(&H, T, 2)).collect::<Vec<_>>();
 
@@ -435,7 +443,7 @@ fn test_compile() {
     current = compiled_composed_transform.evaluate(&current, &ring);
     assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 0, 0, 3, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), &current);
 
-    let ring = DefaultPow2CyclotomicCCFFTRingBase::new(Zn::new(97), 5);
+    let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(97), 5);
     let H = HypercubeIsomorphism::new(ring.get_ring());
     let compiled_transform = pow2_slots_to_coeffs_thin(&H).into_iter().map(|T| CompiledLinearTransform::create_from(&H, T, 2)).collect::<Vec<_>>();
     
@@ -463,7 +471,7 @@ fn test_compile() {
 
 #[test]
 fn test_compose() {
-    let ring = DefaultPow2CyclotomicCCFFTRingBase::new(Zn::new(23), 5);
+    let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(23), 5);
     let H = HypercubeIsomorphism::new(ring.get_ring());
     let composed_transform = pow2_slots_to_coeffs_thin(&H).into_iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H));
 
@@ -472,7 +480,7 @@ fn test_compose() {
 
     assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 0, 0, 3, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), &current);
     
-    let ring = DefaultPow2CyclotomicCCFFTRingBase::new(Zn::new(97), 5);
+    let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(97), 5);
     let H = HypercubeIsomorphism::new(ring.get_ring());
     let composed_transform = pow2_slots_to_coeffs_thin(&H).into_iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H));
     
@@ -484,7 +492,7 @@ fn test_compose() {
 
 #[test]
 fn test_invert() {
-    let ring = DefaultPow2CyclotomicCCFFTRingBase::new(Zn::new(23), 5);
+    let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(23), 5);
     let H = HypercubeIsomorphism::new(ring.get_ring());
     let composed_transform = pow2_slots_to_coeffs_thin(&H).into_iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H));
     let inv_transform = composed_transform.inverse(&H);
@@ -494,7 +502,7 @@ fn test_invert() {
     let expected = H.from_slot_vec([1, 2, 3, 4].into_iter().map(|n| H.slot_ring().int_hom().map(n)));
     assert_el_eq!(&ring, &expected, &actual);
     
-    let ring = DefaultPow2CyclotomicCCFFTRingBase::new(Zn::new(97), 5);
+    let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(97), 5);
     let H = HypercubeIsomorphism::new(ring.get_ring());
     let composed_transform = pow2_slots_to_coeffs_thin(&H).into_iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H));
     let inv_transform = composed_transform.inverse(&H);

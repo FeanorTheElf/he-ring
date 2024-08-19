@@ -250,6 +250,10 @@ impl<R, F, A1, A2> CyclotomicRing for CCFFTRingBase<R, OddCyclotomicFFT<R, F, A1
     fn n(&self) -> usize {
         self.generalized_fft().fft_table.len()
     }
+
+    fn apply_galois_action(&self, el: &Self::Element, s: zn_64::ZnEl) -> Self::Element {
+        unimplemented!()
+    }
 }
 
 pub type DefaultOddCyclotomicCCFFTRingBase<R = zn_64::Zn> = CCFFTRingBase<R, OddCyclotomicFFT<R, bluestein::BluesteinFFT<Complex64Base, Complex64Base, Identity<Complex64>>>>;

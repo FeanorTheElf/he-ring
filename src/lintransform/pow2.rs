@@ -9,9 +9,9 @@ use feanor_math::rings::zn::zn_64::*;
 use feanor_math::rings::zn::*;
 use feanor_math::assert_el_eq;
 
-use crate::complexfft::automorphism::*;
-use crate::complexfft::complex_fft_ring::*;
 use crate::cyclotomic::*;
+use crate::rings::decomposition::*;
+use crate::rings::ntt_ring::*;
 use crate::StdZn;
 use super::*;
 
@@ -50,7 +50,7 @@ fn pow2_bitreversed_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'b, R
         R::Type: StdZn,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone,
-        CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>,
+        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
         G: Fn(&[usize]) -> ZnEl
 {
     let m = H.len(dim_index);
@@ -137,7 +137,7 @@ fn pow2_bitreversed_inv_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'
         R::Type: StdZn,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone,
-        CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>,
+        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
         G: Fn(&[usize]) -> ZnEl
 {
     let m = H.len(dim_index);
@@ -252,7 +252,7 @@ fn pow2_bitreversed_dwt<R, F, A, G>(H: &HypercubeIsomorphism<R, F, A>, dim_index
         R::Type: StdZn,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone,
-        CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>,
+        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
         G: Fn(&[usize]) -> ZnEl
 {
     let m = H.len(dim_index);
@@ -287,7 +287,7 @@ fn pow2_bitreversed_inv_dwt<R, F, A, G>(H: &HypercubeIsomorphism<R, F, A>, dim_i
         R::Type: StdZn,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone,
-        CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>,
+        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
         G: Fn(&[usize]) -> ZnEl
 {
     let m = H.len(dim_index);
@@ -329,7 +329,7 @@ pub fn pow2_slots_to_coeffs_thin<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> 
         R::Type: StdZn,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone,
-        CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>
+        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
 {
     let n = H.ring().get_ring().n();
     let log2_n = ZZ.abs_log2_ceil(&(n as i64)).unwrap();
@@ -388,7 +388,7 @@ pub fn pow2_coeffs_to_slots_thin<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> 
         R::Type: StdZn,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone,
-        CCFFTRingBase<R, F, A>: CyclotomicRing + /* unfortunately, the type checker is not clever enough to know that this is always the case */ RingExtension<BaseRing = R>
+        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
 {
     let n = H.ring().get_ring().n();
     let log2_n = ZZ.abs_log2_ceil(&(n as i64)).unwrap();
@@ -442,12 +442,12 @@ pub fn pow2_coeffs_to_slots_thin<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> 
 }
 
 #[cfg(test)]
-use crate::complexfft::pow2_cyclotomic::DefaultPow2CyclotomicCCFFTRingBase;
+use crate::rings::pow2_cyclotomic::DefaultPow2CyclotomicNTTRingBase;
 
 #[test]
 fn test_pow2_bitreversed_dwt() {
     // `F23[X]/(X^16 + 1) ~ F_(23^4)^4`
-    let ring = DefaultPow2CyclotomicCCFFTRingBase::new(Zn::new(23), 4);
+    let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(23), 4);
     let H = HypercubeIsomorphism::new(ring.get_ring());
 
     let mut current = ring_literal!(&ring, [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
@@ -469,7 +469,7 @@ fn test_pow2_bitreversed_dwt() {
 #[test]
 fn test_pow2_slots_to_coeffs_thin() {
     // `F23[X]/(X^32 + 1) ~ F_(23^8)^4`
-    let ring = DefaultPow2CyclotomicCCFFTRingBase::new(Zn::new(23), 5);
+    let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(23), 5);
     let H = HypercubeIsomorphism::new(ring.get_ring());
 
     let mut current = H.from_slot_vec([1, 2, 3, 4].into_iter().map(|n| H.slot_ring().int_hom().map(n)));
@@ -480,7 +480,7 @@ fn test_pow2_slots_to_coeffs_thin() {
     assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 0, 0, 3, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), &current);
     
     // `F97[X]/(X^32 + 1) ~ F_(97^2)^16`
-    let ring = DefaultPow2CyclotomicCCFFTRingBase::new(Zn::new(97), 5);
+    let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(97), 5);
     let H = HypercubeIsomorphism::new(ring.get_ring());
     
     let mut current = H.from_slot_vec((1..17).map(|n| H.slot_ring().int_hom().map(n)));
@@ -494,7 +494,7 @@ fn test_pow2_slots_to_coeffs_thin() {
 #[test]
 fn test_pow2_coeffs_to_slots_thin() {
     // `F23[X]/(X^32 + 1) ~ F_(23^8)^4`
-    let ring = DefaultPow2CyclotomicCCFFTRingBase::new(Zn::new(23), 5);
+    let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(23), 5);
     let H = HypercubeIsomorphism::new(ring.get_ring());
 
     for (transform, actual) in pow2_slots_to_coeffs_thin(&H).into_iter().rev().zip(pow2_coeffs_to_slots_thin(&H).into_iter()) {
@@ -503,7 +503,7 @@ fn test_pow2_coeffs_to_slots_thin() {
     }
     
     // `F97[X]/(X^32 + 1) ~ F_(97^2)^16`
-    let ring = DefaultPow2CyclotomicCCFFTRingBase::new(Zn::new(97), 5);
+    let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(97), 5);
     let H = HypercubeIsomorphism::new(ring.get_ring());
     
     for (transform, actual) in pow2_slots_to_coeffs_thin(&H).into_iter().rev().zip(pow2_coeffs_to_slots_thin(&H).into_iter()) {

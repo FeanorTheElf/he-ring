@@ -31,6 +31,12 @@ pub trait CyclotomicRing: FreeAlgebra {
     /// function.
     ///
     fn n(&self) -> usize;
+
+    fn galois_group_mulrepr(&self) -> zn_64::Zn {
+        zn_64::Zn::new(self.n() as u64)
+    }
+
+    fn apply_galois_action(&self, el: &Self::Element, s: zn_64::ZnEl) -> Self::Element;
 }
 
 ///
@@ -56,6 +62,7 @@ use feanor_math::algorithms;
 use feanor_math::rings::poly::*;
 #[cfg(test)]
 use feanor_math::rings::poly::sparse_poly::SparsePolyRing;
+use feanor_math::rings::zn::zn_64;
 #[cfg(test)]
 use feanor_math::seq::*;
 

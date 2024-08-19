@@ -23,3 +23,5 @@ pub mod gadget_product;
 /// Contains the [`double_rns_ring::GeneralizedFFT`] for odd-conductor cyclotomics [`odd_cyclotomic::OddCyclotomicFFT`].
 /// 
 pub mod odd_cyclotomic;
+
+pub mod slots;

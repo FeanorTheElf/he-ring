@@ -14,7 +14,6 @@ use feanor_math::rings::zn::*;
 use feanor_math::seq::*;
 
 use crate::complexfft::automorphism::euler_phi;
-use crate::cyclotomic::*;
 use crate::rings::double_rns_ring::*;
 use crate::rings::decomposition::*;
 
@@ -169,18 +168,6 @@ impl<R1, R2, F1, F2, A1, A2> IsomorphismInfo<R2::Type, R1::Type, OddCyclotomicFF
 //         self.fft_table.len() == other.n()
 //     }
 // }
-
-impl<R, F, A1, A2> CyclotomicRing for DoubleRNSRingBase<R, OddCyclotomicFFT<R, F, A1>, A2>
-    where R: RingStore,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + DivisibilityRing,
-        F: FFTAlgorithm<R::Type> + PartialEq,
-        A1: Allocator + Clone,
-        A2: Allocator + Clone
-{
-    fn n(&self) -> usize {
-        self.ring_decompositions()[0].fft_table.len()
-    }
-}
 
 impl<R_main, R_twiddle, A> DoubleRNSRingBase<R_main, OddCyclotomicFFT<R_main, bluestein::BluesteinFFT<R_main::Type, R_twiddle::Type, CanHom<R_twiddle, R_main>, A>, A>, A>
     where R_main: ZnRingStore + Clone,
@@ -367,9 +354,9 @@ fn test_free_algebra_axioms() {
     feanor_math::rings::extension::generic_tests::test_free_algebra_axioms(R);
 }
 
-#[test]
-fn test_cyclotomic_ring_axioms() {
-    let rns_base = zn_rns::Zn::new(vec![Zn::new(577), Zn::new(1153)], BigIntRing::RING);
-    let R = DefaultOddCyclotomicDoubleRNSRingBase::new(rns_base, 9);
-    generic_test_cyclotomic_ring_axioms(R);
-}
+// #[test]
+// fn test_cyclotomic_ring_axioms() {
+//     let rns_base = zn_rns::Zn::new(vec![Zn::new(577), Zn::new(1153)], BigIntRing::RING);
+//     let R = DefaultOddCyclotomicDoubleRNSRingBase::new(rns_base, 9);
+//     generic_test_cyclotomic_ring_axioms(R);
+// }

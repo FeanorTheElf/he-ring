@@ -240,8 +240,8 @@ impl<F, A> DoubleRNSRingBase<Zn, F, A>
     /// # use feanor_math::rings::finite::*;
     /// # use feanor_math::integer::BigIntRing;
     /// # use feanor_math::algorithms::fft::cooley_tuckey::CooleyTuckeyFFT;
-    /// # use he_ring::doublerns::double_rns_ring::DoubleRNSRingBase;
-    /// # use he_ring::doublerns::pow2_cyclotomic::Pow2CyclotomicFFT;
+    /// # use he_ring::rings::double_rns_ring::DoubleRNSRingBase;
+    /// # use he_ring::rings::pow2_cyclotomic::Pow2CyclotomicFFT;
     /// # use feanor_math::rings::extension::FreeAlgebraStore;
     /// # use feanor_math::seq::*;
     /// let rns_base = vec![Zn::new(17), Zn::new(97), Zn::new(113)];
@@ -271,8 +271,8 @@ impl<F, A> DoubleRNSRingBase<Zn, F, A>
     /// # use feanor_math::rings::zn::*;
     /// # use feanor_math::rings::zn::zn_64::*;
     /// # use feanor_math::algorithms::fft::cooley_tuckey::CooleyTuckeyFFT;
-    /// # use he_ring::doublerns::double_rns_ring::DoubleRNSRingBase;
-    /// # use he_ring::doublerns::pow2_cyclotomic::Pow2CyclotomicFFT;
+    /// # use he_ring::rings::double_rns_ring::DoubleRNSRingBase;
+    /// # use he_ring::rings::pow2_cyclotomic::Pow2CyclotomicFFT;
     /// # use feanor_math::rings::extension::FreeAlgebraStore;
     /// # use feanor_math::integer::BigIntRing;
     /// # use feanor_math::rings::finite::*;

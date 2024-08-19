@@ -47,12 +47,12 @@ use rand_distr::StandardNormal;
 // in the spirit of feanor-math, all rings are highly generic and extensible using the type system.
 // here we define the ring types we will use to implement the scheme. 
 pub type PlaintextRing = complexfft::complex_fft_ring::CCFFTRing<Zn, complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<Zn, cooley_tuckey::CooleyTuckeyFFT<Complex64Base, Complex64Base, Identity<Complex64>>>>;
-pub type FFTTable = doublerns::pow2_cyclotomic::Pow2CyclotomicFFT<Zn, cooley_tuckey::CooleyTuckeyFFT<ZnBase, ZnBase, Identity<Zn>>>;
-pub type CiphertextRing = doublerns::double_rns_ring::DoubleRNSRing<Zn, FFTTable>;
+pub type FFTTable = rings::pow2_cyclotomic::Pow2CyclotomicFFT<Zn, cooley_tuckey::CooleyTuckeyFFT<ZnBase, ZnBase, Identity<Zn>>>;
+pub type CiphertextRing = rings::double_rns_ring::DoubleRNSRing<Zn, FFTTable>;
 
 pub type Ciphertext = (El<CiphertextRing>, El<CiphertextRing>);
 pub type SecretKey = El<CiphertextRing>;
-pub type GadgetProductOperand<'a> = doublerns::gadget_product::GadgetProductRhsOperand<'a, FFTTable>;
+pub type GadgetProductOperand<'a> = rings::gadget_product::GadgetProductRhsOperand<'a, FFTTable>;
 pub type KeySwitchKey<'a> = (GadgetProductOperand<'a>, GadgetProductOperand<'a>);
 pub type RelinKey<'a> = (GadgetProductOperand<'a>, GadgetProductOperand<'a>);
 

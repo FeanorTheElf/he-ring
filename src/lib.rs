@@ -12,18 +12,20 @@
 
 #![doc = include_str!("../Readme.md")]
 
-use std::cell::RefCell;
+use std::cmp::min;
 
+use feanor_math::algorithms::miller_rabin::is_prime;
+use feanor_math::integer::BigIntRing;
 use feanor_math::integer::BigIntRingBase;
-use feanor_math::primitive_int::StaticRing;
+use feanor_math::integer::IntegerRingStore;
+use feanor_math::ordered::OrderedRingStore;
+use feanor_math::pid::EuclideanRingStore;
 use feanor_math::primitive_int::StaticRingBase;
 use feanor_math::ring::*;
 use feanor_math::homomorphism::*;
 use feanor_math::rings::extension::galois_field::GaloisFieldDyn;
 use feanor_math::rings::local::AsLocalPIRBase;
 use feanor_math::rings::zn::zn_64;
-use feanor_math::rings::zn::zn_64::Zn;
-use feanor_math::rings::zn::ZnRingStore;
 use feanor_math::rings::zn::{FromModulusCreateableZnRing, ZnRing};
 use feanor_math::serialization::SerializableElementRing;
 
@@ -46,6 +48,7 @@ pub trait StdZn: ZnRing
     + CanHomFrom<<<<GaloisFieldDyn as RingStore>::Type as RingExtension>::BaseRing as RingStore>::Type> 
     + CanHomFrom<AsLocalPIRBase<zn_64::Zn>>
     + CanHomFrom<StaticRingBase<i64>>
+    + CanHomFrom<StaticRingBase<i128>>
     + CanHomFrom<BigIntRingBase>
     + SerializableElementRing
 {}
@@ -56,9 +59,41 @@ impl<R> StdZn for R
     + CanHomFrom<<<<GaloisFieldDyn as RingStore>::Type as RingExtension>::BaseRing as RingStore>::Type> 
     + CanHomFrom<AsLocalPIRBase<zn_64::Zn>>
     + CanHomFrom<StaticRingBase<i64>>
+    + CanHomFrom<StaticRingBase<i128>>
     + CanHomFrom<BigIntRingBase>
     + SerializableElementRing
 {}
+
+pub fn sample_primes(min_bits: usize, max_bits: usize, max_bits_each_modulus: usize, congruent_to_one_mod: &El<BigIntRing>) -> Option<Vec<El<BigIntRing>>> {
+    assert!(max_bits > min_bits);
+    let ZZbig = BigIntRing::RING;
+    let mut result = Vec::new();
+    let mut current_bits = 0.;
+    while current_bits < min_bits as f64 {
+        let next_modulus_add_bound = min(max_bits_each_modulus, max_bits - current_bits as usize);
+        let mut current = ZZbig.add(ZZbig.sub(ZZbig.power_of_two(next_modulus_add_bound), ZZbig.euclidean_rem(ZZbig.power_of_two(next_modulus_add_bound), congruent_to_one_mod)), ZZbig.one());
+        let mut added_any = false;
+        while ZZbig.is_pos(&current) {
+            if is_prime(&ZZbig, &current, 10) {
+                let bits = ZZbig.to_float_approx(&current).log2();
+                if current_bits + bits > max_bits as f64 {
+                    break;
+                } else {
+                    added_any = true;
+                    current_bits += bits;
+                    result.push(ZZbig.clone_el(&current));
+                }
+            }
+            ZZbig.sub_assign_ref(&mut current, congruent_to_one_mod);
+        }
+        if !added_any {
+            return None;
+        }
+    }
+    debug_assert!(ZZbig.is_geq(&ZZbig.prod(result.iter().map(|n| ZZbig.clone_el(n))), &ZZbig.power_of_two(min_bits)));
+    debug_assert!(ZZbig.is_lt(&ZZbig.prod(result.iter().map(|n| ZZbig.clone_el(n))), &ZZbig.power_of_two(max_bits)));
+    return Some(result);
+}
 
 #[macro_use]
 pub mod profiling;

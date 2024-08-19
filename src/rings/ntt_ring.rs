@@ -8,14 +8,15 @@ use feanor_math::primitive_int::{StaticRing, StaticRingBase};
 use feanor_math::rings::extension::{FreeAlgebra, FreeAlgebraStore};
 use feanor_math::rings::finite::FiniteRing;
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
-use feanor_math::rings::zn::{zn_rns, ZnRing, ZnRingStore};
+use feanor_math::rings::zn::{zn_rns, zn_64, ZnRing, ZnRingStore};
 use feanor_math::ring::*;
 use feanor_math::seq::{CloneElFn, CloneRingEl};
 use feanor_math::seq::VectorView;
 use feanor_math::serialization::{DeserializeWithRing, SerializableElementRing, SerializeWithRing};
 use serde::{de, Deserializer, Serializer};
 
-use super::decomposition::{IsomorphismInfo, RingDecompositionSelfIso};
+use super::decomposition::{CyclotomicRingDecomposition, IsomorphismInfo, RingDecompositionSelfIso};
+
 pub struct NTTRingBase<R, F, A = Global> 
     where R: ZnRingStore,
         R::Type: ZnRing + CanHomFrom<StaticRingBase<i128>>,
@@ -63,6 +64,77 @@ impl<R, F, A> NTTRingBase<R, F, A>
         where G: FnMut(i64) -> F
     {
         unimplemented!()
+    }
+
+    pub fn allocator(&self) -> &A {
+        &self.allocator
+    }
+
+    pub fn ring_decompositions(&self) -> &Vec<F> {
+        &self.ring_decompositions
+    }
+
+    pub fn rns_base(&self) -> &zn_rns::ZnBase<R, StaticRing<i128>> {
+        self.rns_base.get_ring()
+    }
+
+    ///
+    /// Computes `sum sigma_i(x_i)` where `els` yields pairs `(x_i, sigma_i)` with `sigma_i` being
+    /// a Galois automorphism.
+    /// 
+    /// Note that this can be faster than directly computing the sum, since we can avoid some of the 
+    /// intermediate DFTs. This is possible, since we only add elements, so the coefficients grow quite
+    /// slowly, as opposed to multiplications.
+    /// 
+    pub fn sum_galois_transforms<I>(&self, els: I) -> <Self as RingBase>::Element
+        where F: CyclotomicRingDecomposition<R::Type>,
+            I: Iterator<Item = (<Self as RingBase>::Element, zn_64::ZnEl)>
+    {
+        let mut unreduced_result = Vec::with_capacity_in(self.rank() * self.rns_base.len(), &self.allocator);
+        unreduced_result.resize_with(self.rank() * self.rns_base.len(), || self.rns_base.at(0).zero());
+        let mut tmp = Vec::with_capacity_in(self.rank(), &self.allocator);
+        tmp.resize_with(self.rank(), || self.rns_base.at(0).zero());
+        let mut tmp_perm = Vec::with_capacity_in(self.rank(), &self.allocator);
+        tmp_perm.resize_with(self.rank(), || self.rns_base.at(0).zero());
+
+        let mut len = 0;
+        for (x, g) in els {
+            len += 1;
+            for i in 0..self.rns_base.len() {
+                let Zp = self.rns_base.at(i);
+                let from_lifted = Zp.can_hom(self.base_ring().integer_ring()).unwrap();
+                for j in 0..self.rank() {
+                    tmp[j] = from_lifted.map(self.base_ring().smallest_lift(self.base_ring().clone_el(&x.data[j])));
+                }
+                self.ring_decompositions[i].fft_forward(&mut tmp[..], Zp.get_ring());
+                self.ring_decompositions[i].permute_galois_action(&tmp, &mut tmp_perm, g, self.base_ring());
+                for j in 0..self.rank() {
+                    Zp.add_assign_ref(&mut unreduced_result[i * self.rank() + j], &tmp_perm[j]);
+                }
+            }
+        }
+        drop(tmp);
+        drop(tmp_perm);
+
+        // if this is satisfied, we have enough precision to not get an overflow
+        assert!(len < int_cast(self.base_ring().integer_ring().clone_el(self.base_ring().modulus()), StaticRing::<i64>::RING, self.base_ring().integer_ring()) as usize);
+        for i in 0..self.rns_base.len() {
+            let Zp = self.rns_base.at(i);
+            self.ring_decompositions[i].fft_backward(&mut unreduced_result[(i * self.rank())..((i + 1) * self.rank())], Zp.get_ring());
+        }
+
+        let hom = self.base_ring().can_hom(&StaticRing::<i128>::RING).unwrap();
+        let mut result = Vec::with_capacity_in(self.rank(), self.allocator.clone());
+        for j in 0..self.rank() {
+            result.push(hom.map(self.rns_base.smallest_lift(
+                self.rns_base.from_congruence((0..self.rns_base.len()).map(|i| self.rns_base.at(i).clone_el(&unreduced_result[i * self.rank() + j])))
+            )));
+        }
+        return NTTRingEl {
+            data: result,
+            ring_decompositions: PhantomData,
+            allocator: PhantomData
+        };
     }
 }
 
@@ -250,6 +322,51 @@ impl<R, F, A> RingExtension for NTTRingBase<R, F, A>
         let mut result = self.zero();
         result.data[0] = x;
         return result;
+    }
+}
+
+impl<R, F, A> CyclotomicRing for NTTRingBase<R, F, A>
+    where R: ZnRingStore,
+        R::Type: ZnRing + CanHomFrom<StaticRingBase<i128>>,
+        F: RingDecompositionSelfIso<R::Type> + CyclotomicRingDecomposition<R::Type>,
+        A: Allocator + Clone
+{
+    fn n(&self) -> usize {
+        *self.ring_decompositions()[0].galois_group_mulrepr().modulus() as usize
+    }
+
+    fn apply_galois_action(&self, el: &Self::Element, g: zn_64::ZnEl) -> Self::Element {
+        assert_eq!(el.data.len(), self.rank());
+
+        let mut unreduced_result = Vec::with_capacity_in(self.rank() * self.rns_base.len(), &self.allocator);
+        unreduced_result.resize_with(self.rank() * self.rns_base.len(), || self.rns_base.at(0).zero());
+        let mut tmp = Vec::with_capacity_in(self.rank(), &self.allocator);
+        tmp.resize_with(self.rank(), || self.rns_base.at(0).zero());
+
+        for i in 0..self.rns_base.len() {
+            let Zp = self.rns_base.at(i);
+            let from_lifted = Zp.can_hom(self.base_ring().integer_ring()).unwrap();
+            for j in 0..self.rank() {
+                tmp[j] = from_lifted.map(self.base_ring().smallest_lift(self.base_ring().clone_el(&el.data[j])));
+            }
+            self.ring_decompositions[i].fft_forward(&mut tmp[..], Zp.get_ring());
+            self.ring_decompositions[i].permute_galois_action(&tmp, &mut unreduced_result[(i * self.rank())..((i + 1) * self.rank())], g, self.base_ring());
+            self.ring_decompositions[i].fft_backward(&mut unreduced_result[(i * self.rank())..((i + 1) * self.rank())], Zp.get_ring());
+        }
+        drop(tmp);
+
+        let hom = self.base_ring().can_hom(&StaticRing::<i128>::RING).unwrap();
+        let mut result = Vec::with_capacity_in(self.rank(), self.allocator.clone());
+        for j in 0..self.rank() {
+            result.push(hom.map(self.rns_base.smallest_lift(
+                self.rns_base.from_congruence((0..self.rns_base.len()).map(|i| self.rns_base.at(i).clone_el(&unreduced_result[i * self.rank() + j])))
+            )));
+        }
+        return NTTRingEl {
+            data: result,
+            ring_decompositions: PhantomData,
+            allocator: PhantomData
+        };
     }
 }
 
@@ -489,11 +606,16 @@ impl<R1, R2, F1, F2, A1, A2> CanIsoFromTo<NTTRingBase<R2, F2, A2>> for NTTRingBa
     }
 }
 
+#[cfg(test)]
 use feanor_math::algorithms::fft::cooley_tuckey;
-use feanor_math::rings::zn::zn_64;
+use crate::cyclotomic::CyclotomicRing;
+#[cfg(test)]
 use crate::rings::pow2_cyclotomic::Pow2CyclotomicFFT;
+#[cfg(test)]
 use feanor_math::algorithms::unity_root::get_prim_root_of_unity_pow2;
+#[cfg(test)]
 use feanor_math::rings::field::{AsField, AsFieldBase};
+#[cfg(test)]
 use feanor_math::homomorphism::CanHom;
 
 #[cfg(test)]

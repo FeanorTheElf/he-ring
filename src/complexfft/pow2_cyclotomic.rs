@@ -158,6 +158,10 @@ impl<R, F, A1, A2> CyclotomicRing for CCFFTRingBase<R, Pow2CyclotomicFFT<R, F, A
     fn n(&self) -> usize {
         2 * self.rank()
     }
+
+    fn apply_galois_action(&self, el: &Self::Element, s: ZnEl) -> Self::Element {
+        unimplemented!()
+    }
 }
 
 pub type DefaultPow2CyclotomicCCFFTRingBase<R = Zn> = CCFFTRingBase<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckeyFFT<Complex64Base, Complex64Base, Identity<Complex64>>>>;
