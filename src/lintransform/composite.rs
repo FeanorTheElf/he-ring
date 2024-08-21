@@ -7,8 +7,6 @@ use feanor_math::rings::zn::*;
 use feanor_math::rings::extension::FreeAlgebraStore;
 use feanor_math::primitive_int::*;
 
-use crate::complexfft::automorphism::*;
-use crate::complexfft::complex_fft_ring::*;
 use crate::cyclotomic::*;
 use crate::StdZn;
 use super::LinearTransform;

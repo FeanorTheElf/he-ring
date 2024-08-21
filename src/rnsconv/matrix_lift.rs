@@ -388,3 +388,42 @@ fn bench_rns_base_conversion(bencher: &mut Bencher) {
         }
     });
 }
+
+#[test]
+fn test_base_conversion_large() {
+    let primes: [i64; 12] = [
+        72057594040066049,
+        288230376150870017,
+        288230376150876161,
+        288230376150878209,
+        288230376150890497,
+        288230376150945793,
+        288230376150956033,
+        288230376151062529,
+        288230376151123969,
+        288230376151130113,
+        288230376151191553,
+        288230376151388161
+    ];
+    let in_len = 6;
+    let from = &primes[..in_len];
+    let from_prod = ZZbig.prod(from.iter().map(|p| int_cast(*p, ZZbig, StaticRing::<i64>::RING)));
+    let to = &primes[in_len..];
+    let number = ZZbig.get_ring().parse("72177485205290958313989757068773497202377902631074612326518605802008441450199155299671731794903833214431", 10).unwrap();
+    assert!(ZZbig.is_lt(&number, &from_prod));
+    
+    let from = from.iter().map(|p| Zn::new(*p as u64)).collect::<Vec<_>>();
+    let to = to.iter().map(|p| Zn::new(*p as u64)).collect::<Vec<_>>();
+    let conversion = AlmostExactMatrixBaseConversion::new_with(from, to, Global);
+
+    let input = (0..in_len).map(|i| conversion.input_rings().at(i).coerce(&ZZbig, ZZbig.clone_el(&number))).collect::<Vec<_>>();
+    let expected = (0..(primes.len() - in_len)).map(|i| conversion.output_rings().at(i).coerce(&ZZbig, ZZbig.clone_el(&number))).collect::<Vec<_>>();
+    let mut output = (0..(primes.len() - in_len)).map(|i| conversion.output_rings().at(i).zero()).collect::<Vec<_>>();
+    conversion.apply(Submatrix::<AsFirstElement<_>, _>::new(&input, in_len, 1), SubmatrixMut::<AsFirstElement<_>, _>::new(&mut output, primes.len() - in_len, 1));
+
+    assert!(
+        expected.iter().zip(output.iter()).enumerate().all(|(i, (e, a))| conversion.output_rings().at(i).eq_el(e, a)) ||
+        expected.iter().zip(output.iter()).enumerate().all(|(i, (e, a))| conversion.output_rings().at(i).eq_el(e, &conversion.output_rings().at(i).add_ref_fst(a, conversion.output_rings().at(i).one()))) ||
+        expected.iter().zip(output.iter()).enumerate().all(|(i, (e, a))| conversion.output_rings().at(i).eq_el(e, &conversion.output_rings().at(i).sub_ref_fst(a, conversion.output_rings().at(i).one())))
+    )
+}

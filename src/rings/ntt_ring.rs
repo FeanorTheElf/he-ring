@@ -2,9 +2,9 @@ use std::alloc::{Allocator, Global};
 use std::marker::PhantomData;
 
 use feanor_math::homomorphism::{CanHomFrom, CanIsoFromTo, Homomorphism};
-use feanor_math::integer::{int_cast, IntegerRing, IntegerRingStore};
+use feanor_math::integer::{int_cast, BigIntRing, BigIntRingBase, IntegerRing, IntegerRingStore};
 use feanor_math::iters::{multi_cartesian_product, MultiProduct};
-use feanor_math::primitive_int::{StaticRing, StaticRingBase};
+use feanor_math::primitive_int::StaticRing;
 use feanor_math::rings::extension::{FreeAlgebra, FreeAlgebraStore};
 use feanor_math::rings::finite::FiniteRing;
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
@@ -13,19 +13,21 @@ use feanor_math::ring::*;
 use feanor_math::seq::{CloneElFn, CloneRingEl};
 use feanor_math::seq::VectorView;
 use feanor_math::serialization::{DeserializeWithRing, SerializableElementRing, SerializeWithRing};
+use feanor_math::ordered::OrderedRingStore;
+
 use serde::{de, Deserializer, Serializer};
 
 use super::decomposition::{CyclotomicRingDecomposition, IsomorphismInfo, RingDecompositionSelfIso};
 
 pub struct NTTRingBase<R, F, A = Global> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanHomFrom<StaticRingBase<i128>>,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
     ring_decompositions: Vec<F>,
     base_ring: R,
-    rns_base: zn_rns::Zn<R, StaticRing<i128>>,
+    rns_base: zn_rns::Zn<R, BigIntRing>,
     allocator: A
 }
 
@@ -33,7 +35,7 @@ pub type NTTRing<R, F, A = Global> = RingValue<NTTRingBase<R, F, A>>;
 
 pub struct NTTRingEl<R, F, A = Global> 
     where R: ZnRingStore,
-        R::Type: ZnRing + CanHomFrom<StaticRingBase<i128>>,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
@@ -44,11 +46,11 @@ pub struct NTTRingEl<R, F, A = Global>
 
 impl<R, F, A> NTTRingBase<R, F, A>
     where R: ZnRingStore,
-        R::Type: ZnRing + CanHomFrom<StaticRingBase<i128>>,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
-    pub fn from_ring_decompositions(base_ring: R, rns_base: zn_rns::Zn<R, StaticRing<i128>>, ring_decompositions: Vec<F>, allocator: A) -> Self {
+    pub fn from_ring_decompositions(base_ring: R, rns_base: zn_rns::Zn<R, BigIntRing>, ring_decompositions: Vec<F>, allocator: A) -> Self {
         assert!(ring_decompositions.len() > 0);
         for i in 0..ring_decompositions.len() {
             assert!(ring_decompositions[i].is_same_number_ring(&ring_decompositions[0]));
@@ -56,14 +58,8 @@ impl<R, F, A> NTTRingBase<R, F, A>
             assert_eq!(ring_decompositions[i].expansion_factor(), ring_decompositions[0].expansion_factor());
         }
         let modulus = int_cast(base_ring.integer_ring().clone_el(base_ring.modulus()), StaticRing::<i64>::RING, base_ring.integer_ring());
-        assert!(*rns_base.modulus() >= ring_decompositions[0].expansion_factor() as i128 * 2 * ((modulus as i128 - 1) / 2 + 1) * ((modulus as i128 - 1) / 2 + 1));
+        assert!(BigIntRing::RING.is_geq(rns_base.modulus(), &BigIntRing::RING.prod([ring_decompositions[0].expansion_factor(), 2, ((modulus - 1) / 2 + 1), ((modulus - 1) / 2 + 1)].into_iter().map(|n| BigIntRing::RING.coerce(&StaticRing::<i64>::RING, n)))));
         Self { base_ring, rns_base, ring_decompositions, allocator }
-    }
-
-    pub fn new_with<G>(base_ring: R, gen_fft_creator: G, allocator: A) -> Self
-        where G: FnMut(i64) -> F
-    {
-        unimplemented!()
     }
 
     pub fn allocator(&self) -> &A {
@@ -74,7 +70,7 @@ impl<R, F, A> NTTRingBase<R, F, A>
         &self.ring_decompositions
     }
 
-    pub fn rns_base(&self) -> &zn_rns::ZnBase<R, StaticRing<i128>> {
+    pub fn rns_base(&self) -> &zn_rns::ZnBase<R, BigIntRing> {
         self.rns_base.get_ring()
     }
 
@@ -123,7 +119,7 @@ impl<R, F, A> NTTRingBase<R, F, A>
             self.ring_decompositions[i].fft_backward(&mut unreduced_result[(i * self.rank())..((i + 1) * self.rank())], Zp.get_ring());
         }
 
-        let hom = self.base_ring().can_hom(&StaticRing::<i128>::RING).unwrap();
+        let hom = self.base_ring().can_hom(&BigIntRing::RING).unwrap();
         let mut result = Vec::with_capacity_in(self.rank(), self.allocator.clone());
         for j in 0..self.rank() {
             result.push(hom.map(self.rns_base.smallest_lift(
@@ -140,7 +136,7 @@ impl<R, F, A> NTTRingBase<R, F, A>
 
 impl<R, F, A> PartialEq for NTTRingBase<R, F, A>
     where R: ZnRingStore,
-        R::Type: ZnRing + CanHomFrom<StaticRingBase<i128>>,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
@@ -151,7 +147,7 @@ impl<R, F, A> PartialEq for NTTRingBase<R, F, A>
 
 impl<R, F, A> RingBase for NTTRingBase<R, F, A>
     where R: ZnRingStore,
-        R::Type: ZnRing + CanHomFrom<StaticRingBase<i128>>,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
@@ -232,7 +228,7 @@ impl<R, F, A> RingBase for NTTRingBase<R, F, A>
         drop(lhs_tmp);
         drop(rhs_tmp);
 
-        let hom = self.base_ring().can_hom(&StaticRing::<i128>::RING).unwrap();
+        let hom = self.base_ring().can_hom(&BigIntRing::RING).unwrap();
         let mut result = Vec::with_capacity_in(self.rank(), self.allocator.clone());
         for j in 0..self.rank() {
             result.push(hom.map(self.rns_base.smallest_lift(
@@ -308,7 +304,7 @@ impl<R, F, A> RingBase for NTTRingBase<R, F, A>
 
 impl<R, F, A> RingExtension for NTTRingBase<R, F, A>
     where R: ZnRingStore,
-        R::Type: ZnRing + CanHomFrom<StaticRingBase<i128>>,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
@@ -327,7 +323,7 @@ impl<R, F, A> RingExtension for NTTRingBase<R, F, A>
 
 impl<R, F, A> CyclotomicRing for NTTRingBase<R, F, A>
     where R: ZnRingStore,
-        R::Type: ZnRing + CanHomFrom<StaticRingBase<i128>>,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         F: RingDecompositionSelfIso<R::Type> + CyclotomicRingDecomposition<R::Type>,
         A: Allocator + Clone
 {
@@ -355,7 +351,7 @@ impl<R, F, A> CyclotomicRing for NTTRingBase<R, F, A>
         }
         drop(tmp);
 
-        let hom = self.base_ring().can_hom(&StaticRing::<i128>::RING).unwrap();
+        let hom = self.base_ring().can_hom(&BigIntRing::RING).unwrap();
         let mut result = Vec::with_capacity_in(self.rank(), self.allocator.clone());
         for j in 0..self.rank() {
             result.push(hom.map(self.rns_base.smallest_lift(
@@ -372,7 +368,7 @@ impl<R, F, A> CyclotomicRing for NTTRingBase<R, F, A>
 
 impl<R, F, A> FreeAlgebra for NTTRingBase<R, F, A>
     where R: ZnRingStore,
-        R::Type: ZnRing + CanHomFrom<StaticRingBase<i128>>,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
@@ -409,7 +405,7 @@ impl<R, F, A> FreeAlgebra for NTTRingBase<R, F, A>
 
 pub struct WRTCanonicalBasisElementCreator<'a, R, F, A>
     where R: ZnRingStore,
-        R::Type: ZnRing + CanHomFrom<StaticRingBase<i128>>,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
@@ -418,14 +414,14 @@ pub struct WRTCanonicalBasisElementCreator<'a, R, F, A>
 
 impl<'a, R, F, A> Copy for WRTCanonicalBasisElementCreator<'a, R, F, A>
     where R: ZnRingStore,
-        R::Type: ZnRing + CanHomFrom<StaticRingBase<i128>>,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {}
 
 impl<'a, R, F, A> Clone for WRTCanonicalBasisElementCreator<'a, R, F, A>
     where R: ZnRingStore,
-        R::Type: ZnRing + CanHomFrom<StaticRingBase<i128>>,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
@@ -436,7 +432,7 @@ impl<'a, R, F, A> Clone for WRTCanonicalBasisElementCreator<'a, R, F, A>
 
 impl<'a, 'b, R, F, A> FnOnce<(&'b [El<R>],)> for WRTCanonicalBasisElementCreator<'a, R, F, A>
     where R: ZnRingStore,
-        R::Type: ZnRing + CanHomFrom<StaticRingBase<i128>>,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
@@ -449,7 +445,7 @@ impl<'a, 'b, R, F, A> FnOnce<(&'b [El<R>],)> for WRTCanonicalBasisElementCreator
 
 impl<'a, 'b, R, F, A> FnMut<(&'b [El<R>],)> for WRTCanonicalBasisElementCreator<'a, R, F, A>
     where R: ZnRingStore,
-        R::Type: ZnRing + CanHomFrom<StaticRingBase<i128>>,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
@@ -460,7 +456,7 @@ impl<'a, 'b, R, F, A> FnMut<(&'b [El<R>],)> for WRTCanonicalBasisElementCreator<
 
 impl<'a, 'b, R, F, A> Fn<(&'b [El<R>],)> for WRTCanonicalBasisElementCreator<'a, R, F, A>
     where R: ZnRingStore,
-        R::Type: ZnRing + CanHomFrom<StaticRingBase<i128>>,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
@@ -471,7 +467,7 @@ impl<'a, 'b, R, F, A> Fn<(&'b [El<R>],)> for WRTCanonicalBasisElementCreator<'a,
 
 impl<R, F, A> FiniteRing for NTTRingBase<R, F, A>
     where R: ZnRingStore,
-        R::Type: ZnRing + CanHomFrom<StaticRingBase<i128>>,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
@@ -506,7 +502,7 @@ impl<R, F, A> FiniteRing for NTTRingBase<R, F, A>
 
 impl<R, F, A> SerializableElementRing for NTTRingBase<R, F, A>
     where R: ZnRingStore,
-        R::Type: ZnRing + CanHomFrom<StaticRingBase<i128>> + SerializableElementRing,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + SerializableElementRing,
         F: RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone
 {
@@ -536,11 +532,11 @@ impl<R, F, A> SerializableElementRing for NTTRingBase<R, F, A>
 
 impl<R1, R2, F1, F2, A1, A2> CanHomFrom<NTTRingBase<R2, F2, A2>> for NTTRingBase<R1, F1, A1>
     where R1: ZnRingStore,
-        R1::Type: ZnRing + CanHomFrom<StaticRingBase<i128>>,
+        R1::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         F1: RingDecompositionSelfIso<R1::Type>,
         A1: Allocator + Clone,
         R2: ZnRingStore,
-        R2::Type: ZnRing + CanHomFrom<StaticRingBase<i128>>,
+        R2::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         F2: RingDecompositionSelfIso<R2::Type>,
         A2: Allocator + Clone,
         R1::Type: CanHomFrom<R2::Type>,
@@ -572,11 +568,11 @@ impl<R1, R2, F1, F2, A1, A2> CanHomFrom<NTTRingBase<R2, F2, A2>> for NTTRingBase
 
 impl<R1, R2, F1, F2, A1, A2> CanIsoFromTo<NTTRingBase<R2, F2, A2>> for NTTRingBase<R1, F1, A1>
     where R1: ZnRingStore,
-        R1::Type: ZnRing + CanHomFrom<StaticRingBase<i128>>,
+        R1::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         F1: RingDecompositionSelfIso<R1::Type>,
         A1: Allocator + Clone,
         R2: ZnRingStore,
-        R2::Type: ZnRing + CanHomFrom<StaticRingBase<i128>>,
+        R2::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         F2: RingDecompositionSelfIso<R2::Type>,
         A2: Allocator + Clone,
         R1::Type: CanIsoFromTo<R2::Type>,
@@ -623,7 +619,7 @@ fn test_ring_and_elements() -> (
     NTTRing<zn_64::Zn, Pow2CyclotomicFFT<zn_64::Zn, cooley_tuckey::CooleyTuckeyFFT<zn_64::ZnBase, AsFieldBase<zn_64::Zn>, CanHom<AsField<zn_64::Zn>, zn_64::Zn>>>>,
     Vec<NTTRingEl<zn_64::Zn, Pow2CyclotomicFFT<zn_64::Zn, cooley_tuckey::CooleyTuckeyFFT<zn_64::ZnBase, AsFieldBase<zn_64::Zn>, CanHom<AsField<zn_64::Zn>, zn_64::Zn>>>>>
 ) {
-    let rns_base = zn_rns::Zn::new([113, 193, 241, 257, 337].into_iter().map(zn_64::Zn::new).collect(), StaticRing::<i128>::RING);
+    let rns_base = zn_rns::Zn::new([113, 193, 241, 257, 337].into_iter().map(zn_64::Zn::new).collect(), BigIntRing::RING);
     let mut generalized_ffts = Vec::new();
     for Fp in rns_base.as_iter() {
         let as_field = (*Fp).as_field().ok().unwrap();

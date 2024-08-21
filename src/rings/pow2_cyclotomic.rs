@@ -21,6 +21,7 @@ use super::ntt_ring::NTTRing;
 use super::ntt_ring::NTTRingBase;
 use crate::rings::decomposition::*;
 use crate::sample_primes;
+use crate::StdZn;
 
 ///
 /// [`GeneralizedFFT`] corresponding to the evaluation at all primitive `2n`-th roots of unity,
@@ -106,10 +107,20 @@ impl<R, F> RingDecomposition<R::Type> for Pow2CyclotomicFFT<R, F>
     }
 }
 
+impl<R, F> PartialEq for Pow2CyclotomicFFT<R, F> 
+    where R: RingStore,
+        R::Type: ZnRing,
+        F: FFTAlgorithm<R::Type> + PartialEq
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.ring.get_ring() == other.ring.get_ring() && self.fft_table == other.fft_table && self.ring.eq_el(&self.twiddles[1], &other.twiddles[1])
+    }
+}
+
 impl<R1, R2, F1, F2> IsomorphismInfo<R1::Type, R2::Type, Pow2CyclotomicFFT<R2, F2>> for Pow2CyclotomicFFT<R1, F1>
     where R1: RingStore,
         R1::Type: ZnRing,
-        F1: FFTAlgorithm<R1::Type> + PartialEq + PartialEq<F2>,
+        F1: FFTAlgorithm<R1::Type> + PartialEq,
         R2: RingStore,
         R2::Type: ZnRing + PartialEq<R1::Type>,
         F2: FFTAlgorithm<R2::Type> + PartialEq
@@ -117,24 +128,7 @@ impl<R1, R2, F1, F2> IsomorphismInfo<R1::Type, R2::Type, Pow2CyclotomicFFT<R2, F
     fn is_same_number_ring(&self, other: &Pow2CyclotomicFFT<R2, F2>) -> bool {
         self.rank() == other.rank()
     }
-
-    fn is_exactly_same(&self, other: &Pow2CyclotomicFFT<R2, F2>) -> bool {
-        self.is_same_number_ring(other) && other.ring.get_ring() == self.ring.get_ring() && self.fft_table == other.fft_table
-    }
 }
-
-// impl<R1, R2, F1, F2> SameNumberRingCross<R2::Type, R1::Type, complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<R1, F1>> for Pow2CyclotomicFFT<R2, F2>
-//     where R1: RingStore,
-//         F1: FFTAlgorithm<Complex64Base> + FFTErrorEstimate,
-//         R1::Type: ZnRing,
-//         R2: RingStore,
-//         R2::Type: ZnRing,
-//         F2: FFTAlgorithm<R2::Type>
-// {
-//     fn is_isomorphic(&self, other: &complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<R1, F1>) -> bool {
-//         self.rank() == <_ as complexfft::complex_fft_ring::RingDecomposition<_>>::rank(other)
-//     }
-// }
 
 impl<R, F> CyclotomicRingDecomposition<R::Type> for Pow2CyclotomicFFT<R, F> 
     where R: RingStore,
@@ -244,29 +238,38 @@ impl<R, A> DoubleRNSRingBase<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckey
 pub type DefaultPow2CyclotomicNTTRingBase<R = zn_64::Zn> = NTTRingBase<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckeyFFT<<R as RingStore>::Type, <R as RingStore>::Type, Identity<R>>>>;
 pub type DefaultPow2CyclotomicNTTRing<R = zn_64::Zn> = NTTRing<R, Pow2CyclotomicFFT<R, cooley_tuckey::CooleyTuckeyFFT<<R as RingStore>::Type, <R as RingStore>::Type, Identity<R>>>>;
 
-impl DefaultPow2CyclotomicNTTRingBase {
-
-    pub fn new(base_ring: zn_64::Zn, log2_n: usize) -> RingValue<Self> {
+impl<R, A> NTTRingBase<RingValue<R>, Pow2CyclotomicFFT<RingValue<R>, cooley_tuckey::CooleyTuckeyFFT<R, R, Identity<RingValue<R>>>>, A>
+    where R: StdZn + Clone,
+        A: Allocator + Default + Clone
+{
+    pub fn new_with(base_ring: RingValue<R>, log2_n: usize, allocator: A) -> RingValue<Self> {
         let modulus = int_cast(base_ring.integer_ring().clone_el(base_ring.modulus()), StaticRing::<i64>::RING, base_ring.integer_ring());
         let required_bits = ((modulus as f64).log2() * 2. + log2_n as f64).ceil() as usize;
-        let primes = sample_primes(required_bits, 40, 40, &BigIntRing::RING.power_of_two(log2_n + 1)).unwrap();
+        let primes = sample_primes(required_bits, required_bits + log2_n + 3, 58, &BigIntRing::RING.power_of_two(log2_n + 1)).unwrap();
 
         let mut rns_base = Vec::new();
         let mut ring_decompositions = Vec::new();
         for p in primes {
-            let p = int_cast(p, &StaticRing::<i64>::RING, &BigIntRing::RING);
-            let Fp = zn_64::Zn::new(p as u64);
-            rns_base.push(Fp);
-            let as_field = Fp.as_field().ok().unwrap();
+            let Fp = RingValue::from(R::create(|int_ring| Ok(int_cast(p, RingRef::new(int_ring), &BigIntRing::RING))).unwrap_or_else(|x| x));
+            let as_field = (&Fp).as_field().ok().unwrap();
             let root_of_unity = Fp.coerce(&as_field, get_prim_root_of_unity_pow2(as_field, log2_n + 1).unwrap());
-            ring_decompositions.push(Pow2CyclotomicFFT::create(Fp, cooley_tuckey::CooleyTuckeyFFT::new(Fp, Fp.pow(root_of_unity, 2), log2_n), root_of_unity));
+            let fft_table = cooley_tuckey::CooleyTuckeyFFT::new(Fp.clone(), Fp.pow(Fp.clone_el(&root_of_unity), 2), log2_n);
+            ring_decompositions.push(Pow2CyclotomicFFT::create(Fp.clone(), fft_table, root_of_unity));
+            rns_base.push(Fp);
         }
-        return RingValue::from(DefaultPow2CyclotomicNTTRingBase::from_ring_decompositions(
+        return RingValue::from(NTTRingBase::from_ring_decompositions(
             base_ring, 
-            zn_rns::Zn::new(rns_base, StaticRing::<i128>::RING), 
+            zn_rns::Zn::new(rns_base, BigIntRing::RING), 
             ring_decompositions, 
-            Global
+            allocator
         ));
+    }
+}
+
+impl DefaultPow2CyclotomicNTTRingBase {
+
+    pub fn new(base_ring: zn_64::Zn, log2_n: usize) -> RingValue<Self> {
+        Self::new_with(base_ring, log2_n, Global)
     }
 }
 

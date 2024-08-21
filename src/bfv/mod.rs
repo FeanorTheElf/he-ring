@@ -2,6 +2,7 @@
 #![allow(non_upper_case_globals)]
 
 use std::alloc::Global;
+use std::borrow::Borrow;
 use std::ptr::Alignment;
 use std::sync::Arc;
 use std::sync::RwLock;
@@ -10,7 +11,6 @@ use feanor_math::homomorphism::CanHom;
 use feanor_math::homomorphism::Identity;
 use feanor_math::ring::*;
 use feanor_math::assert_el_eq;
-use feanor_math::rings::float_complex::Complex64Base;
 use feanor_math::rings::zn::*;
 use feanor_math::rings::zn::zn_64::*;
 use feanor_math::primitive_int::StaticRing;
@@ -21,16 +21,16 @@ use feanor_math::homomorphism::Homomorphism;
 use feanor_math::ordered::OrderedRingStore;
 use feanor_math::rings::extension::FreeAlgebraStore;
 use feanor_math::seq::*;
-use feanor_math::rings::float_complex::Complex64;
 use feanor_mempool::dynsize::DynLayoutMempool;
 use feanor_mempool::AllocArc;
 
-use crate::complexfft::automorphism::HypercubeIsomorphism;
-use crate::doublerns::pow2_cyclotomic::*;
-use crate::doublerns::gadget_product::*;
-use crate::complexfft::complex_fft_ring::*;
-use crate::doublerns::double_rns_ring::*;
+use crate::cyclotomic::CyclotomicRing;
+use crate::rings::pow2_cyclotomic::*;
+use crate::rings::gadget_product::*;
+use crate::rings::double_rns_ring::*;
+use crate::rings::ntt_ring::*;
 use crate::profiling::*;
+use crate::rings::slots::HypercubeIsomorphism;
 use crate::rnsconv;
 
 use rand::thread_rng;
@@ -40,8 +40,8 @@ use rand_distr::StandardNormal;
 pub mod bootstrap;
 
 type PlaintextZn = zn_64::Zn;
-type PlaintextFFT = cooley_tuckey::CooleyTuckeyFFT<Complex64Base, Complex64Base, Identity<Complex64>>;
-pub type PlaintextRing = CCFFTRing<PlaintextZn, crate::complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<PlaintextZn, PlaintextFFT>>;
+type PlaintextFFT = cooley_tuckey::CooleyTuckeyFFT<<PlaintextZn as RingStore>::Type, <PlaintextZn as RingStore>::Type, Identity<PlaintextZn>>;
+pub type PlaintextRing = NTTRing<PlaintextZn, Pow2CyclotomicFFT<PlaintextZn, PlaintextFFT>>;
 
 type CiphertextAllocator = AllocArc<DynLayoutMempool>;
 type CiphertextZn = zn_64::Zn;
@@ -201,17 +201,21 @@ pub fn enc_sym<R: Rng + CryptoRng>(P: &PlaintextRing, C: &CiphertextRing, rng: R
     hom_add_plain(P, C, m, enc_sym_zero(C, rng, sk))
 }
 
-pub fn dec(P: &PlaintextRing, C: &CiphertextRing, ct: Ciphertext, sk: &SecretKey) -> El<PlaintextRing> {
-    let (c0, c1) = ct;
-    let (c0, c1) = (C.get_ring().do_fft(c0), C.get_ring().do_fft(c1));
-    let noisy_m = C.add(c0, C.mul_ref_snd(c1, sk));
-    let coefficients = C.wrt_canonical_basis(&noisy_m);
+pub fn remove_noise(P: &PlaintextRing, C: &CiphertextRing, c: &El<CiphertextRing>) -> El<PlaintextRing> {
+    let coefficients = C.wrt_canonical_basis(c);
     let Delta = ZZbig.rounded_div(
         ZZbig.clone_el(C.base_ring().modulus()), 
         &int_cast(*P.base_ring().modulus() as i32, &ZZbig, &StaticRing::<i32>::RING)
     );
     let modulo = P.base_ring().can_hom(&ZZbig).unwrap();
     return P.from_canonical_basis((0..coefficients.len()).map(|i| modulo.map(ZZbig.rounded_div(C.base_ring().smallest_lift(coefficients.at(i)), &Delta))));
+}
+
+pub fn dec(P: &PlaintextRing, C: &CiphertextRing, ct: Ciphertext, sk: &SecretKey) -> El<PlaintextRing> {
+    let (c0, c1) = ct;
+    let (c0, c1) = (C.get_ring().do_fft(c0), C.get_ring().do_fft(c1));
+    let noisy_m = C.add(c0, C.mul_ref_snd(c1, sk));
+    return remove_noise(P, C, &noisy_m);
 }
 
 pub fn hom_add(C: &CiphertextRing, lhs: Ciphertext, rhs: &Ciphertext) -> Ciphertext {
@@ -231,7 +235,7 @@ pub fn hom_sub(C: &CiphertextRing, lhs: Ciphertext, rhs: &Ciphertext) -> Ciphert
 }
 
 pub fn hom_add_plain(P: &PlaintextRing, C: &CiphertextRing, m: &El<PlaintextRing>, ct: Ciphertext) -> Ciphertext {
-    let mut m = C.get_ring().exact_convert_from_cfft(P.get_ring(), m);
+    let mut m = C.get_ring().exact_convert_from_nttring(P.get_ring(), m);
     let Delta = C.base_ring().coerce(&ZZbig, ZZbig.rounded_div(
         ZZbig.clone_el(C.base_ring().modulus()), 
         &int_cast(*P.base_ring().modulus() as i32, &ZZbig, &StaticRing::<i32>::RING)
@@ -243,10 +247,26 @@ pub fn hom_add_plain(P: &PlaintextRing, C: &CiphertextRing, m: &El<PlaintextRing
 }
 
 pub fn hom_mul_plain(P: &PlaintextRing, C: &CiphertextRing, m: &El<PlaintextRing>, ct: Ciphertext) -> Ciphertext {
-    let m = C.get_ring().do_fft(C.get_ring().exact_convert_from_cfft(P.get_ring(), m));
+    let m = C.get_ring().do_fft(C.get_ring().exact_convert_from_nttring(P.get_ring(), m));
     let (c0, c1) = ct;
     let (c0, c1) = (C.get_ring().do_fft(c0), C.get_ring().do_fft(c1));
     return (C.get_ring().undo_fft(C.mul_ref_snd(c0, &m)), C.get_ring().undo_fft(C.mul(c1, m)));
+}
+
+pub fn noise_budget(P: &PlaintextRing, C: &CiphertextRing, ct: &Ciphertext, sk: &SecretKey) -> usize {
+    let (c0, c1) = ct;
+    let (c0, c1) = (C.get_ring().do_fft(C.get_ring().clone_el_non_fft(c0)), C.get_ring().do_fft(C.get_ring().clone_el_non_fft(c1)));
+    let noisy_m = C.add(c0, C.mul_ref_snd(c1, sk));
+    let coefficients = C.wrt_canonical_basis(&noisy_m);
+    let Delta = ZZbig.rounded_div(
+        ZZbig.clone_el(C.base_ring().modulus()), 
+        &int_cast(*P.base_ring().modulus() as i32, &ZZbig, &StaticRing::<i32>::RING)
+    );
+    return ZZbig.abs_log2_ceil(C.base_ring().modulus()).unwrap().saturating_sub((0..coefficients.len()).map(|i| {
+        let c = C.base_ring().smallest_lift(coefficients.at(i));
+        let size = ZZbig.abs_log2_ceil(&ZZbig.sub_ref_fst(&c, ZZbig.mul_ref_snd(ZZbig.rounded_div(ZZbig.clone_el(&c), &Delta), &Delta)));
+        return size.unwrap_or(0);
+    }).max().unwrap() + P.base_ring().integer_ring().abs_log2_ceil(P.base_ring().modulus()).unwrap() + 1);
 }
 
 pub fn gen_rk<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing, rng: R, sk: &SecretKey) -> RelinKey<'a> {
@@ -256,7 +276,18 @@ pub fn gen_rk<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing, rng: R, sk: &Secret
 pub fn hom_mul(C: &CiphertextRing, C_mul: &CiphertextRing, lhs: &Ciphertext, rhs: &Ciphertext, rk: &RelinKey, conv_data: &MulConversionData) -> Ciphertext {
     let (c00, c01) = lhs;
     let (c10, c11) = rhs;
-    let lift = |c: &DoubleRNSNonFFTEl<CiphertextZn, CiphertextGenFFT, CiphertextAllocator>| C_mul.get_ring().do_fft(C_mul.get_ring().perform_rns_op_from(C.get_ring(), &c, &conv_data.lift_to_C_mul));
+    let lift = |c: &DoubleRNSNonFFTEl<CiphertextZn, CiphertextGenFFT, CiphertextAllocator>| {
+        // let c_fft = C.get_ring().do_fft(C.get_ring().clone_el_non_fft(c));
+        // let input_wrt_basis = C.wrt_canonical_basis(&c_fft);
+        let result = C_mul.get_ring().do_fft(C_mul.get_ring().perform_rns_op_from(C.get_ring(), &c, &conv_data.lift_to_C_mul));
+        // let result_wrt_basis = C_mul.wrt_canonical_basis(&result);
+        // for i in 0..C.rank() {
+        //     let actual = C_mul.base_ring().smallest_lift(result_wrt_basis.at(i));
+        //     let expected = C.base_ring().smallest_lift(input_wrt_basis.at(i));
+        //     assert!(ZZbig.is_leq(&ZZbig.abs(ZZbig.sub_ref(&actual, &expected)), C.base_ring().modulus()), "{}, {}, {}", ZZbig.format(&actual), ZZbig.format(&expected), ZZbig.format(C.base_ring().modulus()));
+        // }
+        return result;
+    };
 
     let lifted0 = C_mul.mul(lift(c00), lift(c10));
     let lifted1 = C_mul.add(C_mul.mul(lift(c00), lift(c11)), C_mul.mul(lift(c01), lift(c10)));
@@ -267,6 +298,23 @@ pub fn hom_mul(C: &CiphertextRing, C_mul: &CiphertextRing, lhs: &Ciphertext, rhs
     let mut res0 = scale_down(lifted0);
     let mut res1 = scale_down(lifted1);
     let res2 = scale_down(lifted2);
+
+    let debug_result = C.add(
+        C.mul_ref_snd(C.get_ring().do_fft(C.get_ring().clone_el_non_fft(&res1)), DEBUG_SK.borrow().read().as_ref().unwrap().as_ref().unwrap()), 
+        C.add(
+            C.mul(C.get_ring().do_fft(C.get_ring().clone_el_non_fft(&res2)), C.pow(C.clone_el(DEBUG_SK.borrow().read().as_ref().unwrap().as_ref().unwrap()), 2)), 
+            C.get_ring().do_fft(C.get_ring().clone_el_non_fft(&res0))
+        )
+    );
+    let params = Pow2BFVParams {
+        t: 257,
+        log2_q_min: 1090,
+        log2_q_max: 1100,
+        log2_N: 10
+    };
+    
+    let P = params.create_plaintext_ring();
+    P.println(&remove_noise(&P, C, &debug_result));
     
     let op = C.get_ring().to_gadget_product_lhs(res2);
     let (s0, s1) = rk;
@@ -308,8 +356,8 @@ pub fn key_switch(C: &CiphertextRing, ct: &Ciphertext, switch_key: &KeySwitchKey
 pub fn mod_switch_to_plaintext(target: &PlaintextRing, C: &CiphertextRing, ct: &Ciphertext, switch_data: &ModSwitchData) -> (El<PlaintextRing>, El<PlaintextRing>) {
     let (c0, c1) = ct;
     return (
-        C.get_ring().perform_rns_op_to_cfft(target.get_ring(), c0, &switch_data.scale),
-        C.get_ring().perform_rns_op_to_cfft(target.get_ring(), c1, &switch_data.scale)
+        C.get_ring().perform_rns_op_to_nttring::<Pow2CyclotomicFFT<PlaintextZn, PlaintextFFT>, _, _>(target.get_ring(), c0, &switch_data.scale),
+        C.get_ring().perform_rns_op_to_nttring::<Pow2CyclotomicFFT<PlaintextZn, PlaintextFFT>, _, _>(target.get_ring(), c1, &switch_data.scale)
     );
 }
 
@@ -389,4 +437,39 @@ fn test_hom_galois() {
     let res = dec(&P, &C, ct_res, &sk);
 
     assert_el_eq!(&P, &P.pow(P.canonical_gen(), 3), &res);
+}
+
+#[test]
+fn test_bfv_mul() {
+    let mut rng = thread_rng();
+    
+    let params = Pow2BFVParams {
+        t: 257,
+        log2_q_min: 1090,
+        log2_q_max: 1100,
+        log2_N: 10
+    };
+    
+    let P = params.create_plaintext_ring();
+    let (C, C_mul) = params.create_ciphertext_rings();
+
+    for Fp in C_mul.base_ring().as_iter() {
+        ZZ.println(Fp.modulus());
+    }
+    println!("{}", C.base_ring().len());
+
+    let sk = gen_sk(&C, &mut rng);
+    let mul_rescale_data = params.create_multiplication_rescale(&P, &C, &C_mul);
+    let rk = gen_rk(&C, &mut rng, &sk);
+
+    let m = P.int_hom().map(2);
+    let ct = enc_sym(&P, &C, &mut rng, &m, &sk);
+
+    let m = dec(&P, &C, (C.get_ring().clone_el_non_fft(&ct.0), C.get_ring().clone_el_non_fft(&ct.1)), &sk);
+    assert_el_eq!(&P, &P.int_hom().map(2), &m);
+
+    let ct_sqr = hom_mul(&C, &C_mul, &ct, &ct, &rk, &mul_rescale_data);
+    let m_sqr = dec(&P, &C, ct_sqr, &sk);
+
+    assert_el_eq!(&P, &P.int_hom().map(4), &m_sqr);
 }

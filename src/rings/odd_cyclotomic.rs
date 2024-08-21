@@ -13,9 +13,9 @@ use feanor_math::rings::poly::sparse_poly::SparsePolyRing;
 use feanor_math::rings::zn::*;
 use feanor_math::seq::*;
 
-use crate::complexfft::automorphism::euler_phi;
 use crate::rings::double_rns_ring::*;
 use crate::rings::decomposition::*;
+use crate::euler_phi;
 
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
 
@@ -75,6 +75,17 @@ impl<R, F, A> OddCyclotomicFFT<R, F, A>
             debug_assert!(*state < self.fft_table.len() as i64);
             return Some(*state as usize);
         })
+    }
+}
+
+impl<R, F, A> PartialEq for OddCyclotomicFFT<R, F, A> 
+    where R: RingStore,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + DivisibilityRing,
+        F: FFTAlgorithm<R::Type> + PartialEq,
+        A: Allocator + Clone
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.ring.get_ring() == other.ring.get_ring() && self.fft_table == other.fft_table
     }
 }
 
@@ -141,16 +152,12 @@ impl<R1, R2, F1, F2, A1, A2> IsomorphismInfo<R2::Type, R1::Type, OddCyclotomicFF
         F1: FFTAlgorithm<R1::Type> + PartialEq,
         R2: RingStore,
         R2::Type: ZnRing + CanHomFrom<BigIntRingBase> + DivisibilityRing,
-        F2: FFTAlgorithm<R2::Type> + PartialEq + PartialEq<F1>,
+        F2: FFTAlgorithm<R2::Type> + PartialEq,
         A1: Allocator + Clone,
         A2: Allocator + Clone
 {
     fn is_same_number_ring(&self, other: &OddCyclotomicFFT<R1, F1, A1>) -> bool {
         self.fft_table.len() == other.fft_table.len()
-    }
-
-    fn is_exactly_same(&self, other: &OddCyclotomicFFT<R1, F1, A1>) -> bool {
-        self.is_same_number_ring(other) && other.ring.get_ring() == self.ring.get_ring() && self.fft_table == other.fft_table
     }
 }
 

@@ -327,6 +327,26 @@ fn test_digit_retain_poly() {
     for k in 0..(17 * 17 * 17) {
         assert_el_eq!(&Zn, &Zn.coerce(&StaticRing::<i64>::RING, k % 17), &P.evaluate(&digit_retain, &Zn.coerce(&StaticRing::<i64>::RING, k), &Zn.identity()));
     }
+    
+    let Zn = Zn::new(257 * 257);
+    let P = DensePolyRing::new(Zn, "X");
+    let digit_retain = digit_retain_poly(&P, 2);
+    assert_eq!(Some(257), P.degree(&digit_retain));
+    for k in 0..257 {
+        assert_el_eq!(&Zn, &Zn.coerce(&StaticRing::<i64>::RING, 2), &P.evaluate(&digit_retain, &Zn.coerce(&StaticRing::<i64>::RING, 2 + k * 257), &Zn.identity()));
+    }
+}
+
+#[test]
+#[ignore]
+fn test_digit_retain_poly_large() {
+    let Zn = Zn::new(257 * 257 * 257);
+    let P = DensePolyRing::new(Zn, "X");
+    let digit_retain = digit_retain_poly(&P, 3);
+    assert_el_eq!(&Zn, &Zn.coerce(&StaticRing::<i64>::RING, 251), &P.evaluate(&digit_retain, &Zn.coerce(&StaticRing::<i64>::RING, 132092), &Zn.identity()));
+    for k in 0..(257 * 257) {
+        assert_el_eq!(&Zn, &Zn.coerce(&StaticRing::<i64>::RING, 2), &P.evaluate(&digit_retain, &Zn.coerce(&StaticRing::<i64>::RING, 2 + k * 257), &Zn.identity()));
+    }
 }
 
 #[test]

@@ -48,16 +48,13 @@ use feanor_math::integer::IntegerRingStore;
 
 use crate::cyclotomic::*;
 use crate::StdZn;
+use crate::euler_phi;
 use super::decomposition::*;
 use super::ntt_ring::NTTRing;
 use super::ntt_ring::NTTRingBase;
 use oorandom;
 
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
-
-pub fn euler_phi(factorization: &[(i64, usize)]) -> i64 {
-    ZZ.prod(factorization.iter().map(|(p, e)| (p - 1) * ZZ.pow(*p, e - 1)))
-}
 
 fn get_multiplicative_generator(ring: Zn, factorization: &[(i64, usize)]) -> ZnEl {
     let mut rng = oorandom::Rand64::new(ring.integer_ring().default_hash(ring.modulus()) as u128);
@@ -151,14 +148,8 @@ fn get_prim_root_of_unity<R>(ring: R, m: usize) -> El<R>
         FFTRNSBasedConvolutionZn::from(FFTRNSBasedConvolution::<<<R::Type as RingExtension>::BaseRing as RingStore>::Type>::new_with(max_log2_len, BigIntRing::RING, Global))
     ).as_field().ok().unwrap();
 
-    println!("finding root of unity in galois field...");
-    let start = Instant::now();
     let rou = feanor_math::algorithms::unity_root::get_prim_root_of_unity(&galois_field, m).unwrap();
-    let end = Instant::now();
-    println!("done in {} ms", (end - start).as_millis());
 
-    println!("performing hensel lifting...");
-    let start = Instant::now();
     let red_map = ReductionMap::new(ring.base_ring(), galois_field.base_ring()).unwrap();
     let mut result = ring.from_canonical_basis(galois_field.wrt_canonical_basis(&rou).into_iter().map(|x| red_map.smallest_lift(x)));
     for _ in 0..e {
@@ -168,8 +159,6 @@ fn get_prim_root_of_unity<R>(ring: R, m: usize) -> El<R>
         ).unwrap();
         ring.sub_assign(&mut result, delta);
     }
-    let end = Instant::now();
-    println!("done in {} ms", (end - start).as_millis());
     assert!(ring.is_one(&ring.pow(ring.clone_el(&result), m)));
     return result;
 }
@@ -307,36 +296,20 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
         let d = ring.rank() / slot_count;
 
         // first task: compute a nice representation of the slot ring
-        println!("creating temporary slot ring...");
-        let start = Instant::now();
         let max_log2_len = ZZ.abs_log2_ceil(&(d as i64)).unwrap() + 1;
         let tmp_slot_ring = RingValue::from(galois_ring_dyn(p, e, d).get_ring().get_delegate().clone()).set_convolution(FFTRNSBasedConvolutionZn::from(FFTRNSBasedConvolution::<R::Type>::new_with(max_log2_len, BigIntRing::RING, Global)));
-        let end = Instant::now();
-        println!("done in {} ms", (end - start).as_millis());
-
-        println!("finding root of unity...");
-        let start = Instant::now();
+        
         let root_of_unity = get_prim_root_of_unity(&tmp_slot_ring, ring.n());
-        let end = Instant::now();
-        println!("done in {} ms", (end - start).as_millis());
-
-        println!("computing root of unity minpoly...");
-        let start = Instant::now();
+        
         let poly_ring = DensePolyRing::new(&tmp_slot_ring, "X");
         let mut slot_generating_poly = poly_ring.prod((0..d).scan(tmp_slot_ring.clone_el(&root_of_unity), |current_root_of_unity, _| {
             let result = poly_ring.sub(poly_ring.indeterminate(), poly_ring.inclusion().map_ref(current_root_of_unity));
             *current_root_of_unity = tmp_slot_ring.pow(tmp_slot_ring.clone_el(current_root_of_unity), galois_group_ring.smallest_positive_lift(frobenius) as usize);
             return Some(result);
         }));
-        let end = Instant::now();
-        println!("done in {} ms", (end - start).as_millis());
-
-        println!("normalizing root of unity minpoly...");
-        let start = Instant::now();
+        
         let normalization_factor = poly_ring.base_ring().invert(poly_ring.lc(&slot_generating_poly).unwrap()).unwrap();
         poly_ring.inclusion().mul_assign_map(&mut slot_generating_poly, normalization_factor);
-        let end = Instant::now();
-        println!("done in {} ms", (end - start).as_millis());
 
         let hom = ring.base_ring().can_hom(tmp_slot_ring.base_ring()).unwrap();
         let mut slot_ring_modulus = SparseHashMapVector::new(d, ring.base_ring());
@@ -373,8 +346,6 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
             slot_unit_vec: ring.zero()
         };
 
-        println!("computing slot unit vector...");
-        let start = Instant::now();
         // nonzero in the first slot and zero in all others
         let unnormalized_slot_unit_vector = ring.prod(result.slot_iter(|idxs| if idxs.iter().all(|x| *x == 0) {
             None
@@ -383,11 +354,7 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
         })
             .filter_map(|x| x)
             .map(|s| ring.apply_galois_action(&irred_factor, s)));
-        let end = Instant::now();
-        println!("done in {} ms", (end - start).as_millis());
-
-        println!("normalizing slot unit vector...");
-        let start = Instant::now();
+        
         let normalization_factor = result.slot_ring().invert(&result.get_slot_values(&unnormalized_slot_unit_vector).next().unwrap()).unwrap();
         let normalization_factor_wrt_basis = result.slot_ring().wrt_canonical_basis(&normalization_factor);
 
@@ -395,8 +362,6 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
             ring.from_canonical_basis((0..ring.rank()).map(|i| if i < normalization_factor_wrt_basis.len() { normalization_factor_wrt_basis.at(i) } else { ring.base_ring().zero() })),
             unnormalized_slot_unit_vector
         );
-        let end = Instant::now();
-        println!("done in {} ms", (end - start).as_millis());
 
         return result;
     }

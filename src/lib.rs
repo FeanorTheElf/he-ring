@@ -20,10 +20,12 @@ use feanor_math::integer::BigIntRingBase;
 use feanor_math::integer::IntegerRingStore;
 use feanor_math::ordered::OrderedRingStore;
 use feanor_math::pid::EuclideanRingStore;
+use feanor_math::primitive_int::StaticRing;
 use feanor_math::primitive_int::StaticRingBase;
 use feanor_math::ring::*;
 use feanor_math::homomorphism::*;
 use feanor_math::rings::extension::galois_field::GaloisFieldDyn;
+use feanor_math::rings::field::AsFieldBase;
 use feanor_math::rings::local::AsLocalPIRBase;
 use feanor_math::rings::zn::zn_64;
 use feanor_math::rings::zn::{FromModulusCreateableZnRing, ZnRing};
@@ -49,6 +51,7 @@ pub trait StdZn: ZnRing
     + CanHomFrom<AsLocalPIRBase<zn_64::Zn>>
     + CanHomFrom<StaticRingBase<i64>>
     + CanHomFrom<StaticRingBase<i128>>
+    + for<'a> CanHomFrom<AsFieldBase<&'a RingValue<Self>>>
     + CanHomFrom<BigIntRingBase>
     + SerializableElementRing
 {}
@@ -60,6 +63,7 @@ impl<R> StdZn for R
     + CanHomFrom<AsLocalPIRBase<zn_64::Zn>>
     + CanHomFrom<StaticRingBase<i64>>
     + CanHomFrom<StaticRingBase<i128>>
+    + for<'a> CanHomFrom<AsFieldBase<&'a RingValue<Self>>>
     + CanHomFrom<BigIntRingBase>
     + SerializableElementRing
 {}
@@ -70,7 +74,7 @@ pub fn sample_primes(min_bits: usize, max_bits: usize, max_bits_each_modulus: us
     let mut result = Vec::new();
     let mut current_bits = 0.;
     while current_bits < min_bits as f64 {
-        let next_modulus_add_bound = min(max_bits_each_modulus, max_bits - current_bits as usize);
+        let next_modulus_add_bound = min(max_bits_each_modulus, max_bits - current_bits.ceil() as usize);
         let mut current = ZZbig.add(ZZbig.sub(ZZbig.power_of_two(next_modulus_add_bound), ZZbig.euclidean_rem(ZZbig.power_of_two(next_modulus_add_bound), congruent_to_one_mod)), ZZbig.one());
         let mut added_any = false;
         while ZZbig.is_pos(&current) {
@@ -95,6 +99,13 @@ pub fn sample_primes(min_bits: usize, max_bits: usize, max_bits_each_modulus: us
     return Some(result);
 }
 
+///
+/// Euler's totient function
+/// 
+fn euler_phi(factorization: &[(i64, usize)]) -> i64 {
+    StaticRing::<i64>::RING.prod(factorization.iter().map(|(p, e)| (p - 1) * StaticRing::<i64>::RING.pow(*p, e - 1)))
+}
+
 #[macro_use]
 pub mod profiling;
 
@@ -109,17 +120,13 @@ pub mod cyclotomic;
 pub mod rnsconv;
 
 ///
-/// Implementation of rings using complex-valued fast fourier transforms for efficient arithmetic.
-/// 
-pub mod complexfft;
-
-///
 /// Implementation of rings using double-RNS representation.
 /// 
 pub mod rings;
 
 pub mod lintransform;
+
 pub mod digitextract;
 
-// #[cfg(test)]
-// pub mod bfv;
+#[cfg(test)]
+pub mod bfv;

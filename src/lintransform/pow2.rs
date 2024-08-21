@@ -220,15 +220,6 @@ fn pow2_bitreversed_inv_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'
     result.optimize(&H);
     #[cfg(debug_assertions)] {
         let expected = pow2_bitreversed_dwt_butterfly(H, dim_index, l, H.slot_ring().clone_el(&zeta_power_table.get_power(1)), row_autos).inverse(&H);
-        
-        for (d, c, _) in &expected.data {
-            println!("{}, {}", H.galois_group_mulrepr().format(d), H.ring().format(c));
-        }
-        println!();
-        for (d, c, _) in &result.data {
-            println!("{}, {}", H.galois_group_mulrepr().format(d), H.ring().format(c));
-        }
-        println!();
         debug_assert!(result.eq(&expected, &H));
     }
     return result;

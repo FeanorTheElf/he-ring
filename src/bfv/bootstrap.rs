@@ -1,4 +1,4 @@
-use std::alloc::Global;
+use std::borrow::Borrow;
 
 use feanor_math::algorithms::int_factor::is_prime_power;
 use feanor_math::divisibility::DivisibilityRingStore;
@@ -14,7 +14,6 @@ use feanor_math::seq::VectorView;
 use polys::poly_to_circuit;
 use rand::thread_rng;
 
-use crate::complexfft::automorphism::HypercubeIsomorphism;
 use crate::lintransform::pow2::pow2_coeffs_to_slots_thin;
 use crate::rnsconv;
 use crate::{digitextract::*, lintransform::pow2::pow2_slots_to_coeffs_thin};
@@ -62,8 +61,8 @@ pub struct Pow2BFVThinBootstrapParams {
     slotwise_trace: Pow2Trace,
     // the k-th circuit works modulo `e - k` and outputs values `yi` such that `yi = lift(x mod p) mod p^(i + 2)` for `0 <= i < v - k - 2` as well as a final `y'` with `y' = lift(x mod p)`
     digit_extract_circuits: Vec<ArithCircuit>,
-    slots_to_coeffs_thin: Vec<CompiledLinearTransform<PlaintextZn, crate::complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<PlaintextZn, PlaintextFFT>, Global>>,
-    coeffs_to_slots_thin: Vec<CompiledLinearTransform<PlaintextZn, crate::complexfft::pow2_cyclotomic::Pow2CyclotomicFFT<PlaintextZn, PlaintextFFT>, Global>>
+    slots_to_coeffs_thin: Vec<CompiledLinearTransform<PlaintextZn, Pow2CyclotomicFFT<PlaintextZn, PlaintextFFT>, Global>>,
+    coeffs_to_slots_thin: Vec<CompiledLinearTransform<PlaintextZn, Pow2CyclotomicFFT<PlaintextZn, PlaintextFFT>, Global>>
 }
 
 pub struct BootstrappingDataBundle {
@@ -269,10 +268,10 @@ impl Pow2BFVThinBootstrapParams {
         ));
         let end = Instant::now();
         println!("done in {} ms and {} key switches", (end - start).as_millis(), key_switches);
-
-        debug_dec_print_slots(P_main, C, &moved_back_to_slots);
         
         let digit_extraction_input = hom_add_plain(P_main, C, &P.inclusion().map(rounding_divisor_half), moved_back_to_slots);
+
+        debug_dec_print_slots(P_main, C, &digit_extraction_input);
 
         let mut result = clone_ct(&digit_extraction_input);
         let mut digit_extracted: Vec<Vec<Ciphertext>> = Vec::new();
@@ -292,15 +291,19 @@ impl Pow2BFVThinBootstrapParams {
             for j in 0..i {
                 current_ct = hom_sub(C, current_ct, &digit_extracted[j][i - j - 1]);
             }
+            println!("current noise budget {}", noise_budget(current_P, C, &current_ct, DEBUG_SK.borrow().read().unwrap().as_ref().unwrap()));
 
             let lowest_digit = self.digit_extract_circuits[i].evaluate_generic(
                 std::slice::from_ref(&current_ct), 
                 |lhs, rhs, factor| {
-                    hom_add(C, hom_mul_plain(current_P, C, &current_P.inclusion().map(current_P.base_ring().coerce(&ZZ, factor)), clone_ct(rhs)), &lhs)
+                    let result = hom_add(C, hom_mul_plain(current_P, C, &current_P.inclusion().map(current_P.base_ring().coerce(&ZZ, factor)), clone_ct(rhs)), &lhs);
+                    return result;
                 }, 
                 |lhs, rhs| {
                     key_switches += 1;
-                    hom_mul(C, C_mul, &lhs, &rhs, rk, current_mul_rescale)
+                    let result =  hom_mul(C, C_mul, &lhs, &rhs, rk, current_mul_rescale);
+                    println!("current noise budget {}", noise_budget(current_P, C, &result, DEBUG_SK.borrow().read().unwrap().as_ref().unwrap()));
+                    return result;
                 }, 
                 |x| {
                     (C.get_ring().non_fft_from(C.base_ring().mul_ref_fst(&delta, C.base_ring().coerce(&ZZ, x))), C.get_ring().non_fft_zero())
@@ -308,8 +311,11 @@ impl Pow2BFVThinBootstrapParams {
             );
             let mut lowest_digit = lowest_digit.collect::<Vec<_>>();
             assert_eq!(k - self.r, lowest_digit.len());
-            debug_dec_print_slots(P_main, C, lowest_digit.last().unwrap());
+            for x in &lowest_digit {
+                debug_dec_print_slots(P_main, C, x);
+            }
             result = hom_sub(C, result, &lowest_digit.pop().unwrap());
+            println!("current noise budget {}", noise_budget(current_P, C, &result, DEBUG_SK.borrow().read().unwrap().as_ref().unwrap()));
             digit_extracted.push(lowest_digit);
             let end = Instant::now();
             println!("done in {} ms and {} key switches", (end - start).as_millis(), key_switches);
@@ -362,8 +368,8 @@ fn test_bfv_thin_bootstrapping_257() {
     
     let params = Pow2BFVParams {
         t: 257,
-        log2_q_min: 790,
-        log2_q_max: 800,
+        log2_q_min: 1090,
+        log2_q_max: 1100,
         log2_N: 10
     };
     let bootstrapper = Pow2BFVThinBootstrapParams::create_for(params.clone(), None);
@@ -378,6 +384,7 @@ fn test_bfv_thin_bootstrapping_257() {
     
     let m = P.int_hom().map(2);
     let ct = enc_sym(&P, &C, &mut rng, &m, &sk);
+    println!("Initial noise budget: {}", noise_budget(&P, &C, &ct, &sk));
     let res_ct = bootstrapper.bootstrap_thin(
         &C, 
         &C_mul, 

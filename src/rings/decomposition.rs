@@ -6,7 +6,7 @@ use feanor_math::rings::zn::zn_64::{Zn, ZnEl};
 /// This must be given by a way to compute the the decomposition of `R/pR` into prime fields `Fp`. 
 /// This of course requires that `f` splits modulo `p`.
 /// 
-pub trait RingDecomposition<R: ?Sized + RingBase> {
+pub trait RingDecomposition<R: ?Sized + RingBase>: PartialEq {
 
     ///
     /// Rank of the ring `R`
@@ -54,18 +54,9 @@ pub trait IsomorphismInfo<R1: ?Sized + RingBase, R2: ?Sized + RingBase, F: RingD
     /// ```
     /// 
     fn is_same_number_ring(&self, other: &F) -> bool;
-
-    ///
-    /// Return true if both decompositions are the same, including the prime `p` and the order
-    /// of the image factors in the decomposition map.
-    /// 
-    /// In particular, this means that `fft_forward()` and `fft_backward()` have same results
-    /// on same inputs.
-    /// 
-    fn is_exactly_same(&self, other: &F) -> bool;
 }
 
-pub trait RingDecompositionSelfIso<R: ?Sized + RingBase>: Sized + IsomorphismInfo<R, R, Self> {}
+pub trait RingDecompositionSelfIso<R: ?Sized + RingBase>: Sized + PartialEq + IsomorphismInfo<R, R, Self> {}
 
 impl<R: ?Sized + RingBase, F: RingDecomposition<R> + IsomorphismInfo<R, R, F>> RingDecompositionSelfIso<R> for F {}
 
