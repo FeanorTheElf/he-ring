@@ -2,7 +2,6 @@
 #![allow(non_upper_case_globals)]
 
 use std::alloc::Global;
-use std::borrow::Borrow;
 use std::ptr::Alignment;
 use std::sync::Arc;
 use std::sync::RwLock;
@@ -298,23 +297,6 @@ pub fn hom_mul(C: &CiphertextRing, C_mul: &CiphertextRing, lhs: &Ciphertext, rhs
     let mut res0 = scale_down(lifted0);
     let mut res1 = scale_down(lifted1);
     let res2 = scale_down(lifted2);
-
-    let debug_result = C.add(
-        C.mul_ref_snd(C.get_ring().do_fft(C.get_ring().clone_el_non_fft(&res1)), DEBUG_SK.borrow().read().as_ref().unwrap().as_ref().unwrap()), 
-        C.add(
-            C.mul(C.get_ring().do_fft(C.get_ring().clone_el_non_fft(&res2)), C.pow(C.clone_el(DEBUG_SK.borrow().read().as_ref().unwrap().as_ref().unwrap()), 2)), 
-            C.get_ring().do_fft(C.get_ring().clone_el_non_fft(&res0))
-        )
-    );
-    let params = Pow2BFVParams {
-        t: 257,
-        log2_q_min: 1090,
-        log2_q_max: 1100,
-        log2_N: 10
-    };
-    
-    let P = params.create_plaintext_ring();
-    P.println(&remove_noise(&P, C, &debug_result));
     
     let op = C.get_ring().to_gadget_product_lhs(res2);
     let (s0, s1) = rk;

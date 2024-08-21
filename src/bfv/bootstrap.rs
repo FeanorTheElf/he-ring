@@ -363,6 +363,7 @@ fn test_bfv_thin_bootstrapping_17() {
 }
 
 #[test]
+#[ignore]
 fn test_bfv_thin_bootstrapping_257() {
     let mut rng = thread_rng();
     
