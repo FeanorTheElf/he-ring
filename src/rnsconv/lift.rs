@@ -361,3 +361,66 @@ fn bench_rns_base_conversion(bencher: &mut Bencher) {
         }
     });
 }
+
+#[test]
+fn test_base_conversion_large() {
+    let primes: [i64; 34] = [
+        72057594040066049,
+        288230376150870017,
+        288230376150876161,
+        288230376150878209,
+        288230376150890497,
+        288230376150945793,
+        288230376150956033,
+        288230376151062529,
+        288230376151123969,
+        288230376151130113,
+        288230376151191553,
+        288230376151388161,
+        288230376151422977,
+        288230376151529473,
+        288230376151545857,
+        288230376151554049,
+        288230376151601153,
+        288230376151625729,
+        288230376151683073,
+        288230376151748609,
+        288230376151760897,
+        288230376151779329,
+        288230376151812097,
+        288230376151902209,
+        288230376151951361,
+        288230376151994369,
+        288230376152027137,
+        288230376152061953,
+        288230376152137729,
+        288230376152154113,
+        288230376152156161,
+        288230376152205313,
+        288230376152227841,
+        288230376152340481,
+    ];
+    let in_len = 17;
+    let from = &primes[..in_len];
+    let from_prod = ZZbig.prod(from.iter().map(|p| int_cast(*p, ZZbig, StaticRing::<i64>::RING)));
+    let to = &primes[in_len..];
+    // let number = BigIntRing::RING.get_ring().parse("14222897889643745", 10).unwrap();
+    let number = ZZbig.get_ring().parse("2407041537888362759062938398118272259778339951344302601597393541090634668681755020422450312176585240137081753275199639248834624127798588375580343337208704451794692513216076983750320532464578830197792286588789065517344987874333545751290591033620869927324311449926157906321630571687710141943638486044746905680282903944597799114559922", 10).unwrap();
+    let number = ZZbig.euclidean_rem(number, &from_prod);
+    assert!(ZZbig.is_lt(&number, &from_prod));
+    
+    let from = from.iter().map(|p| Zn::new(*p as u64)).collect::<Vec<_>>();
+    let to = to.iter().map(|p| Zn::new(*p as u64)).collect::<Vec<_>>();
+    let conversion = AlmostExactBaseConversion::new_with(from, to, Global);
+
+    let input = (0..in_len).map(|i| conversion.input_rings().at(i).coerce(&ZZbig, ZZbig.clone_el(&number))).collect::<Vec<_>>();
+    let expected = (0..(primes.len() - in_len)).map(|i| conversion.output_rings().at(i).coerce(&ZZbig, ZZbig.clone_el(&number))).collect::<Vec<_>>();
+    let mut output = (0..(primes.len() - in_len)).map(|i| conversion.output_rings().at(i).zero()).collect::<Vec<_>>();
+    conversion.apply(Submatrix::<AsFirstElement<_>, _>::new(&input, in_len, 1), SubmatrixMut::<AsFirstElement<_>, _>::new(&mut output, primes.len() - in_len, 1));
+
+    assert!(
+        expected.iter().zip(output.iter()).enumerate().all(|(i, (e, a))| conversion.output_rings().at(i).eq_el(e, a)) ||
+        expected.iter().zip(output.iter()).enumerate().all(|(i, (e, a))| conversion.output_rings().at(i).eq_el(e, &conversion.output_rings().at(i).add_ref_fst(a, conversion.output_rings().at(i).coerce(&ZZbig, ZZbig.clone_el(&from_prod))))) ||
+        expected.iter().zip(output.iter()).enumerate().all(|(i, (e, a))| conversion.output_rings().at(i).eq_el(e, &conversion.output_rings().at(i).sub_ref_fst(a, conversion.output_rings().at(i).coerce(&ZZbig, ZZbig.clone_el(&from_prod)))))
+    );
+}

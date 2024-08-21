@@ -5,7 +5,6 @@ use std::cmp::max;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::BufWriter;
-use std::time::Instant;
 use std::alloc::Global;
 
 use de::DeserializeSeed;

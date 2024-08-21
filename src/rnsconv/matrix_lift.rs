@@ -47,6 +47,9 @@ pub struct AlmostExactMatrixBaseConversion<A = Global>
     allocator: A
 }
 
+// we currently use `any_lift()`; I haven't yet documented it anywhere, but in fact the largest output of `zn_64::Zn::any_lift()` is currently `6 * modulus()`
+const ZN_ANY_LIFT_FACTOR: i64 = 6;
+
 const BLOCK_SIZE_LOG2: usize = 4;
 
 fn pad_to_block(len: usize) -> usize {
@@ -67,9 +70,6 @@ impl<A> AlmostExactMatrixBaseConversion<A>
     pub fn new_with(in_rings: Vec<Zn>, out_rings: Vec<Zn>, allocator: A) -> Self {
         
         let Q = ZZbig.prod((0..in_rings.len()).map(|i| int_cast(*in_rings.at(i).modulus(), ZZbig, ZZi64)));
-
-        // we currently use `any_lift()`; I haven't yet documented it anywhere, but in fact the largest output of `zn_64::Zn::any_lift()` is currently `6 * modulus()`
-        const ZN_ANY_LIFT_FACTOR: i64 = 6;
 
         let max = |l, r| if ZZbig.is_geq(&l, &r) { l } else { r };
         let max_computation_result = ZZbig.prod([
@@ -162,6 +162,8 @@ impl<A> RNSOperation for AlmostExactMatrixBaseConversion<A>
                 // using `any_lift()` here is slightly dangerous, as I haven't documented anywhere that `zn_64::Zn::any_lift()` returns values `<= 6 * modulus()`, but
                 // it currently does, so this is currently fine
                 *lifts.at_mut(i, j) = self.from_summands[i].any_lift(self.from_summands[i].mul_ref(input.at(i, j), self.q_over_Q.at(i))) as i128;
+                debug_assert!(*lifts.at(i, 0) >= 0 && *lifts.at(i, 0) <= ZN_ANY_LIFT_FACTOR as i128 * *self.from_summands[i].modulus() as i128);
+                *lifts.at_mut(i, j) = self.from_summands[i].smallest_positive_lift(self.from_summands[i].mul_ref(input.at(i, j), self.q_over_Q.at(i))) as i128;
             }
         }
 
@@ -179,13 +181,16 @@ impl<A> RNSOperation for AlmostExactMatrixBaseConversion<A>
             for i in 0..(pad_to_block(out_len + 1) / (1 << BLOCK_SIZE_LOG2)) {
                 for k in 0..(pad_to_block(in_len) / (1 << BLOCK_SIZE_LOG2)) {
                     for j in (0..pad_to_block(col_count)).step_by(1 << BLOCK_SIZE_LOG2) {
+                        let rows = (i << BLOCK_SIZE_LOG2)..((i + 1) << BLOCK_SIZE_LOG2);
+                        let cols = (j << BLOCK_SIZE_LOG2)..((j + 1) << BLOCK_SIZE_LOG2);
+                        let ks = (k << BLOCK_SIZE_LOG2)..((k + 1) << BLOCK_SIZE_LOG2);
                         if k == 0 {
                             feanor_math::algorithms::matmul::strassen::dispatch_strassen_impl::<_, _, _, _, false, false, false, false>(
                                 BLOCK_SIZE_LOG2, 
                                 STRASSEN_THRESHOLD_LOG2, 
-                                TransposableSubmatrix::from(self.Q_over_q_mod_and_downscaled.data().submatrix(i..(i + (1 << BLOCK_SIZE_LOG2)), k..(k + (1 << BLOCK_SIZE_LOG2)))), 
-                                TransposableSubmatrix::from(lifts.as_const().submatrix(k..(k + (1 << BLOCK_SIZE_LOG2)), j..(j + (1 << BLOCK_SIZE_LOG2)))), 
-                                TransposableSubmatrixMut::from(output_unreduced.reborrow().submatrix(i..(i + (1 << BLOCK_SIZE_LOG2)), j..(j + (1 << BLOCK_SIZE_LOG2)))), 
+                                TransposableSubmatrix::from(self.Q_over_q_mod_and_downscaled.data().submatrix(rows.clone(), ks.clone())), 
+                                TransposableSubmatrix::from(lifts.as_const().submatrix(ks, cols.clone())), 
+                                TransposableSubmatrixMut::from(output_unreduced.reborrow().submatrix(rows, cols)), 
                                 StaticRing::<i128>::RING, 
                                 &mut memory
                             );
@@ -193,9 +198,9 @@ impl<A> RNSOperation for AlmostExactMatrixBaseConversion<A>
                             feanor_math::algorithms::matmul::strassen::dispatch_strassen_impl::<_, _, _, _, true, false, false, false>(
                                 BLOCK_SIZE_LOG2, 
                                 STRASSEN_THRESHOLD_LOG2, 
-                                TransposableSubmatrix::from(self.Q_over_q_mod_and_downscaled.data().submatrix(i..(i + (1 << BLOCK_SIZE_LOG2)), k..(k + (1 << BLOCK_SIZE_LOG2)))), 
-                                TransposableSubmatrix::from(lifts.as_const().submatrix(k..(k + (1 << BLOCK_SIZE_LOG2)), j..(j + (1 << BLOCK_SIZE_LOG2)))), 
-                                TransposableSubmatrixMut::from(output_unreduced.reborrow().submatrix(i..(i + (1 << BLOCK_SIZE_LOG2)), j..(j + (1 << BLOCK_SIZE_LOG2)))), 
+                                TransposableSubmatrix::from(self.Q_over_q_mod_and_downscaled.data().submatrix(rows.clone(), ks.clone())), 
+                                TransposableSubmatrix::from(lifts.as_const().submatrix(ks, cols.clone())), 
+                                TransposableSubmatrixMut::from(output_unreduced.reborrow().submatrix(rows, cols)), 
                                 StaticRing::<i128>::RING, 
                                 &mut memory
                             );
@@ -204,7 +209,7 @@ impl<A> RNSOperation for AlmostExactMatrixBaseConversion<A>
                 }
             }
         });
-        
+
         for j in 0..col_count {
             let mut correction = *output_unreduced.at(out_len, j);
             correction = ZZi128.rounded_div(correction, &self.gamma);
@@ -391,7 +396,7 @@ fn bench_rns_base_conversion(bencher: &mut Bencher) {
 
 #[test]
 fn test_base_conversion_large() {
-    let primes: [i64; 12] = [
+    let primes: [i64; 34] = [
         72057594040066049,
         288230376150870017,
         288230376150876161,
@@ -403,13 +408,37 @@ fn test_base_conversion_large() {
         288230376151123969,
         288230376151130113,
         288230376151191553,
-        288230376151388161
+        288230376151388161,
+        288230376151422977,
+        288230376151529473,
+        288230376151545857,
+        288230376151554049,
+        288230376151601153,
+        288230376151625729,
+        288230376151683073,
+        288230376151748609,
+        288230376151760897,
+        288230376151779329,
+        288230376151812097,
+        288230376151902209,
+        288230376151951361,
+        288230376151994369,
+        288230376152027137,
+        288230376152061953,
+        288230376152137729,
+        288230376152154113,
+        288230376152156161,
+        288230376152205313,
+        288230376152227841,
+        288230376152340481,
     ];
-    let in_len = 6;
+    let in_len = 17;
     let from = &primes[..in_len];
     let from_prod = ZZbig.prod(from.iter().map(|p| int_cast(*p, ZZbig, StaticRing::<i64>::RING)));
     let to = &primes[in_len..];
-    let number = ZZbig.get_ring().parse("72177485205290958313989757068773497202377902631074612326518605802008441450199155299671731794903833214431", 10).unwrap();
+    // let number = BigIntRing::RING.get_ring().parse("14222897889643745", 10).unwrap();
+    let number = ZZbig.get_ring().parse("2407041537888362759062938398118272259778339951344302601597393541090634668681755020422450312176585240137081753275199639248834624127798588375580343337208704451794692513216076983750320532464578830197792286588789065517344987874333545751290591033620869927324311449926157906321630571687710141943638486044746905680282903944597799114559922", 10).unwrap();
+    let number = ZZbig.euclidean_rem(number, &from_prod);
     assert!(ZZbig.is_lt(&number, &from_prod));
     
     let from = from.iter().map(|p| Zn::new(*p as u64)).collect::<Vec<_>>();
@@ -423,7 +452,7 @@ fn test_base_conversion_large() {
 
     assert!(
         expected.iter().zip(output.iter()).enumerate().all(|(i, (e, a))| conversion.output_rings().at(i).eq_el(e, a)) ||
-        expected.iter().zip(output.iter()).enumerate().all(|(i, (e, a))| conversion.output_rings().at(i).eq_el(e, &conversion.output_rings().at(i).add_ref_fst(a, conversion.output_rings().at(i).one()))) ||
-        expected.iter().zip(output.iter()).enumerate().all(|(i, (e, a))| conversion.output_rings().at(i).eq_el(e, &conversion.output_rings().at(i).sub_ref_fst(a, conversion.output_rings().at(i).one())))
-    )
+        expected.iter().zip(output.iter()).enumerate().all(|(i, (e, a))| conversion.output_rings().at(i).eq_el(e, &conversion.output_rings().at(i).add_ref_fst(a, conversion.output_rings().at(i).coerce(&ZZbig, ZZbig.clone_el(&from_prod))))) ||
+        expected.iter().zip(output.iter()).enumerate().all(|(i, (e, a))| conversion.output_rings().at(i).eq_el(e, &conversion.output_rings().at(i).sub_ref_fst(a, conversion.output_rings().at(i).coerce(&ZZbig, ZZbig.clone_el(&from_prod)))))
+    );
 }
