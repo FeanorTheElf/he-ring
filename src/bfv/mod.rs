@@ -2,6 +2,7 @@
 #![allow(non_upper_case_globals)]
 
 use std::alloc::Global;
+use std::borrow::Borrow;
 use std::ptr::Alignment;
 use std::sync::Arc;
 use std::sync::RwLock;
@@ -276,15 +277,15 @@ pub fn hom_mul(C: &CiphertextRing, C_mul: &CiphertextRing, lhs: &Ciphertext, rhs
     let (c00, c01) = lhs;
     let (c10, c11) = rhs;
     let lift = |c: &DoubleRNSNonFFTEl<CiphertextZn, CiphertextGenFFT, CiphertextAllocator>| {
-        // let c_fft = C.get_ring().do_fft(C.get_ring().clone_el_non_fft(c));
-        // let input_wrt_basis = C.wrt_canonical_basis(&c_fft);
+        let c_fft = C.get_ring().do_fft(C.get_ring().clone_el_non_fft(c));
+        let input_wrt_basis = C.wrt_canonical_basis(&c_fft);
         let result = C_mul.get_ring().do_fft(C_mul.get_ring().perform_rns_op_from(C.get_ring(), &c, &conv_data.lift_to_C_mul));
-        // let result_wrt_basis = C_mul.wrt_canonical_basis(&result);
-        // for i in 0..C.rank() {
-        //     let actual = C_mul.base_ring().smallest_lift(result_wrt_basis.at(i));
-        //     let expected = C.base_ring().smallest_lift(input_wrt_basis.at(i));
-        //     assert!(ZZbig.is_leq(&ZZbig.abs(ZZbig.sub_ref(&actual, &expected)), C.base_ring().modulus()), "{}, {}, {}", ZZbig.format(&actual), ZZbig.format(&expected), ZZbig.format(C.base_ring().modulus()));
-        // }
+        let result_wrt_basis = C_mul.wrt_canonical_basis(&result);
+        for i in 0..C.rank() {
+            let actual = C_mul.base_ring().smallest_lift(result_wrt_basis.at(i));
+            let expected = C.base_ring().smallest_lift(input_wrt_basis.at(i));
+            assert!(ZZbig.is_leq(&ZZbig.abs(ZZbig.sub_ref(&actual, &expected)), C.base_ring().modulus()), "{}, {}, {}", ZZbig.format(&actual), ZZbig.format(&expected), ZZbig.format(C.base_ring().modulus()));
+        }
         return result;
     };
 
@@ -292,12 +293,46 @@ pub fn hom_mul(C: &CiphertextRing, C_mul: &CiphertextRing, lhs: &Ciphertext, rhs
     let lifted1 = C_mul.add(C_mul.mul(lift(c00), lift(c11)), C_mul.mul(lift(c01), lift(c10)));
     let lifted2 = C_mul.mul(lift(c01), lift(c11));
 
-    let scale_down = |c: El<CiphertextRing>| C.get_ring().perform_rns_op_from(C_mul.get_ring(), &C_mul.get_ring().undo_fft(c), &conv_data.scale_down_to_C);
+    println!("{}", ZZbig.format(conv_data.scale_down_to_C.num()));
+    let scale_down = |c: El<CiphertextRing>| {
+        let input_wrt_basis = C_mul.wrt_canonical_basis(&c);
+        for i in 0..C_mul.rank() {
+            println!("{}", ZZbig.format(&C_mul.base_ring().smallest_lift(input_wrt_basis.at(i))));
+        }
+        let result = C.get_ring().perform_rns_op_from(C_mul.get_ring(), &C_mul.get_ring().undo_fft(C_mul.clone_el(&c)), &conv_data.scale_down_to_C);
+        let result_wrt_basis = C.get_ring().wrt_canonical_basis_non_fft(&result);
+        for i in 0..C.rank() {
+            let actual = C.base_ring().smallest_lift(result_wrt_basis.at(i));
+            let expected = C.base_ring().smallest_lift(C.base_ring().coerce(&ZZbig,
+                ZZbig.rounded_div(ZZbig.mul_ref(&C_mul.base_ring().smallest_lift(input_wrt_basis.at(i)), conv_data.scale_down_to_C.num()), conv_data.scale_down_to_C.den())
+            ));
+            assert!(ZZbig.is_leq(&ZZbig.abs(ZZbig.sub_ref(&actual, &expected)), &ZZbig.one()), "{}, {}, {}", ZZbig.format(&actual), ZZbig.format(&expected), ZZbig.format(C.base_ring().modulus()));
+        }
+        return result;   
+    };
 
     let mut res0 = scale_down(lifted0);
     let mut res1 = scale_down(lifted1);
     let res2 = scale_down(lifted2);
     
+    {
+        let debug_dec = C.add(C.get_ring().do_fft(C.get_ring().clone_el_non_fft(&res0)), 
+            C.add(
+                C.mul_ref_snd(C.get_ring().do_fft(C.get_ring().clone_el_non_fft(&res1)), DEBUG_SK.borrow().read().unwrap().as_ref().unwrap()),
+                C.mul(C.get_ring().do_fft(C.get_ring().clone_el_non_fft(&res2)), C.pow(C.clone_el(DEBUG_SK.borrow().read().unwrap().as_ref().unwrap()), 2)),
+            )
+        );
+        let P = <PlaintextRing as RingStore>::Type::new(PlaintextZn::new(int_cast(ZZbig.clone_el(conv_data.scale_down_to_C.num()), StaticRing::<i64>::RING, ZZbig) as u64), StaticRing::<i64>::RING.abs_log2_ceil(&(C.rank() as i64)).unwrap());
+        let H = HypercubeIsomorphism::new(P.get_ring());
+        println!();
+        print!("[");
+        for x in H.get_slot_values(&remove_noise(&P, C, &debug_dec)) {
+            print!("{}, ", H.slot_ring().format(&x));
+        }
+        println!("]");
+        println!();
+    }
+
     let op = C.get_ring().to_gadget_product_lhs(res2);
     let (s0, s1) = rk;
 
@@ -434,11 +469,6 @@ fn test_bfv_mul() {
     
     let P = params.create_plaintext_ring();
     let (C, C_mul) = params.create_ciphertext_rings();
-
-    for Fp in C_mul.base_ring().as_iter() {
-        ZZ.println(Fp.modulus());
-    }
-    println!("{}", C.base_ring().len());
 
     let sk = gen_sk(&C, &mut rng);
     let mul_rescale_data = params.create_multiplication_rescale(&P, &C, &C_mul);

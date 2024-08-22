@@ -302,7 +302,6 @@ impl Pow2BFVThinBootstrapParams {
                 |lhs, rhs| {
                     key_switches += 1;
                     let result =  hom_mul(C, C_mul, &lhs, &rhs, rk, current_mul_rescale);
-                    println!("current noise budget {}", noise_budget(current_P, C, &result, DEBUG_SK.borrow().read().unwrap().as_ref().unwrap()));
                     return result;
                 }, 
                 |x| {
@@ -339,6 +338,7 @@ fn test_bfv_thin_bootstrapping_17() {
     
     let P = params.create_plaintext_ring();
     let (C, C_mul) = params.create_ciphertext_rings();
+
     let bootstrapping_data = bootstrapper.create_all_bootstrapping_data(&C, &C_mul);
     
     let sk = gen_sk(&C, &mut rng);
@@ -369,8 +369,8 @@ fn test_bfv_thin_bootstrapping_257() {
     
     let params = Pow2BFVParams {
         t: 257,
-        log2_q_min: 1090,
-        log2_q_max: 1100,
+        log2_q_min: 1190,
+        log2_q_max: 1200,
         log2_N: 10
     };
     let bootstrapper = Pow2BFVThinBootstrapParams::create_for(params.clone(), None);
