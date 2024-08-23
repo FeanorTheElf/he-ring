@@ -78,10 +78,16 @@ impl Pow2BFVThinBootstrapParams {
         let v = ((s_can_norm as f64 + 1.).log2() / (p as f64).log2()).ceil() as usize;
         let e = r + v;
 
-        let digit_extraction_circuits = (1..=v).rev().map(|remaining_v| {
-            let poly_ring = DensePolyRing::new(PlaintextZn::new(ZZ.pow(p, remaining_v + r) as u64), "X");
-            poly_to_circuit(&poly_ring, &(2..=remaining_v).chain([r + remaining_v].into_iter()).map(|j| digit_retain_poly(&poly_ring, j)).collect::<Vec<_>>())
-        }).collect::<Vec<_>>();
+        let digit_extraction_circuits = 
+        // if r == 1 {
+        //     (1..=v).rev().map(|remaining_v| basic_digit_extract_circuit(p, remaining_v + 1)).collect::<Vec<_>>()
+        // } else 
+        {
+            (1..=v).rev().map(|remaining_v| {
+                let poly_ring = DensePolyRing::new(PlaintextZn::new(ZZ.pow(p, remaining_v + r) as u64), "X");
+                poly_to_circuit(&poly_ring, &(2..=remaining_v).chain([r + remaining_v].into_iter()).map(|j| digit_retain_poly(&poly_ring, j)).collect::<Vec<_>>())
+            }).collect::<Vec<_>>()
+        };
 
         let plaintext_ring = <PlaintextRing as RingStore>::Type::new(PlaintextZn::new(ZZ.pow(p, e) as u64), params.log2_N);
         let original_plaintext_ring = params.create_plaintext_ring();
@@ -234,10 +240,10 @@ impl Pow2BFVThinBootstrapParams {
                 *lhs = hom_add_ntt(C, hom_mul_plain_ntt(P_main, C, factor, clone_ct_ntt(C, rhs)), lhs)
             }, 
             |value, gs| {
-                key_switches += 1;
-                gs.iter().map(|g| hom_galois_ntt(C, value, *g, get_gk(g))).collect()
+                key_switches += gs.len();
+                hom_galois_many_ntt(C, value, gs, gs.map(|g| get_gk(g)))
             },
-            || (C.zero(), C.zero())
+            || (C.get_ring().zero(), C.zero())
         ));
         if LOG {
             let end = Instant::now();
@@ -286,8 +292,8 @@ impl Pow2BFVThinBootstrapParams {
                 *lhs = hom_add_ntt(C, hom_mul_plain_ntt(P_main, C, factor, clone_ct_ntt(C, rhs)), lhs)
             }, 
             |value, gs| {
-                key_switches += 1;
-                gs.iter().map(|g| hom_galois_ntt(C, value, *g, get_gk(g))).collect()
+                key_switches += gs.len();
+                hom_galois_many_ntt(C, value, gs, gs.map(|g| get_gk(g)))
             },
             || (C.zero(), C.zero())
         ));

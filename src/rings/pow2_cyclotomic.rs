@@ -138,6 +138,8 @@ impl<R, F> CyclotomicRingDecomposition<R::Type> for Pow2CyclotomicFFT<R, F>
     fn permute_galois_action<S>(&self, src: &[<R::Type as RingBase>::Element], dst: &mut [<R::Type as RingBase>::Element], galois_element: ZnEl, ring: S)
         where S: RingStore<Type = R::Type>
     {
+        assert_eq!(self.rank(), src.len());
+        assert_eq!(self.rank(), dst.len());
         let Gal = self.galois_group_mulrepr();
         let hom = Gal.can_hom(&StaticRing::<i64>::RING).unwrap();
         let bitlength = StaticRing::<i64>::RING.abs_log2_ceil(&(self.rank() as i64)).unwrap();

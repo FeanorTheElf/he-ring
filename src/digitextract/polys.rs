@@ -8,9 +8,10 @@ use feanor_math::homomorphism::Homomorphism;
 use feanor_math::integer::{int_cast, BigIntRing, IntegerRingStore};
 use feanor_math::primitive_int::StaticRing;
 use feanor_math::ring::*;
+use feanor_math::rings::poly::dense_poly::DensePolyRing;
 use feanor_math::seq::*;
 use feanor_math::rings::poly::{PolyRing, PolyRingStore};
-use feanor_math::rings::zn::{ZnRing, ZnRingStore};
+use feanor_math::rings::zn::{zn_64, ZnRing, ZnRingStore};
 
 use crate::digitextract::ArithCircuit;
 
@@ -235,6 +236,17 @@ fn digit_extraction_poly<P>(poly_ring: P) -> El<P>
     return current;
 }
 
+pub fn basic_digit_extract_circuit(p: i64, e: usize) -> ArithCircuit {
+    let poly_ring = DensePolyRing::new(zn_64::Zn::new(StaticRing::<i64>::RING.pow(p, e) as u64), "X");
+    let f = digit_extraction_poly(&poly_ring);
+    let f_circuit = poly_to_circuit(&poly_ring, std::slice::from_ref(&f));
+    let mut result = ArithCircuit::identity(1);
+    for i in 1..e {
+        result = ArithCircuit::identity(i).tensor(&f_circuit.compose(&ArithCircuit::select(i, &[i - 1]))).compose(&result.output_twice());
+    }
+    return ArithCircuit::select(e, &(1..e).collect::<Vec<_>>()).compose(&result);
+}
+
 ///
 /// Computes `min { n | n! % k == 0 }`
 /// 
@@ -286,8 +298,6 @@ pub fn digit_retain_poly<P>(poly_ring: P, k: usize) -> El<P>
 use feanor_math::rings::zn::zn_64::Zn;
 #[cfg(test)]
 use feanor_math::assert_el_eq;
-#[cfg(test)]
-use feanor_math::rings::poly::dense_poly::DensePolyRing;
 #[cfg(test)]
 use feanor_math::rings::finite::FiniteRingStore;
 

@@ -367,13 +367,36 @@ pub fn hom_mul(C: &CiphertextRing, C_mul: &CiphertextRing, lhs: &Ciphertext, rhs
     let op = C.get_ring().to_gadget_product_lhs(res2);
     let (s0, s1) = rk;
 
-    C.get_ring().add_assign_non_fft(&mut res0, &C.get_ring().gadget_product_base(&op, s0));
-    C.get_ring().add_assign_non_fft(&mut res1, &C.get_ring().gadget_product_base(&op, s1));
+    C.get_ring().add_assign_non_fft(&mut res0, &C.get_ring().gadget_product_coeff(&op, s0));
+    C.get_ring().add_assign_non_fft(&mut res1, &C.get_ring().gadget_product_coeff(&op, s1));
     return (res0, res1);
 }
 
 pub fn hom_mul_ntt(C: &CiphertextRing, C_mul: &CiphertextRing, lhs: &NTTCiphertext, rhs: &NTTCiphertext, rk: &RelinKey, conv_data: &MulConversionData) -> NTTCiphertext {
-    to_ntt(C, hom_mul(C, C_mul, &to_coeff(C, clone_ct_ntt(C, lhs)), &to_coeff(C, clone_ct_ntt(C, rhs)), rk, conv_data))
+    let (c00, c01) = to_coeff(C, clone_ct_ntt(C, lhs));
+    let (c10, c11) = to_coeff(C, clone_ct_ntt(C, rhs));
+    let lift = |c: &DoubleRNSNonFFTEl<CiphertextZn, CiphertextGenFFT, CiphertextAllocator>| {
+        C_mul.get_ring().do_fft(C_mul.get_ring().perform_rns_op_from(C.get_ring(), &c, &conv_data.lift_to_C_mul))
+    };
+
+    let lifted0 = C_mul.mul(lift(&c00), lift(&c10));
+    let lifted1 = C_mul.add(C_mul.mul(lift(&c00), lift(&c11)), C_mul.mul(lift(&c01), lift(&c10)));
+    let lifted2 = C_mul.mul(lift(&c01), lift(&c11));
+
+    let scale_down = |c: El<CiphertextRing>| {
+        C.get_ring().perform_rns_op_from(C_mul.get_ring(), &C_mul.get_ring().undo_fft(C_mul.clone_el(&c)), &conv_data.scale_down_to_C)
+    };
+
+    let mut res0 = C.get_ring().do_fft(scale_down(lifted0));
+    let mut res1 = C.get_ring().do_fft(scale_down(lifted1));
+    let res2 = scale_down(lifted2);
+
+    let op = C.get_ring().to_gadget_product_lhs(res2);
+    let (s0, s1) = rk;
+
+    C.get_ring().add_assign_ref(&mut res0, &C.get_ring().gadget_product_ntt(&op, s0));
+    C.get_ring().add_assign_ref(&mut res1, &C.get_ring().gadget_product_ntt(&op, s1));
+    return (res0, res1);
 }
 
 pub fn gen_switch_key<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing, mut rng: R, old_sk: &SecretKey, new_sk: &SecretKey) -> KeySwitchKey<'a> {
@@ -399,9 +422,9 @@ pub fn key_switch(C: &CiphertextRing, ct: &Ciphertext, switch_key: &KeySwitchKey
     let (c0, c1) = ct;
     let (s0, s1) = switch_key;
     let op = C.get_ring().to_gadget_product_lhs(C.get_ring().clone_el_non_fft(c1));
-    let mut r0 = C.get_ring().gadget_product_base(&op, s0);
+    let mut r0 = C.get_ring().gadget_product_coeff(&op, s0);
     C.get_ring().add_assign_non_fft(&mut r0, c0);
-    let r1 = C.get_ring().gadget_product_base(&op, s1);
+    let r1 = C.get_ring().gadget_product_coeff(&op, s1);
     return (r0, r1);
 }
 
@@ -429,6 +452,39 @@ pub fn hom_galois_ntt(C: &CiphertextRing, ct: &NTTCiphertext, g: ZnEl, gk: &KeyS
         C.get_ring().undo_fft(C.get_ring().apply_galois_action(&ct.0, g)),
         C.get_ring().undo_fft(C.get_ring().apply_galois_action(&ct.1, g))
     ), gk))
+}
+
+pub fn hom_galois_many<'a, V>(C: &CiphertextRing, ct: &Ciphertext, gs: &[ZnEl], gks: V) -> Vec<Ciphertext>
+    where V: VectorView<KeySwitchKey<'a>>
+{
+    let (c0, c1) = ct;
+    let c0_ntt = C.get_ring().do_fft(C.get_ring().clone_el_non_fft(c0));
+    let lhs = C.get_ring().to_gadget_product_lhs(C.get_ring().clone_el_non_fft(c1));
+    return (0..gs.len()).map(|i| {
+        let c1_g = lhs.apply_galois_action(C.get_ring(), gs[i]);
+        let (s0, s1) = gks.at(i);
+        let mut r0 = C.get_ring().gadget_product_coeff(&c1_g, s0);
+        let c0_g = C.get_ring().undo_fft(C.get_ring().apply_galois_action(&c0_ntt, gs[i]));
+        C.get_ring().add_assign_non_fft(&mut r0, &c0_g);
+        let r1 = C.get_ring().gadget_product_coeff(&c1_g, s1);
+        return (r0, r1);
+    }).collect();
+}
+
+pub fn hom_galois_many_ntt<'a, V>(C: &CiphertextRing, ct: &NTTCiphertext, gs: &[ZnEl], gks: V) -> Vec<NTTCiphertext>
+    where V: VectorView<KeySwitchKey<'a>>
+{
+    let (c0, c1) = ct;
+    let lhs = C.get_ring().to_gadget_product_lhs(C.get_ring().undo_fft(C.clone_el(c1)));
+    return (0..gs.len()).map(|i| {
+        let c1_g = lhs.apply_galois_action(C.get_ring(), gs[i]);
+        let (s0, s1) = gks.at(i);
+        let mut r0 = C.get_ring().gadget_product_ntt(&c1_g, s0);
+        let c0_g = C.get_ring().apply_galois_action(&c0, gs[i]);
+        C.get_ring().add_assign_ref(&mut r0, &c0_g);
+        let r1 = C.get_ring().gadget_product_ntt(&c1_g, s1);
+        return (r0, r1);
+    }).collect();
 }
 
 #[test]

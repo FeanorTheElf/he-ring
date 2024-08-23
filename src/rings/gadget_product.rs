@@ -15,6 +15,7 @@ use std::alloc::Global;
 use std::marker::PhantomData;
 
 use super::double_rns_ring::*;
+use crate::cyclotomic::CyclotomicRing;
 use crate::rnsconv::*;
 use crate::rings::decomposition::*;
 
@@ -90,6 +91,29 @@ pub enum GadgetProductLhsOperand<'a, F, A = Global>
     Naive(Vec<El<DoubleRNSRing<Zn, F, A>>, A>)
 }
 
+impl<'a, F, A> GadgetProductLhsOperand<'a, F, A>
+    where F: RingDecompositionSelfIso<ZnBase> + CyclotomicRingDecomposition<ZnBase>,
+        DoubleRNSRingBase<Zn, F, A>: CyclotomicRing,
+        A: Allocator + Clone
+{
+    pub fn apply_galois_action(&self, ring: &DoubleRNSRingBase<Zn, F, A>, g: ZnEl) -> Self {
+        match self {
+            GadgetProductLhsOperand::LKSSStyle(lkss_lhs_op) => GadgetProductLhsOperand::LKSSStyle(lkss_lhs_op.apply_galois_action(ring, g)),
+            GadgetProductLhsOperand::Naive(els) => GadgetProductLhsOperand::Naive({
+                let mut result = Vec::with_capacity_in(els.len(), els.allocator().clone());
+                result.extend(els.iter().map(|el| ring.apply_galois_action(el, g)));
+                result
+            })
+        }
+    }
+}
+
+///
+/// LKSS-style gadget product operand; 
+/// Stores the RNS-decomposition components of the element in NTT form, however not w.r.t. the whole RNS base
+/// but only w.r.t. `output_moduli_count` of its RNS factors. Currently we use the last `output_moduli_count`
+/// RNS factors.
+/// 
 pub struct LKSSGadgetProductLhsOperand<'a, F, A> 
     where F: RingDecompositionSelfIso<ZnBase>,
         A: Allocator + Clone
@@ -97,6 +121,31 @@ pub struct LKSSGadgetProductLhsOperand<'a, F, A>
     output_moduli_count: usize,
     ring: PhantomData<&'a DoubleRNSRingBase<Zn, F, A>>,
     operands: Vec<Vec<ZnEl, A>, A>
+}
+
+impl<'a, F, A> LKSSGadgetProductLhsOperand<'a, F, A>
+    where F: RingDecompositionSelfIso<ZnBase> + CyclotomicRingDecomposition<ZnBase>,
+        DoubleRNSRingBase<Zn, F, A>: CyclotomicRing,
+        A: Allocator + Clone
+{
+    pub fn apply_galois_action(&self, ring: &DoubleRNSRingBase<Zn, F, A>, g: ZnEl) -> Self {
+        let mut result_operands = Vec::with_capacity_in(self.operands.len(), self.operands.allocator().clone());
+        for operand in self.operands.iter() {
+            let mut result_op = Vec::with_capacity_in(operand.len(), operand.allocator().clone());
+            result_op.resize_with(operand.len(), || ring.rns_base().at(0).zero());
+            for k in 0..self.output_moduli_count {
+                let ring_i = ring.rns_base().len() - self.output_moduli_count + k;
+                let Zp = ring.rns_base().at(ring_i);
+                ring.ring_decompositions().at(ring_i).permute_galois_action(&operand[(k * ring.rank())..((k + 1) * ring.rank())], &mut result_op[(k * ring.rank())..((k + 1) * ring.rank())], g, Zp);
+            }
+            result_operands.push(result_op);
+        }
+        return LKSSGadgetProductLhsOperand {
+            output_moduli_count: self.output_moduli_count,
+            ring: PhantomData,
+            operands: result_operands
+        };
+    }
 }
 
 impl<F, A> DoubleRNSRingBase<Zn, F, A> 
@@ -113,8 +162,8 @@ impl<F, A> DoubleRNSRingBase<Zn, F, A>
     fn gadget_decompose(&self, el: DoubleRNSNonFFTEl<Zn, F, A>, output_moduli_count: usize) -> Vec<Vec<ZnEl, A>, A> {
         let mut result = Vec::new_in(self.allocator().clone());
 
+        let homs = (0..output_moduli_count).map(|k| self.rns_base().at(self.rns_base().len() - output_moduli_count + k).can_hom::<StaticRing<i64>>(&StaticRing::<i64>::RING).unwrap()).collect::<Vec<_>>();
         for i in 0..self.rns_base().len() {
-            let homs = (0..output_moduli_count).map(|k| self.rns_base().at(self.rns_base().len() - output_moduli_count + k).can_hom::<StaticRing<i64>>(&StaticRing::<i64>::RING).unwrap()).collect::<Vec<_>>();
             let mut part = Vec::with_capacity_in(output_moduli_count * self.rank(), self.allocator().clone());
             part.extend((0..(output_moduli_count * self.rank())).map(|idx| {
                 let k = idx / self.rank();
@@ -296,7 +345,7 @@ impl<F, A> DoubleRNSRingBase<Zn, F, A>
     /// 
     /// // compute the gadget product
     /// let lhs = ring.random_element(|| rng.rand_u64());
-    /// let actual = ring.get_ring().gadget_product(&ring.get_ring().to_gadget_product_lhs(ring.get_ring().undo_fft(ring.clone_el(&lhs))), &rhs_op);
+    /// let actual = ring.get_ring().gadget_product_ntt(&ring.get_ring().to_gadget_product_lhs(ring.get_ring().undo_fft(ring.clone_el(&lhs))), &rhs_op);
     /// 
     /// // the final result should be close to `lhs * rhs`, except for some noise
     /// let expected = ring.mul_ref(&lhs, &rhs);
@@ -306,8 +355,14 @@ impl<F, A> DoubleRNSRingBase<Zn, F, A>
     /// assert!((0..8).all(|i| int_cast(ring.base_ring().smallest_lift(error_coefficients.at(i)), StaticRing::<i64>::RING, BigIntRing::RING).abs() <= max_allowed_error));
     /// ```
     /// 
-    pub fn gadget_product(&self, lhs: &GadgetProductLhsOperand<F, A>, rhs: &GadgetProductRhsOperand<F, A>) -> DoubleRNSEl<Zn, F, A> {
-        self.do_fft(self.gadget_product_base(lhs, rhs))
+    pub fn gadget_product_ntt(&self, lhs: &GadgetProductLhsOperand<F, A>, rhs: &GadgetProductRhsOperand<F, A>) -> DoubleRNSEl<Zn, F, A> {
+        match (lhs, rhs) {
+            (GadgetProductLhsOperand::LKSSStyle(lhs), GadgetProductRhsOperand::LKSSStyle(rhs)) => self.do_fft(self.gadget_product_lkss(lhs, rhs)),
+            (GadgetProductLhsOperand::Naive(lhs), GadgetProductRhsOperand::Naive(_, rhs)) => timed!("gadget_product_base::naive", || {
+                <_ as RingBase>::sum(self, lhs.iter().zip(rhs.iter()).map(|(l, r)| self.mul_ref(l, r)))
+            }),
+            _ => panic!("Illegal combination of GadgetProductOperands; Maybe they were created by different rings?")
+        }
     }
 
     fn gadget_product_lkss(&self, lhs: &LKSSGadgetProductLhsOperand<F, A>, rhs: &LKSSGadgetProductRhsOperand<F, A>) -> DoubleRNSNonFFTEl<Zn, F, A> {
@@ -345,11 +400,11 @@ impl<F, A> DoubleRNSRingBase<Zn, F, A>
     }
 
     ///
-    /// The gadget product without final FFT. See [`Self::gadget_product()`] for a description.
+    /// The gadget product without final FFT. See [`Self::gadget_product_ntt()`] for a description.
     /// 
     /// The implementation uses the KLSS-style algorithm [https://ia.cr/2023/413].
     /// 
-    pub fn gadget_product_base(&self, lhs: &GadgetProductLhsOperand<F, A>, rhs: &GadgetProductRhsOperand<F, A>) -> DoubleRNSNonFFTEl<Zn, F, A> {
+    pub fn gadget_product_coeff(&self, lhs: &GadgetProductLhsOperand<F, A>, rhs: &GadgetProductRhsOperand<F, A>) -> DoubleRNSNonFFTEl<Zn, F, A> {
         match (lhs, rhs) {
             (GadgetProductLhsOperand::LKSSStyle(lhs), GadgetProductRhsOperand::LKSSStyle(rhs)) => self.gadget_product_lkss(lhs, rhs),
             (GadgetProductLhsOperand::Naive(lhs), GadgetProductRhsOperand::Naive(_, rhs)) => timed!("gadget_product_base::naive", || {
@@ -404,7 +459,7 @@ fn test_gadget_product() {
         }
 
         let lhs_factor = ring_literal!(&ring, [0, 1000, 10000, 100000, 5000, 50000, 80000, 100]);
-        let result_error = ring.sub(ring.mul_ref(&lhs_factor, &rhs), ring.get_ring().gadget_product(&ring.get_ring().to_gadget_product_lhs(ring.get_ring().undo_fft(lhs_factor)), &rhs_op));
+        let result_error = ring.sub(ring.mul_ref(&lhs_factor, &rhs), ring.get_ring().gadget_product_ntt(&ring.get_ring().to_gadget_product_lhs(ring.get_ring().undo_fft(lhs_factor)), &rhs_op));
         let error_bound = 1 * 8 * (97 / 2) + 1 * 8 * (17 / 2) + 1 * 8 * (113 / 2) + 1 * 8 * (193 / 2);
         let result_error_vec = ring.wrt_canonical_basis(&result_error);
         for i in 0..8 {
@@ -423,7 +478,7 @@ fn test_gadget_product() {
         rhs_op.set_rns_factor(1, ring.get_ring().undo_fft(ring.add(ring.int_hom().mul_ref_fst_map(&rhs_factor, inv_crt(0, 1, &17, &97, StaticRing::<i32>::RING)), error2)));
 
         let lhs_factor = ring_literal!(&ring, [0, 10, 100, 1000, 50, 500, 800, 1]);
-        let result_error = ring.sub(ring.mul_ref(&lhs_factor, &rhs_factor), ring.get_ring().gadget_product(&ring.get_ring().to_gadget_product_lhs(ring.get_ring().undo_fft(lhs_factor)), &rhs_op));
+        let result_error = ring.sub(ring.mul_ref(&lhs_factor, &rhs_factor), ring.get_ring().gadget_product_ntt(&ring.get_ring().to_gadget_product_lhs(ring.get_ring().undo_fft(lhs_factor)), &rhs_op));
         let error_bound = 1 * 8 * (97 / 2) + 1 * 8 * (17 / 2);
         let result_error_vec = ring.wrt_canonical_basis(&result_error);
         for i in 0..8 {
@@ -445,7 +500,7 @@ fn test_gadget_product_zero() {
             rhs_op.set_rns_factor(i, ring.get_ring().non_fft_zero());
         }
         let lhs = ring_literal!(&ring, [0, 10, 100, 1000, 50, 500, 800, 1]);
-        assert_el_eq!(&ring, &ring.zero(), &ring.get_ring().gadget_product(&ring.get_ring().to_gadget_product_lhs(ring.get_ring().undo_fft(lhs)), &rhs_op));
+        assert_el_eq!(&ring, &ring.zero(), &ring.get_ring().gadget_product_ntt(&ring.get_ring().to_gadget_product_lhs(ring.get_ring().undo_fft(lhs)), &rhs_op));
     }
     {
         let rns_base = vec![Zn::new(17), Zn::new(97)];
@@ -456,7 +511,7 @@ fn test_gadget_product_zero() {
             rhs_op.set_rns_factor(i, ring.get_ring().non_fft_zero());
         }
         let lhs = ring_literal!(&ring, [0, 10, 100, 1000, 50, 500, 800, 1]);
-        assert_el_eq!(&ring, &ring.zero(), &ring.get_ring().gadget_product(&ring.get_ring().to_gadget_product_lhs(ring.get_ring().undo_fft(lhs)), &rhs_op));
+        assert_el_eq!(&ring, &ring.zero(), &ring.get_ring().gadget_product_ntt(&ring.get_ring().to_gadget_product_lhs(ring.get_ring().undo_fft(lhs)), &rhs_op));
     }
 }
 
@@ -493,7 +548,7 @@ fn bench_gadget_product(bencher: &mut Bencher) {
 
     bencher.iter(|| {
         let lhs_op = ring.get_ring().to_gadget_product_lhs(ring.get_ring().undo_fft(ring.clone_el(&lhs)));
-        let result = ring.get_ring().gadget_product_base(&lhs_op, &rhs_op);
+        let result = ring.get_ring().gadget_product_coeff(&lhs_op, &rhs_op);
         let mut error = result;
         ring.get_ring().sub_assign_non_fft(&mut error, &expected_result);
         let error_vec = ring.get_ring().wrt_canonical_basis_non_fft(&error);
