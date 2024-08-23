@@ -49,14 +49,123 @@ type CiphertextFFT = cooley_tuckey::CooleyTuckeyFFT<<CiphertextZn as RingStore>:
 type CiphertextGenFFT = Pow2CyclotomicFFT<CiphertextZn, CiphertextFFT>;
 pub type CiphertextRing = DoubleRNSRing<CiphertextZn, CiphertextGenFFT, CiphertextAllocator>;
 
-pub type Ciphertext = (DoubleRNSNonFFTEl<CiphertextZn, CiphertextGenFFT, CiphertextAllocator>, DoubleRNSNonFFTEl<CiphertextZn, CiphertextGenFFT, CiphertextAllocator>);
-pub type NTTCiphertext = (DoubleRNSEl<CiphertextZn, CiphertextGenFFT, CiphertextAllocator>, DoubleRNSEl<CiphertextZn, CiphertextGenFFT, CiphertextAllocator>);
+type Ciphertext = (RingEl, RingEl);
 pub type SecretKey = El<CiphertextRing>;
 pub type GadgetProductOperand<'a> = GadgetProductRhsOperand<'a, CiphertextGenFFT, CiphertextAllocator>;
 pub type KeySwitchKey<'a> = (GadgetProductOperand<'a>, GadgetProductOperand<'a>);
 pub type RelinKey<'a> = (GadgetProductOperand<'a>, GadgetProductOperand<'a>);
 
 static DEBUG_SK: RwLock<Option<SecretKey>> = RwLock::new(None);
+
+pub struct RingEl {
+    ntt_part: Option<DoubleRNSEl<CiphertextZn, CiphertextGenFFT, CiphertextAllocator>>,
+    coeff_part: Option<DoubleRNSNonFFTEl<CiphertextZn, CiphertextGenFFT, CiphertextAllocator>>
+}
+
+impl RingEl {
+
+    pub fn ntt_repr(self, C: &CiphertextRing) -> Self {
+        RingEl::from_ntt(self.to_ntt(C))
+    }
+
+    pub fn coeff_repr(self, C: &CiphertextRing) -> Self {
+        RingEl::from_coeff(self.to_coeff(C))
+    }
+
+    pub fn from_ntt(el: El<CiphertextRing>) -> Self {
+        Self {
+            coeff_part: None,
+            ntt_part: Some(el)
+        }
+    }
+
+    pub fn from_coeff(el: DoubleRNSNonFFTEl<CiphertextZn, CiphertextGenFFT, CiphertextAllocator>) -> Self {
+        Self {
+            coeff_part: Some(el),
+            ntt_part: None
+        }
+    }
+
+    pub fn zero() -> Self {
+        Self {
+            coeff_part: None,
+            ntt_part: None
+        }
+    }
+
+    pub fn to_ntt(self, C: &CiphertextRing) -> El<CiphertextRing> {
+        if let Some(mut result) = self.ntt_part {
+            if let Some(coeff) = self.coeff_part {
+                C.add_assign(&mut result, C.get_ring().do_fft(coeff));
+            }
+            return result;
+        } else if let Some(coeff) = self.coeff_part {
+            return C.get_ring().do_fft(coeff);
+        } else {
+            return C.zero();
+        }
+    }
+
+    pub fn to_coeff(self, C: &CiphertextRing) -> DoubleRNSNonFFTEl<CiphertextZn, CiphertextGenFFT, CiphertextAllocator> {
+        if let Some(mut result) = self.coeff_part {
+            if let Some(ntt_part) = self.ntt_part {
+                C.get_ring().add_assign_non_fft(&mut result, &C.get_ring().undo_fft(ntt_part));
+            }
+            return result;
+        } else if let Some(ntt_part) = self.ntt_part {
+            return C.get_ring().undo_fft(ntt_part);
+        } else {
+            return C.get_ring().non_fft_zero();
+        }
+    }
+
+    pub fn gadget_product<'a>(lhs: &GadgetProductLhsOperand<'a, CiphertextGenFFT, CiphertextAllocator>, rhs: &GadgetProductRhsOperand<'a, CiphertextGenFFT, CiphertextAllocator>, C: &CiphertextRing) -> RingEl {
+        match C.get_ring().preferred_output_repr(lhs, rhs) {
+            ElRepr::Coeff => RingEl { ntt_part: None, coeff_part: Some(C.get_ring().gadget_product_coeff(lhs, rhs)) },
+            ElRepr::NTT => RingEl { ntt_part: Some(C.get_ring().gadget_product_ntt(lhs, rhs)), coeff_part: None },
+        }
+    }
+
+    pub fn add(lhs: RingEl, rhs: &RingEl, C: &CiphertextRing) -> RingEl {
+        RingEl {
+            ntt_part: if lhs.ntt_part.is_some() && rhs.ntt_part.is_some() { Some(C.add_ref_snd(lhs.ntt_part.unwrap(), rhs.ntt_part.as_ref().unwrap())) } else { lhs.ntt_part.or(rhs.ntt_part.as_ref().map(|x| C.clone_el(x)))},
+            coeff_part: if lhs.coeff_part.is_some() && rhs.coeff_part.is_some() {
+                let mut result  = lhs.coeff_part.unwrap();
+                C.get_ring().add_assign_non_fft(&mut result, rhs.coeff_part.as_ref().unwrap());
+                Some(result)
+            } else { lhs.coeff_part.or(rhs.coeff_part.as_ref().map(|x| C.get_ring().clone_el_non_fft(x))) }
+        }
+    }
+
+    pub fn sub(lhs: RingEl, rhs: &RingEl, C: &CiphertextRing) -> RingEl {
+        RingEl {
+            ntt_part: if lhs.ntt_part.is_some() && rhs.ntt_part.is_some() { Some(C.sub_ref_snd(lhs.ntt_part.unwrap(), rhs.ntt_part.as_ref().unwrap())) } else { lhs.ntt_part.or(rhs.ntt_part.as_ref().map(|x| C.negate(C.clone_el(x))))},
+            coeff_part: if lhs.coeff_part.is_some() && rhs.coeff_part.is_some() {
+                let mut result  = lhs.coeff_part.unwrap();
+                C.get_ring().sub_assign_non_fft(&mut result, rhs.coeff_part.as_ref().unwrap());
+                Some(result)
+            } else { lhs.coeff_part.or(rhs.coeff_part.as_ref().map(|x| C.get_ring().negate_non_fft(C.get_ring().clone_el_non_fft(x)))) }
+        }
+    }
+
+    pub fn mul_i64(mut val: RingEl, scalar: i64, C: &CiphertextRing) -> RingEl {
+        let hom = C.base_ring().can_hom(&StaticRing::<i64>::RING).unwrap();
+        if let Some(ntt_part) = &mut val.ntt_part {
+            C.inclusion().mul_assign_map(ntt_part, hom.map(scalar));
+        }
+        if let Some(coeff_part) = &mut val.coeff_part {
+            C.get_ring().mul_scalar_assign_non_fft(coeff_part, &hom.map(scalar));
+        }
+        return val;
+    }
+
+    pub fn clone(&self, C: &CiphertextRing) -> RingEl {
+        RingEl { 
+            ntt_part: self.ntt_part.as_ref().map(|x| C.clone_el(x)), 
+            coeff_part: self.coeff_part.as_ref().map(|x| C.get_ring().clone_el_non_fft(x))
+        }
+    }
+}
 
 pub struct MulConversionData {
     lift_to_C_mul: rnsconv::shared_lift::AlmostExactSharedBaseConversion<CiphertextAllocator>,
@@ -166,7 +275,7 @@ impl Pow2BFVParams {
 
 pub fn debug_dec_print(P: &PlaintextRing, C: &CiphertextRing, ct: &Ciphertext) {
     println!();
-    P.println(&dec(P, C, (C.get_ring().clone_el_non_fft(&ct.0), C.get_ring().clone_el_non_fft(&ct.1)), DEBUG_SK.read().unwrap().as_ref().unwrap()));
+    P.println(&dec(P, C, clone_ct(C, ct), DEBUG_SK.read().unwrap().as_ref().unwrap()));
     println!();
 }
 
@@ -174,7 +283,7 @@ pub fn debug_dec_print_slots(P: &PlaintextRing, C: &CiphertextRing, ct: &Ciphert
     let H = HypercubeIsomorphism::new(P.get_ring());
     println!();
     print!("[");
-    for x in H.get_slot_values(&dec(P, C, (C.get_ring().clone_el_non_fft(&ct.0), C.get_ring().clone_el_non_fft(&ct.1)), DEBUG_SK.read().unwrap().as_ref().unwrap())) {
+    for x in H.get_slot_values(&dec(P, C, clone_ct(C, ct), DEBUG_SK.read().unwrap().as_ref().unwrap())) {
         print!("{}, ", H.slot_ring().format(&x));
     }
     println!("]");
@@ -194,7 +303,7 @@ pub fn enc_sym_zero<R: Rng + CryptoRng>(C: &CiphertextRing, mut rng: R, sk: &Sec
     let mut b = C.get_ring().undo_fft(C.negate(C.mul_ref(&a, &sk)));
     let e = C.get_ring().sample_from_coefficient_distribution(|| (rng.sample::<f64, _>(StandardNormal) * 3.2).round() as i32);
     C.get_ring().add_assign_non_fft(&mut b, &e);
-    return (b, C.get_ring().undo_fft(a));
+    return (RingEl::from_coeff(b), RingEl::from_ntt(a));
 }
 
 pub fn enc_sym<R: Rng + CryptoRng>(P: &PlaintextRing, C: &CiphertextRing, rng: R, m: &El<PlaintextRing>, sk: &SecretKey) -> Ciphertext {
@@ -213,61 +322,24 @@ pub fn remove_noise(P: &PlaintextRing, C: &CiphertextRing, c: &El<CiphertextRing
 
 pub fn dec(P: &PlaintextRing, C: &CiphertextRing, ct: Ciphertext, sk: &SecretKey) -> El<PlaintextRing> {
     let (c0, c1) = ct;
-    let (c0, c1) = (C.get_ring().do_fft(c0), C.get_ring().do_fft(c1));
-    let noisy_m = C.add(c0, C.mul_ref_snd(c1, sk));
+    let noisy_m = C.add(c0.to_ntt(C), C.mul_ref_snd(c1.to_ntt(C), sk));
     return remove_noise(P, C, &noisy_m);
 }
 
 pub fn hom_add(C: &CiphertextRing, lhs: Ciphertext, rhs: &Ciphertext) -> Ciphertext {
-    let (mut lhs0, mut lhs1) = lhs;
+    let (lhs0, lhs1) = lhs;
     let (rhs0, rhs1) = rhs;
-    C.get_ring().add_assign_non_fft(&mut lhs0, rhs0);
-    C.get_ring().add_assign_non_fft(&mut lhs1, rhs1);
-    return (lhs0, lhs1);
+    return (RingEl::add(lhs0, rhs0, C), RingEl::add(lhs1, rhs1, C));
 }
 
 pub fn hom_sub(C: &CiphertextRing, lhs: Ciphertext, rhs: &Ciphertext) -> Ciphertext {
-    let (mut lhs0, mut lhs1) = lhs;
+    let (lhs0, lhs1) = lhs;
     let (rhs0, rhs1) = rhs;
-    C.get_ring().sub_assign_non_fft(&mut lhs0, rhs0);
-    C.get_ring().sub_assign_non_fft(&mut lhs1, rhs1);
-    return (lhs0, lhs1);
-}
-
-pub fn hom_add_ntt(C: &CiphertextRing, lhs: NTTCiphertext, rhs: &NTTCiphertext) -> NTTCiphertext {
-    let (mut lhs0, mut lhs1) = lhs;
-    let (rhs0, rhs1) = rhs;
-    C.get_ring().add_assign_ref(&mut lhs0, rhs0);
-    C.get_ring().add_assign_ref(&mut lhs1, rhs1);
-    return (lhs0, lhs1);
-}
-
-pub fn hom_sub_ntt(C: &CiphertextRing, lhs: NTTCiphertext, rhs: &NTTCiphertext) -> NTTCiphertext {
-    let (mut lhs0, mut lhs1) = lhs;
-    let (rhs0, rhs1) = rhs;
-    C.get_ring().sub_assign_ref(&mut lhs0, rhs0);
-    C.get_ring().sub_assign_ref(&mut lhs1, rhs1);
-    return (lhs0, lhs1);
+    return (RingEl::sub(lhs0, rhs0, C), RingEl::sub(lhs1, rhs1, C));
 }
 
 pub fn clone_ct(C: &CiphertextRing, ct: &Ciphertext) -> Ciphertext {
-    let (c0, c1) = ct;
-    return (C.get_ring().clone_el_non_fft(c0), C.get_ring().clone_el_non_fft(c1));
-}
-
-pub fn clone_ct_ntt(C: &CiphertextRing, ct: &NTTCiphertext) -> NTTCiphertext {
-    let (c0, c1) = ct;
-    return (C.clone_el(c0), C.clone_el(c1));
-}
-
-pub fn to_ntt(C: &CiphertextRing, ct: Ciphertext) -> NTTCiphertext {
-    let (c0, c1) = ct;
-    return (C.get_ring().do_fft(c0), C.get_ring().do_fft(c1));
-}
-
-pub fn to_coeff(C: &CiphertextRing, ct: NTTCiphertext) -> Ciphertext {
-    let (c0, c1) = ct;
-    return (C.get_ring().undo_fft(c0), C.get_ring().undo_fft(c1));
+    return (ct.0.clone(C), ct.1.clone(C));
 }
 
 pub fn hom_add_plain(P: &PlaintextRing, C: &CiphertextRing, m: &El<PlaintextRing>, ct: Ciphertext) -> Ciphertext {
@@ -277,38 +349,23 @@ pub fn hom_add_plain(P: &PlaintextRing, C: &CiphertextRing, m: &El<PlaintextRing
         &int_cast(*P.base_ring().modulus() as i32, &ZZbig, &StaticRing::<i32>::RING)
     ));
     C.get_ring().mul_scalar_assign_non_fft(&mut m, &Delta);
-    let (mut c0, c1) = ct;
-    C.get_ring().add_assign_non_fft(&mut c0, &m);
-    return (c0, c1);
-}
-
-pub fn hom_mul_plain_ntt(P: &PlaintextRing, C: &CiphertextRing, m: &El<PlaintextRing>, ct: NTTCiphertext) -> NTTCiphertext {
-    let m = C.get_ring().do_fft(C.get_ring().exact_convert_from_nttring(P.get_ring(), m));
-    let (c0, c1) = ct;
-    return (C.mul_ref_snd(c0, &m), C.mul(c1, m));
+    return (RingEl::add(ct.0, &RingEl::from_coeff(m), C), ct.1);
 }
 
 pub fn hom_mul_plain(P: &PlaintextRing, C: &CiphertextRing, m: &El<PlaintextRing>, ct: Ciphertext) -> Ciphertext {
-    to_coeff(C, hom_mul_plain_ntt(P, C, m, to_ntt(C, ct)))
+    let m = C.get_ring().do_fft(C.get_ring().exact_convert_from_nttring(P.get_ring(), m));
+    let c0 = ct.0.to_ntt(C);
+    let c1 = ct.1.to_ntt(C);
+    return (RingEl::from_ntt(C.mul_ref_snd(c0, &m)), RingEl::from_ntt(C.mul(c1, m)));
 }
 
 pub fn hom_mul_plain_i64(_P: &PlaintextRing, C: &CiphertextRing, m: i64, ct: Ciphertext) -> Ciphertext {
-    let (mut c0, mut c1) = ct;
-    let m = C.base_ring().coerce(&StaticRing::<i64>::RING, m);
-    C.get_ring().mul_scalar_assign_non_fft(&mut c0, &m);
-    C.get_ring().mul_scalar_assign_non_fft(&mut c1, &m);
-    return (c0, c1);
-}
-
-pub fn hom_mul_plain_i64_ntt(_P: &PlaintextRing, C: &CiphertextRing, m: i64, ct: NTTCiphertext) -> NTTCiphertext {
-    let (c0, c1) = ct;
-    let hom = C.inclusion().compose(C.base_ring().can_hom(&StaticRing::<i64>::RING).unwrap());
-    return (hom.mul_map(c0, m), hom.mul_map(c1, m));
+    (RingEl::mul_i64(ct.0, m, C), RingEl::mul_i64(ct.1, m, C))
 }
 
 pub fn noise_budget(P: &PlaintextRing, C: &CiphertextRing, ct: &Ciphertext, sk: &SecretKey) -> usize {
-    let (c0, c1) = ct;
-    let (c0, c1) = (C.get_ring().do_fft(C.get_ring().clone_el_non_fft(c0)), C.get_ring().do_fft(C.get_ring().clone_el_non_fft(c1)));
+    let (c0, c1) = clone_ct(C, ct);
+    let (c0, c1) = (c0.to_ntt(C), c1.to_ntt(C));
     let noisy_m = C.add(c0, C.mul_ref_snd(c1, sk));
     let coefficients = C.wrt_canonical_basis(&noisy_m);
     let Delta = ZZbig.rounded_div(
@@ -326,77 +383,32 @@ pub fn gen_rk<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing, rng: R, sk: &Secret
     gen_switch_key(C, rng, &C.pow(C.clone_el(sk), 2), sk)
 }
 
-pub fn hom_mul(C: &CiphertextRing, C_mul: &CiphertextRing, lhs: &Ciphertext, rhs: &Ciphertext, rk: &RelinKey, conv_data: &MulConversionData) -> Ciphertext {
+pub fn hom_mul(C: &CiphertextRing, C_mul: &CiphertextRing, lhs: Ciphertext, rhs: Ciphertext, rk: &RelinKey, conv_data: &MulConversionData) -> Ciphertext {
     let (c00, c01) = lhs;
     let (c10, c11) = rhs;
-    let lift = |c: &DoubleRNSNonFFTEl<CiphertextZn, CiphertextGenFFT, CiphertextAllocator>| {
-        // let c_fft = C.get_ring().do_fft(C.get_ring().clone_el_non_fft(c));
-        // let input_wrt_basis = C.wrt_canonical_basis(&c_fft);
-        let result = C_mul.get_ring().do_fft(C_mul.get_ring().perform_rns_op_from(C.get_ring(), &c, &conv_data.lift_to_C_mul));
-        // let result_wrt_basis = C_mul.wrt_canonical_basis(&result);
-        // for i in 0..C.rank() {
-        //     let actual = C_mul.base_ring().smallest_lift(result_wrt_basis.at(i));
-        //     let expected = C.base_ring().smallest_lift(input_wrt_basis.at(i));
-        //     assert!(ZZbig.is_leq(&ZZbig.abs(ZZbig.sub_ref(&actual, &expected)), C.base_ring().modulus()), "{}, {}, {}", ZZbig.format(&actual), ZZbig.format(&expected), ZZbig.format(C.base_ring().modulus()));
-        // }
-        return result;
-    };
+    let lift = |c: DoubleRNSNonFFTEl<CiphertextZn, CiphertextGenFFT, CiphertextAllocator>| 
+        C_mul.get_ring().do_fft(C_mul.get_ring().perform_rns_op_from(C.get_ring(), &c, &conv_data.lift_to_C_mul));
 
-    let lifted0 = C_mul.mul(lift(c00), lift(c10));
-    let lifted1 = C_mul.add(C_mul.mul(lift(c00), lift(c11)), C_mul.mul(lift(c01), lift(c10)));
-    let lifted2 = C_mul.mul(lift(c01), lift(c11));
+    let c00_lifted = lift(c00.to_coeff(C));
+    let c01_lifted = lift(c01.to_coeff(C));
+    let c10_lifted = lift(c10.to_coeff(C));
+    let c11_lifted = lift(c11.to_coeff(C));
 
-    let scale_down = |c: El<CiphertextRing>| {
-        // let input_wrt_basis = C_mul.wrt_canonical_basis(&c);
-        let result = C.get_ring().perform_rns_op_from(C_mul.get_ring(), &C_mul.get_ring().undo_fft(C_mul.clone_el(&c)), &conv_data.scale_down_to_C);
-        // let result_wrt_basis = C.get_ring().wrt_canonical_basis_non_fft(&result);
-        // for i in 0..C.rank() {
-        //     let actual = C.base_ring().smallest_lift(result_wrt_basis.at(i));
-        //     let expected = C.base_ring().smallest_lift(C.base_ring().coerce(&ZZbig,
-        //         ZZbig.rounded_div(ZZbig.mul_ref(&C_mul.base_ring().smallest_lift(input_wrt_basis.at(i)), conv_data.scale_down_to_C.num()), conv_data.scale_down_to_C.den())
-        //     ));
-        //     assert!(ZZbig.is_leq(&ZZbig.abs(ZZbig.sub_ref(&actual, &expected)), &ZZbig.one()), "{}, {}, {}", ZZbig.format(&actual), ZZbig.format(&expected), ZZbig.format(C.base_ring().modulus()));
-        // }
-        return result;   
-    };
+    let lifted0 = C_mul.mul_ref(&c00_lifted, &c10_lifted);
+    let lifted1 = C_mul.add(C_mul.mul_ref_snd(c00_lifted, &c11_lifted), C_mul.mul_ref_fst(&c01_lifted, c10_lifted));
+    let lifted2 = C_mul.mul(c01_lifted, c11_lifted);
 
-    let mut res0 = scale_down(lifted0);
-    let mut res1 = scale_down(lifted1);
+    let scale_down = |c: El<CiphertextRing>| 
+        C.get_ring().perform_rns_op_from(C_mul.get_ring(), &C_mul.get_ring().undo_fft(c), &conv_data.scale_down_to_C);
+
+    let res0 = scale_down(lifted0);
+    let res1 = scale_down(lifted1);
     let res2 = scale_down(lifted2);
 
     let op = C.get_ring().to_gadget_product_lhs(res2);
     let (s0, s1) = rk;
 
-    C.get_ring().add_assign_non_fft(&mut res0, &C.get_ring().gadget_product_coeff(&op, s0));
-    C.get_ring().add_assign_non_fft(&mut res1, &C.get_ring().gadget_product_coeff(&op, s1));
-    return (res0, res1);
-}
-
-pub fn hom_mul_ntt(C: &CiphertextRing, C_mul: &CiphertextRing, lhs: &NTTCiphertext, rhs: &NTTCiphertext, rk: &RelinKey, conv_data: &MulConversionData) -> NTTCiphertext {
-    let (c00, c01) = to_coeff(C, clone_ct_ntt(C, lhs));
-    let (c10, c11) = to_coeff(C, clone_ct_ntt(C, rhs));
-    let lift = |c: &DoubleRNSNonFFTEl<CiphertextZn, CiphertextGenFFT, CiphertextAllocator>| {
-        C_mul.get_ring().do_fft(C_mul.get_ring().perform_rns_op_from(C.get_ring(), &c, &conv_data.lift_to_C_mul))
-    };
-
-    let lifted0 = C_mul.mul(lift(&c00), lift(&c10));
-    let lifted1 = C_mul.add(C_mul.mul(lift(&c00), lift(&c11)), C_mul.mul(lift(&c01), lift(&c10)));
-    let lifted2 = C_mul.mul(lift(&c01), lift(&c11));
-
-    let scale_down = |c: El<CiphertextRing>| {
-        C.get_ring().perform_rns_op_from(C_mul.get_ring(), &C_mul.get_ring().undo_fft(C_mul.clone_el(&c)), &conv_data.scale_down_to_C)
-    };
-
-    let mut res0 = C.get_ring().do_fft(scale_down(lifted0));
-    let mut res1 = C.get_ring().do_fft(scale_down(lifted1));
-    let res2 = scale_down(lifted2);
-
-    let op = C.get_ring().to_gadget_product_lhs(res2);
-    let (s0, s1) = rk;
-
-    C.get_ring().add_assign_ref(&mut res0, &C.get_ring().gadget_product_ntt(&op, s0));
-    C.get_ring().add_assign_ref(&mut res1, &C.get_ring().gadget_product_ntt(&op, s1));
-    return (res0, res1);
+    return (RingEl::add(RingEl::from_coeff(res0), &RingEl::gadget_product(&op, s0, C), C), RingEl::add(RingEl::from_coeff(res1), &RingEl::gadget_product(&op, s1, C), C));
 }
 
 pub fn gen_switch_key<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing, mut rng: R, old_sk: &SecretKey, new_sk: &SecretKey) -> KeySwitchKey<'a> {
@@ -411,28 +423,28 @@ pub fn gen_switch_key<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing, mut rng: R,
         }));
         let mut payload = C.get_ring().clone_el_non_fft(&old_sk_non_fft);
         C.get_ring().mul_scalar_assign_non_fft(&mut payload, &factor);
-        C.get_ring().add_assign_non_fft(&mut payload, &c0);
+        C.get_ring().add_assign_non_fft(&mut payload, &c0.to_coeff(C));
         res_0.set_rns_factor(i, payload);
-        res_1.set_rns_factor(i, c1);
+        res_1.set_rns_factor(i, c1.to_coeff(C));
     }
     return (res_0, res_1);
 }
 
-pub fn key_switch(C: &CiphertextRing, ct: &Ciphertext, switch_key: &KeySwitchKey) -> Ciphertext {
+pub fn key_switch(C: &CiphertextRing, ct: Ciphertext, switch_key: &KeySwitchKey) -> Ciphertext {
     let (c0, c1) = ct;
     let (s0, s1) = switch_key;
-    let op = C.get_ring().to_gadget_product_lhs(C.get_ring().clone_el_non_fft(c1));
-    let mut r0 = C.get_ring().gadget_product_coeff(&op, s0);
-    C.get_ring().add_assign_non_fft(&mut r0, c0);
-    let r1 = C.get_ring().gadget_product_coeff(&op, s1);
-    return (r0, r1);
+    let op = C.get_ring().to_gadget_product_lhs(c1.to_coeff(C));
+    return (
+        RingEl::add(c0, &RingEl::gadget_product(&op, s0, C), C),
+        RingEl::gadget_product(&op, s1, C)
+    );
 }
 
-pub fn mod_switch_to_plaintext(target: &PlaintextRing, C: &CiphertextRing, ct: &Ciphertext, switch_data: &ModSwitchData) -> (El<PlaintextRing>, El<PlaintextRing>) {
+pub fn mod_switch_to_plaintext(target: &PlaintextRing, C: &CiphertextRing, ct: Ciphertext, switch_data: &ModSwitchData) -> (El<PlaintextRing>, El<PlaintextRing>) {
     let (c0, c1) = ct;
     return (
-        C.get_ring().perform_rns_op_to_nttring::<Pow2CyclotomicFFT<PlaintextZn, PlaintextFFT>, _, _>(target.get_ring(), c0, &switch_data.scale),
-        C.get_ring().perform_rns_op_to_nttring::<Pow2CyclotomicFFT<PlaintextZn, PlaintextFFT>, _, _>(target.get_ring(), c1, &switch_data.scale)
+        C.get_ring().perform_rns_op_to_nttring::<Pow2CyclotomicFFT<PlaintextZn, PlaintextFFT>, _, _>(target.get_ring(), &c0.to_coeff(C), &switch_data.scale),
+        C.get_ring().perform_rns_op_to_nttring::<Pow2CyclotomicFFT<PlaintextZn, PlaintextFFT>, _, _>(target.get_ring(), &c1.to_coeff(C), &switch_data.scale)
     );
 }
 
@@ -441,49 +453,25 @@ pub fn gen_gk<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing, rng: R, sk: &Secret
 }
 
 pub fn hom_galois(C: &CiphertextRing, ct: Ciphertext, g: ZnEl, gk: &KeySwitchKey) -> Ciphertext {
-    key_switch(C, &(
-        C.get_ring().undo_fft(C.get_ring().apply_galois_action(&C.get_ring().do_fft(ct.0), g)),
-        C.get_ring().undo_fft(C.get_ring().apply_galois_action(&C.get_ring().do_fft(ct.1), g))
+    key_switch(C, (
+        RingEl::from_ntt(C.get_ring().apply_galois_action(&ct.0.to_ntt(C), g)),
+        RingEl::from_ntt(C.get_ring().apply_galois_action(&ct.1.to_ntt(C), g))
     ), gk)
 }
 
-pub fn hom_galois_ntt(C: &CiphertextRing, ct: &NTTCiphertext, g: ZnEl, gk: &KeySwitchKey) -> NTTCiphertext {
-    to_ntt(C, key_switch(C, &(
-        C.get_ring().undo_fft(C.get_ring().apply_galois_action(&ct.0, g)),
-        C.get_ring().undo_fft(C.get_ring().apply_galois_action(&ct.1, g))
-    ), gk))
-}
-
-pub fn hom_galois_many<'a, V>(C: &CiphertextRing, ct: &Ciphertext, gs: &[ZnEl], gks: V) -> Vec<Ciphertext>
+pub fn hom_galois_many<'a, V>(C: &CiphertextRing, ct: Ciphertext, gs: &[ZnEl], gks: V) -> Vec<Ciphertext>
     where V: VectorView<KeySwitchKey<'a>>
 {
     let (c0, c1) = ct;
-    let c0_ntt = C.get_ring().do_fft(C.get_ring().clone_el_non_fft(c0));
-    let lhs = C.get_ring().to_gadget_product_lhs(C.get_ring().clone_el_non_fft(c1));
+    let c0_ntt = c0.to_ntt(&C);
+    let lhs = C.get_ring().to_gadget_product_lhs(c1.to_coeff(&C));
     return (0..gs.len()).map(|i| {
         let c1_g = lhs.apply_galois_action(C.get_ring(), gs[i]);
         let (s0, s1) = gks.at(i);
-        let mut r0 = C.get_ring().gadget_product_coeff(&c1_g, s0);
-        let c0_g = C.get_ring().undo_fft(C.get_ring().apply_galois_action(&c0_ntt, gs[i]));
-        C.get_ring().add_assign_non_fft(&mut r0, &c0_g);
-        let r1 = C.get_ring().gadget_product_coeff(&c1_g, s1);
-        return (r0, r1);
-    }).collect();
-}
-
-pub fn hom_galois_many_ntt<'a, V>(C: &CiphertextRing, ct: &NTTCiphertext, gs: &[ZnEl], gks: V) -> Vec<NTTCiphertext>
-    where V: VectorView<KeySwitchKey<'a>>
-{
-    let (c0, c1) = ct;
-    let lhs = C.get_ring().to_gadget_product_lhs(C.get_ring().undo_fft(C.clone_el(c1)));
-    return (0..gs.len()).map(|i| {
-        let c1_g = lhs.apply_galois_action(C.get_ring(), gs[i]);
-        let (s0, s1) = gks.at(i);
-        let mut r0 = C.get_ring().gadget_product_ntt(&c1_g, s0);
-        let c0_g = C.get_ring().apply_galois_action(&c0, gs[i]);
-        C.get_ring().add_assign_ref(&mut r0, &c0_g);
-        let r1 = C.get_ring().gadget_product_ntt(&c1_g, s1);
-        return (r0, r1);
+        let r0 = RingEl::gadget_product(&c1_g, s0, C);
+        let r1 = RingEl::gadget_product(&c1_g, s1, C);
+        let c0_g = RingEl::from_ntt(C.get_ring().apply_galois_action(&c0_ntt, gs[i]));
+        return (RingEl::add(r0, &c0_g, C), r1);
     }).collect();
 }
 
@@ -517,9 +505,9 @@ fn run_bfv() {
 
     clear_all_timings();
     let start = Instant::now();
-    let mut ct_sqr = hom_mul(&C, &C_mul, &ct, &ct, &relin_key, &mul_rescale_data);
+    let mut ct_sqr = hom_mul(&C, &C_mul, clone_ct(&C, &ct), clone_ct(&C, &ct), &relin_key, &mul_rescale_data);
     for _ in 0..(COUNT - 1) {
-        ct_sqr = hom_mul(&C, &C_mul, &ct, &ct, &relin_key, &mul_rescale_data);
+        ct_sqr = hom_mul(&C, &C_mul, clone_ct(&C, &ct), clone_ct(&C, &ct), &relin_key, &mul_rescale_data);
     }
     let end = Instant::now();
     println!("Performed multiplication in {} ms", (end - start).as_millis() as f64 / COUNT as f64);
@@ -575,10 +563,10 @@ fn test_bfv_mul() {
     let m = P.int_hom().map(2);
     let ct = enc_sym(&P, &C, &mut rng, &m, &sk);
 
-    let m = dec(&P, &C, (C.get_ring().clone_el_non_fft(&ct.0), C.get_ring().clone_el_non_fft(&ct.1)), &sk);
+    let m = dec(&P, &C, clone_ct(&C, &ct), &sk);
     assert_el_eq!(&P, &P.int_hom().map(2), &m);
 
-    let ct_sqr = hom_mul(&C, &C_mul, &ct, &ct, &rk, &mul_rescale_data);
+    let ct_sqr = hom_mul(&C, &C_mul, clone_ct(&C, &ct), clone_ct(&C, &ct), &rk, &mul_rescale_data);
     let m_sqr = dec(&P, &C, ct_sqr, &sk);
 
     assert_el_eq!(&P, &P.int_hom().map(4), &m_sqr);

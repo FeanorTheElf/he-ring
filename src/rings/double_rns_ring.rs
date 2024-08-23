@@ -328,6 +328,16 @@ impl<R, F, A> DoubleRNSRingBase<R, F, A>
         }
     }
 
+    pub fn negate_non_fft(&self, mut val: DoubleRNSNonFFTEl<R, F, A>) -> DoubleRNSNonFFTEl<R, F, A> {
+        assert_eq!(self.element_len(), val.data.len());
+        for i in 0..self.rns_base().len() {
+            for j in 0..self.rank() {
+                self.rns_base().at(i).negate_inplace(&mut val.data[i * self.rank() + j]);
+            }
+        }
+        return val;
+    }
+
     pub fn sub_assign_non_fft(&self, lhs: &mut DoubleRNSNonFFTEl<R, F, A>, rhs: &DoubleRNSNonFFTEl<R, F, A>) {
         assert_eq!(self.element_len(), lhs.data.len());
         assert_eq!(self.element_len(), rhs.data.len());

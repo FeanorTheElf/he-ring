@@ -148,6 +148,10 @@ impl<'a, F, A> LKSSGadgetProductLhsOperand<'a, F, A>
     }
 }
 
+pub enum ElRepr {
+    Coeff, NTT
+}
+
 impl<F, A> DoubleRNSRingBase<Zn, F, A> 
     where F: RingDecompositionSelfIso<ZnBase>,
         A: Allocator + Clone
@@ -399,6 +403,14 @@ impl<F, A> DoubleRNSRingBase<Zn, F, A>
         })
     }
 
+    pub fn preferred_output_repr(&self, lhs: &GadgetProductLhsOperand<F, A>, rhs: &GadgetProductRhsOperand<F, A>) -> ElRepr {
+        match (lhs, rhs) {
+            (GadgetProductLhsOperand::LKSSStyle(_), GadgetProductRhsOperand::LKSSStyle(_)) => ElRepr::Coeff,
+            (GadgetProductLhsOperand::Naive(_), GadgetProductRhsOperand::Naive(_, _)) => ElRepr::NTT,
+            _ => panic!("Illegal combination of GadgetProductOperands; Maybe they were created by different rings?")
+        }
+    }
+
     ///
     /// The gadget product without final FFT. See [`Self::gadget_product_ntt()`] for a description.
     /// 
@@ -412,7 +424,6 @@ impl<F, A> DoubleRNSRingBase<Zn, F, A>
             }),
             _ => panic!("Illegal combination of GadgetProductOperands; Maybe they were created by different rings?")
         }
-        
     }
 }
 

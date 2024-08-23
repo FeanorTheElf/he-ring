@@ -394,13 +394,13 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
         };
     }
 
-    pub fn evaluate<S>(&self, input: &El<NTTRing<R, F, A>>, ring: S) -> El<NTTRing<R, F, A>>
+    pub fn evaluate<S>(&self, input: El<NTTRing<R, F, A>>, ring: S) -> El<NTTRing<R, F, A>>
         where S: RingStore<Type = NTTRingBase<R, F, A>>
     {
         self.evaluate_generic(input, |a, b, c| {
             ring.add_assign(a, ring.mul_ref(b, c));
         }, |x, galois_els| {
-            galois_els.iter().map(|el| ring.get_ring().apply_galois_action(x, *el)).collect()
+            galois_els.iter().map(|el| ring.get_ring().apply_galois_action(&x, *el)).collect()
         }, || ring.zero())
     }
     
@@ -408,9 +408,9 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
         self.baby_step_galois_elements.iter().chain(self.giant_step_galois_elements.iter().filter_map(|x| x.as_ref()))
     }
 
-    pub fn evaluate_generic<T, AddScaled, ApplyGalois, Zero>(&self, input: &T, mut add_scaled_fn: AddScaled, mut apply_galois_fn: ApplyGalois, mut zero_fn: Zero) -> T
+    pub fn evaluate_generic<T, AddScaled, ApplyGalois, Zero>(&self, input: T, mut add_scaled_fn: AddScaled, mut apply_galois_fn: ApplyGalois, mut zero_fn: Zero) -> T
         where AddScaled: FnMut(&mut T, &T, &El<NTTRing<R, F, A>>),
-            ApplyGalois: FnMut(&T, &[ZnEl]) -> Vec<T>,
+            ApplyGalois: FnMut(T, &[ZnEl]) -> Vec<T>,
             Zero: FnMut() -> T
     {
         let baby_steps = apply_galois_fn(input, &self.baby_step_galois_elements);
@@ -425,7 +425,7 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
                 }
             }
             let summand = if let Some(gs_el) = gs_el {
-                let summand = apply_galois_fn(&giant_step_result, &[*gs_el]);
+                let summand = apply_galois_fn(giant_step_result, &[*gs_el]);
                 assert_eq!(summand.len(), 1);
                 summand.into_iter().next().unwrap()
             } else {
@@ -739,13 +739,13 @@ fn test_compile() {
 
     let mut current = H.from_slot_vec([1, 2, 3, 4].into_iter().map(|n| H.slot_ring().int_hom().map(n)));
     for T in &compiled_transform {
-        current = T.evaluate(&current, &ring);
+        current = T.evaluate(current, &ring);
     }
     assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 0, 0, 3, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), &current);
     
     let compiled_composed_transform = CompiledLinearTransform::create_from_merged(&H, &pow2_slots_to_coeffs_thin(&H), 2);
     let mut current = H.from_slot_vec([1, 2, 3, 4].into_iter().map(|n| H.slot_ring().int_hom().map(n)));
-    current = compiled_composed_transform.evaluate(&current, &ring);
+    current = compiled_composed_transform.evaluate(current, &ring);
     assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 0, 0, 3, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), &current);
 
     let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(97), 5);
@@ -754,23 +754,23 @@ fn test_compile() {
     
     let mut current = H.from_slot_vec((1..17).map(|n| H.slot_ring().int_hom().map(n)));
     for T in compiled_transform {
-        current = T.evaluate(&current, &ring);
+        current = T.evaluate(current, &ring);
     }
     assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 5, 0, 3, 0, 7, 0, 2, 0, 6, 0, 4, 0, 8, 0, 9, 0, 13, 0, 11, 0, 15, 0, 10, 0, 14, 0, 12, 0, 16, 0]), &current);
 
     let compiled_composed_transform = CompiledLinearTransform::create_from_merged(&H, &pow2_slots_to_coeffs_thin(&H), 2);
     let mut current = H.from_slot_vec((1..17).map(|n| H.slot_ring().int_hom().map(n)));
-    current = compiled_composed_transform.evaluate(&current, &ring);
+    current = compiled_composed_transform.evaluate(current, &ring);
     assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 5, 0, 3, 0, 7, 0, 2, 0, 6, 0, 4, 0, 8, 0, 9, 0, 13, 0, 11, 0, 15, 0, 10, 0, 14, 0, 12, 0, 16, 0]), &current);
 
     let compiled_composed_transform = CompiledLinearTransform::create_from_merged(&H, &pow2_slots_to_coeffs_thin(&H), 3);
     let mut current = H.from_slot_vec((1..17).map(|n| H.slot_ring().int_hom().map(n)));
-    current = compiled_composed_transform.evaluate(&current, &ring);
+    current = compiled_composed_transform.evaluate(current, &ring);
     assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 5, 0, 3, 0, 7, 0, 2, 0, 6, 0, 4, 0, 8, 0, 9, 0, 13, 0, 11, 0, 15, 0, 10, 0, 14, 0, 12, 0, 16, 0]), &current);
 
     let compiled_composed_transform = CompiledLinearTransform::create_from_merged(&H, &pow2_slots_to_coeffs_thin(&H), 5);
     let mut current = H.from_slot_vec((1..17).map(|n| H.slot_ring().int_hom().map(n)));
-    current = compiled_composed_transform.evaluate(&current, &ring);
+    current = compiled_composed_transform.evaluate(current, &ring);
     assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 5, 0, 3, 0, 7, 0, 2, 0, 6, 0, 4, 0, 8, 0, 9, 0, 13, 0, 11, 0, 15, 0, 10, 0, 14, 0, 12, 0, 16, 0]), &current);
 }
 

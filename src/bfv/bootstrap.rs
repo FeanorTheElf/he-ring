@@ -63,6 +63,22 @@ pub struct Pow2BFVThinBootstrapParams {
     coeffs_to_slots_thin: Vec<CompiledLinearTransform<PlaintextZn, Pow2CyclotomicFFT<PlaintextZn, PlaintextFFT>, Global>>
 }
 
+pub struct BootstrapperConfig {
+    set_v: Option<usize>
+}
+
+impl BootstrapperConfig {
+
+    pub fn set_v(mut self, v: usize) -> Self {
+        self.set_v = Some(v);
+        return self;
+    }
+}
+
+const DEFAULT_CONFIG: BootstrapperConfig = BootstrapperConfig {
+    set_v: None
+};
+
 pub struct BootstrappingDataBundle {
     pub plaintext_ring_hierarchy: Vec<PlaintextRing>,
     pub multiplication_rescale_hierarchy: Vec<MulConversionData>,
@@ -71,11 +87,11 @@ pub struct BootstrappingDataBundle {
 
 impl Pow2BFVThinBootstrapParams {
 
-    pub fn create_for(params: Pow2BFVParams, load_data: Option<&str>, store_data: Option<&str>) -> Self {
+    pub fn create_for(params: Pow2BFVParams, config: BootstrapperConfig, load_data: Option<&str>, store_data: Option<&str>) -> Self {
         let (p, r) = is_prime_power(&ZZ, &params.t).unwrap();
         // this is the case if s is uniformly ternary
         let s_can_norm = 1 << params.log2_N;
-        let v = ((s_can_norm as f64 + 1.).log2() / (p as f64).log2()).ceil() as usize;
+        let v = config.set_v.unwrap_or(((s_can_norm as f64 + 1.).log2() / (p as f64).log2()).ceil() as usize);
         let e = r + v;
 
         let digit_extraction_circuits = 
@@ -234,16 +250,19 @@ impl Pow2BFVThinBootstrapParams {
         }
         let mut key_switches = 0;
         let start = Instant::now();
-        let values_in_coefficients = self.slots_to_coeffs_thin.iter().fold(to_ntt(C, ct), |current, T| T.evaluate_generic(
-            &current, 
+        let values_in_coefficients = self.slots_to_coeffs_thin.iter().fold(ct, |current, T| T.evaluate_generic(
+            current, 
             |lhs, rhs, factor| {
-                *lhs = hom_add_ntt(C, hom_mul_plain_ntt(P_main, C, factor, clone_ct_ntt(C, rhs)), lhs)
+                *lhs = hom_add(C, hom_mul_plain(P_main, C, factor, clone_ct(C, rhs)), lhs)
             }, 
             |value, gs| {
                 key_switches += gs.len();
-                hom_galois_many_ntt(C, value, gs, gs.map(|g| get_gk(g)))
+                hom_galois_many(C, value, gs, gs.map(|g| get_gk(g))).into_iter()
+                    // enforce ntt repr, as otherwise we might clone els in coeff repr and perform ntt many times on the same element during summation
+                    .map(|(c0, c1)| (c0.ntt_repr(C), c1.ntt_repr(C)))
+                    .collect::<Vec<_>>()
             },
-            || (C.get_ring().zero(), C.zero())
+            || (RingEl::zero(), RingEl::zero())
         ));
         if LOG {
             let end = Instant::now();
@@ -254,8 +273,8 @@ impl Pow2BFVThinBootstrapParams {
             println!("computing c0 + c1 * s");
         }
         let start = Instant::now();
-        let (c0, c1) = mod_switch_to_plaintext(P_main, C, &to_coeff(C, values_in_coefficients), mod_switch);
-        let enc_sk: Ciphertext = (C.get_ring().non_fft_zero(), C.get_ring().non_fft_from(delta_bootstrap));
+        let (c0, c1) = mod_switch_to_plaintext(P_main, C, values_in_coefficients, mod_switch);
+        let enc_sk: Ciphertext = (RingEl::zero(), RingEl::from_coeff(C.get_ring().non_fft_from(delta_bootstrap)));
         let noisy_decryption = hom_add_plain(P_main, C, &c0, hom_mul_plain(P_main, C, &c1, enc_sk));
         if LOG {
             let end = Instant::now();
@@ -268,14 +287,14 @@ impl Pow2BFVThinBootstrapParams {
         let mut key_switches = 0;
         let start = Instant::now();
         let cancelled_out_irrelevant_coeffs = self.slotwise_trace.evaluate_generic(
-            to_ntt(C, noisy_decryption), 
-            |lhs, rhs| hom_add_ntt(C, lhs, rhs), 
+            noisy_decryption, 
+            |lhs, rhs| hom_add(C, lhs, rhs), 
             |value, g| {
                 key_switches += 1;
-                hom_galois_ntt(C, value, *g, get_gk(g))
+                hom_galois(C, clone_ct(C, value), *g, get_gk(g))
             }
         );
-        let cancelled_out_irrelevant_coeffs = hom_mul_plain_ntt(&P_main, C, &P.inclusion().map(undo_trace_scaling), cancelled_out_irrelevant_coeffs);
+        let cancelled_out_irrelevant_coeffs = hom_mul_plain(&P_main, C, &P.inclusion().map(undo_trace_scaling), cancelled_out_irrelevant_coeffs);
         if LOG {
             let end = Instant::now();
             println!("done in {} ms and {} key switches", (end - start).as_millis(), key_switches);
@@ -287,22 +306,25 @@ impl Pow2BFVThinBootstrapParams {
         let start = Instant::now();
         let mut key_switches = 0;
         let moved_back_to_slots = self.coeffs_to_slots_thin.iter().fold(cancelled_out_irrelevant_coeffs, |current, T| T.evaluate_generic(
-            &current, 
+            current, 
             |lhs, rhs, factor| {
-                *lhs = hom_add_ntt(C, hom_mul_plain_ntt(P_main, C, factor, clone_ct_ntt(C, rhs)), lhs)
+                *lhs = hom_add(C, hom_mul_plain(P_main, C, factor, clone_ct(C, rhs)), lhs)
             }, 
             |value, gs| {
                 key_switches += gs.len();
-                hom_galois_many_ntt(C, value, gs, gs.map(|g| get_gk(g)))
+                hom_galois_many(C, value, gs, gs.map(|g| get_gk(g))).into_iter()
+                    // enforce ntt repr, as otherwise we might clone els in coeff repr and perform ntt many times on the same element during summation
+                    .map(|(c0, c1)| (c0.ntt_repr(C), c1.ntt_repr(C)))
+                    .collect::<Vec<_>>()
             },
-            || (C.zero(), C.zero())
+            || (RingEl::zero(), RingEl::zero())
         ));
         if LOG {
             let end = Instant::now();
             println!("done in {} ms and {} key switches", (end - start).as_millis(), key_switches);
         }
 
-        let digit_extraction_input = hom_add_plain(P_main, C, &P.inclusion().map(rounding_divisor_half), to_coeff(C, moved_back_to_slots));
+        let digit_extraction_input = hom_add_plain(P_main, C, &P.inclusion().map(rounding_divisor_half), moved_back_to_slots);
         let mut result = clone_ct(C, &digit_extraction_input);
         let mut digit_extracted: Vec<Vec<Ciphertext>> = Vec::new();
         for (i, k) in ((self.r + 1)..(self.e + 1)).rev().enumerate() {
@@ -332,11 +354,11 @@ impl Pow2BFVThinBootstrapParams {
                 }, 
                 |lhs, rhs| {
                     key_switches += 1;
-                    let result =  hom_mul(C, C_mul, &lhs, &rhs, rk, current_mul_rescale);
+                    let result =  hom_mul(C, C_mul, lhs, rhs, rk, current_mul_rescale);
                     return result;
                 }, 
                 |x| {
-                    (C.get_ring().non_fft_from(C.base_ring().mul_ref_fst(&delta, C.base_ring().coerce(&ZZ, x))), C.get_ring().non_fft_zero())
+                    (RingEl::from_coeff(C.get_ring().non_fft_from(C.base_ring().mul_ref_fst(&delta, C.base_ring().coerce(&ZZ, x)))), RingEl::zero())
                 }
             );
             let mut lowest_digit = lowest_digit.collect::<Vec<_>>();
@@ -365,7 +387,7 @@ fn test_bfv_thin_bootstrapping_17() {
         log2_q_max: 800,
         log2_N: 7
     };
-    let bootstrapper = Pow2BFVThinBootstrapParams::create_for(params.clone(), None, None);
+    let bootstrapper = Pow2BFVThinBootstrapParams::create_for(params.clone(), DEFAULT_CONFIG, None, None);
     
     let P = params.create_plaintext_ring();
     let (C, C_mul) = params.create_ciphertext_rings();
@@ -404,7 +426,7 @@ fn test_bfv_thin_bootstrapping_257() {
         log2_q_max: 1200,
         log2_N: 10
     };
-    let bootstrapper = Pow2BFVThinBootstrapParams::create_for(params.clone(), None, None);
+    let bootstrapper = Pow2BFVThinBootstrapParams::create_for(params.clone(), DEFAULT_CONFIG, None, None);
     
     let P = params.create_plaintext_ring();
     let (C, C_mul) = params.create_ciphertext_rings();
@@ -439,13 +461,14 @@ fn run_bfv_thin_bootstrapping() {
     
     let params = Pow2BFVParams {
         t: 257,
-        log2_q_min: 1290,
-        log2_q_max: 1300,
+        log2_q_min: 790,
+        log2_q_max: 800,
         log2_N: 15
     };
     println!("Preparing bootstrapper...");
 
-    let bootstrapper = Pow2BFVThinBootstrapParams::create_for(params.clone(), Some("F:\\Users\\Simon\\Documents\\Projekte\\he-ring\\bootstrap_257_thin"), None);
+    // Some("F:\\Users\\Simon\\Documents\\Projekte\\he-ring\\bootstrap_257_thin")
+    let bootstrapper = Pow2BFVThinBootstrapParams::create_for(params.clone(), DEFAULT_CONFIG.set_v(1), None, None);
     
     println!("Preparing utility data...");
 
