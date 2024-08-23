@@ -1,5 +1,3 @@
-use std::borrow::Borrow;
-
 use feanor_math::algorithms::int_factor::is_prime_power;
 use feanor_math::divisibility::DivisibilityRingStore;
 use feanor_math::homomorphism::Homomorphism;
@@ -73,66 +71,80 @@ pub struct BootstrappingDataBundle {
 
 impl Pow2BFVThinBootstrapParams {
 
-    pub fn create_for(params: Pow2BFVParams, load_hypercube: Option<&str>) -> Self {
+    pub fn create_for(params: Pow2BFVParams, load_data: Option<&str>, store_data: Option<&str>) -> Self {
         let (p, r) = is_prime_power(&ZZ, &params.t).unwrap();
         // this is the case if s is uniformly ternary
         let s_can_norm = 1 << params.log2_N;
         let v = ((s_can_norm as f64 + 1.).log2() / (p as f64).log2()).ceil() as usize;
         let e = r + v;
-        println!("e = {}", e);
 
-        println!("preparing digit extraction polys...");
-        let start = Instant::now();
         let digit_extraction_circuits = (1..=v).rev().map(|remaining_v| {
             let poly_ring = DensePolyRing::new(PlaintextZn::new(ZZ.pow(p, remaining_v + r) as u64), "X");
             poly_to_circuit(&poly_ring, &(2..=remaining_v).chain([r + remaining_v].into_iter()).map(|j| digit_retain_poly(&poly_ring, j)).collect::<Vec<_>>())
         }).collect::<Vec<_>>();
-        let end = Instant::now();
-        println!("done in {} ms", (end - start).as_millis());
 
         let plaintext_ring = <PlaintextRing as RingStore>::Type::new(PlaintextZn::new(ZZ.pow(p, e) as u64), params.log2_N);
         let original_plaintext_ring = params.create_plaintext_ring();
 
-        let H = if let Some(filename) = load_hypercube {
-            HypercubeIsomorphism::load(filename, plaintext_ring.get_ring())
+        if let Some(filename) = load_data {
+
+            let H = HypercubeIsomorphism::load(format!("{}_hypercube.json", filename).as_str(), plaintext_ring.get_ring());
+            let original_H = H.reduce_modulus(original_plaintext_ring.get_ring());
+            
+            let slots_to_coeffs = CompiledLinearTransform::load_seq(format!("{}_slots_to_coeffs.json", filename).as_str(), &original_plaintext_ring, original_H.galois_group_mulrepr());
+            let coeffs_to_slots = CompiledLinearTransform::load_seq(format!("{}_coeffs_to_slots.json", filename).as_str(), &plaintext_ring, H.galois_group_mulrepr());
+
+            return Self {
+                params: params,
+                e: e,
+                r: r,
+                p: p,
+                digit_extract_circuits: digit_extraction_circuits,
+                slots_to_coeffs_thin: slots_to_coeffs,
+                coeffs_to_slots_thin: coeffs_to_slots,
+                slotwise_trace: Pow2Trace::slotwise_trace(H.galois_group_mulrepr(), p, H.slot_ring().rank())
+            };
         } else {
             let H = HypercubeIsomorphism::new(plaintext_ring.get_ring());
-            H.save("F:\\Users\\Simon\\Documents\\Projekte\\he-ring\\hypercube_bootstrap.json");
-            H
-        };
-        let original_H = H.reduce_modulus(original_plaintext_ring.get_ring());
-        original_H.save("F:\\Users\\Simon\\Documents\\Projekte\\he-ring\\hypercube_base.json");
+            let original_H = H.reduce_modulus(original_plaintext_ring.get_ring());
+    
+            println!("computing slots-to-coeffs transforms...");
+            let start = Instant::now();
+            let slots_to_coeffs = pow2_slots_to_coeffs_thin(&original_H);
+            let end = Instant::now();
+            println!("done in {} ms", (end - start).as_millis());
+    
+            println!("computing coeffs-to-slots transforms...");
+            let start = Instant::now();
+            let coeffs_to_slots = pow2_coeffs_to_slots_thin(&H);
+            let end = Instant::now();
+            println!("done in {} ms", (end - start).as_millis());
+    
+            println!("compiling linear transforms...");
+            let start = Instant::now();
+            let compiled_coeffs_to_slots_thin: Vec<_> = coeffs_to_slots.into_iter().map(|T| CompiledLinearTransform::compile(&H, T)).collect();
+            let compiled_slots_to_coeffs_thin: Vec<_> = slots_to_coeffs.into_iter().map(|T| CompiledLinearTransform::compile(&original_H, T)).collect();
+            let end = Instant::now();
+            println!("done in {} ms", (end - start).as_millis());
 
-        println!("computing slots-to-coeffs transforms...");
-        let start = Instant::now();
-        let slots_to_coeffs = pow2_slots_to_coeffs_thin(&original_H);
-        let end = Instant::now();
-        println!("done in {} ms", (end - start).as_millis());
-
-        println!("computing coeffs-to-slots transforms...");
-        let start = Instant::now();
-        let coeffs_to_slots = pow2_coeffs_to_slots_thin(&H);
-        let end = Instant::now();
-        println!("done in {} ms", (end - start).as_millis());
-
-        println!("compiling linear transforms...");
-        let start = Instant::now();
-        let compiled_coeffs_to_slots_thin = coeffs_to_slots.into_iter().map(|T| CompiledLinearTransform::compile(&H, T)).collect();
-        let compiled_slots_to_coeffs_thin = slots_to_coeffs.into_iter().map(|T| CompiledLinearTransform::compile(&original_H, T)).collect();
-        let end = Instant::now();
-        println!("done in {} ms", (end - start).as_millis());
-
-        println!("done");
-        return Self {
-            params: params,
-            e: e,
-            r: r,
-            p: p,
-            digit_extract_circuits: digit_extraction_circuits,
-            slots_to_coeffs_thin: compiled_slots_to_coeffs_thin,
-            coeffs_to_slots_thin: compiled_coeffs_to_slots_thin,
-            slotwise_trace: Pow2Trace::slotwise_trace(H.galois_group_mulrepr(), p, H.slot_ring().rank())
-        };
+            if let Some(filename) = store_data {
+                H.save(format!("{}_hypercube.json", filename).as_str());
+                CompiledLinearTransform::save_seq(&compiled_slots_to_coeffs_thin, format!("{}_slots_to_coeffs.json", filename).as_str(), &original_plaintext_ring, original_H.galois_group_mulrepr());
+                CompiledLinearTransform::save_seq(&compiled_coeffs_to_slots_thin, format!("{}_coeffs_to_slots.json", filename).as_str(), &plaintext_ring, H.galois_group_mulrepr());
+            }
+    
+            println!("done");
+            return Self {
+                params: params,
+                e: e,
+                r: r,
+                p: p,
+                digit_extract_circuits: digit_extraction_circuits,
+                slots_to_coeffs_thin: compiled_slots_to_coeffs_thin,
+                coeffs_to_slots_thin: compiled_coeffs_to_slots_thin,
+                slotwise_trace: Pow2Trace::slotwise_trace(H.galois_group_mulrepr(), p, H.slot_ring().rank())
+            };
+        }
     }
 
     pub fn create_bootstrapping_plaintext_ring_hierarchy(&self) -> Vec<PlaintextRing> {
@@ -188,7 +200,7 @@ impl Pow2BFVThinBootstrapParams {
         return result;
     }
 
-    pub fn bootstrap_thin(
+    pub fn bootstrap_thin<const LOG: bool>(
         &self,
         C: &CiphertextRing, 
         C_mul: &CiphertextRing, 
@@ -209,74 +221,88 @@ impl Pow2BFVThinBootstrapParams {
         let rounding_divisor_half = P_main.base_ring().coerce(&ZZbig, ZZbig.rounded_div(ZZbig.pow(int_cast(self.p, ZZbig, ZZ), self.e - self.r), &ZZbig.int_hom().map(2)));
         let undo_trace_scaling = P_main.base_ring().invert(&P_main.base_ring().coerce(&ZZ, self.slotwise_trace.trace_rank_quo)).unwrap();
 
-        let clone_ct = |(c0, c1): &Ciphertext| (C.get_ring().clone_el_non_fft(c0), C.get_ring().clone_el_non_fft(c1));
         let get_gk = |g: &ZnEl| &gk.iter().filter(|(s, _)| Gal.eq_el(g, s)).next().unwrap().1;
 
-        println!("performing slots-to-coeffs transform");
+        if LOG {
+            println!("performing slots-to-coeffs transform");
+        }
         let mut key_switches = 0;
         let start = Instant::now();
-        let values_in_coefficients = self.slots_to_coeffs_thin.iter().fold(ct, |current, T| T.evaluate_generic(
+        let values_in_coefficients = self.slots_to_coeffs_thin.iter().fold(to_ntt(C, ct), |current, T| T.evaluate_generic(
             &current, 
             |lhs, rhs, factor| {
-                *lhs = hom_add(C, hom_mul_plain(P_main, C, factor, clone_ct(rhs)), lhs)
+                *lhs = hom_add_ntt(C, hom_mul_plain_ntt(P_main, C, factor, clone_ct_ntt(C, rhs)), lhs)
             }, 
             |value, gs| {
                 key_switches += 1;
-                gs.iter().map(|g| hom_galois(C, clone_ct(value), *g, get_gk(g))).collect()
+                gs.iter().map(|g| hom_galois_ntt(C, value, *g, get_gk(g))).collect()
             },
-            || (C.get_ring().non_fft_zero(), C.get_ring().non_fft_zero())
+            || (C.zero(), C.zero())
         ));
-        let end = Instant::now();
-        println!("done in {} ms and {} key switches", (end - start).as_millis(), key_switches);
+        if LOG {
+            let end = Instant::now();
+            println!("done in {} ms and {} key switches", (end - start).as_millis(), key_switches);
+        }
 
-        println!("computing c0 + c1 * s");
+        if LOG {
+            println!("computing c0 + c1 * s");
+        }
         let start = Instant::now();
-        let (c0, c1) = mod_switch_to_plaintext(P_main, C, &values_in_coefficients, mod_switch);
+        let (c0, c1) = mod_switch_to_plaintext(P_main, C, &to_coeff(C, values_in_coefficients), mod_switch);
         let enc_sk: Ciphertext = (C.get_ring().non_fft_zero(), C.get_ring().non_fft_from(delta_bootstrap));
         let noisy_decryption = hom_add_plain(P_main, C, &c0, hom_mul_plain(P_main, C, &c1, enc_sk));
-        let end = Instant::now();
-        println!("done in {} ms and 1 key switch", (end - start).as_millis());
+        if LOG {
+            let end = Instant::now();
+            println!("done in {} ms and 1 key switch", (end - start).as_millis());
+        }
 
-        println!("cancelling pure noise coefficients");
+        if LOG {
+            println!("cancelling pure noise coefficients");
+        }
         let mut key_switches = 0;
         let start = Instant::now();
         let cancelled_out_irrelevant_coeffs = self.slotwise_trace.evaluate_generic(
-            noisy_decryption, 
-            |lhs, rhs| hom_add(C, lhs, rhs), 
+            to_ntt(C, noisy_decryption), 
+            |lhs, rhs| hom_add_ntt(C, lhs, rhs), 
             |value, g| {
                 key_switches += 1;
-                hom_galois(C, clone_ct(value), *g, get_gk(g))
+                hom_galois_ntt(C, value, *g, get_gk(g))
             }
         );
-        let cancelled_out_irrelevant_coeffs = hom_mul_plain(&P_main, C, &P.inclusion().map(undo_trace_scaling), cancelled_out_irrelevant_coeffs);
-        let end = Instant::now();
-        println!("done in {} ms and {} key switches", (end - start).as_millis(), key_switches);
-
-        println!("performing coeffs-to-slots transform");
+        let cancelled_out_irrelevant_coeffs = hom_mul_plain_ntt(&P_main, C, &P.inclusion().map(undo_trace_scaling), cancelled_out_irrelevant_coeffs);
+        if LOG {
+            let end = Instant::now();
+            println!("done in {} ms and {} key switches", (end - start).as_millis(), key_switches);
+        }
+        
+        if LOG {
+            println!("performing coeffs-to-slots transform");
+        }
         let start = Instant::now();
         let mut key_switches = 0;
         let moved_back_to_slots = self.coeffs_to_slots_thin.iter().fold(cancelled_out_irrelevant_coeffs, |current, T| T.evaluate_generic(
             &current, 
             |lhs, rhs, factor| {
-                *lhs = hom_add(C, hom_mul_plain(P_main, C, factor, clone_ct(rhs)), lhs)
+                *lhs = hom_add_ntt(C, hom_mul_plain_ntt(P_main, C, factor, clone_ct_ntt(C, rhs)), lhs)
             }, 
             |value, gs| {
                 key_switches += 1;
-                gs.iter().map(|g| hom_galois(C, clone_ct(value), *g, get_gk(g))).collect()
+                gs.iter().map(|g| hom_galois_ntt(C, value, *g, get_gk(g))).collect()
             },
-            || (C.get_ring().non_fft_zero(), C.get_ring().non_fft_zero())
+            || (C.zero(), C.zero())
         ));
-        let end = Instant::now();
-        println!("done in {} ms and {} key switches", (end - start).as_millis(), key_switches);
-        
-        let digit_extraction_input = hom_add_plain(P_main, C, &P.inclusion().map(rounding_divisor_half), moved_back_to_slots);
+        if LOG {
+            let end = Instant::now();
+            println!("done in {} ms and {} key switches", (end - start).as_millis(), key_switches);
+        }
 
-        debug_dec_print_slots(P_main, C, &digit_extraction_input);
-
-        let mut result = clone_ct(&digit_extraction_input);
+        let digit_extraction_input = hom_add_plain(P_main, C, &P.inclusion().map(rounding_divisor_half), to_coeff(C, moved_back_to_slots));
+        let mut result = clone_ct(C, &digit_extraction_input);
         let mut digit_extracted: Vec<Vec<Ciphertext>> = Vec::new();
         for (i, k) in ((self.r + 1)..(self.e + 1)).rev().enumerate() {
-            println!("extracting {}-th digit", i);
+            if LOG {
+                println!("extracting {}-th digit", i);
+            }
             let mut key_switches = 0;
             let start = Instant::now();
             let current_P =  &P_bootstrap[i];
@@ -286,17 +312,16 @@ impl Pow2BFVThinBootstrapParams {
                 &int_cast(*current_P.base_ring().modulus() as i32, &ZZbig, &StaticRing::<i32>::RING)
             ));
 
-            let mut current_ct = clone_ct(&digit_extraction_input);
+            let mut current_ct = clone_ct(C, &digit_extraction_input);
             assert_eq!(i, digit_extracted.len());
             for j in 0..i {
                 current_ct = hom_sub(C, current_ct, &digit_extracted[j][i - j - 1]);
             }
-            println!("current noise budget {}", noise_budget(current_P, C, &current_ct, DEBUG_SK.borrow().read().unwrap().as_ref().unwrap()));
 
             let lowest_digit = self.digit_extract_circuits[i].evaluate_generic(
                 std::slice::from_ref(&current_ct), 
                 |lhs, rhs, factor| {
-                    let result = hom_add(C, hom_mul_plain(current_P, C, &current_P.inclusion().map(current_P.base_ring().coerce(&ZZ, factor)), clone_ct(rhs)), &lhs);
+                    let result = hom_add(C, hom_mul_plain_i64(current_P, C, factor, clone_ct(C, rhs)), &lhs);
                     return result;
                 }, 
                 |lhs, rhs| {
@@ -310,14 +335,14 @@ impl Pow2BFVThinBootstrapParams {
             );
             let mut lowest_digit = lowest_digit.collect::<Vec<_>>();
             assert_eq!(k - self.r, lowest_digit.len());
-            for x in &lowest_digit {
-                debug_dec_print_slots(P_main, C, x);
-            }
+
             result = hom_sub(C, result, &lowest_digit.pop().unwrap());
-            println!("current noise budget {}", noise_budget(current_P, C, &result, DEBUG_SK.borrow().read().unwrap().as_ref().unwrap()));
             digit_extracted.push(lowest_digit);
-            let end = Instant::now();
-            println!("done in {} ms and {} key switches", (end - start).as_millis(), key_switches);
+            
+            if LOG {
+                let end = Instant::now();
+                println!("done in {} ms and {} key switches", (end - start).as_millis(), key_switches);
+            }
         }
 
         return result;
@@ -334,7 +359,7 @@ fn test_bfv_thin_bootstrapping_17() {
         log2_q_max: 800,
         log2_N: 7
     };
-    let bootstrapper = Pow2BFVThinBootstrapParams::create_for(params.clone(), None);
+    let bootstrapper = Pow2BFVThinBootstrapParams::create_for(params.clone(), None, None);
     
     let P = params.create_plaintext_ring();
     let (C, C_mul) = params.create_ciphertext_rings();
@@ -347,7 +372,7 @@ fn test_bfv_thin_bootstrapping_17() {
     
     let m = P.int_hom().map(2);
     let ct = enc_sym(&P, &C, &mut rng, &m, &sk);
-    let res_ct = bootstrapper.bootstrap_thin(
+    let res_ct = bootstrapper.bootstrap_thin::<true>(
         &C, 
         &C_mul, 
         &P, 
@@ -373,7 +398,7 @@ fn test_bfv_thin_bootstrapping_257() {
         log2_q_max: 1200,
         log2_N: 10
     };
-    let bootstrapper = Pow2BFVThinBootstrapParams::create_for(params.clone(), None);
+    let bootstrapper = Pow2BFVThinBootstrapParams::create_for(params.clone(), None, None);
     
     let P = params.create_plaintext_ring();
     let (C, C_mul) = params.create_ciphertext_rings();
@@ -385,8 +410,7 @@ fn test_bfv_thin_bootstrapping_257() {
     
     let m = P.int_hom().map(2);
     let ct = enc_sym(&P, &C, &mut rng, &m, &sk);
-    println!("Initial noise budget: {}", noise_budget(&P, &C, &ct, &sk));
-    let res_ct = bootstrapper.bootstrap_thin(
+    let res_ct = bootstrapper.bootstrap_thin::<true>(
         &C, 
         &C_mul, 
         &P, 
@@ -409,13 +433,13 @@ fn run_bfv_thin_bootstrapping() {
     
     let params = Pow2BFVParams {
         t: 257,
-        log2_q_min: 790,
-        log2_q_max: 800,
+        log2_q_min: 1290,
+        log2_q_max: 1300,
         log2_N: 15
     };
     println!("Preparing bootstrapper...");
 
-    let bootstrapper = Pow2BFVThinBootstrapParams::create_for(params.clone(), Some("F:\\Users\\Simon\\Documents\\Projekte\\he-ring\\hypercube_bootstrap_257.json"));
+    let bootstrapper = Pow2BFVThinBootstrapParams::create_for(params.clone(), Some("F:\\Users\\Simon\\Documents\\Projekte\\he-ring\\bootstrap_257_thin"), None);
     
     println!("Preparing utility data...");
 
@@ -436,8 +460,10 @@ fn run_bfv_thin_bootstrapping() {
 
     println!("Running bootstrapping...");
 
+    clear_all_timings();
+
     let start = Instant::now();
-    let res_ct = bootstrapper.bootstrap_thin(
+    let res_ct = bootstrapper.bootstrap_thin::<true>(
         &C, 
         &C_mul, 
         &P, 
@@ -451,10 +477,8 @@ fn run_bfv_thin_bootstrapping() {
     let end = Instant::now();
     println!("Bootstrapping done in {} ms", (end - start).as_millis());
 
-    let H = HypercubeIsomorphism::load("F:\\Users\\Simon\\Documents\\Projekte\\he-ring\\hypercube_base_257.json", P.get_ring());
+    print_all_timings();
+
     let result = dec(&P, &C, res_ct, &sk);
-    for x in H.get_slot_values(&result) {
-        H.slot_ring().println(&x);
-    }
-    // assert_el_eq!(P, P.int_hom().map(2), );
+    assert_el_eq!(P, P.int_hom().map(2), &result);
 }

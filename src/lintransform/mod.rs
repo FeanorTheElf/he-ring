@@ -1,6 +1,9 @@
 
 use std::alloc::Allocator;
 use std::alloc::Global;
+use std::fs::File;
+use std::io::BufReader;
+use std::io::BufWriter;
 use std::ops::Range;
 
 use feanor_math::algorithms::eea::signed_gcd;
@@ -16,6 +19,7 @@ use feanor_math::rings::zn::*;
 use feanor_math::seq::*;
 use feanor_math::algorithms::linsolve::LinSolveRing;
 use feanor_math::homomorphism::*;
+use serde::de::DeserializeSeed;
 
 use crate::cyclotomic::*;
 use crate::rings::decomposition::*;
@@ -236,6 +240,30 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
         A: Allocator + Clone,
         NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
 {
+    pub fn save(&self, filename: &str, ring: &NTTRing<R, F, A>, galois_group_mulrepr: &Zn) {
+        serde_json::to_writer_pretty(
+            BufWriter::new(File::create(filename).unwrap()), 
+            &serialization::CompiledLinearTransformSerializable::from(ring, galois_group_mulrepr, self)
+        ).unwrap()
+    }
+
+    pub fn load(filename: &str, ring: &NTTRing<R, F, A>, galois_group_mulrepr: &Zn) -> Self {
+        let mut deserializer = serde_json::Deserializer::from_reader(BufReader::new(File::open(filename).unwrap()));
+        return <_ as DeserializeSeed>::deserialize(serialization::DeserializeLinearTransformSeed { galois_group_mulrepr: galois_group_mulrepr, ring: ring.get_ring() }, &mut deserializer).unwrap().into();
+    }
+
+    pub fn save_seq(data: &[Self], filename: &str, ring: &NTTRing<R, F, A>, galois_group_mulrepr: &Zn) {
+        serde_json::to_writer_pretty(
+            BufWriter::new(File::create(filename).unwrap()), 
+            &data.iter().map(|t| serialization::CompiledLinearTransformSerializable::from(ring, galois_group_mulrepr, t)).collect::<Vec<_>>()
+        ).unwrap()
+    }
+
+    pub fn load_seq(filename: &str, ring: &NTTRing<R, F, A>, galois_group_mulrepr: &Zn) -> Vec<Self> {
+        let mut deserializer = serde_json::Deserializer::from_reader(BufReader::new(File::open(filename).unwrap()));
+        return <_ as DeserializeSeed>::deserialize(serialization::VecDeserializeSeed { base_seed: serialization::DeserializeLinearTransformSeed { galois_group_mulrepr: galois_group_mulrepr, ring: ring.get_ring() } }, &mut deserializer).unwrap().into();
+    }
+
     fn compute_automorphisms_per_dimension(H: &HypercubeIsomorphism<R, F, A>, lin_transform: &LinearTransform<R, F, A>) -> (Vec<i64>, Vec<i64>, Vec<i64>, Vec<i64>) {
         lin_transform.check_valid(H);
         
@@ -406,6 +434,283 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
             add_scaled_fn(&mut result, &summand, &self.one);
         }
         return result;
+    }
+}
+
+mod serialization {
+    use feanor_math::serialization::{DeserializeWithRing, SerializeWithRing};
+    use serde::{de::{self, DeserializeSeed, Visitor}, ser::SerializeStruct, Deserialize, Serialize};
+    use super::*;
+
+    pub struct CompiledLinearTransformSerializable<'a, R, F, A>
+        where R: RingStore,
+            R::Type: StdZn,
+            F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
+            A: Allocator + Clone,
+            NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
+    {
+        baby_step_galois_elements: Vec<SerializeWithRing<'a, &'a Zn>>,
+        giant_step_galois_elements: Vec<Option<SerializeWithRing<'a, &'a Zn>>>,
+        coeffs: Vec<Vec<Option<SerializeWithRing<'a, &'a NTTRing<R, F, A>>>>>,
+    }
+
+    impl<'a, R, F, A> Serialize for CompiledLinearTransformSerializable<'a, R, F, A>
+        where R: RingStore,
+            R::Type: StdZn,
+            F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
+            A: Allocator + Clone,
+            NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
+    {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where S: serde::Serializer
+        {
+            let mut out = serializer.serialize_struct("CompiledLinearTransform", 7)?;
+            out.serialize_field("baby_step_galois_elements", &self.baby_step_galois_elements)?;
+            out.serialize_field("giant_step_galois_elements", &self.giant_step_galois_elements)?;
+            out.serialize_field("coeffs", &self.coeffs)?;
+            return out.end();
+        }
+    }
+
+    impl<'a, R, F, A> CompiledLinearTransformSerializable<'a, R, F, A>
+        where R: RingStore,
+            R::Type: StdZn,
+            F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
+            A: Allocator + Clone,
+            NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
+    {
+        pub fn from(ring: &'a NTTRing<R, F, A>, galois_group_ring: &'a Zn, transform: &'a CompiledLinearTransform<R, F, A>) -> Self {
+            Self {
+                baby_step_galois_elements: transform.baby_step_galois_elements.iter().map(|x| SerializeWithRing::new(x, galois_group_ring)).collect(),
+                giant_step_galois_elements: transform.giant_step_galois_elements.iter().map(|x| x.as_ref().map(|x| SerializeWithRing::new(x, galois_group_ring))).collect(),
+                coeffs: transform.coeffs.iter().map(|cs| cs.iter().map(|c| c.as_ref().map(|c| SerializeWithRing::new(c, ring))).collect()).collect()
+            }
+        }
+    }
+
+    #[derive(Clone)]
+    pub struct VecDeserializeSeed<S: Clone> {
+        pub base_seed: S
+    }
+
+    impl<'de, S> DeserializeSeed<'de> for VecDeserializeSeed<S>
+        where S: Clone + DeserializeSeed<'de>
+    {
+        type Value = Vec<S::Value>;
+
+        fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+            where D: de::Deserializer<'de>
+        {
+            struct ElementsVisitor<S: Clone> {
+                seed: S
+            }
+            impl<'de, S> Visitor<'de> for ElementsVisitor<S>
+                where S: Clone + DeserializeSeed<'de>
+            {
+                type Value = Vec<S::Value>;
+
+                fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                    write!(formatter, "sequence of value")
+                }
+
+                fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+                    where A: de::SeqAccess<'de>
+                {
+                    let mut result = Vec::new();
+                    while let Some(el) = seq.next_element_seed(self.seed.clone())? {
+                        result.push(el);
+                    }
+                    return Ok(result);
+                }
+            }
+            deserializer.deserialize_seq(ElementsVisitor { seed: self.base_seed })
+        }
+    }
+    
+    #[derive(Clone)]
+    pub struct OptionDeserializeSeed<S> {
+        pub base_seed: S
+    }
+
+    impl<'de, S> DeserializeSeed<'de> for OptionDeserializeSeed<S>
+        where S: DeserializeSeed<'de>
+    {
+        type Value = Option<S::Value>;
+
+        fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+            where D: de::Deserializer<'de>
+        {
+            struct ElementVisitor<S> {
+                seed: S
+            }
+
+            impl<'de, S> Visitor<'de> for ElementVisitor<S>
+                where S: DeserializeSeed<'de>
+            {
+                type Value = Option<S::Value>;
+
+                fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                    write!(formatter, "an optional value")
+                }
+                
+                fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+                    where D: de::Deserializer<'de>
+                {
+                    Ok(Some(self.seed.deserialize(deserializer)?))                    
+                }
+
+                fn visit_none<E>(self) -> Result<Self::Value, E>
+                    where E: de::Error
+                {
+                    Ok(None)
+                }
+
+                fn visit_unit<E>(self) -> Result<Self::Value, E>
+                    where E: de::Error
+                {
+                    Ok(None)
+                }
+            }
+
+            deserializer.deserialize_option(ElementVisitor {
+                seed: self.base_seed
+            })
+        }
+    }
+
+    pub struct DeserializeLinearTransformSeed<'a, R, F, A>
+        where R: ZnRingStore,
+            R::Type: StdZn,
+            F: RingDecompositionSelfIso<R::Type> + CyclotomicRingDecomposition<R::Type>,
+            A: Allocator + Clone,
+            NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
+    {
+        pub galois_group_mulrepr: &'a Zn,
+        pub ring: &'a NTTRingBase<R, F, A>
+    }
+    
+    impl<'a, R, F, A> Clone for DeserializeLinearTransformSeed<'a, R, F, A>
+        where R: RingStore,
+            R::Type: StdZn,
+            F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
+            A: Allocator + Clone,
+            NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
+    {
+        fn clone(&self) -> Self {
+            *self
+        }
+    }
+
+    impl<'a, R, F, A> Copy for DeserializeLinearTransformSeed<'a, R, F, A>
+        where R: RingStore,
+            R::Type: StdZn,
+            F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
+            A: Allocator + Clone,
+            NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
+    {}
+
+    impl<'a, 'de, R, F, A> DeserializeSeed<'de> for DeserializeLinearTransformSeed<'a, R, F, A>
+        where R: RingStore,
+            R::Type: StdZn,
+            F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
+            A: Allocator + Clone,
+            NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
+    {
+        type Value = CompiledLinearTransform<R, F, A>;
+
+        fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+            where D: serde::Deserializer<'de>
+        {
+            struct FieldsVisitor<'a, R, F, A>
+                where R: ZnRingStore,
+                    R::Type: StdZn,
+                    F: RingDecompositionSelfIso<R::Type>,
+                    A: Allocator + Clone,
+                    NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
+            {
+                galois_group_mulrepr: &'a Zn,
+                ring: &'a NTTRingBase<R, F, A>
+            }
+            
+            impl<'a, 'de, R, F, A> Visitor<'de> for FieldsVisitor<'a, R, F, A>
+                where R: ZnRingStore,
+                    R::Type: StdZn,
+                    F: RingDecompositionSelfIso<R::Type> + CyclotomicRingDecomposition<R::Type>,
+                    A: Allocator + Clone,
+                    NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
+            {
+                type Value = CompiledLinearTransform<R, F, A>;
+
+                fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                    write!(formatter, "struct `CompiledLinearTransform` with fields `baby_step_galois_elements`, `giant_step_galois_elements`, `coeffs`")
+                }
+
+                fn visit_seq<S>(self, mut seq: S) -> Result<Self::Value, S::Error>
+                    where S: serde::de::SeqAccess<'de>
+                {
+                    let baby_step_galois_elements = seq.next_element_seed(VecDeserializeSeed { base_seed: DeserializeWithRing::new(self.galois_group_mulrepr) })?.ok_or_else(|| de::Error::invalid_length(0, &self))?;
+                    let giant_step_galois_elements = seq.next_element_seed(VecDeserializeSeed { base_seed: OptionDeserializeSeed { base_seed: DeserializeWithRing::new(self.galois_group_mulrepr) } })?.ok_or_else(|| de::Error::invalid_length(1, &self))?;
+                    let coeffs = seq.next_element_seed(VecDeserializeSeed { base_seed: VecDeserializeSeed { base_seed: OptionDeserializeSeed { base_seed: DeserializeWithRing::new(RingRef::new(self.ring)) } } })?.ok_or_else(|| de::Error::invalid_length(1, &self))?;
+                    return Ok(CompiledLinearTransform {
+                        baby_step_galois_elements,
+                        giant_step_galois_elements,
+                        coeffs,
+                        one: self.ring.one()
+                    });
+                }
+                
+                fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+                    where M: de::MapAccess<'de>
+                {
+                    #[allow(non_camel_case_types)]
+                    #[derive(Deserialize)]
+                    enum Field {
+                        baby_step_galois_elements,
+                        giant_step_galois_elements,
+                        coeffs
+                    }
+                    let mut baby_step_galois_elements = None;
+                    let mut giant_step_galois_elements = None;
+                    let mut coeffs = None;
+                    while let Some(key) = map.next_key()? {
+                        match key {
+                            Field::baby_step_galois_elements => {
+                                if baby_step_galois_elements.is_some() {
+                                    return Err(de::Error::duplicate_field("baby_step_galois_elements"));
+                                }
+                                baby_step_galois_elements = Some(map.next_value_seed(VecDeserializeSeed { base_seed: DeserializeWithRing::new(self.galois_group_mulrepr) })?);
+                            },
+                            Field::giant_step_galois_elements => {
+                                if giant_step_galois_elements.is_some() {
+                                    return Err(de::Error::duplicate_field("giant_step_galois_elements"));
+                                }
+                                giant_step_galois_elements = Some(map.next_value_seed(VecDeserializeSeed { base_seed: OptionDeserializeSeed { base_seed: DeserializeWithRing::new(self.galois_group_mulrepr) } })?);
+                            },
+                            Field::coeffs => {
+                                if coeffs.is_some() {
+                                    return Err(de::Error::duplicate_field("coeffs"));
+                                }
+                                coeffs = Some(map.next_value_seed(VecDeserializeSeed { base_seed: VecDeserializeSeed { base_seed: OptionDeserializeSeed { base_seed: DeserializeWithRing::new(RingRef::new(self.ring)) } } })?);
+                            },
+                        }
+                    }
+                    let baby_step_galois_elements = baby_step_galois_elements.ok_or_else(|| de::Error::missing_field("baby_step_galois_elements"))?;
+                    let giant_step_galois_elements = giant_step_galois_elements.ok_or_else(|| de::Error::missing_field("giant_step_galois_elements"))?;
+                    let coeffs = coeffs.ok_or_else(|| de::Error::missing_field("coeffs"))?;
+                    return Ok(CompiledLinearTransform {
+                        baby_step_galois_elements,
+                        giant_step_galois_elements,
+                        coeffs,
+                        one: self.ring.one()
+                    });
+                }
+            }
+
+            deserializer.deserialize_struct("CompiledLinearTransform", &["baby_step_galois_elements", "giant_step_galois_elements", "coeffs"], FieldsVisitor {
+                ring: self.ring,
+                galois_group_mulrepr: self.galois_group_mulrepr
+            })
+        }
     }
 }
 

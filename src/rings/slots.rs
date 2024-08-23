@@ -41,6 +41,7 @@ use feanor_math::seq::*;
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
 use feanor_math::rings::extension::galois_field::*;
 use feanor_math::wrapper::RingElementWrapper;
+use serialization::DeserializeHypercubeIsomorphismSeed;
 use sparse::SparseHashMapVector;
 use feanor_math::integer::BigIntRing;
 use feanor_math::integer::IntegerRingStore;
@@ -409,7 +410,7 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
 
     pub fn load(filename: &str, ring: &'a NTTRingBase<R, F, A>) -> Self {
         let mut deserializer = serde_json::Deserializer::from_reader(BufReader::new(File::open(filename).unwrap()));
-        return <_ as DeserializeSeed>::deserialize(ring, &mut deserializer).unwrap().into();
+        return <_ as DeserializeSeed>::deserialize(DeserializeHypercubeIsomorphismSeed { ring }, &mut deserializer).unwrap().into();
     }
 
     pub fn len(&self, dim_index: usize) -> usize {
@@ -536,6 +537,16 @@ pub mod serialization {
         }
     }
 
+    pub struct DeserializeHypercubeIsomorphismSeed<'a, R, F, A>
+        where R: ZnRingStore,
+            R::Type: StdZn,
+            F: RingDecompositionSelfIso<R::Type> + CyclotomicRingDecomposition<R::Type>,
+            A: Allocator + Clone,
+            NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
+    {
+        pub ring: &'a NTTRingBase<R, F, A>
+    }
+
     pub struct HypercubeIsomorphismDeserializable<'a, R, F, A>
         where R: ZnRingStore,
             R::Type: StdZn,
@@ -554,7 +565,7 @@ pub mod serialization {
         poly_ring: DensePolyRing<&'a R>
     }
 
-    impl<'a, 'de, R, F, A> DeserializeSeed<'de> for &'a NTTRingBase<R, F, A>
+    impl<'a, 'de, R, F, A> DeserializeSeed<'de> for DeserializeHypercubeIsomorphismSeed<'a, R, F, A>
         where R: ZnRingStore,
             R::Type: StdZn,
             F: RingDecompositionSelfIso<R::Type> + CyclotomicRingDecomposition<R::Type>,
@@ -689,8 +700,8 @@ pub mod serialization {
                 }
             }
             deserializer.deserialize_struct("HypercubeIsomorphism", &["slot_rank", "slot_ring_modulus", "slot_unit_vec", "galois_group_ring_modulus", "dims"], FieldsVisitor {
-                poly_ring: DensePolyRing::new(self.base_ring(), "X"),
-                ring: self
+                poly_ring: DensePolyRing::new(self.ring.base_ring(), "X"),
+                ring: self.ring
             })
         }
     }
