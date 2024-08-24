@@ -5,6 +5,7 @@
 #![feature(const_type_name)]
 #![feature(allocator_api)]#![feature(hint_assert_unchecked)]
 #![feature(ptr_alignment_type)]
+#![feature(associated_type_defaults)]
 
 #![allow(non_snake_case)]
 #![allow(non_camel_case_types)]

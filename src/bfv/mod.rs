@@ -2,10 +2,13 @@
 #![allow(non_upper_case_globals)]
 
 use std::alloc::Global;
-use std::ptr::Alignment;
-use std::sync::Arc;
-use std::sync::RwLock;
+use std::marker::PhantomData;
 use std::time::Instant;
+use std::ops::Range;
+
+use feanor_math::algorithms::eea::signed_lcm;
+use feanor_math::algorithms::miller_rabin::is_prime;
+use feanor_math::algorithms::unity_root::get_prim_root_of_unity_pow2;
 use feanor_math::homomorphism::CanHom;
 use feanor_math::homomorphism::Identity;
 use feanor_math::ring::*;
@@ -14,16 +17,17 @@ use feanor_math::rings::zn::*;
 use feanor_math::rings::zn::zn_64::*;
 use feanor_math::primitive_int::StaticRing;
 use feanor_math::integer::*;
-use feanor_math::algorithms::miller_rabin::is_prime;
 use feanor_math::algorithms::fft::*;
 use feanor_math::homomorphism::Homomorphism;
-use feanor_math::ordered::OrderedRingStore;
 use feanor_math::rings::extension::FreeAlgebraStore;
 use feanor_math::seq::*;
-use feanor_mempool::dynsize::DynLayoutMempool;
-use feanor_mempool::AllocArc;
+use feanor_math::ordered::OrderedRingStore;
+use feanor_math::pid::EuclideanRingStore;
 
 use crate::cyclotomic::CyclotomicRing;
+use crate::rings::decomposition::CyclotomicRingDecomposition;
+use crate::rings::decomposition::IsomorphismInfo;
+use crate::rings::decomposition::RingDecompositionSelfIso;
 use crate::rings::pow2_cyclotomic::*;
 use crate::rings::gadget_product::*;
 use crate::rings::double_rns_ring::*;
@@ -31,6 +35,7 @@ use crate::rings::ntt_ring::*;
 use crate::profiling::*;
 use crate::rings::slots::HypercubeIsomorphism;
 use crate::rnsconv;
+use crate::sample_primes;
 
 use rand::thread_rng;
 use rand::{Rng, CryptoRng};
@@ -38,62 +43,128 @@ use rand_distr::StandardNormal;
 
 pub mod bootstrap;
 
-type PlaintextZn = zn_64::Zn;
-type PlaintextFFT = cooley_tuckey::CooleyTuckeyFFT<<PlaintextZn as RingStore>::Type, <PlaintextZn as RingStore>::Type, Identity<PlaintextZn>>;
-pub type PlaintextRing = NTTRing<PlaintextZn, Pow2CyclotomicFFT<PlaintextZn, PlaintextFFT>>;
+pub type PlaintextZn = zn_64::Zn;
+pub type CiphertextZn = zn_64::Zn;
+pub type PlaintextAllocator = Global;
+pub type CiphertextAllocator = Global;
 
-type CiphertextAllocator = AllocArc<DynLayoutMempool>;
-type CiphertextZn = zn_64::Zn;
-type CiphertextFastmulZn = zn_64::ZnFastmul;
-type CiphertextFFT = cooley_tuckey::CooleyTuckeyFFT<<CiphertextZn as RingStore>::Type, <CiphertextFastmulZn as RingStore>::Type, CanHom<CiphertextFastmulZn, CiphertextZn>>;
-type CiphertextGenFFT = Pow2CyclotomicFFT<CiphertextZn, CiphertextFFT>;
-pub type CiphertextRing = DoubleRNSRing<CiphertextZn, CiphertextGenFFT, CiphertextAllocator>;
+pub type CiphertextRing<Params: BFVParams> = DoubleRNSRing<CiphertextZn, Params::CiphertextRingDecomposition, CiphertextAllocator>;
+pub type PlaintextRing<Params: BFVParams> = NTTRing<PlaintextZn, Params::PlaintextRingDecomposition, PlaintextAllocator>;
+pub type SecretKey<Params: BFVParams> = El<CiphertextRing<Params>>;
+pub type Ciphertext<Params: BFVParams> = (CoeffOrNTTRingEl<Params>, CoeffOrNTTRingEl<Params>);
+pub type GadgetProductOperand<'a, Params: BFVParams> = GadgetProductRhsOperand<'a, Params::CiphertextRingDecomposition, CiphertextAllocator>;
+pub type KeySwitchKey<'a, Params: BFVParams> = (GadgetProductOperand<'a, Params>, GadgetProductOperand<'a, Params>);
+pub type RelinKey<'a, Params: BFVParams> = (GadgetProductOperand<'a, Params>, GadgetProductOperand<'a, Params>);
 
-type Ciphertext = (RingEl, RingEl);
-pub type SecretKey = El<CiphertextRing>;
-pub type GadgetProductOperand<'a> = GadgetProductRhsOperand<'a, CiphertextGenFFT, CiphertextAllocator>;
-pub type KeySwitchKey<'a> = (GadgetProductOperand<'a>, GadgetProductOperand<'a>);
-pub type RelinKey<'a> = (GadgetProductOperand<'a>, GadgetProductOperand<'a>);
-
-static DEBUG_SK: RwLock<Option<SecretKey>> = RwLock::new(None);
-
-pub struct RingEl {
-    ntt_part: Option<DoubleRNSEl<CiphertextZn, CiphertextGenFFT, CiphertextAllocator>>,
-    coeff_part: Option<DoubleRNSNonFFTEl<CiphertextZn, CiphertextGenFFT, CiphertextAllocator>>
+pub struct MulConversionData {
+    lift_to_C_mul: rnsconv::shared_lift::AlmostExactSharedBaseConversion<CiphertextAllocator>,
+    scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert<CiphertextAllocator>
 }
 
-impl RingEl {
+pub struct ModSwitchData {
+    scale: rnsconv::bfv_rescale::AlmostExactRescaling<CiphertextAllocator>
+}
 
-    pub fn ntt_repr(self, C: &CiphertextRing) -> Self {
-        RingEl::from_ntt(self.to_ntt(C))
+pub trait BFVParams {
+
+    type PlaintextRingDecomposition: RingDecompositionSelfIso<<PlaintextZn as RingStore>::Type> + CyclotomicRingDecomposition<<PlaintextZn as RingStore>::Type>;
+    type CiphertextRingDecomposition: RingDecompositionSelfIso<<CiphertextZn as RingStore>::Type> + CyclotomicRingDecomposition<<CiphertextZn as RingStore>::Type> + IsomorphismInfo<<CiphertextZn as RingStore>::Type, <PlaintextZn as RingStore>::Type, Self::PlaintextRingDecomposition>;
+
+    fn log2_q(&self) -> Range<usize>;
+    fn n(&self) -> usize;
+    fn t(&self) -> i64;
+    fn create_plaintext_ring(&self, modulus: i64) -> PlaintextRing<Self>;
+    fn create_ciphertext_ring_part(&self, modulus: i64) -> Self::CiphertextRingDecomposition;
+
+    fn create_ciphertext_rings(&self) -> (CiphertextRing<Self>, CiphertextRing<Self>) {
+        let log2_q = self.log2_q();
+        let congruent_to_one_mod = signed_lcm(self.n() as i64, ZZ.pow(2, 1 + ZZ.abs_log2_ceil(&(self.n() as i64)).unwrap()), ZZ);
+        let mut C_rns_base = sample_primes(log2_q.start, log2_q.end, 57, &int_cast(congruent_to_one_mod, ZZbig, ZZ)).unwrap();
+        C_rns_base.sort_unstable_by(|l, r| ZZbig.cmp(l, r));
+
+        let mut Cmul_rns_base = Vec::new();
+        let mut current_bits = 0;
+        let largest_C_prime = C_rns_base.iter().max_by(|l, r| ZZbig.cmp(l, r)).unwrap();
+        let start = ZZbig.add(ZZbig.sub_ref_fst(largest_C_prime, ZZbig.euclidean_rem(ZZbig.clone_el(largest_C_prime), &int_cast(congruent_to_one_mod, ZZbig, ZZ))), ZZbig.one());
+        let mut primes = (1..).map(|k| ZZbig.add_ref_fst(&start, int_cast(congruent_to_one_mod * k, ZZbig, ZZ))).filter(|p| is_prime(ZZbig, p, 10));
+        while current_bits <= log2_q.end {
+            let next_prime = primes.next().unwrap();
+            current_bits += ZZbig.abs_log2_floor(&next_prime).unwrap();
+            Cmul_rns_base.push(next_prime);
+        }
+        let C = DoubleRNSRingBase::from_ring_decompositions(
+            zn_rns::Zn::new(C_rns_base.iter().map(|p| CiphertextZn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect(), ZZbig),
+            C_rns_base.iter().map(|p| self.create_ciphertext_ring_part(int_cast(ZZbig.clone_el(p), ZZ, ZZbig))).collect(),
+            Global
+        );
+        let Cmul = DoubleRNSRingBase::from_ring_decompositions(
+            zn_rns::Zn::new(C_rns_base.iter().chain(Cmul_rns_base.iter()).map(|p| CiphertextZn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect(), ZZbig),
+            C_rns_base.iter().chain(Cmul_rns_base.iter()).map(|p| self.create_ciphertext_ring_part(int_cast(ZZbig.clone_el(p), ZZ, ZZbig))).collect(),
+            Global
+        );
+        return (RingValue::from(C), RingValue::from(Cmul));
     }
 
-    pub fn coeff_repr(self, C: &CiphertextRing) -> Self {
-        RingEl::from_coeff(self.to_coeff(C))
+    fn create_multiplication_rescale(&self, P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, Cmul: &CiphertextRing<Self>) -> MulConversionData {
+        let allocator = C.get_ring().allocator().clone();
+        MulConversionData {
+            lift_to_C_mul: rnsconv::shared_lift::AlmostExactSharedBaseConversion::new_with(
+                C.get_ring().rns_base().as_iter().map(|R| CiphertextZn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
+                Vec::new(),
+                Cmul.get_ring().rns_base().as_iter().skip(C.get_ring().rns_base().len()).map(|R| CiphertextZn::new(*R.modulus() as u64)).collect::<Vec<_>>(),
+                allocator.clone()
+            ),
+            scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert::new_with(
+                Cmul.get_ring().rns_base().as_iter().map(|R| CiphertextZn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
+                vec![ CiphertextZn::new(*P.base_ring().modulus() as u64) ], 
+                C.get_ring().rns_base().len(),
+                allocator
+            )
+        }
+    }
+}
+
+pub struct CoeffOrNTTRingEl<P: BFVParams> {
+    ntt_part: Option<DoubleRNSEl<CiphertextZn, P::CiphertextRingDecomposition, CiphertextAllocator>>,
+    coeff_part: Option<DoubleRNSNonFFTEl<CiphertextZn, P::CiphertextRingDecomposition, CiphertextAllocator>>,
+    params: PhantomData<P>
+}
+
+impl<P: BFVParams> CoeffOrNTTRingEl<P> {
+
+    pub fn ntt_repr(self, C: &CiphertextRing<P>) -> Self {
+        CoeffOrNTTRingEl::from_ntt(self.to_ntt(C))
     }
 
-    pub fn from_ntt(el: El<CiphertextRing>) -> Self {
+    pub fn coeff_repr(self, C: &CiphertextRing<P>) -> Self {
+        CoeffOrNTTRingEl::from_coeff(self.to_coeff(C))
+    }
+
+    pub fn from_ntt(el: El<CiphertextRing<P>>) -> Self {
         Self {
             coeff_part: None,
-            ntt_part: Some(el)
+            ntt_part: Some(el), 
+            params: PhantomData
         }
     }
 
-    pub fn from_coeff(el: DoubleRNSNonFFTEl<CiphertextZn, CiphertextGenFFT, CiphertextAllocator>) -> Self {
+    pub fn from_coeff(el: DoubleRNSNonFFTEl<CiphertextZn, P::CiphertextRingDecomposition, CiphertextAllocator>) -> Self {
         Self {
             coeff_part: Some(el),
-            ntt_part: None
+            ntt_part: None, 
+            params: PhantomData
         }
     }
 
     pub fn zero() -> Self {
         Self {
             coeff_part: None,
-            ntt_part: None
+            ntt_part: None,
+            params: PhantomData
         }
     }
 
-    pub fn to_ntt(self, C: &CiphertextRing) -> El<CiphertextRing> {
+    pub fn to_ntt(self, C: &CiphertextRing<P>) -> El<CiphertextRing<P>> {
         if let Some(mut result) = self.ntt_part {
             if let Some(coeff) = self.coeff_part {
                 C.add_assign(&mut result, C.get_ring().do_fft(coeff));
@@ -106,7 +177,7 @@ impl RingEl {
         }
     }
 
-    pub fn to_coeff(self, C: &CiphertextRing) -> DoubleRNSNonFFTEl<CiphertextZn, CiphertextGenFFT, CiphertextAllocator> {
+    pub fn to_coeff(self, C: &CiphertextRing<P>) -> DoubleRNSNonFFTEl<CiphertextZn, P::CiphertextRingDecomposition, CiphertextAllocator> {
         if let Some(mut result) = self.coeff_part {
             if let Some(ntt_part) = self.ntt_part {
                 C.get_ring().add_assign_non_fft(&mut result, &C.get_ring().undo_fft(ntt_part));
@@ -119,36 +190,38 @@ impl RingEl {
         }
     }
 
-    pub fn gadget_product<'a>(lhs: &GadgetProductLhsOperand<'a, CiphertextGenFFT, CiphertextAllocator>, rhs: &GadgetProductRhsOperand<'a, CiphertextGenFFT, CiphertextAllocator>, C: &CiphertextRing) -> RingEl {
+    pub fn gadget_product<'a>(lhs: &GadgetProductLhsOperand<'a, P::CiphertextRingDecomposition, CiphertextAllocator>, rhs: &GadgetProductRhsOperand<'a, P::CiphertextRingDecomposition, CiphertextAllocator>, C: &CiphertextRing<P>) -> CoeffOrNTTRingEl<P> {
         match C.get_ring().preferred_output_repr(lhs, rhs) {
-            ElRepr::Coeff => RingEl { ntt_part: None, coeff_part: Some(C.get_ring().gadget_product_coeff(lhs, rhs)) },
-            ElRepr::NTT => RingEl { ntt_part: Some(C.get_ring().gadget_product_ntt(lhs, rhs)), coeff_part: None },
+            ElRepr::Coeff => CoeffOrNTTRingEl { ntt_part: None, coeff_part: Some(C.get_ring().gadget_product_coeff(lhs, rhs)), params: PhantomData },
+            ElRepr::NTT => CoeffOrNTTRingEl { ntt_part: Some(C.get_ring().gadget_product_ntt(lhs, rhs)), coeff_part: None, params: PhantomData },
         }
     }
 
-    pub fn add(lhs: RingEl, rhs: &RingEl, C: &CiphertextRing) -> RingEl {
-        RingEl {
+    pub fn add(lhs: CoeffOrNTTRingEl<P>, rhs: &CoeffOrNTTRingEl<P>, C: &CiphertextRing<P>) -> CoeffOrNTTRingEl<P> {
+        CoeffOrNTTRingEl {
             ntt_part: if lhs.ntt_part.is_some() && rhs.ntt_part.is_some() { Some(C.add_ref_snd(lhs.ntt_part.unwrap(), rhs.ntt_part.as_ref().unwrap())) } else { lhs.ntt_part.or(rhs.ntt_part.as_ref().map(|x| C.clone_el(x)))},
             coeff_part: if lhs.coeff_part.is_some() && rhs.coeff_part.is_some() {
                 let mut result  = lhs.coeff_part.unwrap();
                 C.get_ring().add_assign_non_fft(&mut result, rhs.coeff_part.as_ref().unwrap());
                 Some(result)
-            } else { lhs.coeff_part.or(rhs.coeff_part.as_ref().map(|x| C.get_ring().clone_el_non_fft(x))) }
+            } else { lhs.coeff_part.or(rhs.coeff_part.as_ref().map(|x| C.get_ring().clone_el_non_fft(x))) },
+            params: PhantomData
         }
     }
 
-    pub fn sub(lhs: RingEl, rhs: &RingEl, C: &CiphertextRing) -> RingEl {
-        RingEl {
+    pub fn sub(lhs: CoeffOrNTTRingEl<P>, rhs: &CoeffOrNTTRingEl<P>, C: &CiphertextRing<P>) -> CoeffOrNTTRingEl<P> {
+        CoeffOrNTTRingEl {
             ntt_part: if lhs.ntt_part.is_some() && rhs.ntt_part.is_some() { Some(C.sub_ref_snd(lhs.ntt_part.unwrap(), rhs.ntt_part.as_ref().unwrap())) } else { lhs.ntt_part.or(rhs.ntt_part.as_ref().map(|x| C.negate(C.clone_el(x))))},
             coeff_part: if lhs.coeff_part.is_some() && rhs.coeff_part.is_some() {
                 let mut result  = lhs.coeff_part.unwrap();
                 C.get_ring().sub_assign_non_fft(&mut result, rhs.coeff_part.as_ref().unwrap());
                 Some(result)
-            } else { lhs.coeff_part.or(rhs.coeff_part.as_ref().map(|x| C.get_ring().negate_non_fft(C.get_ring().clone_el_non_fft(x)))) }
+            } else { lhs.coeff_part.or(rhs.coeff_part.as_ref().map(|x| C.get_ring().negate_non_fft(C.get_ring().clone_el_non_fft(x)))) },
+            params: PhantomData
         }
     }
 
-    pub fn mul_i64(mut val: RingEl, scalar: i64, C: &CiphertextRing) -> RingEl {
+    pub fn mul_i64(mut val: CoeffOrNTTRingEl<P>, scalar: i64, C: &CiphertextRing<P>) -> CoeffOrNTTRingEl<P> {
         let hom = C.base_ring().can_hom(&StaticRing::<i64>::RING).unwrap();
         if let Some(ntt_part) = &mut val.ntt_part {
             C.inclusion().mul_assign_map(ntt_part, hom.map(scalar));
@@ -159,37 +232,17 @@ impl RingEl {
         return val;
     }
 
-    pub fn clone(&self, C: &CiphertextRing) -> RingEl {
-        RingEl { 
+    pub fn clone(&self, C: &CiphertextRing<P>) -> CoeffOrNTTRingEl<P> {
+        CoeffOrNTTRingEl { 
             ntt_part: self.ntt_part.as_ref().map(|x| C.clone_el(x)), 
-            coeff_part: self.coeff_part.as_ref().map(|x| C.get_ring().clone_el_non_fft(x))
+            coeff_part: self.coeff_part.as_ref().map(|x| C.get_ring().clone_el_non_fft(x)),
+            params: PhantomData
         }
     }
-}
-
-pub struct MulConversionData {
-    lift_to_C_mul: rnsconv::shared_lift::AlmostExactSharedBaseConversion<CiphertextAllocator>,
-    scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert<CiphertextAllocator>
-}
-
-pub struct ModSwitchData {
-    scale: rnsconv::bfv_rescale::AlmostExactRescaling<CiphertextAllocator>
 }
 
 const ZZbig: BigIntRing = BigIntRing::RING;
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
-
-fn max_prime_congruent_one_lt_bound(n: i64, bound: i64) -> Option<i64> {
-    let mut candidate = (bound - 2) - ((bound - 2) % n) + 1;
-
-    while candidate > 0 {
-        if is_prime(ZZ, &candidate, 10) {
-            return Some(candidate);
-        }
-        candidate -= n;
-    }
-    return None;
-}
 
 #[derive(Clone, Debug)]
 pub struct Pow2BFVParams {
@@ -199,118 +252,56 @@ pub struct Pow2BFVParams {
     log2_N: usize
 }
 
-impl Pow2BFVParams {
+impl BFVParams for Pow2BFVParams {
 
-    pub fn create_ciphertext_rings(&self) -> (CiphertextRing, CiphertextRing) {
-        let approx_moduli_size = (1 << 58) + 1;
-    
-        let mut rns_base_components = Vec::new();
-        let mut p = max_prime_congruent_one_lt_bound(2 << self.log2_N, approx_moduli_size).unwrap();
-        let mut current_bits = (p as f64).log2();
-        while current_bits < self.log2_q_max as f64 {
-            rns_base_components.push(p);
-            p = max_prime_congruent_one_lt_bound(2 << self.log2_N, p).unwrap();
-            current_bits += (p as f64).log2();
-        }
-        current_bits -= (*rns_base_components.last().unwrap() as f64).log2();
-        let remaining_size = 2f64.powf(self.log2_q_max as f64 - current_bits).floor() as i64;
-        if let Some(p) = max_prime_congruent_one_lt_bound(2 << self.log2_N, remaining_size) {
-            rns_base_components.push(p);
-            current_bits += (p as f64).log2();
-        }
-        rns_base_components.reverse();
-    
-        let rns_base = zn_rns::Zn::new(
-            rns_base_components.into_iter().map(|p| p as u64).map(CiphertextZn::new).collect(), 
-            ZZbig
-        );
-        let Q = ZZbig.prod(rns_base.as_iter().map(|Fp: &CiphertextZn| int_cast(*Fp.modulus(), ZZbig, ZZ)));
-        assert!(ZZbig.is_geq(&Q, &ZZbig.power_of_two(self.log2_q_min)), "Failed to find a suitable ciphertext modulus within the given range");
-        
-        let mut current_mul_bits = 0.;
-        let primes = (0..)
-            .map(|k| approx_moduli_size + (k << (self.log2_N + 1)))
-            .filter(|p| is_prime(ZZ, p, 10));
-        let rns_base_mul = zn_rns::Zn::new(
-            rns_base.as_iter().map(|R: &RingValue<ZnBase>| *R.modulus()).chain(
-                primes.take_while(|p| if current_mul_bits >= current_bits as f64 + 1. {
-                    false
-                } else {
-                    current_mul_bits += (*p as f64).log2();
-                    true
-                })
-            ).map(|p| p as u64).map(CiphertextZn::new).collect(), 
-            ZZbig
-        );
-        assert!(ZZbig.is_geq(&ZZbig.prod(rns_base_mul.as_iter().map(|Fp: &CiphertextZn| int_cast(*Fp.modulus(), ZZbig, ZZ))), &ZZbig.pow(ZZbig.mul(Q, ZZbig.int_hom().map(2)), 2)), "Failed to find a suitable ciphertext modulus within the given range");
-    
-        let allocator = AllocArc(Arc::new(DynLayoutMempool::new_in(Alignment::of::<u128>(), Global)));
-        let C = <CiphertextRing as RingStore>::Type::new_with(rns_base.clone(), rns_base.as_iter().map(|R| CiphertextFastmulZn::new(*R)).collect(), self.log2_N, allocator.clone());
-        let C_mul = <CiphertextRing as RingStore>::Type::new_with(rns_base_mul.clone(), rns_base_mul.as_iter().map(|R| CiphertextFastmulZn::new(*R)).collect(), self.log2_N, allocator.clone());
-        return (C, C_mul);
+    type CiphertextRingDecomposition = Pow2CyclotomicFFT<CiphertextZn, cooley_tuckey::CooleyTuckeyFFT<<CiphertextZn as RingStore>::Type, <zn_64::ZnFastmul as RingStore>::Type, CanHom<zn_64::ZnFastmul, CiphertextZn>>>;
+    type PlaintextRingDecomposition = Pow2CyclotomicFFT<PlaintextZn, cooley_tuckey::CooleyTuckeyFFT<<PlaintextZn as RingStore>::Type, <PlaintextZn as RingStore>::Type, Identity<PlaintextZn>>>;
+
+    fn create_ciphertext_ring_part(&self, modulus: i64) -> Self::CiphertextRingDecomposition {
+        let Zp = CiphertextZn::new(modulus as u64);
+        let root_of_unity = get_prim_root_of_unity_pow2((&Zp).as_field().ok().unwrap(), self.log2_N + 1).unwrap();
+        let root_of_unity = Zp.coerce(&(&Zp).as_field().ok().unwrap(), root_of_unity);
+        let Zp_fastmul = zn_64::ZnFastmul::new(Zp);
+        Pow2CyclotomicFFT::create(Zp, cooley_tuckey::CooleyTuckeyFFT::new_with_hom(Zp.into_can_hom(Zp_fastmul).ok().unwrap(), Zp_fastmul.coerce(&Zp, Zp.pow(root_of_unity, 2)), self.log2_N), root_of_unity)
     }
-    
-    pub fn create_plaintext_ring(&self) -> PlaintextRing {
-        return <PlaintextRing as RingStore>::Type::new(PlaintextZn::new(self.t as u64), self.log2_N);
+
+    fn create_plaintext_ring(&self, modulus: i64) -> PlaintextRing<Self> {
+        NTTRingBase::new(PlaintextZn::new(modulus as u64), self.log2_N)
     }
-    
-    pub fn create_multiplication_rescale(&self, P: &PlaintextRing, C: &CiphertextRing, C_mul: &CiphertextRing) -> MulConversionData {
-        let allocator = C.get_ring().allocator().clone();
-        MulConversionData {
-            lift_to_C_mul: rnsconv::shared_lift::AlmostExactSharedBaseConversion::new_with(
-                C.get_ring().rns_base().as_iter().map(|R| CiphertextZn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
-                Vec::new(),
-                C_mul.get_ring().rns_base().as_iter().skip(C.get_ring().rns_base().len()).map(|R| CiphertextZn::new(*R.modulus() as u64)).collect::<Vec<_>>(),
-                allocator.clone()
-            ),
-            scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert::new_with(
-                C_mul.get_ring().rns_base().as_iter().map(|R| CiphertextZn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
-                vec![ CiphertextZn::new(*P.base_ring().modulus() as u64) ], 
-                C.get_ring().rns_base().len(),
-                allocator
-            )
-        }
+
+    fn n(&self) -> usize {
+        2 << self.log2_N
+    }
+
+    fn t(&self) -> i64 {
+        self.t
+    }
+
+    fn log2_q(&self) -> Range<usize> {
+        self.log2_q_min..self.log2_q_max
     }
 }
 
-pub fn debug_dec_print(P: &PlaintextRing, C: &CiphertextRing, ct: &Ciphertext) {
-    println!();
-    P.println(&dec(P, C, clone_ct(C, ct), DEBUG_SK.read().unwrap().as_ref().unwrap()));
-    println!();
-}
-
-pub fn debug_dec_print_slots(P: &PlaintextRing, C: &CiphertextRing, ct: &Ciphertext) {
-    let H = HypercubeIsomorphism::new(P.get_ring());
-    println!();
-    print!("[");
-    for x in H.get_slot_values(&dec(P, C, clone_ct(C, ct), DEBUG_SK.read().unwrap().as_ref().unwrap())) {
-        print!("{}, ", H.slot_ring().format(&x));
-    }
-    println!("]");
-    println!();
-}
-
-pub fn gen_sk<R: Rng + CryptoRng>(C: &CiphertextRing, mut rng: R) -> SecretKey {
+pub fn gen_sk<R: Rng + CryptoRng, Params: BFVParams>(C: &CiphertextRing<Params>, mut rng: R) -> SecretKey<Params> {
     // we sample uniform ternary secrets 
     let result = C.get_ring().sample_from_coefficient_distribution(|| (rng.next_u32() % 3) as i32 - 1);
     let result = C.get_ring().do_fft(result);
-    *DEBUG_SK.write().unwrap() = Some(C.clone_el(&result));
     return result;
 }
 
-pub fn enc_sym_zero<R: Rng + CryptoRng>(C: &CiphertextRing, mut rng: R, sk: &SecretKey) -> Ciphertext {
+pub fn enc_sym_zero<R: Rng + CryptoRng, Params: BFVParams>(C: &CiphertextRing<Params>, mut rng: R, sk: &SecretKey<Params>) -> Ciphertext<Params> {
     let a = C.get_ring().sample_uniform(|| rng.next_u64());
     let mut b = C.get_ring().undo_fft(C.negate(C.mul_ref(&a, &sk)));
     let e = C.get_ring().sample_from_coefficient_distribution(|| (rng.sample::<f64, _>(StandardNormal) * 3.2).round() as i32);
     C.get_ring().add_assign_non_fft(&mut b, &e);
-    return (RingEl::from_coeff(b), RingEl::from_ntt(a));
+    return (CoeffOrNTTRingEl::from_coeff(b), CoeffOrNTTRingEl::from_ntt(a));
 }
 
-pub fn enc_sym<R: Rng + CryptoRng>(P: &PlaintextRing, C: &CiphertextRing, rng: R, m: &El<PlaintextRing>, sk: &SecretKey) -> Ciphertext {
+pub fn enc_sym<R: Rng + CryptoRng, Params: BFVParams>(P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, rng: R, m: &El<PlaintextRing<Params>>, sk: &SecretKey<Params>) -> Ciphertext<Params> {
     hom_add_plain(P, C, m, enc_sym_zero(C, rng, sk))
 }
 
-pub fn remove_noise(P: &PlaintextRing, C: &CiphertextRing, c: &El<CiphertextRing>) -> El<PlaintextRing> {
+pub fn remove_noise<Params: BFVParams>(P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, c: &El<CiphertextRing<Params>>) -> El<PlaintextRing<Params>> {
     let coefficients = C.wrt_canonical_basis(c);
     let Delta = ZZbig.rounded_div(
         ZZbig.clone_el(C.base_ring().modulus()), 
@@ -320,50 +311,50 @@ pub fn remove_noise(P: &PlaintextRing, C: &CiphertextRing, c: &El<CiphertextRing
     return P.from_canonical_basis((0..coefficients.len()).map(|i| modulo.map(ZZbig.rounded_div(C.base_ring().smallest_lift(coefficients.at(i)), &Delta))));
 }
 
-pub fn dec(P: &PlaintextRing, C: &CiphertextRing, ct: Ciphertext, sk: &SecretKey) -> El<PlaintextRing> {
+pub fn dec<Params: BFVParams>(P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, ct: Ciphertext<Params>, sk: &SecretKey<Params>) -> El<PlaintextRing<Params>> {
     let (c0, c1) = ct;
     let noisy_m = C.add(c0.to_ntt(C), C.mul_ref_snd(c1.to_ntt(C), sk));
-    return remove_noise(P, C, &noisy_m);
+    return remove_noise::<Params>(P, C, &noisy_m);
 }
 
-pub fn hom_add(C: &CiphertextRing, lhs: Ciphertext, rhs: &Ciphertext) -> Ciphertext {
+pub fn hom_add<Params: BFVParams>(C: &CiphertextRing<Params>, lhs: Ciphertext<Params>, rhs: &Ciphertext<Params>) -> Ciphertext<Params> {
     let (lhs0, lhs1) = lhs;
     let (rhs0, rhs1) = rhs;
-    return (RingEl::add(lhs0, rhs0, C), RingEl::add(lhs1, rhs1, C));
+    return (CoeffOrNTTRingEl::add(lhs0, rhs0, C), CoeffOrNTTRingEl::add(lhs1, rhs1, C));
 }
 
-pub fn hom_sub(C: &CiphertextRing, lhs: Ciphertext, rhs: &Ciphertext) -> Ciphertext {
+pub fn hom_sub<Params: BFVParams>(C: &CiphertextRing<Params>, lhs: Ciphertext<Params>, rhs: &Ciphertext<Params>) -> Ciphertext<Params> {
     let (lhs0, lhs1) = lhs;
     let (rhs0, rhs1) = rhs;
-    return (RingEl::sub(lhs0, rhs0, C), RingEl::sub(lhs1, rhs1, C));
+    return (CoeffOrNTTRingEl::sub(lhs0, rhs0, C), CoeffOrNTTRingEl::sub(lhs1, rhs1, C));
 }
 
-pub fn clone_ct(C: &CiphertextRing, ct: &Ciphertext) -> Ciphertext {
+pub fn clone_ct<Params: BFVParams>(C: &CiphertextRing<Params>, ct: &Ciphertext<Params>) -> Ciphertext<Params> {
     return (ct.0.clone(C), ct.1.clone(C));
 }
 
-pub fn hom_add_plain(P: &PlaintextRing, C: &CiphertextRing, m: &El<PlaintextRing>, ct: Ciphertext) -> Ciphertext {
+pub fn hom_add_plain<Params: BFVParams>(P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, m: &El<PlaintextRing<Params>>, ct: Ciphertext<Params>) -> Ciphertext<Params> {
     let mut m = C.get_ring().exact_convert_from_nttring(P.get_ring(), m);
     let Delta = C.base_ring().coerce(&ZZbig, ZZbig.rounded_div(
         ZZbig.clone_el(C.base_ring().modulus()), 
         &int_cast(*P.base_ring().modulus() as i32, &ZZbig, &StaticRing::<i32>::RING)
     ));
     C.get_ring().mul_scalar_assign_non_fft(&mut m, &Delta);
-    return (RingEl::add(ct.0, &RingEl::from_coeff(m), C), ct.1);
+    return (CoeffOrNTTRingEl::add(ct.0, &CoeffOrNTTRingEl::from_coeff(m), C), ct.1);
 }
 
-pub fn hom_mul_plain(P: &PlaintextRing, C: &CiphertextRing, m: &El<PlaintextRing>, ct: Ciphertext) -> Ciphertext {
+pub fn hom_mul_plain<Params: BFVParams>(P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, m: &El<PlaintextRing<Params>>, ct: Ciphertext<Params>) -> Ciphertext<Params> {
     let m = C.get_ring().do_fft(C.get_ring().exact_convert_from_nttring(P.get_ring(), m));
     let c0 = ct.0.to_ntt(C);
     let c1 = ct.1.to_ntt(C);
-    return (RingEl::from_ntt(C.mul_ref_snd(c0, &m)), RingEl::from_ntt(C.mul(c1, m)));
+    return (CoeffOrNTTRingEl::from_ntt(C.mul_ref_snd(c0, &m)), CoeffOrNTTRingEl::from_ntt(C.mul(c1, m)));
 }
 
-pub fn hom_mul_plain_i64(_P: &PlaintextRing, C: &CiphertextRing, m: i64, ct: Ciphertext) -> Ciphertext {
-    (RingEl::mul_i64(ct.0, m, C), RingEl::mul_i64(ct.1, m, C))
+pub fn hom_mul_plain_i64<Params: BFVParams>(_P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, m: i64, ct: Ciphertext<Params>) -> Ciphertext<Params> {
+    (CoeffOrNTTRingEl::mul_i64(ct.0, m, C), CoeffOrNTTRingEl::mul_i64(ct.1, m, C))
 }
 
-pub fn noise_budget(P: &PlaintextRing, C: &CiphertextRing, ct: &Ciphertext, sk: &SecretKey) -> usize {
+pub fn noise_budget<Params: BFVParams>(P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, ct: &Ciphertext<Params>, sk: &SecretKey<Params>) -> usize {
     let (c0, c1) = clone_ct(C, ct);
     let (c0, c1) = (c0.to_ntt(C), c1.to_ntt(C));
     let noisy_m = C.add(c0, C.mul_ref_snd(c1, sk));
@@ -379,14 +370,14 @@ pub fn noise_budget(P: &PlaintextRing, C: &CiphertextRing, ct: &Ciphertext, sk: 
     }).max().unwrap() + P.base_ring().integer_ring().abs_log2_ceil(P.base_ring().modulus()).unwrap() + 1);
 }
 
-pub fn gen_rk<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing, rng: R, sk: &SecretKey) -> RelinKey<'a> {
-    gen_switch_key(C, rng, &C.pow(C.clone_el(sk), 2), sk)
+pub fn gen_rk<'a, R: Rng + CryptoRng, Params: BFVParams>(C: &'a CiphertextRing<Params>, rng: R, sk: &SecretKey<Params>) -> RelinKey<'a, Params> {
+    gen_switch_key::<R, Params>(C, rng, &C.pow(C.clone_el(sk), 2), sk)
 }
 
-pub fn hom_mul(C: &CiphertextRing, C_mul: &CiphertextRing, lhs: Ciphertext, rhs: Ciphertext, rk: &RelinKey, conv_data: &MulConversionData) -> Ciphertext {
+pub fn hom_mul<Params: BFVParams>(C: &CiphertextRing<Params>, C_mul: &CiphertextRing<Params>, lhs: Ciphertext<Params>, rhs: Ciphertext<Params>, rk: &RelinKey<Params>, conv_data: &MulConversionData) -> Ciphertext<Params> {
     let (c00, c01) = lhs;
     let (c10, c11) = rhs;
-    let lift = |c: DoubleRNSNonFFTEl<CiphertextZn, CiphertextGenFFT, CiphertextAllocator>| 
+    let lift = |c: DoubleRNSNonFFTEl<CiphertextZn, Params::CiphertextRingDecomposition, CiphertextAllocator>| 
         C_mul.get_ring().do_fft(C_mul.get_ring().perform_rns_op_from(C.get_ring(), &c, &conv_data.lift_to_C_mul));
 
     let c00_lifted = lift(c00.to_coeff(C));
@@ -398,7 +389,7 @@ pub fn hom_mul(C: &CiphertextRing, C_mul: &CiphertextRing, lhs: Ciphertext, rhs:
     let lifted1 = C_mul.add(C_mul.mul_ref_snd(c00_lifted, &c11_lifted), C_mul.mul_ref_fst(&c01_lifted, c10_lifted));
     let lifted2 = C_mul.mul(c01_lifted, c11_lifted);
 
-    let scale_down = |c: El<CiphertextRing>| 
+    let scale_down = |c: El<CiphertextRing<Params>>| 
         C.get_ring().perform_rns_op_from(C_mul.get_ring(), &C_mul.get_ring().undo_fft(c), &conv_data.scale_down_to_C);
 
     let res0 = scale_down(lifted0);
@@ -408,15 +399,15 @@ pub fn hom_mul(C: &CiphertextRing, C_mul: &CiphertextRing, lhs: Ciphertext, rhs:
     let op = C.get_ring().to_gadget_product_lhs(res2);
     let (s0, s1) = rk;
 
-    return (RingEl::add(RingEl::from_coeff(res0), &RingEl::gadget_product(&op, s0, C), C), RingEl::add(RingEl::from_coeff(res1), &RingEl::gadget_product(&op, s1, C), C));
+    return (CoeffOrNTTRingEl::add(CoeffOrNTTRingEl::from_coeff(res0), &CoeffOrNTTRingEl::gadget_product(&op, s0, C), C), CoeffOrNTTRingEl::add(CoeffOrNTTRingEl::from_coeff(res1), &CoeffOrNTTRingEl::gadget_product(&op, s1, C), C));
 }
 
-pub fn gen_switch_key<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing, mut rng: R, old_sk: &SecretKey, new_sk: &SecretKey) -> KeySwitchKey<'a> {
+pub fn gen_switch_key<'a, R: Rng + CryptoRng, Params: BFVParams>(C: &'a CiphertextRing<Params>, mut rng: R, old_sk: &SecretKey<Params>, new_sk: &SecretKey<Params>) -> KeySwitchKey<'a, Params> {
     let old_sk_non_fft = C.get_ring().undo_fft(C.clone_el(old_sk));
     let mut res_0 = C.get_ring().gadget_product_rhs_empty();
     let mut res_1 = C.get_ring().gadget_product_rhs_empty();
     for i in 0..C.get_ring().rns_base().len() {
-        let (c0, c1) = enc_sym_zero(C, &mut rng, new_sk);
+        let (c0, c1) = enc_sym_zero::<_, Params>(C, &mut rng, new_sk);
         let factor = C.base_ring().get_ring().from_congruence((0..C.get_ring().rns_base().len()).map(|i2| {
             let Fp = C.get_ring().rns_base().at(i2);
             if i2 == i { Fp.one() } else { Fp.zero() } 
@@ -430,37 +421,38 @@ pub fn gen_switch_key<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing, mut rng: R,
     return (res_0, res_1);
 }
 
-pub fn key_switch(C: &CiphertextRing, ct: Ciphertext, switch_key: &KeySwitchKey) -> Ciphertext {
+pub fn key_switch<Params: BFVParams>(C: &CiphertextRing<Params>, ct: Ciphertext<Params>, switch_key: &KeySwitchKey<Params>) -> Ciphertext<Params> {
     let (c0, c1) = ct;
     let (s0, s1) = switch_key;
     let op = C.get_ring().to_gadget_product_lhs(c1.to_coeff(C));
     return (
-        RingEl::add(c0, &RingEl::gadget_product(&op, s0, C), C),
-        RingEl::gadget_product(&op, s1, C)
+        CoeffOrNTTRingEl::add(c0, &CoeffOrNTTRingEl::gadget_product(&op, s0, C), C),
+        CoeffOrNTTRingEl::gadget_product(&op, s1, C)
     );
 }
 
-pub fn mod_switch_to_plaintext(target: &PlaintextRing, C: &CiphertextRing, ct: Ciphertext, switch_data: &ModSwitchData) -> (El<PlaintextRing>, El<PlaintextRing>) {
+pub fn mod_switch_to_plaintext<Params: BFVParams>(target: &PlaintextRing<Params>, C: &CiphertextRing<Params>, ct: Ciphertext<Params>, switch_data: &ModSwitchData) -> (El<PlaintextRing<Params>>, El<PlaintextRing<Params>>) {
     let (c0, c1) = ct;
     return (
-        C.get_ring().perform_rns_op_to_nttring::<Pow2CyclotomicFFT<PlaintextZn, PlaintextFFT>, _, _>(target.get_ring(), &c0.to_coeff(C), &switch_data.scale),
-        C.get_ring().perform_rns_op_to_nttring::<Pow2CyclotomicFFT<PlaintextZn, PlaintextFFT>, _, _>(target.get_ring(), &c1.to_coeff(C), &switch_data.scale)
+        C.get_ring().perform_rns_op_to_nttring::<Params::PlaintextRingDecomposition, _, _>(target.get_ring(), &c0.to_coeff(C), &switch_data.scale),
+        C.get_ring().perform_rns_op_to_nttring::<Params::PlaintextRingDecomposition, _, _>(target.get_ring(), &c1.to_coeff(C), &switch_data.scale)
     );
 }
 
-pub fn gen_gk<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing, rng: R, sk: &SecretKey, g: ZnEl) -> KeySwitchKey<'a> {
-    gen_switch_key(C, rng, &C.get_ring().apply_galois_action(sk, g), sk)
+pub fn gen_gk<'a, R: Rng + CryptoRng, Params: BFVParams>(C: &'a CiphertextRing<Params>, rng: R, sk: &SecretKey<Params>, g: ZnEl) -> KeySwitchKey<'a, Params> {
+    gen_switch_key::<R, Params>(C, rng, &C.get_ring().apply_galois_action(sk, g), sk)
 }
 
-pub fn hom_galois(C: &CiphertextRing, ct: Ciphertext, g: ZnEl, gk: &KeySwitchKey) -> Ciphertext {
+pub fn hom_galois<Params: BFVParams>(C: &CiphertextRing<Params>, ct: Ciphertext<Params>, g: ZnEl, gk: &KeySwitchKey<Params>) -> Ciphertext<Params> {
     key_switch(C, (
-        RingEl::from_ntt(C.get_ring().apply_galois_action(&ct.0.to_ntt(C), g)),
-        RingEl::from_ntt(C.get_ring().apply_galois_action(&ct.1.to_ntt(C), g))
+        CoeffOrNTTRingEl::from_ntt(C.get_ring().apply_galois_action(&ct.0.to_ntt(C), g)),
+        CoeffOrNTTRingEl::from_ntt(C.get_ring().apply_galois_action(&ct.1.to_ntt(C), g))
     ), gk)
 }
 
-pub fn hom_galois_many<'a, V>(C: &CiphertextRing, ct: Ciphertext, gs: &[ZnEl], gks: V) -> Vec<Ciphertext>
-    where V: VectorView<KeySwitchKey<'a>>
+pub fn hom_galois_many<'a, V, Params: BFVParams>(C: &CiphertextRing<Params>, ct: Ciphertext<Params>, gs: &[ZnEl], gks: V) -> Vec<Ciphertext<Params>>
+    where V: VectorView<KeySwitchKey<'a, Params>>,
+        Params::CiphertextRingDecomposition: 'a
 {
     let (c0, c1) = ct;
     let c0_ntt = c0.to_ntt(&C);
@@ -468,10 +460,10 @@ pub fn hom_galois_many<'a, V>(C: &CiphertextRing, ct: Ciphertext, gs: &[ZnEl], g
     return (0..gs.len()).map(|i| {
         let c1_g = lhs.apply_galois_action(C.get_ring(), gs[i]);
         let (s0, s1) = gks.at(i);
-        let r0 = RingEl::gadget_product(&c1_g, s0, C);
-        let r1 = RingEl::gadget_product(&c1_g, s1, C);
-        let c0_g = RingEl::from_ntt(C.get_ring().apply_galois_action(&c0_ntt, gs[i]));
-        return (RingEl::add(r0, &c0_g, C), r1);
+        let r0 = CoeffOrNTTRingEl::gadget_product(&c1_g, s0, C);
+        let r1 = CoeffOrNTTRingEl::gadget_product(&c1_g, s1, C);
+        let c0_g = CoeffOrNTTRingEl::from_ntt(C.get_ring().apply_galois_action(&c0_ntt, gs[i]));
+        return (CoeffOrNTTRingEl::add(r0, &c0_g, C), r1);
     }).collect();
 }
 
@@ -487,25 +479,25 @@ fn run_bfv() {
         log2_N: 15
     };
     
-    let P = params.create_plaintext_ring();
+    let P = params.create_plaintext_ring(params.t());
     let (C, C_mul) = params.create_ciphertext_rings();
     println!("Created rings, RNS base length is {}", C.base_ring().get_ring().len());
     
-    let sk = gen_sk(&C, &mut rng);
+    let sk = gen_sk::<_, Pow2BFVParams>(&C, &mut rng);
     
     let m = P.int_hom().map(2);
     let ct = enc_sym(&P, &C, &mut rng, &m, &sk);
     println!("Encrypted message");
     
     let mul_rescale_data = params.create_multiplication_rescale(&P, &C, &C_mul);
-    let relin_key = gen_rk(&C, &mut rng, &sk);
+    let relin_key = gen_rk::<_, Pow2BFVParams>(&C, &mut rng, &sk);
     println!("Created relin key");
 
     const COUNT: usize = 10;
 
     clear_all_timings();
     let start = Instant::now();
-    let mut ct_sqr = hom_mul(&C, &C_mul, clone_ct(&C, &ct), clone_ct(&C, &ct), &relin_key, &mul_rescale_data);
+    let mut ct_sqr = hom_mul(&C, &C_mul, clone_ct::<Pow2BFVParams>(&C, &ct), clone_ct(&C, &ct), &relin_key, &mul_rescale_data);
     for _ in 0..(COUNT - 1) {
         ct_sqr = hom_mul(&C, &C_mul, clone_ct(&C, &ct), clone_ct(&C, &ct), &relin_key, &mul_rescale_data);
     }
@@ -529,14 +521,14 @@ fn test_hom_galois() {
         log2_N: 7
     };
     
-    let P = params.create_plaintext_ring();
+    let P = params.create_plaintext_ring(params.t());
     let (C, _C_mul) = params.create_ciphertext_rings();    
-    let sk = gen_sk(&C, &mut rng);
-    let gk = gen_gk(&C, &mut rng, &sk, P.get_ring().galois_group_mulrepr().int_hom().map(3));
+    let sk = gen_sk::<_, Pow2BFVParams>(&C, &mut rng);
+    let gk = gen_gk::<_, Pow2BFVParams>(&C, &mut rng, &sk, P.get_ring().galois_group_mulrepr().int_hom().map(3));
     
     let m = P.canonical_gen();
     let ct = enc_sym(&P, &C, &mut rng, &m, &sk);
-    let ct_res = hom_galois(&C, ct, P.get_ring().galois_group_mulrepr().int_hom().map(3), &gk);
+    let ct_res = hom_galois::<Pow2BFVParams>(&C, ct, P.get_ring().galois_group_mulrepr().int_hom().map(3), &gk);
     let res = dec(&P, &C, ct_res, &sk);
 
     assert_el_eq!(&P, &P.pow(P.canonical_gen(), 3), &res);
@@ -553,17 +545,17 @@ fn test_bfv_mul() {
         log2_N: 10
     };
     
-    let P = params.create_plaintext_ring();
+    let P = params.create_plaintext_ring(params.t());
     let (C, C_mul) = params.create_ciphertext_rings();
 
-    let sk = gen_sk(&C, &mut rng);
+    let sk = gen_sk::<_, Pow2BFVParams>(&C, &mut rng);
     let mul_rescale_data = params.create_multiplication_rescale(&P, &C, &C_mul);
-    let rk = gen_rk(&C, &mut rng, &sk);
+    let rk = gen_rk::<_, Pow2BFVParams>(&C, &mut rng, &sk);
 
     let m = P.int_hom().map(2);
     let ct = enc_sym(&P, &C, &mut rng, &m, &sk);
 
-    let m = dec(&P, &C, clone_ct(&C, &ct), &sk);
+    let m = dec(&P, &C, clone_ct::<Pow2BFVParams>(&C, &ct), &sk);
     assert_el_eq!(&P, &P.int_hom().map(2), &m);
 
     let ct_sqr = hom_mul(&C, &C_mul, clone_ct(&C, &ct), clone_ct(&C, &ct), &rk, &mul_rescale_data);
