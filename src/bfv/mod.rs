@@ -5,9 +5,11 @@ use std::alloc::Global;
 use std::marker::PhantomData;
 use std::time::Instant;
 use std::ops::Range;
+use std::cmp::max;
 
-use feanor_math::algorithms::eea::signed_lcm;
+use feanor_math::algorithms::int_factor::factor;
 use feanor_math::algorithms::miller_rabin::is_prime;
+use feanor_math::algorithms::unity_root::get_prim_root_of_unity;
 use feanor_math::algorithms::unity_root::get_prim_root_of_unity_pow2;
 use feanor_math::homomorphism::CanHom;
 use feanor_math::homomorphism::Identity;
@@ -25,9 +27,12 @@ use feanor_math::ordered::OrderedRingStore;
 use feanor_math::pid::EuclideanRingStore;
 
 use crate::cyclotomic::CyclotomicRing;
+use crate::euler_phi;
 use crate::rings::decomposition::CyclotomicRingDecomposition;
 use crate::rings::decomposition::IsomorphismInfo;
+use crate::rings::decomposition::RingDecomposition;
 use crate::rings::decomposition::RingDecompositionSelfIso;
+use crate::rings::odd_cyclotomic::OddCyclotomicFFT;
 use crate::rings::pow2_cyclotomic::*;
 use crate::rings::gadget_product::*;
 use crate::rings::double_rns_ring::*;
@@ -73,12 +78,13 @@ pub trait BFVParams {
     fn log2_q(&self) -> Range<usize>;
     fn n(&self) -> usize;
     fn t(&self) -> i64;
+    fn double_rns_moduli_congruent_to_one_mod(&self) -> i64;
     fn create_plaintext_ring(&self, modulus: i64) -> PlaintextRing<Self>;
     fn create_ciphertext_ring_part(&self, modulus: i64) -> Self::CiphertextRingDecomposition;
 
     fn create_ciphertext_rings(&self) -> (CiphertextRing<Self>, CiphertextRing<Self>) {
         let log2_q = self.log2_q();
-        let congruent_to_one_mod = signed_lcm(self.n() as i64, ZZ.pow(2, 1 + ZZ.abs_log2_ceil(&(self.n() as i64)).unwrap()), ZZ);
+        let congruent_to_one_mod = self.double_rns_moduli_congruent_to_one_mod();
         let mut C_rns_base = sample_primes(log2_q.start, log2_q.end, 57, &int_cast(congruent_to_one_mod, ZZbig, ZZ)).unwrap();
         C_rns_base.sort_unstable_by(|l, r| ZZbig.cmp(l, r));
 
@@ -271,6 +277,102 @@ impl BFVParams for Pow2BFVParams {
 
     fn n(&self) -> usize {
         2 << self.log2_N
+    }
+
+    fn t(&self) -> i64 {
+        self.t
+    }
+
+    fn double_rns_moduli_congruent_to_one_mod(&self) -> i64 {
+        2 << self.log2_N
+    }
+
+    fn log2_q(&self) -> Range<usize> {
+        self.log2_q_min..self.log2_q_max
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct CompositeBFVParams {
+    t: i64,
+    log2_q_min: usize,
+    log2_q_max: usize,
+    n1: usize,
+    n2: usize
+}
+
+impl BFVParams for CompositeBFVParams {
+
+    type CiphertextRingDecomposition = OddCyclotomicFFT<CiphertextZn, factor_fft::CoprimeCooleyTuckeyFFT<
+        <CiphertextZn as RingStore>::Type, 
+        <CiphertextZn as RingStore>::Type, 
+        Identity<CiphertextZn>,
+        bluestein::BluesteinFFT<<CiphertextZn as RingStore>::Type, <CiphertextZn as RingStore>::Type, Identity<CiphertextZn>>,
+        bluestein::BluesteinFFT<<CiphertextZn as RingStore>::Type, <CiphertextZn as RingStore>::Type, Identity<CiphertextZn>>,
+    >>;
+    type PlaintextRingDecomposition = OddCyclotomicFFT<PlaintextZn, factor_fft::CoprimeCooleyTuckeyFFT<
+        <PlaintextZn as RingStore>::Type, 
+        <PlaintextZn as RingStore>::Type, 
+        Identity<PlaintextZn>,
+        bluestein::BluesteinFFT<<PlaintextZn as RingStore>::Type, <PlaintextZn as RingStore>::Type, Identity<PlaintextZn>>,
+        bluestein::BluesteinFFT<<PlaintextZn as RingStore>::Type, <PlaintextZn as RingStore>::Type, Identity<PlaintextZn>>,
+    >>;
+
+    fn create_ciphertext_ring_part(&self, modulus: i64) -> Self::CiphertextRingDecomposition {
+        let Fp = CiphertextZn::new(modulus as u64);
+        let log2_m = max(ZZ.abs_log2_ceil(&(self.n1 as i64)).unwrap(), ZZ.abs_log2_ceil(&(self.n2 as i64)).unwrap()) + 1;
+        let as_field = (&Fp).as_field().ok().unwrap();
+        let pow2_root_of_unity = Fp.coerce(&as_field, get_prim_root_of_unity_pow2(as_field, log2_m).unwrap());
+        let root_of_unity = Fp.coerce(&as_field, get_prim_root_of_unity(as_field, 2 * self.n()).unwrap());
+        OddCyclotomicFFT::create(Fp, factor_fft::CoprimeCooleyTuckeyFFT::new(
+            Fp, 
+            Fp.pow(root_of_unity, 2), 
+            bluestein::BluesteinFFT::new(Fp, Fp.pow(root_of_unity, self.n2), Fp.pow(pow2_root_of_unity, 1 << (log2_m - ZZ.abs_log2_ceil(&(self.n1 as i64)).unwrap() - 1)), self.n1, ZZ.abs_log2_ceil(&(self.n1 as i64)).unwrap() + 1, Global), 
+            bluestein::BluesteinFFT::new(Fp, Fp.pow(root_of_unity, self.n1), Fp.pow(pow2_root_of_unity, 1 << (log2_m - ZZ.abs_log2_ceil(&(self.n2 as i64)).unwrap() - 1)), self.n2, ZZ.abs_log2_ceil(&(self.n2 as i64)).unwrap() + 1, Global),
+        ), Global)
+    }
+
+    fn double_rns_moduli_congruent_to_one_mod(&self) -> i64 {
+        let log2_m = max(ZZ.abs_log2_ceil(&(self.n1 as i64)).unwrap(), ZZ.abs_log2_ceil(&(self.n2 as i64)).unwrap()) + 1;
+        return (self.n() << log2_m) as i64;
+    }
+
+    fn create_plaintext_ring(&self, modulus: i64) -> PlaintextRing<Self> {
+        assert!(self.n() % 2 == 1);
+        let expansion_factor = ZZ.pow(euler_phi(&factor(&ZZ, self.n() as i64)), 3);
+        let required_bits = ((modulus as f64).log2() * 2. + (expansion_factor as f64).log2()).ceil() as usize;
+
+        let log2_m = max(ZZ.abs_log2_ceil(&(self.n1 as i64)).unwrap(), ZZ.abs_log2_ceil(&(self.n2 as i64)).unwrap()) + 1;
+        let congruent_to_one_mod = self.n() << log2_m;
+        let primes = sample_primes(required_bits, required_bits + log2_m + 3, 58, &BigIntRing::RING.coerce(&ZZ, congruent_to_one_mod as i64)).unwrap();
+
+        let mut rns_base = Vec::new();
+        let mut ring_decompositions = Vec::new();
+        for p in primes {
+            let Fp = PlaintextZn::new(int_cast(p, ZZ, ZZbig) as u64);
+            let as_field = (&Fp).as_field().ok().unwrap();
+            let pow2_root_of_unity = Fp.coerce(&as_field, get_prim_root_of_unity_pow2(as_field, log2_m).unwrap());
+            let root_of_unity = Fp.coerce(&as_field, get_prim_root_of_unity(as_field, 2 * self.n()).unwrap());
+            let fft_table = factor_fft::CoprimeCooleyTuckeyFFT::new(
+                Fp, 
+                Fp.pow(root_of_unity, 2), 
+                bluestein::BluesteinFFT::new(Fp, Fp.pow(root_of_unity, self.n2), Fp.pow(pow2_root_of_unity, 1 << (log2_m - ZZ.abs_log2_ceil(&(self.n1 as i64)).unwrap() - 1)), self.n1, ZZ.abs_log2_ceil(&(self.n1 as i64)).unwrap() + 1, Global), 
+                bluestein::BluesteinFFT::new(Fp, Fp.pow(root_of_unity, self.n1), Fp.pow(pow2_root_of_unity, 1 << (log2_m - ZZ.abs_log2_ceil(&(self.n2 as i64)).unwrap() - 1)), self.n2, ZZ.abs_log2_ceil(&(self.n2 as i64)).unwrap() + 1, Global),
+            );
+            ring_decompositions.push(OddCyclotomicFFT::create(Fp.clone(), fft_table, Global));
+            assert_eq!(expansion_factor, ring_decompositions.last().unwrap().expansion_factor());
+            rns_base.push(Fp);
+        }
+        return RingValue::from(NTTRingBase::from_ring_decompositions(
+            PlaintextZn::new(modulus as u64), 
+            zn_rns::Zn::new(rns_base, BigIntRing::RING), 
+            ring_decompositions, 
+            Global
+        ));
+    }
+
+    fn n(&self) -> usize {
+        self.n1 * self.n2
     }
 
     fn t(&self) -> i64 {
@@ -558,6 +660,37 @@ fn test_bfv_mul() {
     let m = dec(&P, &C, clone_ct::<Pow2BFVParams>(&C, &ct), &sk);
     assert_el_eq!(&P, &P.int_hom().map(2), &m);
 
+    let ct_sqr = hom_mul(&C, &C_mul, clone_ct(&C, &ct), clone_ct(&C, &ct), &rk, &mul_rescale_data);
+    let m_sqr = dec(&P, &C, ct_sqr, &sk);
+
+    assert_el_eq!(&P, &P.int_hom().map(4), &m_sqr);
+}
+
+#[test]
+fn test_composite_bfv_mul() {
+    let mut rng = thread_rng();
+    
+    let params = CompositeBFVParams {
+        t: 8,
+        log2_q_min: 700,
+        log2_q_max: 800,
+        n1: 17,
+        n2: 97
+    };
+    
+    let P = params.create_plaintext_ring(params.t());
+    let (C, C_mul) = params.create_ciphertext_rings();
+
+    let sk = gen_sk::<_, CompositeBFVParams>(&C, &mut rng);
+    let mul_rescale_data = params.create_multiplication_rescale(&P, &C, &C_mul);
+    let rk = gen_rk::<_, CompositeBFVParams>(&C, &mut rng, &sk);
+
+    let m = P.int_hom().map(2);
+    let ct = enc_sym(&P, &C, &mut rng, &m, &sk);
+
+    let m = dec(&P, &C, clone_ct::<CompositeBFVParams>(&C, &ct), &sk);
+    assert_el_eq!(&P, &P.int_hom().map(2), &m);
+    
     let ct_sqr = hom_mul(&C, &C_mul, clone_ct(&C, &ct), clone_ct(&C, &ct), &rk, &mul_rescale_data);
     let m_sqr = dec(&P, &C, ct_sqr, &sk);
 

@@ -416,6 +416,45 @@ fn test_bfv_thin_bootstrapping_17() {
 }
 
 #[test]
+fn test_composite_bfv_thin_bootstrapping_2() {
+    let mut rng = thread_rng();
+    
+    let params = CompositeBFVParams {
+        t: 8,
+        log2_q_min: 750,
+        log2_q_max: 800,
+        n1: 17,
+        n2: 97
+    };
+    let bootstrapper = Pow2BFVThinBootstrapParams::create_for(params.clone(), DEFAULT_CONFIG, None, None);
+    
+    let P = params.create_plaintext_ring(params.t());
+    let (C, C_mul) = params.create_ciphertext_rings();
+
+    let bootstrapping_data = bootstrapper.create_all_bootstrapping_data(&C, &C_mul);
+    
+    let sk = gen_sk::<_, CompositeBFVParams>(&C, &mut rng);
+    let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, gen_gk::<_, CompositeBFVParams>(&C, &mut rng, &sk, g))).collect::<Vec<_>>();
+    let rk = gen_rk::<_, CompositeBFVParams>(&C, &mut rng, &sk);
+    
+    let m = P.int_hom().map(2);
+    let ct = enc_sym(&P, &C, &mut rng, &m, &sk);
+    let res_ct = bootstrapper.bootstrap_thin::<true>(
+        &C, 
+        &C_mul, 
+        &P, 
+        &bootstrapping_data.plaintext_ring_hierarchy, 
+        &bootstrapping_data.multiplication_rescale_hierarchy, 
+        &bootstrapping_data.mod_switch, 
+        ct, 
+        &rk, 
+        &gk
+    );
+
+    assert_el_eq!(P, P.int_hom().map(2), dec(&P, &C, res_ct, &sk));
+}
+
+#[test]
 #[ignore]
 fn test_bfv_thin_bootstrapping_257() {
     let mut rng = thread_rng();
@@ -467,8 +506,7 @@ fn run_bfv_thin_bootstrapping() {
     };
     println!("Preparing bootstrapper...");
 
-    // Some("F:\\Users\\Simon\\Documents\\Projekte\\he-ring\\bootstrap_257_thin")
-    let bootstrapper = Pow2BFVThinBootstrapParams::create_for(params.clone(), DEFAULT_CONFIG.set_v(1), None, None);
+    let bootstrapper = Pow2BFVThinBootstrapParams::create_for(params.clone(), DEFAULT_CONFIG.set_v(1), Some("F:\\Users\\Simon\\Documents\\Projekte\\he-ring\\bootstrap_257_1_1_thin"), None);
     
     println!("Preparing utility data...");
 

@@ -247,7 +247,7 @@ impl<R, A> NTTRingBase<RingValue<R>, Pow2CyclotomicFFT<RingValue<R>, cooley_tuck
     pub fn new_with(base_ring: RingValue<R>, log2_n: usize, allocator: A) -> RingValue<Self> {
         let modulus = int_cast(base_ring.integer_ring().clone_el(base_ring.modulus()), StaticRing::<i64>::RING, base_ring.integer_ring());
         let required_bits = ((modulus as f64).log2() * 2. + log2_n as f64).ceil() as usize;
-        let primes = sample_primes(required_bits, required_bits + log2_n + 3, 58, &BigIntRing::RING.power_of_two(log2_n + 1)).unwrap();
+        let primes = sample_primes(required_bits, required_bits + 4, 58, &BigIntRing::RING.power_of_two(log2_n + 1)).unwrap();
 
         let mut rns_base = Vec::new();
         let mut ring_decompositions = Vec::new();

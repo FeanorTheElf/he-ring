@@ -13,8 +13,6 @@
 
 #![doc = include_str!("../Readme.md")]
 
-use std::cmp::min;
-
 use feanor_math::algorithms::miller_rabin::is_prime;
 use feanor_math::integer::BigIntRing;
 use feanor_math::integer::BigIntRingBase;
@@ -70,24 +68,31 @@ impl<R> StdZn for R
 {}
 
 pub fn sample_primes(min_bits: usize, max_bits: usize, max_bits_each_modulus: usize, congruent_to_one_mod: &El<BigIntRing>) -> Option<Vec<El<BigIntRing>>> {
-    assert!(max_bits > min_bits);
     let ZZbig = BigIntRing::RING;
+    assert!(max_bits > min_bits);
+
     let mut result = Vec::new();
     let mut current_bits = 0.;
     while current_bits < min_bits as f64 {
-        let next_modulus_add_bound = min(max_bits_each_modulus, max_bits - current_bits.ceil() as usize);
-        let mut current = ZZbig.add(ZZbig.sub(ZZbig.power_of_two(next_modulus_add_bound), ZZbig.euclidean_rem(ZZbig.power_of_two(next_modulus_add_bound), congruent_to_one_mod)), ZZbig.one());
+
+        let prime_of_bits = if min_bits as f64 - current_bits < max_bits_each_modulus as f64 {
+            f64::min(max_bits as f64 - current_bits, max_bits_each_modulus as f64)
+        } else {
+            let required_number_of_primes = ((min_bits as f64 - current_bits) / max_bits_each_modulus as f64).ceil() as usize;
+            f64::min(max_bits as f64 / required_number_of_primes as f64, max_bits_each_modulus as f64)
+        };
+
+        let mut current = ZZbig.from_float_approx(2f64.powf(prime_of_bits)).unwrap();
+        current = ZZbig.add(ZZbig.sub_ref_fst(&current, ZZbig.euclidean_rem(ZZbig.clone_el(&current), congruent_to_one_mod)), ZZbig.one());
+
         let mut added_any = false;
         while ZZbig.is_pos(&current) {
-            if is_prime(&ZZbig, &current, 10) {
+            if is_prime(&ZZbig, &current, 10) && result.iter().all(|p| !ZZbig.eq_el(p, &current)) {
                 let bits = ZZbig.to_float_approx(&current).log2();
-                if current_bits + bits > max_bits as f64 {
-                    break;
-                } else {
-                    added_any = true;
-                    current_bits += bits;
-                    result.push(ZZbig.clone_el(&current));
-                }
+                added_any = true;
+                current_bits += bits;
+                result.push(ZZbig.clone_el(&current));
+                break;
             }
             ZZbig.sub_assign_ref(&mut current, congruent_to_one_mod);
         }
@@ -131,3 +136,16 @@ pub mod digitextract;
 
 #[cfg(test)]
 pub mod bfv;
+
+#[cfg(test)]
+use feanor_math::integer::int_cast;
+
+#[test]
+fn test_sample_primes() {
+    let ZZbig = BigIntRing::RING;
+    let result = sample_primes(60, 62, 58, &int_cast(422144, ZZbig, StaticRing::<i64>::RING)).unwrap();
+    let prod = ZZbig.prod(result.iter().map(|n| ZZbig.clone_el(n)));
+    assert!(ZZbig.abs_log2_floor(&prod).unwrap() >= 60);
+    assert!(ZZbig.abs_log2_ceil(&prod).unwrap() <= 71);
+    assert!(result.iter().all(|n| ZZbig.is_one(&ZZbig.euclidean_rem(ZZbig.clone_el(n), &int_cast(422144, ZZbig, StaticRing::<i64>::RING)))));
+}
