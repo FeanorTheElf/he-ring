@@ -28,7 +28,7 @@ use crate::rings::ntt_ring::*;
 use crate::StdZn;
 
 pub mod pow2;
-// pub mod composite;
+pub mod composite;
 
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
 

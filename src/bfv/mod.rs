@@ -272,7 +272,7 @@ impl BFVParams for Pow2BFVParams {
     }
 
     fn create_plaintext_ring(&self, modulus: i64) -> PlaintextRing<Self> {
-        NTTRingBase::new(PlaintextZn::new(modulus as u64), self.log2_N)
+        NTTRingBase::<_, Pow2CyclotomicFFT<_, _>, _>::new(PlaintextZn::new(modulus as u64), self.log2_N)
     }
 
     fn n(&self) -> usize {

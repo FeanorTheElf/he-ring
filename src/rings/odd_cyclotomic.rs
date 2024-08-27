@@ -255,6 +255,14 @@ impl<R, A> DoubleRNSRingBase<R, OddCyclotomicFFT<R, bluestein::BluesteinFFT<R::T
 pub type DefaultOddCyclotomicNTTRingBase<R = zn_64::Zn> = NTTRingBase<R, OddCyclotomicFFT<R, bluestein::BluesteinFFT<<R as RingStore>::Type, <R as RingStore>::Type, Identity<R>>>>;
 pub type DefaultOddCyclotomicNTTRing<R = zn_64::Zn> = NTTRing<R, OddCyclotomicFFT<R, bluestein::BluesteinFFT<<R as RingStore>::Type, <R as RingStore>::Type, Identity<R>>>>;
 
+impl<R> NTTRingBase<RingValue<R>, OddCyclotomicFFT<RingValue<R>, bluestein::BluesteinFFT<R, R, Identity<RingValue<R>>>>>
+    where R: StdZn + Clone
+{
+    pub fn new(base_ring: RingValue<R>, n: usize) -> RingValue<Self> {
+        Self::new_with(base_ring, n, Global)
+    }
+}
+
 impl<R, A> NTTRingBase<RingValue<R>, OddCyclotomicFFT<RingValue<R>, bluestein::BluesteinFFT<R, R, Identity<RingValue<R>>>>, A>
     where R: StdZn + Clone,
         A: Allocator + Default + Clone
@@ -272,7 +280,7 @@ impl<R, A> NTTRingBase<RingValue<R>, OddCyclotomicFFT<RingValue<R>, bluestein::B
         let mut ring_decompositions = Vec::new();
         for p in primes {
             let Fp = RingValue::from(R::create(|int_ring| Ok(int_cast(p, RingRef::new(int_ring), &BigIntRing::RING))).unwrap_or_else(|x| x));
-            let as_field = (&Fp).as_field().ok().unwrap();
+            let as_field = RingRef::new(Fp.get_ring()).as_field().ok().unwrap();
             let pow2_root_of_unity = Fp.coerce(&as_field, get_prim_root_of_unity_pow2(as_field, log2_m).unwrap());
             let root_of_unity = Fp.coerce(&as_field, get_prim_root_of_unity(as_field, 2 * n).unwrap());
             let fft_table = bluestein::BluesteinFFT::new(Fp.clone(), root_of_unity, pow2_root_of_unity, n, log2_m, Global);

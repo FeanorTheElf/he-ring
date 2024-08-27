@@ -50,7 +50,8 @@ pub trait StdZn: ZnRing
     + CanHomFrom<AsLocalPIRBase<zn_64::Zn>>
     + CanHomFrom<StaticRingBase<i64>>
     + CanHomFrom<StaticRingBase<i128>>
-    + for<'a> CanHomFrom<AsFieldBase<&'a RingValue<Self>>>
+    + for<'a> CanHomFrom<AsFieldBase<RingRef<'a, Self>>>
+    + for<'a> CanHomFrom<AsLocalPIRBase<RingRef<'a, Self>>>
     + CanHomFrom<BigIntRingBase>
     + SerializableElementRing
 {}
@@ -62,7 +63,8 @@ impl<R> StdZn for R
     + CanHomFrom<AsLocalPIRBase<zn_64::Zn>>
     + CanHomFrom<StaticRingBase<i64>>
     + CanHomFrom<StaticRingBase<i128>>
-    + for<'a> CanHomFrom<AsFieldBase<&'a RingValue<Self>>>
+    + for<'a> CanHomFrom<AsFieldBase<RingRef<'a, Self>>>
+    + for<'a> CanHomFrom<AsLocalPIRBase<RingRef<'a, Self>>>
     + CanHomFrom<BigIntRingBase>
     + SerializableElementRing
 {}
@@ -144,6 +146,7 @@ use feanor_math::integer::int_cast;
 fn test_sample_primes() {
     let ZZbig = BigIntRing::RING;
     let result = sample_primes(60, 62, 58, &int_cast(422144, ZZbig, StaticRing::<i64>::RING)).unwrap();
+    assert_eq!(result.len(), 2);
     let prod = ZZbig.prod(result.iter().map(|n| ZZbig.clone_el(n)));
     assert!(ZZbig.abs_log2_floor(&prod).unwrap() >= 60);
     assert!(ZZbig.abs_log2_ceil(&prod).unwrap() <= 71);

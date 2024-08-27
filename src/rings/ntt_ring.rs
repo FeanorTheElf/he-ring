@@ -113,7 +113,7 @@ impl<R, F, A> NTTRingBase<R, F, A>
         drop(tmp_perm);
 
         // if this is satisfied, we have enough precision to not get an overflow
-        assert!(len < int_cast(self.base_ring().integer_ring().clone_el(self.base_ring().modulus()), StaticRing::<i64>::RING, self.base_ring().integer_ring()) as usize);
+        assert!(len < int_cast(self.rns_base.integer_ring().clone_el(self.rns_base.modulus()), StaticRing::<i64>::RING, self.rns_base.integer_ring()) as usize);
         for i in 0..self.rns_base.len() {
             let Zp = self.rns_base.at(i);
             self.ring_decompositions[i].fft_backward(&mut unreduced_result[(i * self.rank())..((i + 1) * self.rank())], Zp.get_ring());

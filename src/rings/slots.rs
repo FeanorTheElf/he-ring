@@ -22,7 +22,6 @@ use feanor_math::algorithms::int_factor;
 use feanor_math::algorithms::int_factor::is_prime_power;
 use feanor_math::homomorphism::*;
 use feanor_math::integer::int_cast;
-use feanor_math::delegate::DelegateRing;
 use feanor_math::iters::multi_cartesian_product;
 use feanor_math::local::PrincipalLocalRing;
 use feanor_math::primitive_int::*;
@@ -39,12 +38,12 @@ use feanor_math::rings::zn::*;
 use feanor_math::rings::poly::PolyRingStore;
 use feanor_math::seq::*;
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
-use feanor_math::rings::extension::galois_field::*;
+use feanor_math::rings::extension::galois_field_new::*;
 use feanor_math::wrapper::RingElementWrapper;
 use serialization::DeserializeHypercubeIsomorphismSeed;
-use sparse::SparseHashMapVector;
 use feanor_math::integer::BigIntRing;
 use feanor_math::integer::IntegerRingStore;
+use sparse::SparseMapVector;
 
 use crate::cyclotomic::*;
 use crate::StdZn;
@@ -140,13 +139,12 @@ impl HypercubeDimension {
 fn get_prim_root_of_unity<R>(ring: R, m: usize) -> El<R>
     where R: RingStore,
         R::Type: FiniteRing + FreeAlgebra + DivisibilityRing,
-        <<R::Type as RingExtension>::BaseRing as RingStore>::Type: PrincipalLocalRing + StdZn
+        <<R::Type as RingExtension>::BaseRing as RingStore>::Type: PrincipalLocalRing + ZnRing + CanHomFrom<StaticRingBase<i64>>
 {
     let (p, e) = is_prime_power(&ZZ, &ring.characteristic(&ZZ).unwrap()).unwrap();
     let max_log2_len = ZZ.abs_log2_ceil(&(ring.rank() as i64)).unwrap() + 1;
-    let galois_field = RingValue::from(galois_field_dyn(p, ring.rank()).get_ring().get_delegate().clone()).set_convolution(
-        FFTRNSBasedConvolutionZn::from(FFTRNSBasedConvolution::<<<R::Type as RingExtension>::BaseRing as RingStore>::Type>::new_with(max_log2_len, BigIntRing::RING, Global))
-    ).as_field().ok().unwrap();
+    let convolution: FFTRNSBasedConvolutionZn = FFTRNSBasedConvolutionZn::from(FFTRNSBasedConvolution::new_with(max_log2_len, BigIntRing::RING, Global));
+    let galois_field = GaloisField::new_with(Zn::new(p as u64), ring.rank(), Global, convolution);
 
     let rou = feanor_math::algorithms::unity_root::get_prim_root_of_unity(&galois_field, m).unwrap();
 
@@ -243,7 +241,7 @@ pub fn compute_hypercube_structure(n: i64, p: i64) -> (Vec<HypercubeDimension>, 
     return (dims, Zn);
 }
 
-pub type SlotRing<'a, R, A> = AsLocalPIR<FreeAlgebraImpl<&'a R, SparseHashMapVector<&'a R>, A, FFTRNSBasedConvolutionZn>>;
+pub type SlotRing<'a, R, A> = AsLocalPIR<FreeAlgebraImpl<&'a R, SparseMapVector<&'a R>, A, FFTRNSBasedConvolutionZn>>;
 
 ///
 /// Encapsulates the isomorphism
@@ -291,15 +289,24 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
         let t = int_cast(ring.base_ring().integer_ring().clone_el(ring.base_ring().modulus()), ZZ, ring.base_ring().integer_ring());
         let (p, e) = is_prime_power(&ZZ, &t).unwrap();
         let (dims, galois_group_ring) = compute_hypercube_structure(ring.n() as i64, p);
+
+        println!("got hypercube structure");
+
         let frobenius = galois_group_ring.can_hom(&ZZ).unwrap().map(p);
         let slot_count: usize = dims.iter().map(|dim| dim.length).product();
         let d = ring.rank() / slot_count;
 
         // first task: compute a nice representation of the slot ring
         let max_log2_len = ZZ.abs_log2_ceil(&(d as i64)).unwrap() + 1;
-        let tmp_slot_ring = RingValue::from(galois_ring_dyn(p, e, d).get_ring().get_delegate().clone()).set_convolution(FFTRNSBasedConvolutionZn::from(FFTRNSBasedConvolution::<R::Type>::new_with(max_log2_len, BigIntRing::RING, Global)));
+        println!("GR({}, {}, {})", p, e, d);
+        let convolution = FFTRNSBasedConvolutionZn::from(FFTRNSBasedConvolution::<R::Type>::new_with(max_log2_len, BigIntRing::RING, Global));
+        let tmp_slot_ring = GaloisField::new(p, d).get_ring().galois_ring_with(AsLocalPIR::from_zn(RingRef::new(ring.base_ring().get_ring())).unwrap(), Global, convolution);
         
+        println!("got slot ring");
+
         let root_of_unity = get_prim_root_of_unity(&tmp_slot_ring, ring.n());
+
+        println!("got root of unity");
         
         let poly_ring = DensePolyRing::new(&tmp_slot_ring, "X");
         let mut slot_generating_poly = poly_ring.prod((0..d).scan(tmp_slot_ring.clone_el(&root_of_unity), |current_root_of_unity, _| {
@@ -308,11 +315,13 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
             return Some(result);
         }));
         
+        println!("computed slot generating poly");
+
         let normalization_factor = poly_ring.base_ring().invert(poly_ring.lc(&slot_generating_poly).unwrap()).unwrap();
         poly_ring.inclusion().mul_assign_map(&mut slot_generating_poly, normalization_factor);
 
         let hom = ring.base_ring().can_hom(tmp_slot_ring.base_ring()).unwrap();
-        let mut slot_ring_modulus = SparseHashMapVector::new(d, ring.base_ring());
+        let mut slot_ring_modulus = SparseMapVector::new(d, ring.base_ring());
         for (coeff, i) in poly_ring.terms(&slot_generating_poly) {
             let coeff_wrt_basis = tmp_slot_ring.wrt_canonical_basis(&coeff);
             assert!((1..tmp_slot_ring.rank()).all(|i| tmp_slot_ring.base_ring().is_zero(&coeff_wrt_basis.at(i))));
@@ -375,7 +384,7 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
 
         let poly_ring = DensePolyRing::new(self.slot_ring().base_ring(), "X");
         let slot_ring_modulus = self.slot_ring().generating_poly(&poly_ring, &poly_ring.base_ring().identity());
-        let mut new_slot_ring_modulus = SparseHashMapVector::new(self.slot_ring().rank(), new_ring.base_ring());
+        let mut new_slot_ring_modulus = SparseMapVector::new(self.slot_ring().rank(), new_ring.base_ring());
         for (c, i) in poly_ring.terms(&slot_ring_modulus) {
             if i != self.slot_ring().rank() {
                 *new_slot_ring_modulus.at_mut(i) = new_ring.base_ring().negate(red_map.map_ref(c));
@@ -722,7 +731,7 @@ pub mod serialization {
             let galois_group_ring = Zn::new(value.galois_group_ring_modulus);
             let hom = galois_group_ring.can_hom(&StaticRing::<i64>::RING).unwrap();
 
-            let mut slot_ring_modulus = SparseHashMapVector::new(value.slot_rank, value.ring.base_ring());
+            let mut slot_ring_modulus = SparseMapVector::new(value.slot_rank, value.ring.base_ring());
             for (coeff, i) in value.poly_ring.terms(&value.slot_ring_modulus) {
                 if i != value.slot_rank {
                     *slot_ring_modulus.at_mut(i) = value.poly_ring.base_ring().clone_el(coeff);

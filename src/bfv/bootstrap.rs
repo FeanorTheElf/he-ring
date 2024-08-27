@@ -12,6 +12,8 @@ use feanor_math::seq::VectorView;
 use polys::poly_to_circuit;
 use rand::thread_rng;
 
+use crate::cyclotomic::CyclotomicRingStore;
+use crate::lintransform::composite::{odd_powcoeffs_to_slots_thin, odd_slots_to_powcoeffs_thin};
 use crate::lintransform::pow2::pow2_coeffs_to_slots_thin;
 use crate::rnsconv;
 use crate::{digitextract::*, lintransform::pow2::pow2_slots_to_coeffs_thin};
@@ -93,6 +95,7 @@ impl<Params: BFVParams> Pow2BFVThinBootstrapParams<Params> {
         let s_can_norm = params.n();
         let v = config.set_v.unwrap_or(((s_can_norm as f64 + 1.).log2() / (p as f64).log2()).ceil() as usize);
         let e = r + v;
+        println!("e = {} + {}", r, v);
 
         let digit_extraction_circuits = 
         // if r == 1 {
@@ -127,18 +130,31 @@ impl<Params: BFVParams> Pow2BFVThinBootstrapParams<Params> {
                 slotwise_trace: Pow2Trace::slotwise_trace(H.galois_group_mulrepr(), p, H.slot_ring().rank())
             };
         } else {
+            println!("creating hypercube...");
+            let start = Instant::now();
             let H = HypercubeIsomorphism::new(plaintext_ring.get_ring());
+            let end = Instant::now();
+            println!("done in {} ms", (end - start).as_millis());
+
             let original_H = H.reduce_modulus(original_plaintext_ring.get_ring());
     
             println!("computing slots-to-coeffs transforms...");
             let start = Instant::now();
-            let slots_to_coeffs = pow2_slots_to_coeffs_thin(&original_H);
+            let slots_to_coeffs = if H.ring().n() % 2 == 0 {
+                pow2_slots_to_coeffs_thin(&original_H)
+            } else {
+                odd_slots_to_powcoeffs_thin(&original_H)
+            };
             let end = Instant::now();
             println!("done in {} ms", (end - start).as_millis());
     
             println!("computing coeffs-to-slots transforms...");
             let start = Instant::now();
-            let coeffs_to_slots = pow2_coeffs_to_slots_thin(&H);
+            let coeffs_to_slots = if H.ring().n() % 2 == 0 {
+                pow2_coeffs_to_slots_thin(&H)
+            } else {
+                odd_powcoeffs_to_slots_thin(&H)
+            };
             let end = Instant::now();
             println!("done in {} ms", (end - start).as_millis());
     
@@ -424,7 +440,7 @@ fn test_composite_bfv_thin_bootstrapping_2() {
         log2_q_min: 750,
         log2_q_max: 800,
         n1: 17,
-        n2: 97
+        n2: 31
     };
     let bootstrapper = Pow2BFVThinBootstrapParams::create_for(params.clone(), DEFAULT_CONFIG, None, None);
     
