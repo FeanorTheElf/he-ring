@@ -15,29 +15,20 @@ use crate::cyclotomic::*;
 use crate::StdZn;
 use crate::lintransform::*;
 
-fn column_dwt<R, F, A, G>(H: &HypercubeIsomorphism<R, F, A>, dim_index: usize, row_autos: G) -> Vec<LinearTransform<R, F, A>>
+fn transform_1d<'a, R, F, A, G>(H: &HypercubeIsomorphism<'a, R, F, A>, dim_index: usize, matrix: G) -> LinearTransform<R, F, A>
     where R: RingStore,
         R::Type: StdZn,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
         A: Allocator + Clone,
         NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
-        G: Fn(&[usize]) -> ZnEl
+        G: Fn(usize, usize, &[usize]) -> El<SlotRing<'a, R, A>>
 {
     let m = H.len(dim_index) as i64;
-    let zeta = H.slot_ring().pow(H.slot_ring().canonical_gen(), H.ring().n() / H.dim(dim_index).corresponding_factor_n() as usize);
     let hom = H.galois_group_mulrepr().can_hom(&StaticRing::<i64>::RING).unwrap();
-    // multiplication with the matrix `A(i, j) = zeta^(j * g^i)` if we consider an element as multiple vectors along the `dim_index`-th dimension
-    vec![LinearTransform {
+    let mut result = LinearTransform {
         data: ((1 - m)..m).map(|s| {
             let coeff = H.from_slot_vec(H.slot_iter(|idxs| if idxs[dim_index] as i64 >= s && idxs[dim_index] as i64 - s < m {
-                H.slot_ring().pow(H.slot_ring().clone_el(&zeta), {
-                    let res = H.galois_group_mulrepr().smallest_positive_lift(H.galois_group_mulrepr().prod([
-                        H.shift_galois_element(dim_index, -(idxs[dim_index] as i64)),
-                        hom.map(idxs[dim_index] as i64 - s),
-                        row_autos(idxs)
-                    ].into_iter())) as usize;
-                    res 
-                })
+                matrix(idxs[dim_index], (idxs[dim_index] as i64 - s) as usize, idxs)
             } else {
                 H.slot_ring().zero()
             }));
@@ -47,7 +38,46 @@ fn column_dwt<R, F, A, G>(H: &HypercubeIsomorphism<R, F, A>, dim_index: usize, r
                 (0..H.dim_count()).map(|i| if i == dim_index { s } else { 0 }).collect()
             );
         }).collect()
-    }]
+    };
+    result.optimize(H);
+    return result;
+}
+
+fn column_dwt_matrix<'a, 'b, R, F, A, G>(H: &'b HypercubeIsomorphism<'a, R, F, A>, dim_index: usize, row_autos: G) -> impl 'b + Fn(usize, usize, &[usize]) -> El<SlotRing<'a, R, A>>
+    where R: RingStore,
+        R::Type: StdZn,
+        F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
+        A: Allocator + Clone,
+        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
+        G: 'b + Fn(&[usize]) -> ZnEl
+{
+    let m = H.len(dim_index) as i64;
+    let zeta = H.slot_ring().pow(H.slot_ring().canonical_gen(), H.ring().n() / H.dim(dim_index).corresponding_factor_n() as usize);
+    let hom = H.galois_group_mulrepr().can_hom(&StaticRing::<i64>::RING).unwrap();
+    move |i, j, idxs| H.slot_ring().pow(
+        H.slot_ring().clone_el(&zeta), 
+        H.galois_group_mulrepr().smallest_positive_lift(H.galois_group_mulrepr().prod([
+            H.shift_galois_element(dim_index, -(i as i64)),
+            hom.map(j as i64),
+            row_autos(idxs)
+        ].into_iter())) as usize
+    )
+}
+
+fn column_dwt<R, F, A, G>(H: &HypercubeIsomorphism<R, F, A>, dim_index: usize, row_autos: G) -> Vec<LinearTransform<R, F, A>>
+    where R: RingStore,
+        R::Type: StdZn,
+        F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
+        A: Allocator + Clone,
+        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
+        G: Fn(&[usize]) -> ZnEl
+{
+    // multiplication with the matrix `A(i, j) = zeta^(j * g^i)` if we consider an element as multiple vectors along the `dim_index`-th dimension
+    vec![transform_1d(
+        H, 
+        dim_index, 
+        column_dwt_matrix(H, dim_index, row_autos), 
+    )]
 }
 
 ///
@@ -61,40 +91,24 @@ fn column_dwt_inv<R, F, A, G>(H: &HypercubeIsomorphism<R, F, A>, dim_index: usiz
         NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
         G: Fn(&[usize]) -> ZnEl
 {
-    let m = H.len(dim_index) as i64;
-    let (p, e) = is_prime_power(&StaticRing::<i64>::RING, &H.dim(dim_index).corresponding_factor_n()).unwrap();
-    debug_assert_eq!(m, (p - 1) * StaticRing::<i64>::RING.pow(p, e - 1));
-    let zeta = H.slot_ring().pow(H.slot_ring().canonical_gen(), H.ring().n() / H.dim(dim_index).corresponding_factor_n() as usize);
-    let hom = H.galois_group_mulrepr().can_hom(&StaticRing::<i64>::RING).unwrap();
-    let m_inv = H.slot_ring().base_ring().invert(&H.slot_ring().base_ring().coerce(&StaticRing::<i64>::RING, m)).unwrap();
-
-    // consider again the matrix `A(i, j) = zeta^(j * g^i)`, and set `B(i, j) = zeta^(-i * g^j)`
-    // Then `BA = nI - C` where `C(i, j) = 1` (at least in the case `p = 1`), so `nA^-1 = B + A'` 
-    // if we choose `A'` such that `A'A = C`;
-    // This clearly means that every row of `A'` is `a'` with `sum_i a'(i) zeta^(g^i) = 1`
-
-    let poly_ring = DensePolyRing::new(H.slot_ring(), "X");
-    // let a_prime_as_poly = 
-
-    vec![LinearTransform {
-        data: ((1 - m)..m).map(|s| {
-            let coeff = H.from_slot_vec(H.slot_iter(|idxs| if idxs[dim_index] as i64 >= s && idxs[dim_index] as i64 - s < m {
-                H.slot_ring().inclusion().mul_ref_snd_map(H.slot_ring().pow(H.slot_ring().clone_el(&zeta), {
-                    let res = H.galois_group_mulrepr().smallest_positive_lift(H.galois_group_mulrepr().prod([
-                    H.shift_galois_element(dim_index, s - idxs[dim_index] as i64),
-                    hom.map(-(idxs[dim_index] as i64)),
-                    row_autos(idxs)
-                ].into_iter())) as usize; res }), &m_inv)
-            } else {
-                H.slot_ring().zero()
-            }));
-            return (
-                H.shift_galois_element(dim_index, s),
-                coeff, 
-                (0..H.dim_count()).map(|i| if i == dim_index { s } else { 0 }).collect()
-            );
-        }).collect()
-    }]
+    let m = H.len(dim_index);
+    let A = column_dwt_matrix(H, dim_index, |_| H.galois_group_mulrepr().one());
+    let dummy_idxs = (0..H.dim_count()).map(|_| usize::MAX).collect::<Vec<_>>();
+    let mut lhs: OwnedMatrix<_> = OwnedMatrix::from_fn_in(m, m, |i, j| A(i, j, &dummy_idxs), Global);
+    let mut rhs: OwnedMatrix<_> = OwnedMatrix::identity(m, m, H.slot_ring());
+    let mut sol: OwnedMatrix<_> = OwnedMatrix::zero(m, m, H.slot_ring());
+    H.slot_ring().get_ring().solve_right(lhs.data_mut(), rhs.data_mut(), sol.data_mut(), Global).assert_solved();
+    vec![transform_1d(
+        H, 
+        dim_index,
+        |i, j, idxs| {
+            let base_value = H.slot_ring().clone_el(sol.at(i, j));
+            if !H.galois_group_mulrepr().is_one(&row_autos(idxs)) {
+                unimplemented!();
+            }
+            return base_value;
+        }
+    )]
 }
 
 ///

@@ -8,6 +8,7 @@
 #![feature(associated_type_defaults)]
 
 #![allow(non_snake_case)]
+#![allow(type_alias_bounds)]
 #![allow(non_camel_case_types)]
 #![allow(non_upper_case_globals)]
 
