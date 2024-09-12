@@ -197,10 +197,10 @@ use feanor_math::assert_el_eq;
 
 #[test]
 fn test_rescale() {
-    let from = vec![Zn::new(17), Zn::new(97), Zn::new(113)];
+    let from = vec![Zn::new(17), Zn::new(23), Zn::new(113)];
     let to = vec![Zn::new(19), Zn::new(257)];
     let Zt = Zn::new(5);
-    let q = 17 * 97 * 113;
+    let q = 17 * 23 * 113;
     let qprime = 19 * 257;
 
     let rescaling = CongruencePreservingRescaling::new_with(
@@ -241,11 +241,11 @@ fn test_rescale() {
 
 #[test]
 fn test_rescale_down() {
-    let from = vec![Zn::new(17), Zn::new(97), Zn::new(113)];
-    let to = vec![Zn::new(97), Zn::new(113)];
+    let from = vec![Zn::new(17), Zn::new(23), Zn::new(113)];
+    let to = vec![Zn::new(23), Zn::new(113)];
     let Zt = Zn::new(5);
-    let q = 17 * 97 * 113;
-    let qprime = 97 * 113;
+    let q = 17 * 23 * 113;
+    let qprime = 23 * 113;
 
     let rescaling = CongruencePreservingRescaling::scale_down(
         from.clone(), 

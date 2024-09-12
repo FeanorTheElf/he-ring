@@ -29,6 +29,7 @@ use crate::StdZn;
 
 pub mod pow2;
 pub mod composite;
+pub mod trace;
 
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
 

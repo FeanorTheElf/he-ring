@@ -1,12 +1,11 @@
 use feanor_math::algorithms::int_factor::is_prime_power;
-use feanor_math::divisibility::DivisibilityRingStore;
 use feanor_math::homomorphism::Homomorphism;
 use feanor_math::integer::{int_cast, IntegerRingStore};
 use feanor_math::primitive_int::StaticRing;
 use feanor_math::ring::*;
 use feanor_math::rings::extension::FreeAlgebraStore;
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
-use feanor_math::rings::zn::zn_64::{Zn, ZnEl};
+use feanor_math::rings::zn::zn_64::ZnEl;
 use feanor_math::rings::zn::ZnRingStore;
 use feanor_math::seq::VectorView;
 use polys::poly_to_circuit;
@@ -15,6 +14,7 @@ use rand::thread_rng;
 use crate::cyclotomic::CyclotomicRingStore;
 use crate::lintransform::composite::{odd_powcoeffs_to_slots_thin, odd_slots_to_powcoeffs_thin};
 use crate::lintransform::pow2::pow2_coeffs_to_slots_thin;
+use crate::lintransform::trace::Trace;
 use crate::rnsconv;
 use crate::{digitextract::*, lintransform::pow2::pow2_slots_to_coeffs_thin};
 use crate::digitextract::polys::digit_retain_poly;
@@ -22,43 +22,12 @@ use crate::lintransform::CompiledLinearTransform;
 
 use super::*;
 
-pub struct Pow2Trace {
-    galois_elements: Vec<ZnEl>,
-    trace_rank_quo: i64
-}
-
-impl Pow2Trace {
-
-    pub fn slotwise_trace(Gal: &Zn, p: i64, slot_rank: usize) -> Pow2Trace {
-        let log2_slot_rank = ZZ.abs_log2_ceil(&(slot_rank as i64)).unwrap();
-        assert_eq!(slot_rank, 1 << log2_slot_rank);
-        Pow2Trace { 
-            galois_elements: (0..log2_slot_rank).map(|i| Gal.pow(Gal.coerce(&ZZ, p), 1 << i)).collect(),
-            trace_rank_quo: slot_rank as i64
-        }
-    }
-
-    pub fn evaluate_generic<T, Add, ApplyGalois>(&self, input: T, mut add_fn: Add, mut apply_galois_fn: ApplyGalois) -> T
-        where Add: FnMut(T, &T) -> T,
-            ApplyGalois: FnMut(&T, &ZnEl) -> T
-    {
-        self.galois_elements.iter().fold(input, |current, g| {
-            let conjugate = apply_galois_fn(&current, g);
-            add_fn(conjugate, &current)
-        })
-    }
-
-    pub fn required_galois_keys<'a>(&'a self) -> impl 'a + Iterator<Item = &'a ZnEl> {
-        self.galois_elements.iter()
-    }
-}
-
-pub struct Pow2BFVThinBootstrapParams<Params: BFVParams> {
+pub struct ThinBootstrapParams<Params: BFVParams> {
     params: Params,
     r: usize,
     e: usize,
     p: i64,
-    slotwise_trace: Pow2Trace,
+    slotwise_trace: Trace,
     // the k-th circuit works modulo `e - k` and outputs values `yi` such that `yi = lift(x mod p) mod p^(i + 2)` for `0 <= i < v - k - 2` as well as a final `y'` with `y' = lift(x mod p)`
     digit_extract_circuits: Vec<ArithCircuit>,
     slots_to_coeffs_thin: Vec<CompiledLinearTransform<PlaintextZn, Params::PlaintextRingDecomposition, Global>>,
@@ -87,7 +56,7 @@ pub struct BootstrappingDataBundle<Params: BFVParams> {
     pub mod_switch: ModSwitchData
 }
 
-impl<Params: BFVParams> Pow2BFVThinBootstrapParams<Params> {
+impl<Params: BFVParams> ThinBootstrapParams<Params> {
 
     pub fn create_for(params: Params, config: BootstrapperConfig, load_data: Option<&str>, store_data: Option<&str>) -> Self {
         let (p, r) = is_prime_power(&ZZ, &params.t()).unwrap();
@@ -127,7 +96,7 @@ impl<Params: BFVParams> Pow2BFVThinBootstrapParams<Params> {
                 digit_extract_circuits: digit_extraction_circuits,
                 slots_to_coeffs_thin: slots_to_coeffs,
                 coeffs_to_slots_thin: coeffs_to_slots,
-                slotwise_trace: Pow2Trace::slotwise_trace(H.galois_group_mulrepr(), p, H.slot_ring().rank())
+                slotwise_trace: Trace::new(H.galois_group_mulrepr(), p, H.slot_ring().rank())
             };
         } else {
             println!("creating hypercube...");
@@ -180,7 +149,7 @@ impl<Params: BFVParams> Pow2BFVThinBootstrapParams<Params> {
                 digit_extract_circuits: digit_extraction_circuits,
                 slots_to_coeffs_thin: compiled_slots_to_coeffs_thin,
                 coeffs_to_slots_thin: compiled_coeffs_to_slots_thin,
-                slotwise_trace: Pow2Trace::slotwise_trace(H.galois_group_mulrepr(), p, H.slot_ring().rank())
+                slotwise_trace: Trace::new(H.galois_group_mulrepr(), p, H.slot_ring().rank())
             };
         }
     }
@@ -257,7 +226,6 @@ impl<Params: BFVParams> Pow2BFVThinBootstrapParams<Params> {
             &int_cast(*P_main.base_ring().modulus() as i32, &ZZbig, &StaticRing::<i32>::RING)
         ));
         let rounding_divisor_half = P_main.base_ring().coerce(&ZZbig, ZZbig.rounded_div(ZZbig.pow(int_cast(self.p, ZZbig, ZZ), self.e - self.r), &ZZbig.int_hom().map(2)));
-        let undo_trace_scaling = P_main.base_ring().invert(&P_main.base_ring().coerce(&ZZ, self.slotwise_trace.trace_rank_quo)).unwrap();
 
         let get_gk = |g: &ZnEl| &gk.iter().filter(|(s, _)| Gal.eq_el(g, s)).next().unwrap().1;
 
@@ -308,9 +276,10 @@ impl<Params: BFVParams> Pow2BFVThinBootstrapParams<Params> {
             |value, g| {
                 key_switches += 1;
                 hom_galois(C, clone_ct(C, value), *g, get_gk(g))
-            }
+            },
+            |value| clone_ct(C, value)
         );
-        let cancelled_out_irrelevant_coeffs = hom_mul_plain(&P_main, C, &P.inclusion().map(undo_trace_scaling), cancelled_out_irrelevant_coeffs);
+        let cancelled_out_irrelevant_coeffs = hom_mul_plain(&P_main, C, &P.inclusion().map(unimplemented!("undo_trace_scaling")), cancelled_out_irrelevant_coeffs);
         if LOG {
             let end = Instant::now();
             println!("done in {} ms and {} key switches", (end - start).as_millis(), key_switches);
@@ -394,16 +363,56 @@ impl<Params: BFVParams> Pow2BFVThinBootstrapParams<Params> {
 }
 
 #[test]
-fn test_bfv_thin_bootstrapping_17() {
+fn test_pow2_bfv_thin_bootstrapping_17() {
     let mut rng = thread_rng();
     
+    // 8 slots of rank 16
     let params = Pow2BFVParams {
         t: 17,
         log2_q_min: 790,
         log2_q_max: 800,
         log2_N: 7
     };
-    let bootstrapper = Pow2BFVThinBootstrapParams::create_for(params.clone(), DEFAULT_CONFIG, None, None);
+    let bootstrapper = ThinBootstrapParams::create_for(params.clone(), DEFAULT_CONFIG, None, None);
+    
+    let P = params.create_plaintext_ring(params.t());
+    let (C, C_mul) = params.create_ciphertext_rings();
+
+    let bootstrapping_data = bootstrapper.create_all_bootstrapping_data(&C, &C_mul);
+    
+    let sk = gen_sk::<_, Pow2BFVParams>(&C, &mut rng);
+    let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, gen_gk::<_, Pow2BFVParams>(&C, &mut rng, &sk, g))).collect::<Vec<_>>();
+    let rk = gen_rk::<_, Pow2BFVParams>(&C, &mut rng, &sk);
+    
+    let m = P.int_hom().map(2);
+    let ct = enc_sym(&P, &C, &mut rng, &m, &sk);
+    let res_ct = bootstrapper.bootstrap_thin::<true>(
+        &C, 
+        &C_mul, 
+        &P, 
+        &bootstrapping_data.plaintext_ring_hierarchy, 
+        &bootstrapping_data.multiplication_rescale_hierarchy, 
+        &bootstrapping_data.mod_switch, 
+        ct, 
+        &rk, 
+        &gk
+    );
+
+    assert_el_eq!(P, P.int_hom().map(2), dec(&P, &C, res_ct, &sk));
+}
+
+#[test]
+fn test_pow2_bfv_thin_bootstrapping_23() {
+    let mut rng = thread_rng();
+    
+    // 4 slots of rank 32
+    let params = Pow2BFVParams {
+        t: 23,
+        log2_q_min: 790,
+        log2_q_max: 800,
+        log2_N: 7
+    };
+    let bootstrapper = ThinBootstrapParams::create_for(params.clone(), DEFAULT_CONFIG, None, None);
     
     let P = params.create_plaintext_ring(params.t());
     let (C, C_mul) = params.create_ciphertext_rings();
@@ -435,6 +444,7 @@ fn test_bfv_thin_bootstrapping_17() {
 fn test_composite_bfv_thin_bootstrapping_2() {
     let mut rng = thread_rng();
     
+    // 12 slots of rank 40
     let params = CompositeBFVParams {
         t: 8,
         log2_q_min: 750,
@@ -442,7 +452,7 @@ fn test_composite_bfv_thin_bootstrapping_2() {
         n1: 17,
         n2: 31
     };
-    let bootstrapper = Pow2BFVThinBootstrapParams::create_for(params.clone(), DEFAULT_CONFIG, None, None);
+    let bootstrapper = ThinBootstrapParams::create_for(params.clone(), DEFAULT_CONFIG, None, None);
     
     let P = params.create_plaintext_ring(params.t());
     let (C, C_mul) = params.create_ciphertext_rings();
@@ -472,7 +482,7 @@ fn test_composite_bfv_thin_bootstrapping_2() {
 
 #[test]
 #[ignore]
-fn test_bfv_thin_bootstrapping_257() {
+fn test_large_pow2_bfv_thin_bootstrapping_257() {
     let mut rng = thread_rng();
     
     let params = Pow2BFVParams {
@@ -481,7 +491,7 @@ fn test_bfv_thin_bootstrapping_257() {
         log2_q_max: 1200,
         log2_N: 10
     };
-    let bootstrapper = Pow2BFVThinBootstrapParams::create_for(params.clone(), DEFAULT_CONFIG, None, None);
+    let bootstrapper = ThinBootstrapParams::create_for(params.clone(), DEFAULT_CONFIG, None, None);
     
     let P = params.create_plaintext_ring(params.t());
     let (C, C_mul) = params.create_ciphertext_rings();
@@ -522,7 +532,7 @@ fn run_bfv_thin_bootstrapping() {
     };
     println!("Preparing bootstrapper...");
 
-    let bootstrapper = Pow2BFVThinBootstrapParams::create_for(params.clone(), DEFAULT_CONFIG.set_v(1), Some("F:\\Users\\Simon\\Documents\\Projekte\\he-ring\\bootstrap_257_1_1_thin"), None);
+    let bootstrapper = ThinBootstrapParams::create_for(params.clone(), DEFAULT_CONFIG.set_v(1), Some("F:\\Users\\Simon\\Documents\\Projekte\\he-ring\\bootstrap_257_1_1_thin"), None);
     
     println!("Preparing utility data...");
 
