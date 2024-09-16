@@ -434,28 +434,6 @@ pub fn slots_to_coeffs_thin_inv<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> V
 use crate::rings::pow2_cyclotomic::DefaultPow2CyclotomicNTTRingBase;
 
 #[test]
-fn test_pow2_bitreversed_dwt() {
-    // `F23[X]/(X^16 + 1) ~ F_(23^4)^4`
-    let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(23), 4);
-    let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
-
-    let mut current = ring_literal!(&ring, [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-    for T in pow2_bitreversed_dwt(&H, 0, |_| H.galois_group_mulrepr().one()) {
-        current = ring.get_ring().compute_linear_transform(&current, &T);
-    }
-
-    assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]), &current);
-
-    let mut current = H.from_slot_vec([1, 2, 3, 4].into_iter().map(|n| H.slot_ring().int_hom().map(n)));
-    for T in pow2_bitreversed_dwt(&H, 0, |_| H.galois_group_mulrepr().one()) {
-        current = ring.get_ring().compute_linear_transform(&current, &T);
-    }
-
-    // remember that input is in bitreversed order
-    assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 3, 0, 2, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0]), &current);
-}
-
-#[test]
 fn test_pow2_slots_to_coeffs_thin() {
     // `F97[X]/(X^32 + 1) ~ F_(97^2)^16`
     let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(97), 5);

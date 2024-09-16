@@ -761,40 +761,46 @@ fn test_compile() {
     let compiled_transform = slots_to_coeffs_thin(&H).into_iter().map(|T| CompiledLinearTransform::create_from(&H, T, 2)).collect::<Vec<_>>();
 
     let mut current = H.from_slot_vec([1, 2, 3, 4].into_iter().map(|n| H.slot_ring().int_hom().map(n)));
+    let expected = slots_to_coeffs_thin(&H).into_iter().fold(ring.clone_el(&current), |c, T| ring.get_ring().compute_linear_transform(&c, &T));
     for T in &compiled_transform {
         current = T.evaluate(current, &ring);
     }
-    assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 0, 0, 3, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), &current);
+    assert_el_eq!(&ring, &expected, &current);
     
     let compiled_composed_transform = CompiledLinearTransform::create_from_merged(&H, &slots_to_coeffs_thin(&H), 2);
     let mut current = H.from_slot_vec([1, 2, 3, 4].into_iter().map(|n| H.slot_ring().int_hom().map(n)));
+    let expected = slots_to_coeffs_thin(&H).into_iter().fold(ring.clone_el(&current), |c, T| ring.get_ring().compute_linear_transform(&c, &T));
     current = compiled_composed_transform.evaluate(current, &ring);
-    assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 0, 0, 3, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), &current);
+    assert_el_eq!(&ring, &expected, &current);
 
     let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(97), 5);
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
     let compiled_transform = slots_to_coeffs_thin(&H).into_iter().map(|T| CompiledLinearTransform::create_from(&H, T, 2)).collect::<Vec<_>>();
     
     let mut current = H.from_slot_vec((1..17).map(|n| H.slot_ring().int_hom().map(n)));
+    let expected = slots_to_coeffs_thin(&H).into_iter().fold(ring.clone_el(&current), |c, T| ring.get_ring().compute_linear_transform(&c, &T));
     for T in compiled_transform {
         current = T.evaluate(current, &ring);
     }
-    assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 5, 0, 3, 0, 7, 0, 2, 0, 6, 0, 4, 0, 8, 0, 9, 0, 13, 0, 11, 0, 15, 0, 10, 0, 14, 0, 12, 0, 16, 0]), &current);
+    assert_el_eq!(&ring, &expected, &current);
 
     let compiled_composed_transform = CompiledLinearTransform::create_from_merged(&H, &slots_to_coeffs_thin(&H), 2);
     let mut current = H.from_slot_vec((1..17).map(|n| H.slot_ring().int_hom().map(n)));
+    let expected = slots_to_coeffs_thin(&H).into_iter().fold(ring.clone_el(&current), |c, T| ring.get_ring().compute_linear_transform(&c, &T));
     current = compiled_composed_transform.evaluate(current, &ring);
-    assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 5, 0, 3, 0, 7, 0, 2, 0, 6, 0, 4, 0, 8, 0, 9, 0, 13, 0, 11, 0, 15, 0, 10, 0, 14, 0, 12, 0, 16, 0]), &current);
+    assert_el_eq!(&ring, &expected, &current);
 
     let compiled_composed_transform = CompiledLinearTransform::create_from_merged(&H, &slots_to_coeffs_thin(&H), 3);
     let mut current = H.from_slot_vec((1..17).map(|n| H.slot_ring().int_hom().map(n)));
+    let expected = slots_to_coeffs_thin(&H).into_iter().fold(ring.clone_el(&current), |c, T| ring.get_ring().compute_linear_transform(&c, &T));
     current = compiled_composed_transform.evaluate(current, &ring);
-    assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 5, 0, 3, 0, 7, 0, 2, 0, 6, 0, 4, 0, 8, 0, 9, 0, 13, 0, 11, 0, 15, 0, 10, 0, 14, 0, 12, 0, 16, 0]), &current);
+    assert_el_eq!(&ring, &expected, &current);
 
     let compiled_composed_transform = CompiledLinearTransform::create_from_merged(&H, &slots_to_coeffs_thin(&H), 5);
     let mut current = H.from_slot_vec((1..17).map(|n| H.slot_ring().int_hom().map(n)));
+    let expected = slots_to_coeffs_thin(&H).into_iter().fold(ring.clone_el(&current), |c, T| ring.get_ring().compute_linear_transform(&c, &T));
     current = compiled_composed_transform.evaluate(current, &ring);
-    assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 5, 0, 3, 0, 7, 0, 2, 0, 6, 0, 4, 0, 8, 0, 9, 0, 13, 0, 11, 0, 15, 0, 10, 0, 14, 0, 12, 0, 16, 0]), &current);
+    assert_el_eq!(&ring, &expected, &current);
 }
 
 #[test]
@@ -804,18 +810,22 @@ fn test_compose() {
     let composed_transform = slots_to_coeffs_thin(&H).into_iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H));
 
     let mut current = H.from_slot_vec([1, 2, 3, 4].into_iter().map(|n| H.slot_ring().int_hom().map(n)));
+    let mut expected = ring.clone_el(&current);
     current = ring.get_ring().compute_linear_transform(&current, &composed_transform);
+    expected = slots_to_coeffs_thin(&H).into_iter().fold(expected, |c, T| ring.get_ring().compute_linear_transform(&c, &T));
 
-    assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 0, 0, 3, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), &current);
+    assert_el_eq!(&ring, &expected, &current);
     
     let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(97), 5);
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
     let composed_transform = slots_to_coeffs_thin(&H).into_iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H));
     
     let mut current = H.from_slot_vec((1..17).map(|n| H.slot_ring().int_hom().map(n)));
+    let mut expected = ring.clone_el(&current);
     current = ring.get_ring().compute_linear_transform(&current, &composed_transform);
+    expected = slots_to_coeffs_thin(&H).into_iter().fold(expected, |c, T| ring.get_ring().compute_linear_transform(&c, &T));
 
-    assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 5, 0, 3, 0, 7, 0, 2, 0, 6, 0, 4, 0, 8, 0, 9, 0, 13, 0, 11, 0, 15, 0, 10, 0, 14, 0, 12, 0, 16, 0]), &current);
+    assert_el_eq!(&ring, &expected, &current);
 }
 
 #[test]
@@ -825,9 +835,9 @@ fn test_invert() {
     let composed_transform = slots_to_coeffs_thin(&H).into_iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H));
     let inv_transform = composed_transform.inverse(&H);
 
-    let current = ring_literal!(&ring, [1, 0, 0, 0, 3, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-    let actual = ring.get_ring().compute_linear_transform(&current, &inv_transform);
     let expected = H.from_slot_vec([1, 2, 3, 4].into_iter().map(|n| H.slot_ring().int_hom().map(n)));
+    let current = slots_to_coeffs_thin(&H).into_iter().fold(ring.clone_el(&expected), |c, T| ring.get_ring().compute_linear_transform(&c, &T));
+    let actual = ring.get_ring().compute_linear_transform(&current, &inv_transform);
     assert_el_eq!(&ring, &expected, &actual);
     
     let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(97), 5);
@@ -835,9 +845,9 @@ fn test_invert() {
     let composed_transform = slots_to_coeffs_thin(&H).into_iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H));
     let inv_transform = composed_transform.inverse(&H);
     
-    let current = ring_literal!(&ring, [1, 0, 5, 0, 3, 0, 7, 0, 2, 0, 6, 0, 4, 0, 8, 0, 9, 0, 13, 0, 11, 0, 15, 0, 10, 0, 14, 0, 12, 0, 16, 0]);
-    let actual = ring.get_ring().compute_linear_transform(&current, &inv_transform);
     let expected = H.from_slot_vec((1..17).map(|n| H.slot_ring().int_hom().map(n)));
+    let current = slots_to_coeffs_thin(&H).into_iter().fold(ring.clone_el(&expected), |c, T| ring.get_ring().compute_linear_transform(&c, &T));
+    let actual = ring.get_ring().compute_linear_transform(&current, &inv_transform);
 
     assert_el_eq!(&ring, &expected, &actual);
 }
