@@ -12,11 +12,12 @@ use polys::poly_to_circuit;
 use rand::thread_rng;
 
 use crate::cyclotomic::CyclotomicRingStore;
-use crate::lintransform::composite::{odd_powcoeffs_to_slots_thin, odd_slots_to_powcoeffs_thin};
-use crate::lintransform::pow2::pow2_coeffs_to_slots_thin;
+use crate::lintransform::composite;
+use crate::lintransform::pow2::coeffs_to_slots_thin;
 use crate::lintransform::trace::Trace;
 use crate::rnsconv;
-use crate::{digitextract::*, lintransform::pow2::pow2_slots_to_coeffs_thin};
+use crate::digitextract::*;
+use crate::lintransform::pow2;
 use crate::digitextract::polys::digit_retain_poly;
 use crate::lintransform::CompiledLinearTransform;
 
@@ -101,7 +102,7 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
         } else {
             println!("creating hypercube...");
             let start = Instant::now();
-            let H = HypercubeIsomorphism::new(plaintext_ring.get_ring());
+            let H = HypercubeIsomorphism::new::<true>(plaintext_ring.get_ring());
             let end = Instant::now();
             println!("done in {} ms", (end - start).as_millis());
 
@@ -110,9 +111,9 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
             println!("computing slots-to-coeffs transforms...");
             let start = Instant::now();
             let slots_to_coeffs = if H.ring().n() % 2 == 0 {
-                pow2_slots_to_coeffs_thin(&original_H)
+                pow2::slots_to_coeffs_thin(&original_H)
             } else {
-                odd_slots_to_powcoeffs_thin(&original_H)
+                composite::slots_to_powcoeffs_thin(&original_H)
             };
             let end = Instant::now();
             println!("done in {} ms", (end - start).as_millis());
@@ -120,9 +121,9 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
             println!("computing coeffs-to-slots transforms...");
             let start = Instant::now();
             let coeffs_to_slots = if H.ring().n() % 2 == 0 {
-                pow2_coeffs_to_slots_thin(&H)
+                pow2::coeffs_to_slots_thin(&H)
             } else {
-                odd_powcoeffs_to_slots_thin(&H)
+                composite::powcoeffs_to_slots_thin(&H)
             };
             let end = Instant::now();
             println!("done in {} ms", (end - start).as_millis());

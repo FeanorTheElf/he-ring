@@ -46,7 +46,7 @@ use rand::thread_rng;
 use rand::{Rng, CryptoRng};
 use rand_distr::StandardNormal;
 
-pub mod bootstrap;
+// pub mod bootstrap;
 
 pub type PlaintextZn = zn_64::Zn;
 pub type CiphertextZn = zn_64::Zn;

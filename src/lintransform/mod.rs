@@ -28,7 +28,7 @@ use crate::rings::ntt_ring::*;
 use crate::StdZn;
 
 pub mod pow2;
-pub mod composite;
+// pub mod composite;
 pub mod trace;
 
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
@@ -65,6 +65,28 @@ impl<R, F, A> LinearTransform<R, F, A>
             }
         }
         return true;
+    }
+
+    pub fn matmul1d<'a, G>(H: &HypercubeIsomorphism<'a, R, F, A>, dim_index: usize, matrix: G) -> LinearTransform<R, F, A>
+        where G: Fn(usize, usize, &[usize]) -> El<SlotRing<'a, R, A>>
+    {
+        let m = H.len(dim_index) as i64;
+        let mut result = LinearTransform {
+            data: ((1 - m)..m).map(|s| {
+                let coeff = H.from_slot_vec(H.slot_iter(|idxs| if idxs[dim_index] as i64 >= s && idxs[dim_index] as i64 - s < m {
+                    matrix(idxs[dim_index], (idxs[dim_index] as i64 - s) as usize, idxs)
+                } else {
+                    H.slot_ring().zero()
+                }));
+                return (
+                    H.shift_galois_element(dim_index, s),
+                    coeff, 
+                    (0..H.dim_count()).map(|i| if i == dim_index { s } else { 0 }).collect()
+                );
+            }).collect()
+        };
+        result.canonicalize(H);
+        return result;
     }
 
     pub fn switch_ring(&self, H_from: &HypercubeIsomorphism<R, F, A>, to: &NTTRingBase<R, F, A>) -> Self {
@@ -139,7 +161,7 @@ impl<R, F, A> LinearTransform<R, F, A>
                 steps.into_iter().map(|k| -k).collect()
             )).collect()
         };
-        result.optimize(H);
+        result.canonicalize(H);
 
         #[cfg(test)] {
             let check = self.compose(&result, H);
@@ -176,7 +198,7 @@ impl<R, F, A> LinearTransform<R, F, A>
                 self_indices.iter().zip(first_indices).map(|(self_i, first_i)| self_i + first_i).collect()
             ))).collect()
         };
-        result.optimize(&H);
+        result.canonicalize(&H);
         return result;
     }
 
@@ -186,7 +208,7 @@ impl<R, F, A> LinearTransform<R, F, A>
         }
     }
 
-    fn optimize(&mut self, H: &HypercubeIsomorphism<R, F, A>) {
+    fn canonicalize(&mut self, H: &HypercubeIsomorphism<R, F, A>) {
         self.data.sort_unstable_by_key(|(g, _, _)| H.galois_group_mulrepr().smallest_positive_lift(*g));
         self.data.dedup_by(|second, first| {
             if H.galois_group_mulrepr().eq_el(&second.0, &first.0) {
@@ -728,15 +750,15 @@ use feanor_math::matrix::TransposableSubmatrix;
 #[cfg(test)]
 use feanor_math::matrix::TransposableSubmatrixMut;
 #[cfg(test)]
-use pow2::pow2_slots_to_coeffs_thin;
+use pow2::slots_to_coeffs_thin;
 #[cfg(test)]
 use crate::rings::pow2_cyclotomic::*;
 
 #[test]
 fn test_compile() {
     let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(23), 5);
-    let H = HypercubeIsomorphism::new(ring.get_ring());
-    let compiled_transform = pow2_slots_to_coeffs_thin(&H).into_iter().map(|T| CompiledLinearTransform::create_from(&H, T, 2)).collect::<Vec<_>>();
+    let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
+    let compiled_transform = slots_to_coeffs_thin(&H).into_iter().map(|T| CompiledLinearTransform::create_from(&H, T, 2)).collect::<Vec<_>>();
 
     let mut current = H.from_slot_vec([1, 2, 3, 4].into_iter().map(|n| H.slot_ring().int_hom().map(n)));
     for T in &compiled_transform {
@@ -744,14 +766,14 @@ fn test_compile() {
     }
     assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 0, 0, 3, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), &current);
     
-    let compiled_composed_transform = CompiledLinearTransform::create_from_merged(&H, &pow2_slots_to_coeffs_thin(&H), 2);
+    let compiled_composed_transform = CompiledLinearTransform::create_from_merged(&H, &slots_to_coeffs_thin(&H), 2);
     let mut current = H.from_slot_vec([1, 2, 3, 4].into_iter().map(|n| H.slot_ring().int_hom().map(n)));
     current = compiled_composed_transform.evaluate(current, &ring);
     assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 0, 0, 3, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), &current);
 
     let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(97), 5);
-    let H = HypercubeIsomorphism::new(ring.get_ring());
-    let compiled_transform = pow2_slots_to_coeffs_thin(&H).into_iter().map(|T| CompiledLinearTransform::create_from(&H, T, 2)).collect::<Vec<_>>();
+    let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
+    let compiled_transform = slots_to_coeffs_thin(&H).into_iter().map(|T| CompiledLinearTransform::create_from(&H, T, 2)).collect::<Vec<_>>();
     
     let mut current = H.from_slot_vec((1..17).map(|n| H.slot_ring().int_hom().map(n)));
     for T in compiled_transform {
@@ -759,17 +781,17 @@ fn test_compile() {
     }
     assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 5, 0, 3, 0, 7, 0, 2, 0, 6, 0, 4, 0, 8, 0, 9, 0, 13, 0, 11, 0, 15, 0, 10, 0, 14, 0, 12, 0, 16, 0]), &current);
 
-    let compiled_composed_transform = CompiledLinearTransform::create_from_merged(&H, &pow2_slots_to_coeffs_thin(&H), 2);
+    let compiled_composed_transform = CompiledLinearTransform::create_from_merged(&H, &slots_to_coeffs_thin(&H), 2);
     let mut current = H.from_slot_vec((1..17).map(|n| H.slot_ring().int_hom().map(n)));
     current = compiled_composed_transform.evaluate(current, &ring);
     assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 5, 0, 3, 0, 7, 0, 2, 0, 6, 0, 4, 0, 8, 0, 9, 0, 13, 0, 11, 0, 15, 0, 10, 0, 14, 0, 12, 0, 16, 0]), &current);
 
-    let compiled_composed_transform = CompiledLinearTransform::create_from_merged(&H, &pow2_slots_to_coeffs_thin(&H), 3);
+    let compiled_composed_transform = CompiledLinearTransform::create_from_merged(&H, &slots_to_coeffs_thin(&H), 3);
     let mut current = H.from_slot_vec((1..17).map(|n| H.slot_ring().int_hom().map(n)));
     current = compiled_composed_transform.evaluate(current, &ring);
     assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 5, 0, 3, 0, 7, 0, 2, 0, 6, 0, 4, 0, 8, 0, 9, 0, 13, 0, 11, 0, 15, 0, 10, 0, 14, 0, 12, 0, 16, 0]), &current);
 
-    let compiled_composed_transform = CompiledLinearTransform::create_from_merged(&H, &pow2_slots_to_coeffs_thin(&H), 5);
+    let compiled_composed_transform = CompiledLinearTransform::create_from_merged(&H, &slots_to_coeffs_thin(&H), 5);
     let mut current = H.from_slot_vec((1..17).map(|n| H.slot_ring().int_hom().map(n)));
     current = compiled_composed_transform.evaluate(current, &ring);
     assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 5, 0, 3, 0, 7, 0, 2, 0, 6, 0, 4, 0, 8, 0, 9, 0, 13, 0, 11, 0, 15, 0, 10, 0, 14, 0, 12, 0, 16, 0]), &current);
@@ -778,8 +800,8 @@ fn test_compile() {
 #[test]
 fn test_compose() {
     let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(23), 5);
-    let H = HypercubeIsomorphism::new(ring.get_ring());
-    let composed_transform = pow2_slots_to_coeffs_thin(&H).into_iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H));
+    let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
+    let composed_transform = slots_to_coeffs_thin(&H).into_iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H));
 
     let mut current = H.from_slot_vec([1, 2, 3, 4].into_iter().map(|n| H.slot_ring().int_hom().map(n)));
     current = ring.get_ring().compute_linear_transform(&current, &composed_transform);
@@ -787,8 +809,8 @@ fn test_compose() {
     assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 0, 0, 3, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), &current);
     
     let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(97), 5);
-    let H = HypercubeIsomorphism::new(ring.get_ring());
-    let composed_transform = pow2_slots_to_coeffs_thin(&H).into_iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H));
+    let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
+    let composed_transform = slots_to_coeffs_thin(&H).into_iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H));
     
     let mut current = H.from_slot_vec((1..17).map(|n| H.slot_ring().int_hom().map(n)));
     current = ring.get_ring().compute_linear_transform(&current, &composed_transform);
@@ -799,8 +821,8 @@ fn test_compose() {
 #[test]
 fn test_invert() {
     let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(23), 5);
-    let H = HypercubeIsomorphism::new(ring.get_ring());
-    let composed_transform = pow2_slots_to_coeffs_thin(&H).into_iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H));
+    let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
+    let composed_transform = slots_to_coeffs_thin(&H).into_iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H));
     let inv_transform = composed_transform.inverse(&H);
 
     let current = ring_literal!(&ring, [1, 0, 0, 0, 3, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
@@ -809,8 +831,8 @@ fn test_invert() {
     assert_el_eq!(&ring, &expected, &actual);
     
     let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(97), 5);
-    let H = HypercubeIsomorphism::new(ring.get_ring());
-    let composed_transform = pow2_slots_to_coeffs_thin(&H).into_iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H));
+    let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
+    let composed_transform = slots_to_coeffs_thin(&H).into_iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H));
     let inv_transform = composed_transform.inverse(&H);
     
     let current = ring_literal!(&ring, [1, 0, 5, 0, 3, 0, 7, 0, 2, 0, 6, 0, 4, 0, 8, 0, 9, 0, 13, 0, 11, 0, 15, 0, 10, 0, 14, 0, 12, 0, 16, 0]);

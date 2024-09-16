@@ -8,6 +8,7 @@ use feanor_math::rings::extension::*;
 use feanor_math::rings::zn::zn_64::*;
 use feanor_math::rings::zn::*;
 use feanor_math::assert_el_eq;
+use trace::Trace;
 
 use crate::cyclotomic::*;
 use crate::rings::decomposition::*;
@@ -125,7 +126,7 @@ fn pow2_bitreversed_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'b, R
             )
         ]
     };
-    result.optimize(H);
+    result.canonicalize(H);
     return result;
 }
 
@@ -217,7 +218,7 @@ fn pow2_bitreversed_inv_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'
             )
         ]
     };
-    result.optimize(&H);
+    result.canonicalize(&H);
     #[cfg(debug_assertions)] {
         let expected = pow2_bitreversed_dwt_butterfly(H, dim_index, l, H.slot_ring().clone_el(&zeta_power_table.get_power(1)), row_autos).inverse(&H);
         debug_assert!(result.eq(&expected, &H));
@@ -315,7 +316,7 @@ fn pow2_bitreversed_inv_dwt<R, F, A, G>(H: &HypercubeIsomorphism<R, F, A>, dim_i
 /// If `p = 3 mod 4`, the slots are enumerate by `j` with `0 <= j < l/2`. The returned linear transform will then
 /// put the value of slot `j` into the coefficient of `X^(bitrev(j, l) * n/(4l))`.
 /// 
-pub fn pow2_slots_to_coeffs_thin<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> Vec<LinearTransform<R, F, A>>
+pub fn slots_to_coeffs_thin<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> Vec<LinearTransform<R, F, A>>
     where R: RingStore,
         R::Type: StdZn,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
@@ -372,9 +373,13 @@ pub fn pow2_slots_to_coeffs_thin<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> 
 }
 
 ///
-/// Inverse to [`pow2_slots_to_coeffs_thin()`]
+/// Computes the [https://ia.cr/2024/153]-style Coeffs-to-Slots linear transform for the thin-bootstrapping case,
+/// i.e. where all slots contain elements in `Z/pZ`. Discards coefficients of monomials `X^i` where `i` is not a multiple
+/// of `n/(2l))`. To achieve this, the returned trace must also be applied after the sequence of linear transforms.
 /// 
-pub fn pow2_coeffs_to_slots_thin<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> Vec<LinearTransform<R, F, A>>
+/// Conceptually, this is the inverse to [`pow2_slots_to_coeffs_thin()`]
+/// 
+pub fn coeffs_to_slots_thin<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> (Vec<LinearTransform<R, F, A>>, Trace)
     where R: RingStore,
         R::Type: StdZn,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
@@ -425,10 +430,10 @@ pub fn pow2_coeffs_to_slots_thin<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> 
             ]
         });
 
-        return result;
+        return (result, unimplemented!());
     } else {
         assert_eq!(H.dim_count(), 1);
-        return pow2_bitreversed_inv_dwt(H, 0, |_| H.galois_group_mulrepr().one());
+        return (pow2_bitreversed_inv_dwt(H, 0, |_| H.galois_group_mulrepr().one()), unimplemented!());
     }
 }
 
@@ -439,7 +444,7 @@ use crate::rings::pow2_cyclotomic::DefaultPow2CyclotomicNTTRingBase;
 fn test_pow2_bitreversed_dwt() {
     // `F23[X]/(X^16 + 1) ~ F_(23^4)^4`
     let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(23), 4);
-    let H = HypercubeIsomorphism::new(ring.get_ring());
+    let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
 
     let mut current = ring_literal!(&ring, [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     for T in pow2_bitreversed_dwt(&H, 0, |_| H.galois_group_mulrepr().one()) {
@@ -461,10 +466,10 @@ fn test_pow2_bitreversed_dwt() {
 fn test_pow2_slots_to_coeffs_thin() {
     // `F23[X]/(X^32 + 1) ~ F_(23^8)^4`
     let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(23), 5);
-    let H = HypercubeIsomorphism::new(ring.get_ring());
+    let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
 
     let mut current = H.from_slot_vec([1, 2, 3, 4].into_iter().map(|n| H.slot_ring().int_hom().map(n)));
-    for T in pow2_slots_to_coeffs_thin(&H) {
+    for T in slots_to_coeffs_thin(&H) {
         current = ring.get_ring().compute_linear_transform(&current, &T);
     }
 
@@ -472,10 +477,10 @@ fn test_pow2_slots_to_coeffs_thin() {
     
     // `F97[X]/(X^32 + 1) ~ F_(97^2)^16`
     let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(97), 5);
-    let H = HypercubeIsomorphism::new(ring.get_ring());
+    let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
     
     let mut current = H.from_slot_vec((1..17).map(|n| H.slot_ring().int_hom().map(n)));
-    for T in pow2_slots_to_coeffs_thin(&H) {
+    for T in slots_to_coeffs_thin(&H) {
         current = ring.get_ring().compute_linear_transform(&current, &T);
     }
 
@@ -486,18 +491,18 @@ fn test_pow2_slots_to_coeffs_thin() {
 fn test_pow2_coeffs_to_slots_thin() {
     // `F23[X]/(X^32 + 1) ~ F_(23^8)^4`
     let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(23), 5);
-    let H = HypercubeIsomorphism::new(ring.get_ring());
+    let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
 
-    for (transform, actual) in pow2_slots_to_coeffs_thin(&H).into_iter().rev().zip(pow2_coeffs_to_slots_thin(&H).into_iter()) {
+    for (transform, actual) in slots_to_coeffs_thin(&H).into_iter().rev().zip(coeffs_to_slots_thin(&H).0.into_iter()) {
         let expected = transform.inverse(&H);
         assert!(expected.eq(&actual, &H));
     }
     
     // `F97[X]/(X^32 + 1) ~ F_(97^2)^16`
     let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(97), 5);
-    let H = HypercubeIsomorphism::new(ring.get_ring());
+    let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
     
-    for (transform, actual) in pow2_slots_to_coeffs_thin(&H).into_iter().rev().zip(pow2_coeffs_to_slots_thin(&H).into_iter()) {
+    for (transform, actual) in slots_to_coeffs_thin(&H).into_iter().rev().zip(coeffs_to_slots_thin(&H).0.into_iter()) {
         let expected = transform.inverse(&H);
         assert!(expected.eq(&actual, &H));
     }

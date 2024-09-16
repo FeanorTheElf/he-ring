@@ -30,7 +30,6 @@ pub struct OddCyclotomicFFT<R, F, A = Global>
 {
     ring: R,
     fft_table: F,
-    n_factorization: Vec<(i64, usize)>,
     /// contains `usize::MAX` whenenver the fft output index corresponds to a non-primitive root of unity, and an index otherwise
     fft_output_indices_to_indices: Vec<usize>,
     zeta_pow_rank: HashMap<usize, El<R>>,
@@ -68,7 +67,7 @@ impl<R, F, A> OddCyclotomicFFT<R, F, A>
             }
         }).collect::<Vec<_>>();
 
-        return Self { ring, fft_table, n_factorization, zeta_pow_rank, rank, allocator, fft_output_indices_to_indices };
+        return Self { ring, fft_table, zeta_pow_rank, rank, allocator, fft_output_indices_to_indices };
     }
 }
 
