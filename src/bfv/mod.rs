@@ -38,7 +38,6 @@ use crate::rings::gadget_product::*;
 use crate::rings::double_rns_ring::*;
 use crate::rings::ntt_ring::*;
 use crate::profiling::*;
-use crate::rings::slots::HypercubeIsomorphism;
 use crate::rnsconv;
 use crate::sample_primes;
 

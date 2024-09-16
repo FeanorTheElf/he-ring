@@ -1,5 +1,6 @@
 use std::alloc::Allocator;
 
+use feanor_math::algorithms::fft::cooley_tuckey::bitreverse;
 use feanor_math::algorithms::unity_root::is_prim_root_of_unity;
 use feanor_math::homomorphism::Homomorphism;
 use feanor_math::integer::IntegerRingStore;
@@ -309,12 +310,9 @@ fn pow2_bitreversed_inv_dwt<R, F, A, G>(H: &HypercubeIsomorphism<R, F, A>, dim_i
 /// Computes the [https://ia.cr/2024/153]-style Slots-to-Coeffs linear transform for the thin-bootstrapping case,
 /// i.e. where all slots contain elements in `Z/pZ`.
 /// 
-/// If `p = 1 mod 4`, the slots are enumerated by `i, j` with `i in {0, 1}` and `0 <= j < l/2`. The returned linear
-/// transform will then put the value of slot `(0, j)` into the coefficient of `X^(bitrev(j, l/2) * n/(2l))` and the value of slot
-/// `(1, j)` into the coefficient of `X^(bitrev(j, l/2) * n/(2l) + n/4)`. 
-/// 
-/// If `p = 3 mod 4`, the slots are enumerate by `j` with `0 <= j < l/2`. The returned linear transform will then
-/// put the value of slot `j` into the coefficient of `X^(bitrev(j, l) * n/(4l))`.
+/// Note that the slots are enumerated by `i, j` with `0 <= i < l/2` and `j in {0, 1}`. The returned linear
+/// transform will then put the value of slot `(i, 0)` into the coefficient of `X^(bitrev(i, l/2) * n/(2l))` and the 
+/// value of slot `(i, 1)` into the coefficient of `X^(bitrev(i, l/2) * n/(2l) + n/4)`. 
 /// 
 pub fn slots_to_coeffs_thin<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> Vec<LinearTransform<R, F, A>>
     where R: RingStore,
@@ -327,59 +325,58 @@ pub fn slots_to_coeffs_thin<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> Vec<L
     let log2_n = ZZ.abs_log2_ceil(&(n as i64)).unwrap();
     assert!(n == 1 << log2_n);
 
-    if H.dim_count() == 2 {
-        assert_eq!(2, H.len(0));
+    assert_eq!(2, H.dim_count());
+    assert_eq!(2, H.len(1));
         
-        let mut result = Vec::new();
+    let mut result = Vec::new();
+    let zeta4 = H.slot_ring().pow(H.slot_ring().canonical_gen(), H.ring().n() / 4);
 
-        let zeta4 = H.slot_ring().pow(H.slot_ring().canonical_gen(), H.ring().n() / 4);
+    result.push(LinearTransform {
+        data: vec![
+            (
+                H.galois_group_mulrepr().one(),
+                H.from_slot_vec(H.slot_iter(|idxs| if idxs[1] == 0 {
+                    H.slot_ring().one()
+                } else {
+                    debug_assert!(idxs[1] == 1);
+                    H.slot_ring().negate(H.slot_ring().clone_el(&zeta4))
+                })),
+                vec![0, 0]
+            ), 
+            (
+                H.galois_group_mulrepr().neg_one(),
+                H.from_slot_vec(H.slot_iter(|idxs| if idxs[1] == 0 {
+                    H.slot_ring().clone_el(&zeta4)
+                } else {
+                    debug_assert!(idxs[1] == 1);
+                    H.slot_ring().one()
+                })),
+                vec![0, 1]
+            )
+        ]
+    });
+    result.last_mut().unwrap().canonicalize(H);
 
-        result.push(LinearTransform {
-            data: vec![
-                (
-                    H.galois_group_mulrepr().one(),
-                    H.from_slot_vec(H.slot_iter(|idxs| if idxs[0] == 0 {
-                        H.slot_ring().one()
-                    } else {
-                        debug_assert!(idxs[0] == 1);
-                        H.slot_ring().negate(H.slot_ring().clone_el(&zeta4))
-                    })),
-                    vec![0, 0]
-                ), 
-                (
-                    H.galois_group_mulrepr().neg_one(),
-                    H.from_slot_vec(H.slot_iter(|idxs| if idxs[0] == 0 {
-                        H.slot_ring().clone_el(&zeta4)
-                    } else {
-                        debug_assert!(idxs[0] == 1);
-                        H.slot_ring().one()
-                    })),
-                    vec![1, 0]
-                )
-            ]
-        });
-
-        result.extend(pow2_bitreversed_dwt(H, 1, |idxs| if idxs[0] == 0 {
-            H.galois_group_mulrepr().one()
-        } else {
-            debug_assert!(idxs[0] == 1);
-            H.galois_group_mulrepr().neg_one()
-        }));
-        return result;
+    result.extend(pow2_bitreversed_dwt(H, 0, |idxs| if idxs[1] == 0 {
+        H.galois_group_mulrepr().one()
     } else {
-        assert_eq!(H.dim_count(), 1);
-        return pow2_bitreversed_dwt(H, 0, |_| H.galois_group_mulrepr().one());
-    }
+        debug_assert!(idxs[1] == 1);
+        H.galois_group_mulrepr().neg_one()
+    }));
+
+    return result;
 }
 
 ///
 /// Computes the [https://ia.cr/2024/153]-style Coeffs-to-Slots linear transform for the thin-bootstrapping case,
-/// i.e. where all slots contain elements in `Z/pZ`. Discards coefficients of monomials `X^i` where `i` is not a multiple
-/// of `n/(2l))`. To achieve this, the returned trace must also be applied after the sequence of linear transforms.
+/// i.e. where all slots contain elements in `Z/pZ`. This moves coefficients of monomials `X^i` where `i` is not a multiple
+/// of `n/(2l))` to the corresponding slots, but not via the basis `1, zeta, zeta^2, ...` within that slot. Thus,
+/// either a linear transform on each slot (for fat bootstrapping) or a filtering of coefficients within each slot
+/// (for thin bootstrapping) is usually required afterwards.
 /// 
 /// Conceptually, this is the inverse to [`pow2_slots_to_coeffs_thin()`]
 /// 
-pub fn coeffs_to_slots_thin<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> (Vec<LinearTransform<R, F, A>>, Trace)
+pub fn slots_to_coeffs_thin_inv<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> Vec<LinearTransform<R, F, A>>
     where R: RingStore,
         R::Type: StdZn,
         F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
@@ -390,51 +387,47 @@ pub fn coeffs_to_slots_thin<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> (Vec<
     let log2_n = ZZ.abs_log2_ceil(&(n as i64)).unwrap();
     assert!(n == 1 << log2_n);
 
-    if H.dim_count() == 2 {
-        assert_eq!(2, H.len(0));
+    assert_eq!(2, H.dim_count());
+    assert_eq!(2, H.len(1));
         
-        let mut result = Vec::new();
+    let mut result = Vec::new();
+    let zeta4_inv = H.slot_ring().pow(H.slot_ring().canonical_gen(), 3 * H.ring().n() / 4);
+    let two_inv = H.ring().base_ring().invert(&H.slot_ring().base_ring().int_hom().map(2)).unwrap();
 
-        let zeta4_inv = H.slot_ring().pow(H.slot_ring().canonical_gen(), 3 * H.ring().n() / 4);
-        let inv_2 = H.ring().base_ring().invert(&H.ring().base_ring().int_hom().map(2)).unwrap();
-
-        result.extend(pow2_bitreversed_inv_dwt(H, 1, |idxs| if idxs[0] == 0 {
-            H.galois_group_mulrepr().one()
-        } else {
-            debug_assert!(idxs[0] == 1);
-            H.galois_group_mulrepr().neg_one()
-        }));
-
-        result.push(LinearTransform {
-            data: vec![
-                (
-                    H.galois_group_mulrepr().one(),
-                    H.ring().inclusion().mul_map(H.from_slot_vec(H.slot_iter(|idxs| if idxs[0] == 0 {
-                        H.slot_ring().one()
-                    } else {
-                        debug_assert!(idxs[0] == 1);
-                        H.slot_ring().negate(H.slot_ring().clone_el(&zeta4_inv))
-                    })), H.ring().base_ring().clone_el(&inv_2)),
-                    vec![0, 0]
-                ), 
-                (
-                    H.galois_group_mulrepr().neg_one(),
-                    H.ring().inclusion().mul_map(H.from_slot_vec(H.slot_iter(|idxs| if idxs[0] == 0 {
-                        H.slot_ring().one()
-                    } else {
-                        debug_assert!(idxs[0] == 1);
-                        H.slot_ring().clone_el(&zeta4_inv)
-                    })), inv_2),
-                    vec![1, 0]
-                )
-            ]
-        });
-
-        return (result, unimplemented!());
+    result.extend(pow2_bitreversed_inv_dwt(H, 0, |idxs| if idxs[1] == 0 {
+        H.galois_group_mulrepr().one()
     } else {
-        assert_eq!(H.dim_count(), 1);
-        return (pow2_bitreversed_inv_dwt(H, 0, |_| H.galois_group_mulrepr().one()), unimplemented!());
-    }
+        debug_assert!(idxs[1] == 1);
+        H.galois_group_mulrepr().neg_one()
+    }));
+
+    result.push(LinearTransform {
+        data: vec![
+            (
+                H.galois_group_mulrepr().one(),
+                H.ring().inclusion().mul_map(H.from_slot_vec(H.slot_iter(|idxs| if idxs[1] == 0 {
+                    H.slot_ring().one()
+                } else {
+                    debug_assert!(idxs[1] == 1);
+                    H.slot_ring().negate(H.slot_ring().clone_el(&zeta4_inv))
+                })), H.ring().base_ring().clone_el(&two_inv)),
+                vec![0, 0]
+            ), 
+            (
+                H.galois_group_mulrepr().neg_one(),
+                H.ring().inclusion().mul_map(H.from_slot_vec(H.slot_iter(|idxs| if idxs[1] == 0 {
+                    H.slot_ring().one()
+                } else {
+                    debug_assert!(idxs[1] == 1);
+                    H.slot_ring().clone_el(&zeta4_inv)
+                })), two_inv),
+                vec![0, 1]
+            )
+        ]
+    });
+    result.last_mut().unwrap().canonicalize(H);
+
+    return result;
 }
 
 #[cfg(test)]
@@ -464,17 +457,6 @@ fn test_pow2_bitreversed_dwt() {
 
 #[test]
 fn test_pow2_slots_to_coeffs_thin() {
-    // `F23[X]/(X^32 + 1) ~ F_(23^8)^4`
-    let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(23), 5);
-    let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
-
-    let mut current = H.from_slot_vec([1, 2, 3, 4].into_iter().map(|n| H.slot_ring().int_hom().map(n)));
-    for T in slots_to_coeffs_thin(&H) {
-        current = ring.get_ring().compute_linear_transform(&current, &T);
-    }
-
-    assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 0, 0, 3, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), &current);
-    
     // `F97[X]/(X^32 + 1) ~ F_(97^2)^16`
     let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(97), 5);
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
@@ -484,7 +466,30 @@ fn test_pow2_slots_to_coeffs_thin() {
         current = ring.get_ring().compute_linear_transform(&current, &T);
     }
 
-    assert_el_eq!(&ring, &ring_literal!(&ring, [1, 0, 5, 0, 3, 0, 7, 0, 2, 0, 6, 0, 4, 0, 8, 0, 9, 0, 13, 0, 11, 0, 15, 0, 10, 0, 14, 0, 12, 0, 16, 0]), &current);
+    let mut expected = [0; 32];
+    for i in 0..8 {
+        for j in 0..2 {
+            expected[bitreverse(i, 3) * 2 + j * 16] = i * 2 + j + 1;
+        }
+    }
+    assert_el_eq!(&ring, &ring_literal!(&ring, expected), &current);
+
+    // `F23[X]/(X^32 + 1) ~ F_(23^8)^4`
+    let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(23), 5);
+    let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
+
+    let mut current = H.from_slot_vec([1, 2, 3, 4].into_iter().map(|n| H.slot_ring().int_hom().map(n)));
+    for T in slots_to_coeffs_thin(&H) {
+        current = ring.get_ring().compute_linear_transform(&current, &T);
+    }
+
+    let mut expected = [0; 32];
+    for i in 0..2 {
+        for j in 0..2 {
+            expected[bitreverse(i, 1) * 8 + j * 16] = i * 2 + j + 1;
+        }
+    }
+    assert_el_eq!(&ring, &ring_literal!(&ring, expected), &current);
 }
 
 #[test]
@@ -493,7 +498,7 @@ fn test_pow2_coeffs_to_slots_thin() {
     let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(23), 5);
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
 
-    for (transform, actual) in slots_to_coeffs_thin(&H).into_iter().rev().zip(coeffs_to_slots_thin(&H).0.into_iter()) {
+    for (transform, actual) in slots_to_coeffs_thin(&H).into_iter().rev().zip(slots_to_coeffs_thin_inv(&H).into_iter()) {
         let expected = transform.inverse(&H);
         assert!(expected.eq(&actual, &H));
     }
@@ -502,7 +507,7 @@ fn test_pow2_coeffs_to_slots_thin() {
     let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(97), 5);
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
     
-    for (transform, actual) in slots_to_coeffs_thin(&H).into_iter().rev().zip(coeffs_to_slots_thin(&H).0.into_iter()) {
+    for (transform, actual) in slots_to_coeffs_thin(&H).into_iter().rev().zip(slots_to_coeffs_thin_inv(&H).into_iter()) {
         let expected = transform.inverse(&H);
         assert!(expected.eq(&actual, &H));
     }
