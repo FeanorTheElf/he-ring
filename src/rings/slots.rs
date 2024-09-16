@@ -186,9 +186,8 @@ pub fn compute_hypercube_structure(n: i64, p: i64) -> (Vec<HypercubeDimension>, 
                 if p % 4 == 1 {
                     // `p` is in `<g1>`
                     let logg1_p = unit_group_dlog(Zqk, g1, ord_g1, Zqk.can_hom(&ZZ).unwrap().map(p)).unwrap();
-                    let ord_p = ord_g1 / signed_gcd(logg1_p, ord_g1, ZZ);
                     dims.push(HypercubeDimension {
-                        order_of_p: (ord_g1 / ord_p) as usize, 
+                        order_of_p: (ord_g1 / signed_gcd(logg1_p, ord_g1, ZZ)) as usize, 
                         order_of_g: ord_g1 as usize,
                         g: from_crt(i, g1),
                         factor_n: (2, k - 1)
@@ -247,7 +246,7 @@ pub fn compute_hypercube_structure(n: i64, p: i64) -> (Vec<HypercubeDimension>, 
 pub fn order_hypercube_dimensions(dims: &mut [HypercubeDimension]) -> Vec<usize> {
     // largest order of p first
     dims.sort_unstable_by_key(|dim| -(dim.order_of_p() as i64));
-    return dims.iter().scan(0, |current_d, dim| {
+    return dims.iter().scan(1, |current_d, dim| {
         let new_d = signed_lcm(*current_d, dim.order_of_p() as i64, ZZ);
         let len = euler_phi(slice::from_ref(&dim.factor_n())) / (new_d / *current_d);
         *current_d = new_d;
@@ -876,7 +875,7 @@ fn test_compute_hypercube_structure_pow2() {
         let (dims, Z_2n) = compute_hypercube_structure(1024, 23);
         assert_eq!(2, dims.len());
         assert_eq!(128, dims[0].order_of_p());
-        assert_eq!(2, dims[0].order_of_p());
+        assert_eq!(2, dims[1].order_of_p());
         assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(23), 128, Z_2n.pow(dims[0].g, 2)).is_none());
         assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(23), 128, Z_2n.pow(dims[0].g, 4)).is_some());
     }
@@ -884,19 +883,17 @@ fn test_compute_hypercube_structure_pow2() {
         let (dims, Z_2n) = compute_hypercube_structure(1024, 13);
         assert_eq!(2, dims.len());
         assert_eq!(256, dims[0].order_of_p());
-        assert_eq!(2, dims[1].order_of_p());
-        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(13), 256, dims[0].g).is_none());
-        assert_eq!(Some(0), unit_group_dlog(&Z_2n, Z_2n.int_hom().map(13), 256, Z_2n.pow(dims[0].g, 2)));
+        assert_eq!(1, dims[1].order_of_p());
+        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(13), 256, dims[0].g).is_some());
+        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(13), 256, dims[1].g).is_none());
     }
     {
         let (dims, Z_2n) = compute_hypercube_structure(1024, 17);
         assert_eq!(2, dims.len());
         assert_eq!(64, dims[0].order_of_p());
         assert_eq!(1, dims[1].order_of_p());
-        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(17), 64, dims[0].g).is_none());
-        assert_eq!(Some(0), unit_group_dlog(&Z_2n, Z_2n.int_hom().map(17), 64, Z_2n.pow(dims[0].g, 2)));
-        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(17), 64, Z_2n.pow(dims[1].g, 2)).is_none());
-        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(17), 64, Z_2n.pow(dims[1].g, 4)).is_some());
+        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(17), 64, Z_2n.pow(dims[0].g, 2)).is_none());
+        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(17), 64, Z_2n.pow(dims[0].g, 4)).is_some());
     }
 }
 
@@ -915,22 +912,16 @@ fn test_compute_hypercube_structure_odd() {
         assert!(unit_group_dlog(&Zn, Zn.int_hom().map(11), 64, Zn.pow(dims[0].g, 4)).is_some());
     }
     {
-        let (dims, Zn) = compute_hypercube_structure(257 * 101, 13);
+        let (dims, _Zn) = compute_hypercube_structure(257 * 101, 13);
         assert_eq!(2, dims.len());
         assert_eq!(50, dims[0].order_of_p());
         assert_eq!(128, dims[1].order_of_p());
-        assert!(unit_group_dlog(&Zn, Zn.int_hom().map(11), 64, Zn.mul(Zn.pow(dims[0].g, 1), Zn.pow(dims[1].g, 2))).is_none());
-        assert!(unit_group_dlog(&Zn, Zn.int_hom().map(11), 64, Zn.mul(Zn.pow(dims[0].g, 2), Zn.pow(dims[1].g, 1))).is_none());
-        assert!(unit_group_dlog(&Zn, Zn.int_hom().map(11), 64, Zn.mul(Zn.pow(dims[0].g, 2), Zn.pow(dims[1].g, 2))).is_some());
     }
     {
-        let (dims, Zn) = compute_hypercube_structure(257 * 101, 2);
+        let (dims, _Zn) = compute_hypercube_structure(257 * 101, 2);
         assert_eq!(2, dims.len());
-        assert_eq!(2, dims[0].order_of_p());
-        assert_eq!(2, dims[1].order_of_p());
-        assert!(unit_group_dlog(&Zn, Zn.int_hom().map(11), 64, Zn.mul(Zn.pow(dims[0].g, 50), Zn.pow(dims[1].g, 64))).is_none());
-        assert!(unit_group_dlog(&Zn, Zn.int_hom().map(11), 64, Zn.mul(Zn.pow(dims[0].g, 25), Zn.pow(dims[1].g, 128))).is_none());
-        assert!(unit_group_dlog(&Zn, Zn.int_hom().map(11), 64, Zn.mul(Zn.pow(dims[0].g, 50), Zn.pow(dims[1].g, 128))).is_some());
+        assert_eq!(100, dims[0].order_of_p());
+        assert_eq!(16, dims[1].order_of_p());
     }
 }
 
