@@ -126,9 +126,9 @@ impl<R, F, A> LinearTransform<R, F, A>
     }
 
     ///
-    /// Computes the linear transform 
+    /// Computes the linear transform that maps the value `sum_i a_i X^i` in each slot to `a_coefficient`
     /// 
-    pub fn extract_constant_coefficient(slot_ring: SlotRing<R, A>)
+    pub fn extract_coefficient(slot_ring: SlotRing<R, A>, coefficient: usize)
         where R: RingStore,
             R::Type: StdZn,
             A: Allocator + Clone

@@ -88,7 +88,7 @@ impl<R, F> RingDecomposition<R::Type> for Pow2CyclotomicFFT<R, F>
 
     fn fft_backward(&self, data: &mut [El<R>], ring: &R::Type) {
         assert!(ring == self.ring.get_ring());
-        self.fft_table.unordered_inv_fft(&mut data[..], ring);
+        self.fft_table.unordered_inv_fft(&mut data[..], RingRef::new(ring));
         for i in 0..self.rank() {
             ring.mul_assign_ref(&mut data[i], &self.twiddles[i]);
         }
@@ -99,7 +99,7 @@ impl<R, F> RingDecomposition<R::Type> for Pow2CyclotomicFFT<R, F>
         for i in 0..self.rank() {
             ring.mul_assign_ref(&mut data[i], &self.inv_twiddles[i]);
         }
-        self.fft_table.unordered_fft(&mut data[..], ring);
+        self.fft_table.unordered_fft(&mut data[..], RingRef::new(ring));
     }
 
     fn rank(&self) -> usize {

@@ -24,7 +24,7 @@ use feanor_math::primitive_int::StaticRing;
 use feanor_math::primitive_int::StaticRingBase;
 use feanor_math::ring::*;
 use feanor_math::homomorphism::*;
-use feanor_math::rings::extension::galois_field::GaloisFieldDyn;
+use feanor_math::rings::extension::galois_field::GaloisField;
 use feanor_math::rings::field::AsFieldBase;
 use feanor_math::rings::local::AsLocalPIRBase;
 use feanor_math::rings::zn::zn_64;
@@ -47,7 +47,7 @@ extern crate test;
 
 pub trait StdZn: ZnRing 
     + FromModulusCreateableZnRing 
-    + CanHomFrom<<<<GaloisFieldDyn as RingStore>::Type as RingExtension>::BaseRing as RingStore>::Type> 
+    + CanHomFrom<<<<GaloisField as RingStore>::Type as RingExtension>::BaseRing as RingStore>::Type> 
     + CanHomFrom<AsLocalPIRBase<zn_64::Zn>>
     + CanHomFrom<StaticRingBase<i64>>
     + CanHomFrom<StaticRingBase<i128>>
@@ -60,7 +60,7 @@ pub trait StdZn: ZnRing
 impl<R> StdZn for R
     where R: ZnRing 
     + FromModulusCreateableZnRing 
-    + CanHomFrom<<<<GaloisFieldDyn as RingStore>::Type as RingExtension>::BaseRing as RingStore>::Type> 
+    + CanHomFrom<<<<GaloisField as RingStore>::Type as RingExtension>::BaseRing as RingStore>::Type> 
     + CanHomFrom<AsLocalPIRBase<zn_64::Zn>>
     + CanHomFrom<StaticRingBase<i64>>
     + CanHomFrom<StaticRingBase<i128>>

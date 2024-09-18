@@ -122,7 +122,7 @@ impl<R, F, A> RingDecomposition<R::Type> for OddCyclotomicFFT<R, F , A>
         for (i, j) in self.fft_output_indices() {
             tmp[j] = ring.clone_el(&data[i]);
         }
-        self.fft_table.unordered_inv_fft(&mut tmp[..], ring);
+        self.fft_table.unordered_inv_fft(&mut tmp[..], RingRef::new(ring));
 
         for i in (self.rank()..self.fft_table.len()).rev() {
             let factor = ring.clone_el(&tmp[i]);
@@ -146,7 +146,7 @@ impl<R, F, A> RingDecomposition<R::Type> for OddCyclotomicFFT<R, F , A>
             tmp[i] = ring.clone_el(&data[i]);
         }
 
-        self.fft_table.unordered_fft(&mut tmp[..], ring);
+        self.fft_table.unordered_fft(&mut tmp[..], RingRef::new(ring));
         for (i, j) in self.fft_output_indices() {
             data[i] = ring.clone_el(&tmp[j]); 
         }
