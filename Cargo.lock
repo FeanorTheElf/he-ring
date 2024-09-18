@@ -35,7 +35,7 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 [[package]]
 name = "feanor-math"
 version = "2.3.0"
-source = "git+https://github.com/feanortheelf/feanor-math.git#4f6f758a639e5b785a8c5f71e39f6edb6679cf32"
+source = "git+https://github.com/feanortheelf/feanor-math.git#20984803235fa2cda49daf5c8f2bccc12506ad64"
 dependencies = [
  "append-only-vec",
  "atomicbox",

@@ -126,13 +126,21 @@ impl<R, F, A> LinearTransform<R, F, A>
     }
 
     ///
-    /// Computes the linear transform that maps the value `sum_i a_i X^i` in each slot to `a_coefficient`
+    /// Computes the linear transforms that maps the value `sum_i a_i X^i` in each slot to `a_j`
     /// 
-    pub fn extract_coefficient(slot_ring: SlotRing<R, A>, coefficient: usize)
-        where R: RingStore,
-            R::Type: StdZn,
-            A: Allocator + Clone
-    {
+    pub fn extract_coefficient_map(H: &HypercubeIsomorphism<R, F, A>, coefficient_j: usize) {
+        let slot_ring = H.slot_ring();
+
+        let mut lhs = OwnedMatrix::zero(slot_ring.rank(), slot_ring.rank(), slot_ring.base_ring());
+        let mut rhs = OwnedMatrix::identity(slot_ring.rank(), slot_ring.rank(), slot_ring.base_ring());
+        let mut sol = OwnedMatrix::zero(slot_ring.rank(), slot_ring.rank(), slot_ring.base_ring());
+
+        let frobenius = H.galois_group_mulrepr().smallest_positive_lift(H.frobenius_element(1));
+        let mut current = slot_ring.canonical_gen();
+        for i in 0..slot_ring.rank() {
+
+        }
+
         unimplemented!()
     }
 
