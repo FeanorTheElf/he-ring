@@ -28,10 +28,68 @@ use crate::rings::ntt_ring::*;
 use crate::StdZn;
 
 pub mod pow2;
-// pub mod composite;
+pub mod composite;
 pub mod trace;
 
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
+
+#[derive(Clone, PartialEq, Eq)]
+struct GaloisElementIndex {
+    shift_steps: Vec<i64>,
+    frobenius_count: i64
+}
+
+impl GaloisElementIndex {
+
+    fn shift_1d(dim_count: usize, dim_index: usize, steps: i64) -> GaloisElementIndex {
+        GaloisElementIndex {
+            shift_steps: (0..dim_count).map(|i| if i == dim_index { steps } else { 0 }).collect::<Vec<_>>(),
+            frobenius_count: 0
+        }
+    }
+
+    fn frobenius(dim_count: usize, count: i64) -> GaloisElementIndex {
+        GaloisElementIndex {
+            shift_steps: (0..dim_count).map(|_| 0).collect(),
+            frobenius_count: count
+        }
+    }
+
+    fn inverse(mut self) -> GaloisElementIndex {
+        self.frobenius_count = -self.frobenius_count;
+        for s in &mut self.shift_steps {
+            *s = -*s;
+        }
+        return self;
+    }
+
+    fn compose(mut self, other: &GaloisElementIndex) -> GaloisElementIndex {
+        assert!(self.shift_steps.len() == other.shift_steps.len());
+        self.frobenius_count += other.frobenius_count;
+        for i in 0..self.shift_steps.len() {
+            self.shift_steps[i] += other.shift_steps[i];
+        }
+        return self;
+    }
+
+    fn galois_element<R, F, A>(&self, H: &HypercubeIsomorphism<R, F, A>) -> ZnEl
+        where R: RingStore,
+            R::Type: StdZn,
+            F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
+            A: Allocator + Clone,
+            NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
+    {
+        H.galois_group_mulrepr().prod(self.shift_steps.iter().enumerate().map(|(i, s)| H.shift_galois_element(i, *s)).chain([H.frobenius_element(self.frobenius_count)].into_iter()))
+    }
+
+    fn index_at(&self, dim_index_or_frobenius: usize) -> i64 {
+        if dim_index_or_frobenius == 0 {
+            self.frobenius_count
+        } else {
+            self.shift_steps[dim_index_or_frobenius - 1]
+        }
+    }
+}
 
 pub struct LinearTransform<R, F, A>
     where R: RingStore,
@@ -40,7 +98,7 @@ pub struct LinearTransform<R, F, A>
         A: Allocator + Clone,
         NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
 {
-    data: Vec<(ZnEl, El<NTTRing<R, F, A>>, Vec<i64>)>
+    data: Vec<(GaloisElementIndex, El<NTTRing<R, F, A>>)>
 }
 
 impl<R, F, A> LinearTransform<R, F, A>
@@ -57,7 +115,7 @@ impl<R, F, A> LinearTransform<R, F, A>
             return false;
         }
         for (self_d, other_d) in self.data.iter().zip(other.data.iter()) {
-            if !H.galois_group_mulrepr().eq_el(&self_d.0, &other_d.0) {
+            if !H.galois_group_mulrepr().eq_el(&self_d.0.galois_element(H), &other_d.0.galois_element(H)) {
                 return false;
             }
             if !H.ring().eq_el(&self_d.1, &other_d.1) {
@@ -67,6 +125,21 @@ impl<R, F, A> LinearTransform<R, F, A>
         return true;
     }
 
+    ///
+    /// Computes the linear transform 
+    /// 
+    pub fn extract_constant_coefficient(slot_ring: SlotRing<R, A>)
+        where R: RingStore,
+            R::Type: StdZn,
+            A: Allocator + Clone
+    {
+        unimplemented!()
+    }
+
+    ///
+    /// `matrix` is called on `output_index, input_index, column_indices` to give the `(output_index, input_index)`-th
+    /// entry of the matrix corresponding to the hypercolumn containing the slot `column_indices`.
+    /// 
     pub fn matmul1d<'a, G>(H: &HypercubeIsomorphism<'a, R, F, A>, dim_index: usize, matrix: G) -> LinearTransform<R, F, A>
         where G: Fn(usize, usize, &[usize]) -> El<SlotRing<'a, R, A>>
     {
@@ -79,14 +152,23 @@ impl<R, F, A> LinearTransform<R, F, A>
                     H.slot_ring().zero()
                 }));
                 return (
-                    H.shift_galois_element(dim_index, s),
+                    GaloisElementIndex::shift_1d(H.dim_count(), dim_index, s),
                     coeff, 
-                    (0..H.dim_count()).map(|i| if i == dim_index { s } else { 0 }).collect()
                 );
             }).collect()
         };
         result.canonicalize(H);
         return result;
+    }
+    
+    ///
+    /// The matrix is the matrix of the transform w.r.t. the basis `X^j e_i`, `j < d` and `i < li` where `e_i` is the `i`-th unit vector
+    /// and `X` is the canonical generator of the slot ring `F_p^d`.
+    /// 
+    pub fn blockmatmul1d<'a, G>(H: &HypercubeIsomorphism<'a, R, F, A>, dim_index: usize, matrix: G) -> LinearTransform<R, F, A>
+        where G: Fn(usize, usize, usize, usize, &[usize]) -> El<Zn>
+    {
+        unimplemented!()
     }
 
     pub fn switch_ring(&self, H_from: &HypercubeIsomorphism<R, F, A>, to: &NTTRingBase<R, F, A>) -> Self {
@@ -96,15 +178,15 @@ impl<R, F, A> LinearTransform<R, F, A>
         let red_map = ReductionMap::new(from.base_ring(), to.base_ring()).unwrap();
         let hom = |x: &El<NTTRing<R, F, A>>| to.from_canonical_basis(H_from.ring().wrt_canonical_basis(x).into_iter().map(|x| red_map.map(x)));
         Self {
-            data: self.data.iter().map(|(g, coeff, steps)| (*g, hom(coeff), steps.clone())).collect()
+            data: self.data.iter().map(|(g, coeff)| (g.clone(), hom(coeff))).collect()
         }
     }
 
     pub fn inverse(&self, H: &HypercubeIsomorphism<R, F, A>) -> Self {
         self.check_valid(H);
-        let original_automorphisms = self.data.iter().map(|(g, _, _)| g);
-        let inverse_automorphisms = original_automorphisms.clone().map(|g| H.galois_group_mulrepr().invert(g).unwrap()).collect::<Vec<_>>();
-        let mut composed_automorphisms = original_automorphisms.clone().flat_map(|g| inverse_automorphisms.iter().map(|s| H.galois_group_mulrepr().mul_ref(g, s))).collect::<Vec<_>>();
+        let original_automorphisms = self.data.iter().map(|(g, _)| g.galois_element(H));
+        let inverse_automorphisms = original_automorphisms.clone().map(|g| H.galois_group_mulrepr().invert(&g).unwrap()).collect::<Vec<_>>();
+        let mut composed_automorphisms = original_automorphisms.clone().flat_map(|g| inverse_automorphisms.iter().map(move |s| H.galois_group_mulrepr().mul_ref(&g, s))).collect::<Vec<_>>();
         composed_automorphisms.sort_unstable_by_key(|g| H.galois_group_mulrepr().smallest_positive_lift(*g));
         composed_automorphisms.dedup_by(|a, b| H.galois_group_mulrepr().eq_el(a, b));
 
@@ -112,7 +194,7 @@ impl<R, F, A> LinearTransform<R, F, A>
         for (i, g) in original_automorphisms.enumerate() {
             for (j, s) in inverse_automorphisms.iter().enumerate() {
                 let row_index = composed_automorphisms.binary_search_by_key(
-                    &H.galois_group_mulrepr().smallest_positive_lift(H.galois_group_mulrepr().mul_ref(g, s)), 
+                    &H.galois_group_mulrepr().smallest_positive_lift(H.galois_group_mulrepr().mul_ref(&g, s)), 
                     |g| H.galois_group_mulrepr().smallest_positive_lift(*g)
                 ).unwrap();
                 let entry = H.ring().get_ring().apply_galois_action(&self.data[i].1, *s);
@@ -125,6 +207,7 @@ impl<R, F, A> LinearTransform<R, F, A>
         let mut lhs: OwnedMatrix<_> = OwnedMatrix::zero(matrix.row_count(), matrix.col_count(), H.slot_ring());
         let mut rhs: OwnedMatrix<_> = OwnedMatrix::zero(matrix.row_count(), 1, H.slot_ring());
         let mut sol: OwnedMatrix<_> = OwnedMatrix::zero(matrix.col_count(), 1, H.slot_ring());
+
         for _ in H.slot_iter(|_indices| ()) {
             for i in 0..matrix.row_count() {
                 for j in 0..matrix.col_count() {
@@ -155,10 +238,9 @@ impl<R, F, A> LinearTransform<R, F, A>
         }
 
         let mut result = Self {
-            data: self.data.iter().zip(result.into_iter()).map(|((g, _, steps), coeff)| (
-                H.galois_group_mulrepr().invert(g).unwrap(),
-                coeff,
-                steps.into_iter().map(|k| -k).collect()
+            data: self.data.iter().zip(result.into_iter()).map(|((g, _), coeff)| (
+                g.clone().inverse(),
+                coeff
             )).collect()
         };
         result.canonicalize(H);
@@ -166,7 +248,7 @@ impl<R, F, A> LinearTransform<R, F, A>
         #[cfg(test)] {
             let check = self.compose(&result, H);
             assert_eq!(1, check.data.len());
-            assert!(H.galois_group_mulrepr().is_one(&check.data[0].0));
+            assert!(H.galois_group_mulrepr().is_one(&check.data[0].0.galois_element(H)));
             assert!(H.ring().is_one(&check.data[0].1));
         }
 
@@ -174,17 +256,10 @@ impl<R, F, A> LinearTransform<R, F, A>
     }
 
     fn check_valid(&self, H: &HypercubeIsomorphism<R, F, A>) {
-        for (i, (g, _, _)) in self.data.iter().enumerate() {
-            for (j, (s, _, _)) in self.data.iter().enumerate() {
-                assert!(i == j || !H.galois_group_mulrepr().eq_el(g, s));
+        for (i, (g, _)) in self.data.iter().enumerate() {
+            for (j, (s, _)) in self.data.iter().enumerate() {
+                assert!(i == j || g != s);
             }
-        }
-        for (g, _, steps) in &self.data {
-            assert_el_eq!(
-                H.galois_group_mulrepr(),
-                g,
-                H.galois_group_mulrepr().prod(steps.iter().enumerate().map(|(i, s)| H.shift_galois_element(i, *s)))
-            );
         }
     }
 
@@ -192,10 +267,9 @@ impl<R, F, A> LinearTransform<R, F, A>
         self.check_valid(H);
         run_first.check_valid(H);
         let mut result = Self {
-            data: self.data.iter().flat_map(|(self_g, self_coeff, self_indices)| run_first.data.iter().map(|(first_g, first_coeff, first_indices)| (
-                H.galois_group_mulrepr().mul_ref(self_g, first_g), 
-                H.ring().mul_ref_snd(H.ring().get_ring().apply_galois_action(first_coeff, *self_g), self_coeff),
-                self_indices.iter().zip(first_indices).map(|(self_i, first_i)| self_i + first_i).collect()
+            data: self.data.iter().flat_map(|(self_g, self_coeff)| run_first.data.iter().map(|(first_g, first_coeff)| (
+                self_g.clone().compose(first_g), 
+                H.ring().mul_ref_snd(H.ring().get_ring().apply_galois_action(first_coeff, self_g.galois_element(H)), self_coeff)
             ))).collect()
         };
         result.canonicalize(&H);
@@ -204,21 +278,28 @@ impl<R, F, A> LinearTransform<R, F, A>
 
     fn identity(H: &HypercubeIsomorphism<R, F, A>) -> Self {
         Self {
-            data: vec![(H.galois_group_mulrepr().one(), H.ring().one(), (0..H.dim_count()).map(|_| 0).collect())]
+            data: vec![(GaloisElementIndex::shift_1d(H.dim_count(), 0, 0), H.ring().one())]
         }
     }
 
     fn canonicalize(&mut self, H: &HypercubeIsomorphism<R, F, A>) {
-        self.data.sort_unstable_by_key(|(g, _, _)| H.galois_group_mulrepr().smallest_positive_lift(*g));
+        self.data.sort_unstable_by_key(|(g, _)| H.galois_group_mulrepr().smallest_positive_lift(g.galois_element(H)));
         self.data.dedup_by(|second, first| {
-            if H.galois_group_mulrepr().eq_el(&second.0, &first.0) {
+            if H.galois_group_mulrepr().eq_el(&second.0.galois_element(H), &first.0.galois_element(H)) {
                 H.ring().add_assign_ref(&mut first.1, &second.1);
                 return true;
             } else {
                 return false;
             }
         });
-        self.data.retain(|(_, coeff, _)| !H.ring().is_zero(coeff));
+        self.data.retain(|(_, coeff)| !H.ring().is_zero(coeff));
+    }
+
+    #[cfg(test)]
+    fn print(&self, H: &HypercubeIsomorphism<R, F, A>) {
+        for (g, c) in &self.data {
+            println!("p^{} {:?}: {}", g.frobenius_count, g.shift_steps, H.ring().format(c));
+        }
     }
 }
 
@@ -229,8 +310,8 @@ impl<R, F, A> NTTRingBase<R, F, A>
         A: Allocator + Clone,
         NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
 {
-    pub fn compute_linear_transform(&self, el: &<Self as RingBase>::Element, transform: &LinearTransform<R, F, A>) -> <Self as RingBase>::Element {
-        <_ as RingBase>::sum(self, transform.data.iter().map(|(s, c, _)| self.mul_ref_fst(c, self.apply_galois_action(el, *s))))
+    pub fn compute_linear_transform(&self, H: &HypercubeIsomorphism<R, F, A>, el: &<Self as RingBase>::Element, transform: &LinearTransform<R, F, A>) -> <Self as RingBase>::Element {
+        <_ as RingBase>::sum(self, transform.data.iter().map(|(s, c)| self.mul_ref_fst(c, self.apply_galois_action(el, s.galois_element(H)))))
     }
 }
 
@@ -247,6 +328,7 @@ pub struct CompiledLinearTransform<R, F, A>
     one: El<NTTRing<R, F, A>>
 }
 
+#[derive(Debug)]
 pub struct BabyStepGiantStepParams {
     pure_baby_step_dimensions: Range<usize>,
     pure_giant_step_dimensions: Range<usize>,
@@ -287,6 +369,9 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
         return <_ as DeserializeSeed>::deserialize(serialization::VecDeserializeSeed { base_seed: serialization::DeserializeLinearTransformSeed { galois_group_mulrepr: galois_group_mulrepr, ring: ring.get_ring() } }, &mut deserializer).unwrap().into();
     }
 
+    /// 
+    /// In the returned lists, we use the first entry for the "frobenius-dimension"
+    /// 
     fn compute_automorphisms_per_dimension(H: &HypercubeIsomorphism<R, F, A>, lin_transform: &LinearTransform<R, F, A>) -> (Vec<i64>, Vec<i64>, Vec<i64>, Vec<i64>) {
         lin_transform.check_valid(H);
         
@@ -294,10 +379,10 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
         let mut min_step: Vec<i64> = Vec::new();
         let mut gcd_step: Vec<i64> = Vec::new();
         let mut sizes: Vec<i64> = Vec::new();
-        for i in 0..H.dim_count() {
-            max_step.push(lin_transform.data.iter().map(|(_, _, steps)| steps[i]).max().unwrap());
-            min_step.push(lin_transform.data.iter().map(|(_, _, steps)| steps[i]).min().unwrap());
-            let gcd = lin_transform.data.iter().map(|(_, _, steps)| steps[i]).fold(0, |a, b| signed_gcd(a, b, StaticRing::<i64>::RING));
+        for i in 0..=H.dim_count() {
+            max_step.push(lin_transform.data.iter().map(|(steps, _)| steps.index_at(i)).max().unwrap());
+            min_step.push(lin_transform.data.iter().map(|(steps, _)| steps.index_at(i)).min().unwrap());
+            let gcd = lin_transform.data.iter().map(|(steps, _)| steps.index_at(i)).fold(0, |a, b| signed_gcd(a, b, StaticRing::<i64>::RING));
             if gcd == 0 {
                 gcd_step.push(1);
             } else {
@@ -378,7 +463,7 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
 
         let (max_step, min_step, gcd_step, sizes) = Self::compute_automorphisms_per_dimension(H, &lin_transform);
 
-        let params = Self::baby_step_giant_step_params((0..H.dim_count()).map_fn(|i| sizes[i] as usize), preferred_baby_steps);
+        let params = Self::baby_step_giant_step_params((0..sizes.len()).map_fn(|i| sizes[i] as usize), preferred_baby_steps);
         let mixed_dim_i = params.mixed_step_dimension;
         let mixed_dim_baby_steps = params.mixed_step_dimension_baby_steps as i64;
 
@@ -388,14 +473,20 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
         let baby_step_range_iters = params.pure_baby_step_dimensions.clone().map(|i| (min_step[i]..=max_step[i]).step_by(gcd_step[i] as usize))
             .chain([(0..=((mixed_dim_baby_steps - 1) * gcd_step[mixed_dim_i])).step_by(gcd_step[mixed_dim_i] as usize)]);
 
+        let shift_or_frobenius = |dim_or_frobenius: usize, steps: i64| if dim_or_frobenius == 0 {
+            GaloisElementIndex::frobenius(H.dim_count(), steps)
+        } else {
+            GaloisElementIndex::shift_1d(H.dim_count(), dim_or_frobenius - 1, steps)
+        };
+
         let giant_steps_galois_els = multi_cartesian_product(giant_step_range_iters, |indices| {
-            H.galois_group_mulrepr().prod(indices.iter().enumerate().map(|(i, s)| H.shift_galois_element(if i == 0 { mixed_dim_i } else { i + params.pure_giant_step_dimensions.start - 1 }, *s)))
+            indices[1..].iter().enumerate().map(|(i, s)| shift_or_frobenius(i + params.pure_giant_step_dimensions.start, *s)).fold(shift_or_frobenius(mixed_dim_i, indices[0]), |a, b| a.compose(&b)).galois_element(H)
         }, |_, x| *x)
             .map(|g_el| if H.galois_group_mulrepr().is_one(&g_el) { None } else { Some(g_el) })
             .collect::<Vec<_>>();
 
         let baby_steps_galois_els = multi_cartesian_product(baby_step_range_iters, move |indices| {
-            H.galois_group_mulrepr().prod(indices.iter().enumerate().map(|(i, s)| H.shift_galois_element(i, *s)))
+            indices.iter().enumerate().map(|(i, s)| shift_or_frobenius(i, *s)).fold(shift_or_frobenius(0, 0), |a, b| a.compose(&b)).galois_element(H)
         }, |_, x| *x).collect::<Vec<_>>();
 
         assert_eq!(params.hoisted_automorphism_count, baby_steps_galois_els.len() - 1);
@@ -404,7 +495,7 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
         let compiled_coeffs = giant_steps_galois_els.iter().map(|gs_el| baby_steps_galois_els.iter().map(|bs_el| {
             let gs_el = gs_el.unwrap_or(H.galois_group_mulrepr().one());
             let total_el = H.galois_group_mulrepr().mul(gs_el, *bs_el);
-            let coeff = &lin_transform.data.iter().filter(|(g, _, _)| H.galois_group_mulrepr().eq_el(g, &total_el)).next().map(|(_, c, _)| c).and_then(|c| if H.ring().is_zero(c) { None } else { Some(c) });
+            let coeff = &lin_transform.data.iter().filter(|(g, _)| H.galois_group_mulrepr().eq_el(&g.galois_element(H), &total_el)).next().map(|(_, c)| c).and_then(|c| if H.ring().is_zero(c) { None } else { Some(c) });
             let result = coeff.map(|c| H.ring().get_ring().apply_galois_action(c, H.galois_group_mulrepr().invert(&gs_el).unwrap()));
             return result;
         }).collect::<Vec<_>>()).collect::<Vec<_>>();
@@ -761,7 +852,7 @@ fn test_compile() {
     let compiled_transform = slots_to_coeffs_thin(&H).into_iter().map(|T| CompiledLinearTransform::create_from(&H, T, 2)).collect::<Vec<_>>();
 
     let mut current = H.from_slot_vec([1, 2, 3, 4].into_iter().map(|n| H.slot_ring().int_hom().map(n)));
-    let expected = slots_to_coeffs_thin(&H).into_iter().fold(ring.clone_el(&current), |c, T| ring.get_ring().compute_linear_transform(&c, &T));
+    let expected = slots_to_coeffs_thin(&H).into_iter().fold(ring.clone_el(&current), |c, T| ring.get_ring().compute_linear_transform(&H, &c, &T));
     for T in &compiled_transform {
         current = T.evaluate(current, &ring);
     }
@@ -769,7 +860,7 @@ fn test_compile() {
     
     let compiled_composed_transform = CompiledLinearTransform::create_from_merged(&H, &slots_to_coeffs_thin(&H), 2);
     let mut current = H.from_slot_vec([1, 2, 3, 4].into_iter().map(|n| H.slot_ring().int_hom().map(n)));
-    let expected = slots_to_coeffs_thin(&H).into_iter().fold(ring.clone_el(&current), |c, T| ring.get_ring().compute_linear_transform(&c, &T));
+    let expected = slots_to_coeffs_thin(&H).into_iter().fold(ring.clone_el(&current), |c, T| ring.get_ring().compute_linear_transform(&H, &c, &T));
     current = compiled_composed_transform.evaluate(current, &ring);
     assert_el_eq!(&ring, &expected, &current);
 
@@ -778,7 +869,7 @@ fn test_compile() {
     let compiled_transform = slots_to_coeffs_thin(&H).into_iter().map(|T| CompiledLinearTransform::create_from(&H, T, 2)).collect::<Vec<_>>();
     
     let mut current = H.from_slot_vec((1..17).map(|n| H.slot_ring().int_hom().map(n)));
-    let expected = slots_to_coeffs_thin(&H).into_iter().fold(ring.clone_el(&current), |c, T| ring.get_ring().compute_linear_transform(&c, &T));
+    let expected = slots_to_coeffs_thin(&H).into_iter().fold(ring.clone_el(&current), |c, T| ring.get_ring().compute_linear_transform(&H, &c, &T));
     for T in compiled_transform {
         current = T.evaluate(current, &ring);
     }
@@ -786,19 +877,19 @@ fn test_compile() {
 
     let compiled_composed_transform = CompiledLinearTransform::create_from_merged(&H, &slots_to_coeffs_thin(&H), 2);
     let mut current = H.from_slot_vec((1..17).map(|n| H.slot_ring().int_hom().map(n)));
-    let expected = slots_to_coeffs_thin(&H).into_iter().fold(ring.clone_el(&current), |c, T| ring.get_ring().compute_linear_transform(&c, &T));
+    let expected = slots_to_coeffs_thin(&H).into_iter().fold(ring.clone_el(&current), |c, T| ring.get_ring().compute_linear_transform(&H, &c, &T));
     current = compiled_composed_transform.evaluate(current, &ring);
     assert_el_eq!(&ring, &expected, &current);
 
     let compiled_composed_transform = CompiledLinearTransform::create_from_merged(&H, &slots_to_coeffs_thin(&H), 3);
     let mut current = H.from_slot_vec((1..17).map(|n| H.slot_ring().int_hom().map(n)));
-    let expected = slots_to_coeffs_thin(&H).into_iter().fold(ring.clone_el(&current), |c, T| ring.get_ring().compute_linear_transform(&c, &T));
+    let expected = slots_to_coeffs_thin(&H).into_iter().fold(ring.clone_el(&current), |c, T| ring.get_ring().compute_linear_transform(&H, &c, &T));
     current = compiled_composed_transform.evaluate(current, &ring);
     assert_el_eq!(&ring, &expected, &current);
 
     let compiled_composed_transform = CompiledLinearTransform::create_from_merged(&H, &slots_to_coeffs_thin(&H), 5);
     let mut current = H.from_slot_vec((1..17).map(|n| H.slot_ring().int_hom().map(n)));
-    let expected = slots_to_coeffs_thin(&H).into_iter().fold(ring.clone_el(&current), |c, T| ring.get_ring().compute_linear_transform(&c, &T));
+    let expected = slots_to_coeffs_thin(&H).into_iter().fold(ring.clone_el(&current), |c, T| ring.get_ring().compute_linear_transform(&H, &c, &T));
     current = compiled_composed_transform.evaluate(current, &ring);
     assert_el_eq!(&ring, &expected, &current);
 }
@@ -811,8 +902,8 @@ fn test_compose() {
 
     let mut current = H.from_slot_vec([1, 2, 3, 4].into_iter().map(|n| H.slot_ring().int_hom().map(n)));
     let mut expected = ring.clone_el(&current);
-    current = ring.get_ring().compute_linear_transform(&current, &composed_transform);
-    expected = slots_to_coeffs_thin(&H).into_iter().fold(expected, |c, T| ring.get_ring().compute_linear_transform(&c, &T));
+    current = ring.get_ring().compute_linear_transform(&H, &current, &composed_transform);
+    expected = slots_to_coeffs_thin(&H).into_iter().fold(expected, |c, T| ring.get_ring().compute_linear_transform(&H, &c, &T));
 
     assert_el_eq!(&ring, &expected, &current);
     
@@ -822,8 +913,8 @@ fn test_compose() {
     
     let mut current = H.from_slot_vec((1..17).map(|n| H.slot_ring().int_hom().map(n)));
     let mut expected = ring.clone_el(&current);
-    current = ring.get_ring().compute_linear_transform(&current, &composed_transform);
-    expected = slots_to_coeffs_thin(&H).into_iter().fold(expected, |c, T| ring.get_ring().compute_linear_transform(&c, &T));
+    current = ring.get_ring().compute_linear_transform(&H, &current, &composed_transform);
+    expected = slots_to_coeffs_thin(&H).into_iter().fold(expected, |c, T| ring.get_ring().compute_linear_transform(&H, &c, &T));
 
     assert_el_eq!(&ring, &expected, &current);
 }
@@ -836,8 +927,8 @@ fn test_invert() {
     let inv_transform = composed_transform.inverse(&H);
 
     let expected = H.from_slot_vec([1, 2, 3, 4].into_iter().map(|n| H.slot_ring().int_hom().map(n)));
-    let current = slots_to_coeffs_thin(&H).into_iter().fold(ring.clone_el(&expected), |c, T| ring.get_ring().compute_linear_transform(&c, &T));
-    let actual = ring.get_ring().compute_linear_transform(&current, &inv_transform);
+    let current = slots_to_coeffs_thin(&H).into_iter().fold(ring.clone_el(&expected), |c, T| ring.get_ring().compute_linear_transform(&H, &c, &T));
+    let actual = ring.get_ring().compute_linear_transform(&H, &current, &inv_transform);
     assert_el_eq!(&ring, &expected, &actual);
     
     let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(97), 5);
@@ -846,8 +937,8 @@ fn test_invert() {
     let inv_transform = composed_transform.inverse(&H);
     
     let expected = H.from_slot_vec((1..17).map(|n| H.slot_ring().int_hom().map(n)));
-    let current = slots_to_coeffs_thin(&H).into_iter().fold(ring.clone_el(&expected), |c, T| ring.get_ring().compute_linear_transform(&c, &T));
-    let actual = ring.get_ring().compute_linear_transform(&current, &inv_transform);
+    let current = slots_to_coeffs_thin(&H).into_iter().fold(ring.clone_el(&expected), |c, T| ring.get_ring().compute_linear_transform(&H, &c, &T));
+    let actual = ring.get_ring().compute_linear_transform(&H, &current, &inv_transform);
 
     assert_el_eq!(&ring, &expected, &actual);
 }

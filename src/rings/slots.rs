@@ -479,6 +479,10 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
         self.dim_lengths[dim_index]
     }
 
+    pub fn corresponding_factor_n(&self, dim_index: usize) -> i64 {
+        StaticRing::<i64>::RING.pow(self.dims[dim_index].factor_n.0, self.dims[dim_index].factor_n.1)
+    }
+
     pub fn dim_count(&self) -> usize {
         self.dims.len()
     }
@@ -560,6 +564,17 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
             self.galois_group_mulrepr().invert(&forward_galois_element).unwrap()
         } else {
             forward_galois_element
+        }
+    }
+
+    pub fn frobenius_element(&self, count: i64) -> ZnEl {
+        let t = int_cast(self.ring().base_ring().integer_ring().clone_el(self.ring().base_ring().modulus()), ZZ, self.ring().base_ring().integer_ring());
+        let (p, _) = is_prime_power(&ZZ, &t).unwrap();
+        let frobenius = self.galois_group_mulrepr().can_hom(&ZZ).unwrap().map(p);
+        if count < 0 {
+            self.galois_group_mulrepr().pow(frobenius, self.slot_ring().rank() - ((-count) % self.slot_ring().rank() as i64) as usize)
+        } else {
+            self.galois_group_mulrepr().pow(frobenius, (count % self.slot_ring().rank() as i64) as usize)
         }
     }
 }

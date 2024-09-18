@@ -9,7 +9,6 @@ use feanor_math::rings::extension::*;
 use feanor_math::rings::zn::zn_64::*;
 use feanor_math::rings::zn::*;
 use feanor_math::assert_el_eq;
-use trace::Trace;
 
 use crate::cyclotomic::*;
 use crate::rings::decomposition::*;
@@ -78,9 +77,6 @@ fn pow2_bitreversed_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'b, R
         TwiddleFactor::Zero => H.slot_ring().zero()
     };
 
-    let forward_galois_element = H.shift_galois_element(dim_index, l as i64 / 2);
-    let backward_galois_element = H.shift_galois_element(dim_index, -(l as i64 / 2));
-
     let forward_mask = H.from_slot_vec(H.slot_iter(|idxs| {
         let idx_in_block = idxs[dim_index] % l;
         if idx_in_block >= l / 2 {
@@ -111,19 +107,16 @@ fn pow2_bitreversed_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'b, R
     let mut result = LinearTransform {
         data: vec![
             (
-                H.galois_group_mulrepr().one(),
-                diagonal_mask,
-                (0..H.dim_count()).map(|_| 0).collect()
+                GaloisElementIndex::shift_1d(H.dim_count(), dim_index, 0),
+                diagonal_mask
             ),
             (
-                forward_galois_element,
-                forward_mask,
-                (0..H.dim_count()).map(|i| if i == dim_index { l as i64 / 2 } else { 0 }).collect()
+                GaloisElementIndex::shift_1d(H.dim_count(), dim_index, l as i64 / 2),
+                forward_mask
             ),
             (
-                backward_galois_element,
-                backward_mask,
-                (0..H.dim_count()).map(|i| if i == dim_index { -(l as i64 / 2) } else { 0 }).collect()
+                GaloisElementIndex::shift_1d(H.dim_count(), dim_index, -(l as i64) / 2),
+                backward_mask
             )
         ]
     };
@@ -165,9 +158,6 @@ fn pow2_bitreversed_inv_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'
         TwiddleFactor::Zero => H.slot_ring().zero()
     };
 
-    let forward_galois_element = H.shift_galois_element(dim_index, l as i64 / 2);
-    let backward_galois_element = H.shift_galois_element(dim_index, -(l as i64 / 2));
-
     let inv_2 = H.ring().base_ring().invert(&H.ring().base_ring().int_hom().map(2)).unwrap();
 
     let mut forward_mask = H.from_slot_vec(H.slot_iter(|idxs| {
@@ -203,19 +193,16 @@ fn pow2_bitreversed_inv_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'
     let mut result = LinearTransform {
         data: vec![
             (
-                H.galois_group_mulrepr().one(),
-                diagonal_mask,
-                (0..H.dim_count()).map(|_| 0).collect()
+                GaloisElementIndex::shift_1d(H.dim_count(), dim_index, 0),
+                diagonal_mask
             ),
             (
-                forward_galois_element,
-                forward_mask,
-                (0..H.dim_count()).map(|i| if i == dim_index { l as i64 / 2 } else { 0 }).collect()
+                GaloisElementIndex::shift_1d(H.dim_count(), dim_index, l as i64 / 2),
+                forward_mask
             ),
             (
-                backward_galois_element,
-                backward_mask,
-                (0..H.dim_count()).map(|i| if i == dim_index { -(l as i64 / 2) } else { 0 }).collect()
+                GaloisElementIndex::shift_1d(H.dim_count(), dim_index, -(l as i64) / 2),
+                backward_mask
             )
         ]
     };
@@ -334,24 +321,22 @@ pub fn slots_to_coeffs_thin<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> Vec<L
     result.push(LinearTransform {
         data: vec![
             (
-                H.galois_group_mulrepr().one(),
+                GaloisElementIndex::shift_1d(H.dim_count(), 1, 0),
                 H.from_slot_vec(H.slot_iter(|idxs| if idxs[1] == 0 {
                     H.slot_ring().one()
                 } else {
                     debug_assert!(idxs[1] == 1);
                     H.slot_ring().negate(H.slot_ring().clone_el(&zeta4))
-                })),
-                vec![0, 0]
+                }))
             ), 
             (
-                H.galois_group_mulrepr().neg_one(),
+                GaloisElementIndex::shift_1d(H.dim_count(), 1, 1),
                 H.from_slot_vec(H.slot_iter(|idxs| if idxs[1] == 0 {
                     H.slot_ring().clone_el(&zeta4)
                 } else {
                     debug_assert!(idxs[1] == 1);
                     H.slot_ring().one()
-                })),
-                vec![0, 1]
+                }))
             )
         ]
     });
@@ -404,24 +389,22 @@ pub fn slots_to_coeffs_thin_inv<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> V
     result.push(LinearTransform {
         data: vec![
             (
-                H.galois_group_mulrepr().one(),
+                GaloisElementIndex::shift_1d(H.dim_count(), 1, 0),
                 H.ring().inclusion().mul_map(H.from_slot_vec(H.slot_iter(|idxs| if idxs[1] == 0 {
                     H.slot_ring().one()
                 } else {
                     debug_assert!(idxs[1] == 1);
                     H.slot_ring().negate(H.slot_ring().clone_el(&zeta4_inv))
-                })), H.ring().base_ring().clone_el(&two_inv)),
-                vec![0, 0]
+                })), H.ring().base_ring().clone_el(&two_inv))
             ), 
             (
-                H.galois_group_mulrepr().neg_one(),
+                GaloisElementIndex::shift_1d(H.dim_count(), 1, 1),
                 H.ring().inclusion().mul_map(H.from_slot_vec(H.slot_iter(|idxs| if idxs[1] == 0 {
                     H.slot_ring().one()
                 } else {
                     debug_assert!(idxs[1] == 1);
                     H.slot_ring().clone_el(&zeta4_inv)
-                })), two_inv),
-                vec![0, 1]
+                })), two_inv)
             )
         ]
     });
@@ -441,7 +424,7 @@ fn test_pow2_slots_to_coeffs_thin() {
     
     let mut current = H.from_slot_vec((1..17).map(|n| H.slot_ring().int_hom().map(n)));
     for T in slots_to_coeffs_thin(&H) {
-        current = ring.get_ring().compute_linear_transform(&current, &T);
+        current = ring.get_ring().compute_linear_transform(&H, &current, &T);
     }
 
     let mut expected = [0; 32];
@@ -458,7 +441,7 @@ fn test_pow2_slots_to_coeffs_thin() {
 
     let mut current = H.from_slot_vec([1, 2, 3, 4].into_iter().map(|n| H.slot_ring().int_hom().map(n)));
     for T in slots_to_coeffs_thin(&H) {
-        current = ring.get_ring().compute_linear_transform(&current, &T);
+        current = ring.get_ring().compute_linear_transform(&H, &current, &T);
     }
 
     let mut expected = [0; 32];
@@ -478,6 +461,7 @@ fn test_pow2_coeffs_to_slots_thin() {
 
     for (transform, actual) in slots_to_coeffs_thin(&H).into_iter().rev().zip(slots_to_coeffs_thin_inv(&H).into_iter()) {
         let expected = transform.inverse(&H);
+        println!();
         assert!(expected.eq(&actual, &H));
     }
     
