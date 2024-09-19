@@ -49,3 +49,14 @@ fn column_dwt<R, F, A, G>(H: &HypercubeIsomorphism<R, F, A>, dim_index: usize, r
         column_dwt_matrix(H, dim_index, row_autos), 
     )]
 }
+
+fn slots_to_coeffs_fat<R, F, A, G>(H: &HypercubeIsomorphism<R, F, A>, dim_index: usize, row_autos: G) -> Vec<LinearTransform<R, F, A>>
+    where R: RingStore,
+        R::Type: StdZn,
+        F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
+        A: Allocator + Clone,
+        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
+        G: Fn(&[usize]) -> ZnEl
+{
+    unimplemented!()
+}

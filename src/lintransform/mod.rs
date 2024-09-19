@@ -7,6 +7,7 @@ use std::io::BufWriter;
 use std::ops::Range;
 
 use feanor_math::algorithms::eea::signed_gcd;
+use feanor_math::algorithms::matmul::ComputeInnerProduct;
 use feanor_math::assert_el_eq;
 use feanor_math::divisibility::DivisibilityRingStore;
 use feanor_math::iters::multi_cartesian_product;
@@ -14,15 +15,19 @@ use feanor_math::matrix::OwnedMatrix;
 use feanor_math::primitive_int::*;
 use feanor_math::ring::*;
 use feanor_math::rings::extension::*;
+use feanor_math::rings::poly::dense_poly::DensePolyRing;
+use feanor_math::rings::poly::PolyRingStore;
 use feanor_math::rings::zn::zn_64::*;
 use feanor_math::rings::zn::*;
 use feanor_math::seq::*;
 use feanor_math::algorithms::linsolve::LinSolveRing;
 use feanor_math::homomorphism::*;
 use serde::de::DeserializeSeed;
+use trace::Trace;
 
 use crate::cyclotomic::*;
 use crate::rings::decomposition::*;
+use crate::rings::odd_cyclotomic::DefaultOddCyclotomicNTTRingBase;
 use crate::rings::slots::*;
 use crate::rings::ntt_ring::*;
 use crate::StdZn;
@@ -126,25 +131,6 @@ impl<R, F, A> LinearTransform<R, F, A>
     }
 
     ///
-    /// Computes the linear transforms that maps the value `sum_i a_i X^i` in each slot to `a_j`
-    /// 
-    pub fn extract_coefficient_map(H: &HypercubeIsomorphism<R, F, A>, coefficient_j: usize) {
-        let slot_ring = H.slot_ring();
-
-        let mut lhs = OwnedMatrix::zero(slot_ring.rank(), slot_ring.rank(), slot_ring.base_ring());
-        let mut rhs = OwnedMatrix::identity(slot_ring.rank(), slot_ring.rank(), slot_ring.base_ring());
-        let mut sol = OwnedMatrix::zero(slot_ring.rank(), slot_ring.rank(), slot_ring.base_ring());
-
-        let frobenius = H.galois_group_mulrepr().smallest_positive_lift(H.frobenius_element(1));
-        let mut current = slot_ring.canonical_gen();
-        for i in 0..slot_ring.rank() {
-
-        }
-
-        unimplemented!()
-    }
-
-    ///
     /// `matrix` is called on `output_index, input_index, column_indices` to give the `(output_index, input_index)`-th
     /// entry of the matrix corresponding to the hypercolumn containing the slot `column_indices`.
     /// 
@@ -170,13 +156,54 @@ impl<R, F, A> LinearTransform<R, F, A>
     }
     
     ///
-    /// The matrix is the matrix of the transform w.r.t. the basis `X^j e_i`, `j < d` and `i < li` where `e_i` is the `i`-th unit vector
-    /// and `X` is the canonical generator of the slot ring `F_p^d`.
+    /// The matrix is the matrix of the transform w.r.t. the basis `X^k e_i`, `k < d` and `i < hypercolumn_length` 
+    /// where `e_i` is the `i`-th unit vector and `X` is the canonical generator of the slot ring `F_p^d`. 
+    /// More concretely, the passed closure is given `(i, k), (j, l), idxs`, where `(i, k)` refers to the row,
+    /// `(j, l)` refers to the column and `idxs` is the hypercube index of a slot that is contained in the current
+    /// hypercolumn.
     /// 
     pub fn blockmatmul1d<'a, G>(H: &HypercubeIsomorphism<'a, R, F, A>, dim_index: usize, matrix: G) -> LinearTransform<R, F, A>
-        where G: Fn(usize, usize, usize, usize, &[usize]) -> El<Zn>
+        where G: Fn((usize, usize), (usize, usize), &[usize]) -> El<R>
     {
-        unimplemented!()
+        let m = H.len(dim_index) as i64;
+        let d = H.slot_ring().rank();
+        let Gal = H.galois_group_mulrepr();
+        let trace = Trace::new(&Gal, Gal.smallest_positive_lift(H.frobenius_element(1)), d);
+        let extract_coeff_factors = (0..d).map(|j| trace.extract_coefficient_map(H.slot_ring(), j)).collect::<Vec<_>>();
+        
+        let poly_ring = DensePolyRing::new(H.slot_ring().base_ring(), "X");
+        // this is the map `X -> X^p`, which is the frobenius in our case, since we choose the canonical generator of the slot ring as root of unity
+        let apply_frobenius = |x: &El<SlotRing<'a, _, _>>, count: i64| {
+            poly_ring.evaluate(&H.slot_ring().poly_repr(&poly_ring, x, &H.slot_ring().base_ring().identity()), &H.slot_ring().pow(H.slot_ring().canonical_gen(), Gal.smallest_positive_lift(H.frobenius_element(count)) as usize), &H.slot_ring().inclusion())
+        };
+        
+        // the approach is as follows:
+        // We consider the matrix by block-diagonals as in [`matmul1d()`], which correspond to shifting slots within a hypercolumn.
+        // Additionally however, we need to take care of the transformation within a slot. Unfortunately, the matrix structure does
+        // not nicely correspond to structure of the Frobenius anymore (more concretely, the basis `1, X, ..., X^(d - 1)` w.r.t. which
+        // we represent the matrix is not normal). Thus, we have to solve a linear system, which is done by [`Trace::extract_coefficient_map`].
+        // In other words, we compute the Frobenius-coefficients for the maps `sum a_k X^k -> a_l` for all `l`. Then we we take the
+        // desired map as the linear combination of these extract-coefficient-maps.
+        let mut result = LinearTransform {
+            data: ((1 - m)..m).flat_map(|s| (0..d).map(move |frobenius_index| (s, frobenius_index))).map(|(s, frobenius_index)| {
+                let coeff = H.from_slot_vec(H.slot_iter(|idxs| if idxs[dim_index] as i64 >= s && idxs[dim_index] as i64 - s < m {
+                    let i = idxs[dim_index];
+                    let j = (idxs[dim_index] as i64 - s) as usize;
+                    <_ as ComputeInnerProduct>::inner_product(H.slot_ring().get_ring(), (0..d).map(|l| (
+                        apply_frobenius(&extract_coeff_factors[l], frobenius_index as i64),
+                        H.slot_ring().from_canonical_basis((0..d).map(|k| matrix((i, k), (j, l), idxs)))
+                    )))
+                } else {
+                    H.slot_ring().zero()
+                }));
+                return (
+                    GaloisElementIndex::shift_1d(H.dim_count(), dim_index, s).compose(&GaloisElementIndex::frobenius(H.dim_count(), frobenius_index as i64)),
+                    coeff, 
+                );
+            }).collect()
+        };
+        result.canonicalize(H);
+        return result;
     }
 
     pub fn switch_ring(&self, H_from: &HypercubeIsomorphism<R, F, A>, to: &NTTRingBase<R, F, A>) -> Self {
@@ -949,4 +976,61 @@ fn test_invert() {
     let actual = ring.get_ring().compute_linear_transform(&H, &current, &inv_transform);
 
     assert_el_eq!(&ring, &expected, &actual);
+}
+
+#[test]
+fn test_blockmatmul1d() {
+    // F23[X]/(Phi_5) ~ F_(23^4)
+    let ring = DefaultOddCyclotomicNTTRingBase::new(Zn::new(23), 5);
+    let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
+    let matrix = [
+        [1, 0, 1, 0],
+        [0, 0, 0, 2],
+        [0, 0, 0, 0],
+        [5, 0, 8, 8]
+    ];
+    let lin_transform = LinearTransform::blockmatmul1d(&H, 0, |(i, k), (j, l), idxs| {
+        assert_eq!(0, i);
+        assert_eq!(0, j);
+        assert_eq!(&[0], idxs);
+        H.slot_ring().base_ring().int_hom().map(matrix[k][l])
+    });
+
+    for i in 0..4 {
+        let input = H.ring().pow(H.ring().canonical_gen(), i);
+        let expected = H.ring().from_canonical_basis((0..4).map(|j| H.ring().base_ring().int_hom().map(matrix[j][i])));
+        let actual = ring.get_ring().compute_linear_transform(&H, &input, &lin_transform);
+        assert_el_eq!(H.ring(), &expected, &actual);
+    }
+
+
+    // F23[X]/(Phi_7) ~ F_(23^3)^2
+    let ring = DefaultOddCyclotomicNTTRingBase::new(Zn::new(23), 7);
+    let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
+    let matrix = [
+        [1, 0, 0],
+        [2, 0, 0],
+        [3, 0, 0]
+    ];
+    let lin_transform = LinearTransform::blockmatmul1d(&H, 0, |(i, k), (j, l), _idxs| {
+        if i == 0 && j == 1 {
+            H.slot_ring().base_ring().int_hom().map(matrix[k][l])
+        } else {
+            H.slot_ring().base_ring().zero()
+        }
+    });
+
+    for i in 0..3 {
+        let input = H.from_slot_vec([H.slot_ring().zero(), H.slot_ring().pow(H.slot_ring().canonical_gen(), i)]);
+        let expected = H.from_slot_vec([H.slot_ring().from_canonical_basis((0..3).map(|j| H.slot_ring().base_ring().int_hom().map(matrix[j][i]))), H.slot_ring().zero()]);
+        let actual = ring.get_ring().compute_linear_transform(&H, &input, &lin_transform);
+        assert_el_eq!(H.ring(), &expected, &actual);
+    }
+
+    for i in 0..3 {
+        let input = H.from_slot_vec([H.slot_ring().pow(H.slot_ring().canonical_gen(), i), H.slot_ring().zero()]);
+        let expected = H.ring().zero();
+        let actual = ring.get_ring().compute_linear_transform(&H, &input, &lin_transform);
+        assert_el_eq!(H.ring(), &expected, &actual);
+    }
 }

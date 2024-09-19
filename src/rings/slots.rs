@@ -268,7 +268,8 @@ pub type SlotRing<'a, R, A> = AsLocalPIR<FreeAlgebraImpl<&'a R, SparseMapVector<
 /// ```text
 /// Z[X] / (Phi_n(X), p)  ->  F_(p^d) ^ G
 /// ```
-/// where `G = Gal(K / Q) / <p>` with `K = Q[X]/(Phi_n(X))` and `d = phi(n) / #G`.
+/// and its extension to Galois rings, where `G = Gal(K / Q) / <p>` 
+/// with `K = Q[X]/(Phi_n(X))` and `d = phi(n) / #G`.
 /// 
 /// This becomes a hypercube by considering the decomposition
 /// ```text
@@ -516,11 +517,13 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
     }
 
     pub fn from_slot_vec<I>(&self, vec: I) -> El<NTTRing<R, F, A>>
-        where I: ExactSizeIterator<Item = El<SlotRing<'a, R, A>>>
+        where I: IntoIterator<Item = El<SlotRing<'a, R, A>>>
     {
-        assert_eq!(vec.len(), self.ring.rank() / self.d);
+        let mut given_len = 0;
+        let mut vec_it = vec.into_iter().inspect(|_| given_len += 1);
+
         let move_to_slot_gens = self.slot_iter(|idxs| self.galois_group_mulrepr().prod(idxs.iter().enumerate().map(|(j, e)| self.shift_galois_element(j, *e as i64))));
-        return self.ring.sum_galois_transforms(move_to_slot_gens.zip(vec)
+        let result = self.ring.sum_galois_transforms(move_to_slot_gens.zip(vec_it.by_ref())
             .filter(|(_, x)| !self.slot_ring().is_zero(&x))
             .map(|(g, x)| {
                 let x_wrt_basis = self.slot_ring().wrt_canonical_basis(&x);
@@ -529,6 +532,9 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
                 return (lift_of_x, g);
             })
         );
+        assert!(vec_it.next().is_none());
+        assert_eq!(given_len, self.ring.rank() / self.d);
+        return result;
     }
 
     pub fn get_slot_value(&self, el: &El<NTTRing<R, F, A>>, move_to_slot_zero_el: ZnEl) -> El<SlotRing<'a, R, A>> {
@@ -567,6 +573,15 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
         }
     }
 
+    ///
+    /// Returns the element `g` in `(Z/nZ)*` that represents the `p^count`-th power Frobenius
+    /// automorphism in the main ring `(Z/p^eZ)[X]/(Phi_n)`.
+    /// 
+    /// Since we choose the canonical generator of the slot ring to be just `X mod f` where `f | Phi_n`,
+    /// this can also be used to compute the Frobenius isomorphism in the slot ring.
+    /// Note however that in the case of Galois rings `GR(p^e, d)` (with `e > 1`), the Frobenius
+    /// is no longer given as `x -> x^p`.
+    /// 
     pub fn frobenius_element(&self, count: i64) -> ZnEl {
         let t = int_cast(self.ring().base_ring().integer_ring().clone_el(self.ring().base_ring().modulus()), ZZ, self.ring().base_ring().integer_ring());
         let (p, _) = is_prime_power(&ZZ, &t).unwrap();
