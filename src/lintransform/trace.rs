@@ -3,15 +3,12 @@ use std::cell::RefCell;
 
 use feanor_math::algorithms::convolution::fft::{FFTRNSBasedConvolution, FFTRNSBasedConvolutionZn};
 use feanor_math::algorithms::unity_root::is_prim_root_of_unity;
-use feanor_math::delegate::DelegateRing;
 use feanor_math::homomorphism::Homomorphism;
 use feanor_math::integer::BigIntRing;
 use feanor_math::matrix::OwnedMatrix;
 use feanor_math::rings::extension::extension_impl::FreeAlgebraImpl;
 use feanor_math::rings::extension::galois_field::GaloisField;
 use feanor_math::rings::extension::FreeAlgebraStore;
-use feanor_math::rings::field::AsField;
-use feanor_math::rings::local::AsLocalPIR;
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
 use feanor_math::rings::poly::PolyRingStore;
 use feanor_math::seq::sparse::SparseMapVector;

@@ -156,11 +156,15 @@ impl<R, F, A> LinearTransform<R, F, A>
     }
     
     ///
-    /// The matrix is the matrix of the transform w.r.t. the basis `X^k e_i`, `k < d` and `i < hypercolumn_length` 
-    /// where `e_i` is the `i`-th unit vector and `X` is the canonical generator of the slot ring `F_p^d`. 
-    /// More concretely, the passed closure is given `(i, k), (j, l), idxs`, where `(i, k)` refers to the row,
-    /// `(j, l)` refers to the column and `idxs` is the hypercube index of a slot that is contained in the current
-    /// hypercolumn.
+    /// For each hypercolumn along the `dim_index`-th dimension containing the slots of index 
+    /// `U(i) = (u1, ..., u(dim_index - 1), i, u(dim_index + 1), ..., ur)` for all `i`, 
+    /// we can consider the `Fp`-basis given by `X^k e_U(i)`. An `Fp`-linear transform that operates on 
+    /// each set `{ X^k e_U(i) | k, k }` separately, for all `U`, is said to be of `blockmatmul1d`-type, 
+    /// and can be created using this function.
+    /// 
+    /// More concretely, for each hypercolumn (represented by `U(.)`), the given function `matrix` 
+    /// should return the `(i, k), (j, l)`-th entry of the matrix of the linear transform (w.r.t. basis `X^k e_U(i)`) 
+    /// when called on `((i, k), (j, l), U(<unspecified value>))`.
     /// 
     pub fn blockmatmul1d<'a, G>(H: &HypercubeIsomorphism<'a, R, F, A>, dim_index: usize, matrix: G) -> LinearTransform<R, F, A>
         where G: Fn((usize, usize), (usize, usize), &[usize]) -> El<R>
@@ -263,7 +267,7 @@ impl<R, F, A> LinearTransform<R, F, A>
         let result = result_by_slots.into_iter().map(|coeff_by_slots| H.from_slot_vec(coeff_by_slots.into_iter())).collect::<Vec<_>>();
 
         #[cfg(test)] {
-            let sol = Submatrix::<AsFirstElement<_>, _>::new(&result, matrix.col_count(), 1);
+            let sol = Submatrix::from_1d(&result, matrix.col_count(), 1);
             let mut check: OwnedMatrix<_> = OwnedMatrix::zero(matrix.row_count(), 1, H.ring());
             STANDARD_MATMUL.matmul(TransposableSubmatrix::from(matrix.data()), TransposableSubmatrix::from(sol), TransposableSubmatrixMut::from(check.data_mut()), H.ring());
             assert!(H.ring().is_one(check.at(0, 0)));
@@ -867,8 +871,6 @@ mod serialization {
 use feanor_math::algorithms::matmul::MatmulAlgorithm;
 #[cfg(test)]
 use feanor_math::algorithms::matmul::STANDARD_MATMUL;
-#[cfg(test)]
-use feanor_math::matrix::AsFirstElement;
 #[cfg(test)]
 use feanor_math::matrix::Submatrix;
 #[cfg(test)]

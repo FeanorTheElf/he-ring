@@ -95,8 +95,8 @@ fn test_rns_shared_base_conversion() {
         let mut actual = to.iter().map(|Zn| Zn.int_hom().map(k)).collect::<Vec<_>>();
 
         table.apply(
-            Submatrix::<AsFirstElement<_>, _>::new(&x, 3, 1), 
-            SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 4, 1)
+            Submatrix::from_1d(&x, 3, 1), 
+            SubmatrixMut::from_1d(&mut actual, 4, 1)
         );
         
         for i in 0..y.len() {

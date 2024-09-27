@@ -150,14 +150,14 @@ impl<A> RNSOperation for CongruencePreservingRescaling<A>
                 self.aq_moduli().at(i).zero()
             }
         }));
-        let mut x = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut x, self.aq_moduli().len(), input.col_count());
+        let mut x = SubmatrixMut::from_1d(&mut x, self.aq_moduli().len(), input.col_count());
 
         let x_mod_b = x.as_const().restrict_rows(0..self.b_moduli_count);
 
         // Compute `lift(x mod b)`; Here we introduce an error of `+/- b`
         let mut x_mod_b_lift = Vec::with_capacity_in(self.aq_moduli().len() * input.col_count(), self.allocator.clone());
         x_mod_b_lift.extend((0..(self.aq_moduli().len() * input.col_count())).map(|idx| self.aq_moduli().at(idx / input.col_count()).zero()));
-        let mut x_mod_b_lift = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut x_mod_b_lift, self.aq_moduli().len(), input.col_count());
+        let mut x_mod_b_lift = SubmatrixMut::from_1d(&mut x_mod_b_lift, self.aq_moduli().len(), input.col_count());
         self.b_to_aq_lift.apply(x_mod_b, x_mod_b_lift.reborrow());
         // `x_mod_b_lift` is ordered according to `self.aq_moduli_sorted()`, not `self.aq_moduli()`
 
@@ -172,7 +172,7 @@ impl<A> RNSOperation for CongruencePreservingRescaling<A>
         // this is small, so no error here
         let mut diff_mod_t = Vec::with_capacity_in(input.col_count(), self.allocator.clone());
         diff_mod_t.extend((0..input.col_count()).map(|_j| self.t_modulus().zero()));
-        let mut diff_mod_t = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut diff_mod_t, 1, input.col_count());
+        let mut diff_mod_t = SubmatrixMut::from_1d(&mut diff_mod_t, 1, input.col_count());
         self.aq_to_t_conv.apply(x_mod_b_lift.as_const(), diff_mod_t.reborrow());
         for j in 0..input.col_count() {
             self.t_modulus().mul_assign_ref(diff_mod_t.at_mut(0, j), &self.b_inv_mod_t);
@@ -227,7 +227,7 @@ fn test_rescale() {
         let output = to.iter().map(|Zn| Zn.int_hom().map(output)).collect::<Vec<_>>();
         let mut actual = to.iter().map(|Zn| Zn.zero()).collect::<Vec<_>>();
 
-        rescaling.apply(Submatrix::<AsFirstElement<_>, _>::new(&input, 3, 1), SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 2, 1));
+        rescaling.apply(Submatrix::from_1d(&input, 3, 1), SubmatrixMut::from_1d(&mut actual, 2, 1));
 
         for j in 0..output.len() {
             assert!(
@@ -270,7 +270,7 @@ fn test_rescale_down() {
         let output = to.iter().map(|Zn| Zn.int_hom().map(output)).collect::<Vec<_>>();
         let mut actual = to.iter().map(|Zn| Zn.zero()).collect::<Vec<_>>();
 
-        rescaling.apply(Submatrix::<AsFirstElement<_>, _>::new(&input, 3, 1), SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 2, 1));
+        rescaling.apply(Submatrix::from_1d(&input, 3, 1), SubmatrixMut::from_1d(&mut actual, 2, 1));
 
         for j in 0..output.len() {
             // we currently assume no error happens

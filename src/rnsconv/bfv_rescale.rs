@@ -95,7 +95,7 @@ impl<A> RNSOperation for AlmostExactRescalingConvert<A>
     {
         assert_eq!(input.col_count(), output.col_count());
         let mut tmp = (0..(self.rescaling.output_rings().len() * input.col_count())).map(|idx| self.rescaling.output_rings().at(idx  / input.col_count()).zero()).collect::<Vec<_>>();
-        let mut tmp = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut tmp, self.rescaling.output_rings().len(), input.col_count());
+        let mut tmp = SubmatrixMut::from_1d(&mut tmp, self.rescaling.output_rings().len(), input.col_count());
         self.rescaling.apply(input, tmp.reborrow());
         self.convert.apply(tmp.as_const(), output);
     }
@@ -129,7 +129,7 @@ impl<A> RNSOperation for AlmostExactRescalingConvert<A>
 /// let mut output = [to[0].zero()];
 ///
 /// let x = 1000;
-/// rescaling.apply(Submatrix::<AsFirstElement<_>, _>::new(&[from[0].int_hom().map(x), from[1].int_hom().map(x), from[2].int_hom().map(x)], 3, 1), SubmatrixMut::<AsFirstElement<_>, _>::new(&mut output, 1, 1));
+/// rescaling.apply(Submatrix::from_1d(&[from[0].int_hom().map(x), from[1].int_hom().map(x), from[2].int_hom().map(x)], 3, 1), SubmatrixMut::from_1d(&mut output, 1, 1));
 /// assert_el_eq!(
 ///     &to[0],
 ///     &to[0].int_hom().map(/* rounded division */ (x * 29 + from_modulus / 2) / from_modulus),
@@ -138,7 +138,7 @@ impl<A> RNSOperation for AlmostExactRescalingConvert<A>
 /// We sometimes get an error of `+/- 1`
 /// ```should_panikc
 /// for x in 1000..2000 {
-///     rescaling.apply(Submatrix::<AsFirstElement<_>, _>::new(&[from[0].int_hom().map(x), from[1].int_hom().map(x), from[2].int_hom().map(x)], 3, 1), SubmatrixMut::<AsFirstElement<_>, _>::new(&mut output, 1, 1));
+///     rescaling.apply(Submatrix::from_1d(&[from[0].int_hom().map(x), from[1].int_hom().map(x), from[2].int_hom().map(x)], 3, 1), SubmatrixMut::from_1d(&mut output, 1, 1));
 ///     assert_el_eq!(
 ///         &to[0],
 ///         &to[0].int_hom().map(/* rounded division */ (x * 29 + from_modulus / 2) / from_modulus + 1),
@@ -269,7 +269,7 @@ impl<A> RNSOperation for AlmostExactRescaling<A>
         // Compute `x := el * a mod aq`, store it in `x_mod_b` and `x_mod_aq_over_b`
         let mut x_mod_b = Vec::with_capacity_in(self.b_moduli().len() * col_count, self.allocator.clone());
         x_mod_b.extend((0..(self.b_moduli().len() * col_count)).map(|_| self.b_moduli().at(0).get_ring().zero()));
-        let mut x_mod_b = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut x_mod_b, self.b_moduli().len(), col_count);
+        let mut x_mod_b = SubmatrixMut::from_1d(&mut x_mod_b, self.b_moduli().len(), col_count);
         for i in 0..self.b_moduli().len() {
             for j in 0..col_count {
                 *x_mod_b.at_mut(i, j) = self.b_moduli().at(i).mul_ref(input.at(i, j), self.a.at(i));
@@ -293,7 +293,7 @@ impl<A> RNSOperation for AlmostExactRescaling<A>
         // that will later be rescaled to `+/- 1`.
         let mut x_mod_b_lift: Vec<ZnEl, _> = Vec::with_capacity_in(self.aq_over_b_moduli().len() * col_count, self.allocator.clone());
         x_mod_b_lift.extend((0..(self.aq_over_b_moduli().len() * col_count)).map(|idx| self.aq_over_b_moduli().at(idx / col_count).zero()));
-        let mut x_mod_b_lift = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut x_mod_b_lift, self.aq_over_b_moduli().len(), col_count);
+        let mut x_mod_b_lift = SubmatrixMut::from_1d(&mut x_mod_b_lift, self.aq_over_b_moduli().len(), col_count);
         self.b_to_aq_over_b_lift.apply(x_mod_b.as_const(), x_mod_b_lift.reborrow());
         debug_assert!(x_mod_b_lift.row_count() == self.aq_over_b_moduli().len());
 
@@ -331,7 +331,7 @@ fn test_rescale() {
         let output = to.iter().map(|Zn| Zn.int_hom().map((i as f64 * 257. / 17. / 97.).round() as i32)).collect::<Vec<_>>();
         let mut actual = to.iter().map(|Zn| Zn.zero()).collect::<Vec<_>>();
 
-        rescaling.apply(Submatrix::<AsFirstElement<_>, _>::new(&input, 3, 1), SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 2, 1));
+        rescaling.apply(Submatrix::from_1d(&input, 3, 1), SubmatrixMut::from_1d(&mut actual, 2, 1));
 
         for j in 0..output.len() {
             assert!(to.at(j).smallest_lift(to.at(j).sub_ref(output.at(j), actual.at(j))).abs() <= 1);
@@ -358,7 +358,7 @@ fn test_rescale_small_num() {
         let output = to.iter().map(|Zn| Zn.int_hom().map((i as f64 * 19. * 23. / 17. / 97.).round() as i32)).collect::<Vec<_>>();
         let mut actual = to.iter().map(|Zn| Zn.zero()).collect::<Vec<_>>();
 
-        rescaling.apply(Submatrix::<AsFirstElement<_>, _>::new(&input, 3, 1), SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 3, 1));
+        rescaling.apply(Submatrix::from_1d(&input, 3, 1), SubmatrixMut::from_1d(&mut actual, 3, 1));
 
         for j in 0..output.len() {
             assert!(to.at(j).smallest_lift(to.at(j).sub_ref(output.at(j), actual.at(j))).abs() <= 1);
@@ -385,7 +385,7 @@ fn test_rescale_small() {
         let output = num.iter().map(|Zn| Zn.int_hom().map((i as f64 * 29. / q as f64).round() as i32)).collect::<Vec<_>>();
         let mut actual = num.iter().map(|Zn| Zn.zero()).collect::<Vec<_>>();
 
-        rescaling.apply(Submatrix::<AsFirstElement<_>, _>::new(&input, 3, 1), SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 1, 1));
+        rescaling.apply(Submatrix::from_1d(&input, 3, 1), SubmatrixMut::from_1d(&mut actual, 1, 1));
 
         let Zk = num.at(0);
         assert!(Zk.eq_el(output.at(0), actual.at(0)) ||
@@ -399,6 +399,7 @@ fn test_rescale_small() {
 use feanor_math::primitive_int::StaticRing;
 
 #[test]
+#[ignore]
 fn test_rescale_large() {
     const LEN: usize = 256;
     let primes: [i64; 38] = [

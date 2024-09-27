@@ -280,8 +280,8 @@ impl<R, A> NTTRingBase<RingValue<R>, OddCyclotomicFFT<RingValue<R>, bluestein::B
         for p in primes {
             let Fp = RingValue::from(R::create(|int_ring| Ok(int_cast(p, RingRef::new(int_ring), &BigIntRing::RING))).unwrap_or_else(|x| x));
             let as_field = RingRef::new(Fp.get_ring()).as_field().ok().unwrap();
-            let pow2_root_of_unity = Fp.coerce(&as_field, get_prim_root_of_unity_pow2(as_field, log2_m).unwrap());
-            let root_of_unity = Fp.coerce(&as_field, get_prim_root_of_unity(as_field, 2 * n).unwrap());
+            let pow2_root_of_unity = Fp.coerce(&as_field, get_prim_root_of_unity_pow2(&as_field, log2_m).unwrap());
+            let root_of_unity = Fp.coerce(&as_field, get_prim_root_of_unity(&as_field, 2 * n).unwrap());
             let fft_table = bluestein::BluesteinFFT::new(Fp.clone(), root_of_unity, pow2_root_of_unity, n, log2_m, Global);
             ring_decompositions.push(OddCyclotomicFFT::create(Fp.clone(), fft_table, Global));
             assert_eq!(expansion_factor, ring_decompositions.last().unwrap().expansion_factor());

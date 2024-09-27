@@ -283,8 +283,8 @@ impl<R, F, A> RingBase for NTTRingBase<R, F, A>
     }
     
     fn is_commutative(&self) -> bool { true }
-
     fn is_noetherian(&self) -> bool { true }
+    fn is_approximate(&self) -> bool { false }
 
     fn dbg<'a>(&self, value: &Self::Element, out: &mut std::fmt::Formatter<'a>) -> std::fmt::Result {
         self.dbg_within(value, out, EnvBindingStrength::Weakest)
@@ -376,11 +376,11 @@ impl<R, F, A> FreeAlgebra for NTTRingBase<R, F, A>
         where Self: 'a;
 
     fn from_canonical_basis<V>(&self, vec: V) -> Self::Element
-        where V: ExactSizeIterator + DoubleEndedIterator + Iterator<Item = El<Self::BaseRing>>
+        where V: IntoIterator<Item = El<Self::BaseRing>>
     {
-        assert_eq!(vec.len(), self.rank());
         let mut result = Vec::with_capacity_in(self.rank(), self.allocator.clone());
         result.extend(vec);
+        assert_eq!(result.len(), self.rank());
         return NTTRingEl {
             data: result,
             ring_decompositions: PhantomData,

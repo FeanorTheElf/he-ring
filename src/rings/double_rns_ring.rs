@@ -94,11 +94,11 @@ impl<R, F, A> DoubleRNSRingBase<R, F, A>
     }
 
     pub fn as_matrix<'a>(&self, element: &'a DoubleRNSNonFFTEl<R, F, A>) -> Submatrix<'a, AsFirstElement<El<R>>, El<R>> {
-        Submatrix::<AsFirstElement<_>, _>::new(&element.data, self.rns_base().len(), self.rank())
+        Submatrix::from_1d(&element.data, self.rns_base().len(), self.rank())
     }
 
     pub fn as_matrix_mut<'a>(&self, element: &'a mut DoubleRNSNonFFTEl<R, F, A>) -> SubmatrixMut<'a, AsFirstElement<El<R>>, El<R>> {
-        SubmatrixMut::<AsFirstElement<_>, _>::new(&mut element.data, self.rns_base().len(), self.rank())
+        SubmatrixMut::from_1d(&mut element.data, self.rns_base().len(), self.rank())
     }
 
     ///
@@ -288,7 +288,7 @@ impl<R, F, A> DoubleRNSRingBase<R, F, A>
             assert!(to.base_ring().get_ring() == op.output_rings().at(0).get_ring());
          
             let mut result = to.zero();
-            let result_matrix = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut result.data, 1, to.rank());
+            let result_matrix = SubmatrixMut::from_1d(&mut result.data, 1, to.rank());
             op.apply(self.as_matrix(element), result_matrix);
             return result;
         })
@@ -481,6 +481,7 @@ impl<R, F, A> RingBase for DoubleRNSRingBase<R, F, A>
     
     fn is_commutative(&self) -> bool { true }
     fn is_noetherian(&self) -> bool { true }
+    fn is_approximate(&self) -> bool { false }
 
     fn dbg<'a>(&self, value: &Self::Element, out: &mut std::fmt::Formatter<'a>) -> std::fmt::Result {
         let poly_ring = DensePolyRing::new(self.base_ring(), "X");
@@ -602,10 +603,10 @@ impl<R, F, A> FreeAlgebra for DoubleRNSRingBase<R, F, A>
     }
 
     fn from_canonical_basis<V>(&self, vec: V) -> Self::Element
-        where V: ExactSizeIterator + DoubleEndedIterator + Iterator<Item = El<Self::BaseRing>>
+        where V: IntoIterator<Item = El<Self::BaseRing>>
     {
         let mut result = self.non_fft_zero();
-        for (j, x) in vec.enumerate() {
+        for (j, x) in vec.into_iter().enumerate() {
             let congruence = self.base_ring().get_ring().get_congruence(&x);
             for i in 0..self.rns_base().len() {
                 result.data[i * self.rank() + j] = self.rns_base().at(i).clone_el(congruence.at(i));

@@ -62,7 +62,7 @@ impl<R, F> Pow2CyclotomicFFT<R, F>
         assert!(rank == (1 << log2_n));
         let mut twiddles = Vec::with_capacity(rank as usize);
         let mut inv_twiddles = Vec::with_capacity(rank as usize);
-        assert_el_eq!(&ring, fft_table.root_of_unity(ring.get_ring()), &ring.pow(ring.clone_el(&root_of_unity), 2));
+        assert_el_eq!(&ring, fft_table.root_of_unity(&ring), &ring.pow(ring.clone_el(&root_of_unity), 2));
 
         let mut current = ring.one();
         let mut current_inv = ring.one();
@@ -254,7 +254,7 @@ impl<R, A> NTTRingBase<RingValue<R>, Pow2CyclotomicFFT<RingValue<R>, cooley_tuck
         for p in primes {
             let Fp = RingValue::from(R::create(|int_ring| Ok(int_cast(p, RingRef::new(int_ring), &BigIntRing::RING))).unwrap_or_else(|x| x));
             let as_field = RingRef::new(Fp.get_ring()).as_field().ok().unwrap();
-            let root_of_unity = Fp.coerce(&as_field, get_prim_root_of_unity_pow2(as_field, log2_n + 1).unwrap());
+            let root_of_unity = Fp.coerce(&as_field, get_prim_root_of_unity_pow2(&as_field, log2_n + 1).unwrap());
             let fft_table = cooley_tuckey::CooleyTuckeyFFT::new(Fp.clone(), Fp.pow(Fp.clone_el(&root_of_unity), 2), log2_n);
             ring_decompositions.push(Pow2CyclotomicFFT::create(Fp.clone(), fft_table, root_of_unity));
             rns_base.push(Fp);

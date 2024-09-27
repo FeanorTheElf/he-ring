@@ -230,7 +230,7 @@ fn digit_extraction_poly<P>(poly_ring: P) -> El<P>
             ).unwrap()),
             Global
         ).unwrap();
-        poly_ring.inclusion().mul_assign_map_ref(&mut correction, &Zn.pow(hom.map(p as i64), i as usize));
+        poly_ring.inclusion().mul_assign_ref_map(&mut correction, &Zn.pow(hom.map(p as i64), i as usize));
         poly_ring.sub_assign(&mut current, correction);
     }
     return current;

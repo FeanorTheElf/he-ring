@@ -394,7 +394,7 @@ impl<F, A> DoubleRNSRingBase<Zn, F, A>
                 });
                 timed!("gadget_product_lkss::lifting", || {
                     rhs.conversions[j].apply(
-                        Submatrix::<AsFirstElement<_>, _>::new(&summand, shortened_rns_base.len(), self.rank()),
+                        Submatrix::from_1d(&summand, shortened_rns_base.len(), self.rank()),
                         self.as_matrix_mut(&mut result).restrict_rows(j..(j + 1))
                     );
                 });

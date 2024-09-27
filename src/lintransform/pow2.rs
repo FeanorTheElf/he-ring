@@ -168,7 +168,7 @@ fn pow2_bitreversed_inv_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'
             TwiddleFactor::Zero
         }
     }).map(&pow_of_zeta));
-    H.ring().inclusion().mul_assign_map_ref(&mut forward_mask, &inv_2);
+    H.ring().inclusion().mul_assign_ref_map(&mut forward_mask, &inv_2);
 
     let mut diagonal_mask = H.from_slot_vec(H.slot_iter(|idxs| {
         let idx_in_block = idxs[dim_index] % l;
@@ -178,7 +178,7 @@ fn pow2_bitreversed_inv_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'
             TwiddleFactor::PosPowerZeta(H.galois_group_mulrepr().zero())
         }
     }).map(&pow_of_zeta));
-    H.ring().inclusion().mul_assign_map_ref(&mut diagonal_mask, &inv_2);
+    H.ring().inclusion().mul_assign_ref_map(&mut diagonal_mask, &inv_2);
 
     let mut backward_mask = H.from_slot_vec(H.slot_iter(|idxs| {
         let idx_in_block = idxs[dim_index] % l;
@@ -188,7 +188,7 @@ fn pow2_bitreversed_inv_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'
             TwiddleFactor::Zero
         }
     }).map(&pow_of_zeta));
-    H.ring().inclusion().mul_assign_map_ref(&mut backward_mask, &inv_2);
+    H.ring().inclusion().mul_assign_ref_map(&mut backward_mask, &inv_2);
 
     let mut result = LinearTransform {
         data: vec![

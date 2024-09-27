@@ -142,7 +142,7 @@ fn get_prim_root_of_unity<R>(ring: R, m: usize) -> El<R>
     let (p, e) = is_prime_power(&ZZ, &ring.characteristic(&ZZ).unwrap()).unwrap();
     let max_log2_len = ZZ.abs_log2_ceil(&(ring.rank() as i64)).unwrap() + 1;
     let convolution: FFTRNSBasedConvolutionZn = FFTRNSBasedConvolutionZn::from(FFTRNSBasedConvolution::new_with(max_log2_len, BigIntRing::RING, Global));
-    let galois_field = GaloisField::new_with(Zn::new(p as u64), ring.rank(), Global, convolution);
+    let galois_field = GaloisField::new_with(Zn::new(p as u64).as_field().ok().unwrap(), ring.rank(), Global, convolution);
 
     let rou = feanor_math::algorithms::unity_root::get_prim_root_of_unity(&galois_field, m).unwrap();
 
@@ -387,7 +387,7 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
 
         slot_ring_modulus.scan(|_, x| ring.base_ring().negate_inplace(x));
         let max_log2_len = ZZ.abs_log2_ceil(&(d as i64)).unwrap() + 1;
-        let slot_ring = FreeAlgebraImpl::new_with(ring.base_ring(), tmp_slot_ring.rank(), slot_ring_modulus, ring.allocator().clone(), FFTRNSBasedConvolution::new_with(max_log2_len, BigIntRing::RING, Global).into());
+        let slot_ring = FreeAlgebraImpl::new_with(ring.base_ring(), tmp_slot_ring.rank(), slot_ring_modulus, "ζ", ring.allocator().clone(), FFTRNSBasedConvolution::new_with(max_log2_len, BigIntRing::RING, Global).into());
         let max_ideal_gen = slot_ring.inclusion().map(slot_ring.base_ring().coerce(&ZZ, p));
         let slot_ring = AsLocalPIR::from(AsLocalPIRBase::promise_is_local_pir(slot_ring, max_ideal_gen, Some(e)));
 
@@ -445,7 +445,7 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
         }
 
         let max_log2_len = ZZ.abs_log2_ceil(&(self.slot_ring().rank() as i64)).unwrap() + 1;
-        let slot_ring = FreeAlgebraImpl::new_with(new_ring.base_ring(), self.slot_ring().rank(), new_slot_ring_modulus, new_ring.allocator().clone(), FFTRNSBasedConvolution::new_with(max_log2_len, BigIntRing::RING, Global).into());
+        let slot_ring = FreeAlgebraImpl::new_with(new_ring.base_ring(), self.slot_ring().rank(), new_slot_ring_modulus, "ζ", new_ring.allocator().clone(), FFTRNSBasedConvolution::new_with(max_log2_len, BigIntRing::RING, Global).into());
         let max_ideal_gen = slot_ring.inclusion().map(slot_ring.base_ring().coerce(&ZZ, p));
         let slot_ring = AsLocalPIR::from(AsLocalPIRBase::promise_is_local_pir(slot_ring, max_ideal_gen, Some(e)));
 
@@ -482,6 +482,15 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
 
     pub fn corresponding_factor_n(&self, dim_index: usize) -> i64 {
         StaticRing::<i64>::RING.pow(self.dims[dim_index].factor_n.0, self.dims[dim_index].factor_n.1)
+    }
+
+    ///
+    /// Returns the "local" slot rank, which is the number `d'` such that `Fp[X]/(Phi_ni) ~ F_(p^d')^(phi(ni)/d')`.
+    /// In particular, this always divides the actual slot rank. However, note that the product of local slot ranks
+    /// is **not** the global slot rank, but in general can be larger.
+    /// 
+    pub fn local_slot_rank(&self, dim_index: usize) -> usize {
+        self.dims[dim_index].order_of_p
     }
 
     pub fn dim_count(&self) -> usize {
@@ -850,7 +859,7 @@ pub mod serialization {
                 }
             }
             let max_log2_len = ZZ.abs_log2_ceil(&(value.slot_rank as i64)).unwrap() + 1;
-            let slot_ring = FreeAlgebraImpl::new_with(value.ring.base_ring(), value.slot_rank, slot_ring_modulus, value.ring.allocator().clone(), FFTRNSBasedConvolution::new_with(max_log2_len, BigIntRing::RING, Global).into());
+            let slot_ring = FreeAlgebraImpl::new_with(value.ring.base_ring(), value.slot_rank, slot_ring_modulus, "ζ", value.ring.allocator().clone(), FFTRNSBasedConvolution::new_with(max_log2_len, BigIntRing::RING, Global).into());
             let max_ideal_gen = slot_ring.inclusion().map(slot_ring.base_ring().coerce(&ZZ, p));
             let slot_ring: SlotRing<'a, R, A> = AsLocalPIR::from(AsLocalPIRBase::promise_is_local_pir(slot_ring, max_ideal_gen, Some(e)));
 

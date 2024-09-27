@@ -247,8 +247,8 @@ fn test_rns_base_conversion() {
         let mut actual = to.iter().map(|Zn| Zn.int_hom().map(k)).collect::<Vec<_>>();
 
         table.apply(
-            Submatrix::<AsFirstElement<_>, _>::new(&input, 2, 1), 
-            SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 4, 1)
+            Submatrix::from_1d(&input, 2, 1), 
+            SubmatrixMut::from_1d(&mut actual, 4, 1)
         );
 
         for j in 0..to.len() {
@@ -262,8 +262,8 @@ fn test_rns_base_conversion() {
         let mut actual = to.iter().map(|Zn| Zn.int_hom().map(k)).collect::<Vec<_>>();
 
         table.apply(
-            Submatrix::<AsFirstElement<_>, _>::new(&input, 2, 1), 
-            SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 4, 1)
+            Submatrix::from_1d(&input, 2, 1), 
+            SubmatrixMut::from_1d(&mut actual, 4, 1)
         );
 
         for j in 0..to.len() {
@@ -285,8 +285,8 @@ fn test_rns_base_conversion_small() {
     for k in -(97 * 3 / 2)..(97 * 3 / 2) {
         let mut actual = to.iter().map(|Zn| Zn.int_hom().map(k)).collect::<Vec<_>>();
         table.apply(
-            Submatrix::<AsFirstElement<_>, _>::new(&[from[0].int_hom().map(k), from[1].int_hom().map(k)], 2, 1), 
-            SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 1, 1)
+            Submatrix::from_1d(&[from[0].int_hom().map(k), from[1].int_hom().map(k)], 2, 1), 
+            SubmatrixMut::from_1d(&mut actual, 1, 1)
         );
 
         assert!(
@@ -309,8 +309,8 @@ fn test_rns_base_conversion_not_coprime() {
         let mut actual = to.iter().map(|Zn| Zn.int_hom().map(k)).collect::<Vec<_>>();
 
         table.apply(
-            Submatrix::<AsFirstElement<_>, _>::new(&x, 3, 1), 
-            SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 4, 1)
+            Submatrix::from_1d(&x, 3, 1), 
+            SubmatrixMut::from_1d(&mut actual, 4, 1)
         );
         
         for i in 0..y.len() {
@@ -331,8 +331,8 @@ fn test_rns_base_conversion_not_coprime_permuted() {
         let mut actual = to.iter().map(|Zn| Zn.int_hom().map(k)).collect::<Vec<_>>();
 
         table.apply(
-            Submatrix::<AsFirstElement<_>, _>::new(&x, 3, 1), 
-            SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 4, 1)
+            Submatrix::from_1d(&x, 3, 1), 
+            SubmatrixMut::from_1d(&mut actual, 4, 1)
         );
         
         for i in 0..y.len() {
@@ -353,8 +353,8 @@ fn test_rns_base_conversion_coprime() {
         let mut actual = to.iter().map(|Zn| Zn.int_hom().map(k)).collect::<Vec<_>>();
 
         table.apply(
-            Submatrix::<AsFirstElement<_>, _>::new(&x, 3, 1), 
-            SubmatrixMut::<AsFirstElement<_>, _>::new(&mut actual, 3, 1)
+            Submatrix::from_1d(&x, 3, 1), 
+            SubmatrixMut::from_1d(&mut actual, 3, 1)
         );
         
         for i in 0..y.len() {
@@ -375,9 +375,9 @@ fn bench_rns_base_conversion(bencher: &mut Bencher) {
     
     let mut rng = oorandom::Rand64::new(1);
     let mut in_data = (0..(in_moduli_count * cols)).map(|idx| in_moduli[idx / cols].zero()).collect::<Vec<_>>();
-    let mut in_matrix = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut in_data, in_moduli_count, cols);
+    let mut in_matrix = SubmatrixMut::from_1d(&mut in_data, in_moduli_count, cols);
     let mut out_data = (0..(out_moduli_count * cols)).map(|idx| out_moduli[idx / cols].zero()).collect::<Vec<_>>();
-    let mut out_matrix = SubmatrixMut::<AsFirstElement<_>, _>::new(&mut out_data, out_moduli_count, cols);
+    let mut out_matrix = SubmatrixMut::from_1d(&mut out_data, out_moduli_count, cols);
 
     bencher.iter(|| {
         for i in 0..in_moduli_count {
@@ -446,7 +446,7 @@ fn test_base_conversion_large() {
     let input = (0..in_len).map(|i| conversion.input_rings().at(i).coerce(&ZZbig, ZZbig.clone_el(&number))).collect::<Vec<_>>();
     let expected = (0..(primes.len() - in_len)).map(|i| conversion.output_rings().at(i).coerce(&ZZbig, ZZbig.clone_el(&number))).collect::<Vec<_>>();
     let mut output = (0..(primes.len() - in_len)).map(|i| conversion.output_rings().at(i).zero()).collect::<Vec<_>>();
-    conversion.apply(Submatrix::<AsFirstElement<_>, _>::new(&input, in_len, 1), SubmatrixMut::<AsFirstElement<_>, _>::new(&mut output, primes.len() - in_len, 1));
+    conversion.apply(Submatrix::from_1d(&input, in_len, 1), SubmatrixMut::from_1d(&mut output, primes.len() - in_len, 1));
 
     assert!(
         expected.iter().zip(output.iter()).enumerate().all(|(i, (e, a))| conversion.output_rings().at(i).eq_el(e, a)) ||
