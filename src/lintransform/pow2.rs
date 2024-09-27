@@ -1,6 +1,5 @@
 use std::alloc::Allocator;
 
-use feanor_math::algorithms::fft::cooley_tuckey::bitreverse;
 use feanor_math::algorithms::unity_root::is_prim_root_of_unity;
 use feanor_math::homomorphism::Homomorphism;
 use feanor_math::integer::IntegerRingStore;
@@ -415,6 +414,8 @@ pub fn slots_to_coeffs_thin_inv<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> V
 
 #[cfg(test)]
 use crate::rings::pow2_cyclotomic::DefaultPow2CyclotomicNTTRingBase;
+#[cfg(test)]
+use feanor_math::algorithms::fft::cooley_tuckey::bitreverse;
 
 #[test]
 fn test_pow2_slots_to_coeffs_thin() {

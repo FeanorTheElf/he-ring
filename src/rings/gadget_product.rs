@@ -312,8 +312,8 @@ impl<F, A> DoubleRNSRingBase<Zn, F, A>
     /// 
     /// // compute the gadget product
     /// let lhs = ring.random_element(|| rng.rand_u64());
-    /// let actual = ring.get_ring().gadget_product(&ring.get_ring().to_gadget_product_lhs(ring.get_ring().undo_fft(ring.clone_el(&lhs))), &rhs_op);
-    /// assert_el_eq!(&ring, &ring.mul_ref(&lhs, &rhs), &ring.get_ring().gadget_product(&ring.get_ring().to_gadget_product_lhs(ring.get_ring().undo_fft(lhs)), &rhs_op));
+    /// let actual = ring.get_ring().gadget_product_ntt(&ring.get_ring().to_gadget_product_lhs(ring.get_ring().undo_fft(ring.clone_el(&lhs))), &rhs_op);
+    /// assert_el_eq!(&ring, &ring.mul_ref(&lhs, &rhs), &ring.get_ring().gadget_product_ntt(&ring.get_ring().to_gadget_product_lhs(ring.get_ring().undo_fft(lhs)), &rhs_op));
     /// ```
     /// To demonstrate how this keeps small error terms small, consider the following variation of the previous example:
     /// 

@@ -8,7 +8,6 @@ use std::ops::Range;
 
 use feanor_math::algorithms::eea::signed_gcd;
 use feanor_math::algorithms::matmul::ComputeInnerProduct;
-use feanor_math::assert_el_eq;
 use feanor_math::divisibility::DivisibilityRingStore;
 use feanor_math::iters::multi_cartesian_product;
 use feanor_math::matrix::OwnedMatrix;
@@ -27,7 +26,6 @@ use trace::Trace;
 
 use crate::cyclotomic::*;
 use crate::rings::decomposition::*;
-use crate::rings::odd_cyclotomic::DefaultOddCyclotomicNTTRingBase;
 use crate::rings::slots::*;
 use crate::rings::ntt_ring::*;
 use crate::StdZn;
@@ -294,7 +292,7 @@ impl<R, F, A> LinearTransform<R, F, A>
         return result;
     }
 
-    fn check_valid(&self, H: &HypercubeIsomorphism<R, F, A>) {
+    fn check_valid(&self, _H: &HypercubeIsomorphism<R, F, A>) {
         for (i, (g, _)) in self.data.iter().enumerate() {
             for (j, (s, _)) in self.data.iter().enumerate() {
                 assert!(i == j || g != s);
@@ -881,6 +879,10 @@ use feanor_math::matrix::TransposableSubmatrixMut;
 use pow2::slots_to_coeffs_thin;
 #[cfg(test)]
 use crate::rings::pow2_cyclotomic::*;
+#[cfg(test)]
+use feanor_math::assert_el_eq;
+#[cfg(test)]
+use crate::rings::odd_cyclotomic::DefaultOddCyclotomicNTTRingBase;
 
 #[test]
 fn test_compile() {

@@ -6,7 +6,6 @@ use feanor_math::rings::zn::zn_64::*;
 use feanor_math::rings::zn::*;
 use feanor_math::rings::extension::FreeAlgebraStore;
 use feanor_math::primitive_int::*;
-use trace::Trace;
 
 use crate::*;
 use crate::rings::slots::*;

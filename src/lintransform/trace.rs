@@ -1,23 +1,18 @@
-use std::alloc::{Allocator, Global};
+use std::alloc::*;
 use std::cell::RefCell;
 
-use feanor_math::algorithms::convolution::fft::{FFTRNSBasedConvolution, FFTRNSBasedConvolutionZn};
-use feanor_math::algorithms::unity_root::is_prim_root_of_unity;
 use feanor_math::homomorphism::Homomorphism;
-use feanor_math::integer::BigIntRing;
 use feanor_math::matrix::OwnedMatrix;
-use feanor_math::rings::extension::extension_impl::FreeAlgebraImpl;
-use feanor_math::rings::extension::galois_field::GaloisField;
 use feanor_math::rings::extension::FreeAlgebraStore;
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
 use feanor_math::rings::poly::PolyRingStore;
-use feanor_math::seq::sparse::SparseMapVector;
-use feanor_math::{algorithms::sqr_mul, rings::zn::zn_64::ZnEl};
+use feanor_math::algorithms::sqr_mul;
+use feanor_math::rings::zn::zn_64::ZnEl;
 use feanor_math::primitive_int::StaticRing;
-use feanor_math::{assert_el_eq, ring::*};
+use feanor_math::ring::*;
 use feanor_math::rings::zn::zn_64::Zn;
 use feanor_math::rings::zn::ZnRingStore;
-use feanor_math::seq::{VectorFn, VectorViewMut};
+use feanor_math::seq::*;
 use feanor_math::algorithms::linsolve::LinSolveRingStore;
 
 use crate::StdZn;
@@ -122,6 +117,21 @@ impl Trace {
         return result.into_iter();
     }
 }
+
+#[cfg(test)]
+use feanor_math::assert_el_eq;
+#[cfg(test)]
+use feanor_math::rings::extension::galois_field::GaloisField;
+#[cfg(test)]
+use feanor_math::seq::sparse::*;
+#[cfg(test)]
+use feanor_math::algorithms::convolution::fft::{FFTRNSBasedConvolution, FFTRNSBasedConvolutionZn};
+#[cfg(test)]
+use feanor_math::algorithms::unity_root::is_prim_root_of_unity;
+#[cfg(test)]
+use feanor_math::integer::BigIntRing;
+#[cfg(test)]
+use feanor_math::rings::extension::extension_impl::FreeAlgebraImpl;
 
 #[test]
 fn test_extract_coefficient_map() {

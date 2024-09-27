@@ -122,12 +122,12 @@ impl<R, F, A> DoubleRNSRingBase<R, F, A>
     /// The indexing of the primes is consistent with the order of the primes in the base ring (of type
     /// [`zn_rns::ZnBase`]). The indexing of the `k` is quite unpredictable, as it depends on the implementation
     /// of the underlying [`RingDecomposition`] (in particular, if it is implemented using standard FFTs, then
-    /// that in turn depends on the ordering used by [`feanor_math::algorithms::fft::FFTTable::unordered_fft()`]).
+    /// that in turn depends on the ordering used by [`feanor_math::algorithms::fft::FFTAlgorithm::unordered_fft()`]).
     /// Therefore, you should not rely on any specific relationship between `j` and `k`, except that it will
     /// remain constant during the lifetime of the ring. Note also that changing the order corresponds to an
     /// automorphism of the ring.
     /// 
-    pub fn fourier_coefficient<'a>(&self, i: usize, j: usize, el: &'a DoubleRNSEl<R, F, A>) -> &'a El<R> {
+    pub fn doublerns_coeff_at<'a>(&self, i: usize, j: usize, el: &'a DoubleRNSEl<R, F, A>) -> &'a El<R> {
         &el.data[i * self.rank() + j]
     }
 
@@ -143,9 +143,9 @@ impl<R, F, A> DoubleRNSRingBase<R, F, A>
     ///
     /// Returns the `(i, j)`-th component of the element in double-RNS-representation. 
     /// 
-    /// See [`Self::fourier_coefficient()`] for details.
+    /// See [`Self::doublerns_coeff_at()`] for details.
     /// 
-    pub fn fourier_coefficient_mut<'a>(&self, i: usize, j: usize, el: &'a mut DoubleRNSEl<R, F, A>) -> &'a mut El<R> {
+    pub fn doublerns_coeff_at_mut<'a>(&self, i: usize, j: usize, el: &'a mut DoubleRNSEl<R, F, A>) -> &'a mut El<R> {
         &mut el.data[i * self.rank() + j]
     }
 

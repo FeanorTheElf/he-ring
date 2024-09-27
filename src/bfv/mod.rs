@@ -570,7 +570,7 @@ pub fn hom_galois_many<'a, V, Params: BFVParams>(C: &CiphertextRing<Params>, ct:
 
 #[test]
 #[ignore]
-fn run_bfv() {
+fn run_pow2_bfv() {
     let mut rng = thread_rng();
     
     let params = Pow2BFVParams {
@@ -612,7 +612,7 @@ fn run_bfv() {
 }
 
 #[test]
-fn test_hom_galois() {
+fn test_pow2_hom_galois() {
     let mut rng = thread_rng();
     
     let params = Pow2BFVParams {
@@ -636,7 +636,7 @@ fn test_hom_galois() {
 }
 
 #[test]
-fn test_bfv_mul() {
+fn test_pow2_bfv_mul() {
     let mut rng = thread_rng();
     
     let params = Pow2BFVParams {
