@@ -154,6 +154,43 @@ impl<R, F, A> LinearTransform<R, F, A>
     }
     
     ///
+    /// Applies a linea transform on each slot separately. The transform is given by its matrix w.r.t. the basis
+    /// `1, X, ..., X^(d - 1)` where `X` is the canonical generator of the slot ring.
+    /// 
+    pub fn blockmatmul0d<'a, G>(H: &HypercubeIsomorphism<'a, R, F, A>, matrix: G) -> LinearTransform<R, F, A>
+        where G: Fn(usize, usize, &[usize]) -> El<R>
+    {
+        let d = H.slot_ring().rank();
+        let Gal = H.galois_group_mulrepr();
+        let trace = Trace::new(&Gal, Gal.smallest_positive_lift(H.frobenius_element(1)), d);
+        let extract_coeff_factors = (0..d).map(|j| trace.extract_coefficient_map(H.slot_ring(), j)).collect::<Vec<_>>();
+        
+        let poly_ring = DensePolyRing::new(H.slot_ring().base_ring(), "X");
+        // this is the map `X -> X^p`, which is the frobenius in our case, since we choose the canonical generator of the slot ring as root of unity
+        let apply_frobenius = |x: &El<SlotRing<'a, _, _>>, count: i64| {
+            poly_ring.evaluate(&H.slot_ring().poly_repr(&poly_ring, x, &H.slot_ring().base_ring().identity()), &H.slot_ring().pow(H.slot_ring().canonical_gen(), Gal.smallest_positive_lift(H.frobenius_element(count)) as usize), &H.slot_ring().inclusion())
+        };
+        
+        // similar to `blockmatmul1d()`, but simpler
+        let mut result = LinearTransform {
+            data: (0..d).map(|frobenius_index| {
+                let coeff = H.from_slot_vec(H.slot_iter(|idxs| {
+                    <_ as ComputeInnerProduct>::inner_product(H.slot_ring().get_ring(), (0..d).map(|l| (
+                        apply_frobenius(&extract_coeff_factors[l], frobenius_index as i64),
+                        H.slot_ring().from_canonical_basis((0..d).map(|k| matrix(k, l, idxs)))
+                    )))
+                }));
+                return (
+                    GaloisElementIndex::frobenius(H.dim_count(), frobenius_index as i64),
+                    coeff, 
+                );
+            }).collect()
+        };
+        result.canonicalize(H);
+        return result;
+    }
+
+    ///
     /// For each hypercolumn along the `dim_index`-th dimension containing the slots of index 
     /// `U(i) = (u1, ..., u(dim_index - 1), i, u(dim_index + 1), ..., ur)` for all `i`, 
     /// we can consider the `Fp`-basis given by `X^k e_U(i)`. An `Fp`-linear transform that operates on 
