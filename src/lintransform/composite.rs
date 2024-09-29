@@ -220,9 +220,6 @@ pub fn powcoeffs_to_slots_thin<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> Ve
     return result;
 }
 
-#[cfg(test)]
-use feanor_math::rings::zn::zn_64::*;
-
 #[test]
 fn test_slots_to_powcoeffs_thin() {
     // F11[X]/Phi_35(X) ~ F_(11^3)^8
@@ -273,7 +270,6 @@ fn test_powcoeffs_to_slots_thin() {
     assert_eq!(2, H.len(0));
     assert_eq!(5, H.corresponding_factor_n(1));
     assert_eq!(4, H.len(1));
-    let ring_ref = &ring;
     let mut current = ring_literal!(&ring, [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     for transform in powcoeffs_to_slots_thin(&H) {
         current = ring.get_ring().compute_linear_transform(&H, &current, &transform);
@@ -290,7 +286,7 @@ fn test_powcoeffs_to_slots_thin() {
     for transform in powcoeffs_to_slots_thin(&H) {
         current = ring.get_ring().compute_linear_transform(&H, &current, &transform);
     }
-    let expected = H.from_slot_vec([1, 2, 3, 4, 5, 6, 7, 8].map(|n| H.slot_ring().int_hom().map(n)));
+    let expected = H.from_slot_vec([1, 2, 3, 4, 5, 6, 7, 8].into_iter().map(|n| H.slot_ring().int_hom().map(n)));
     assert_el_eq!(ring, expected, current);
 
     // F71[X]/Phi_35(X) ~ F71^24
@@ -358,5 +354,24 @@ fn test_slots_to_powcoeffs_fat() {
     }
     let ring_ref = &ring;
     let expected = ring.sum((0..4).flat_map(|i| (0..6).map(move |j| ring_ref.mul(ring_ref.pow(ring_ref.canonical_gen(), i * 7 + j * 5), ring_ref.int_hom().map((1 + j + i * 6) as i32)))));
+    assert_el_eq!(ring, expected, current);
+}
+
+#[test]
+fn test_powcoeffs_to_slots_fat() {
+    // F11[X]/Phi_35(X) ~ F_(11^3)^8
+    let ring = DefaultOddCyclotomicNTTRingBase::new(Zn::new(11), 35);
+    let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
+
+    assert_eq!(7, H.corresponding_factor_n(0));
+    assert_eq!(2, H.len(0));
+    assert_eq!(5, H.corresponding_factor_n(1));
+    assert_eq!(4, H.len(1));
+    let ring_ref = &ring;
+    let mut current = ring.sum((0..6).flat_map(|i| (0..4).map(move |j| ring_ref.mul(ring_ref.pow(ring_ref.canonical_gen(), i * 5 + j * 7), ring_ref.int_hom().map((1 + j + i * 4) as i32)))));
+    for transform in powcoeffs_to_slots_fat(&H) {
+        current = ring.get_ring().compute_linear_transform(&H, &current, &transform);
+    }
+    let expected = H.from_slot_vec([1, 2, 3, 4, 5, 6, 7, 8].into_iter().map(|n| H.slot_ring().from_canonical_basis([n, n + 8, n + 16].into_iter().map(|m| H.slot_ring().base_ring().int_hom().map(m)))));
     assert_el_eq!(ring, expected, current);
 }
