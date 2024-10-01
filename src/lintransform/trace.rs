@@ -17,7 +17,7 @@ use feanor_math::algorithms::linsolve::LinSolveRingStore;
 
 use crate::StdZn;
 
-use super::SlotRing;
+use super::{CyclotomicRing, CyclotomicRingDecomposition, NTTRingBase, RingDecompositionSelfIso, SlotRing};
 
 pub struct Trace {
     Gal: Zn,
@@ -36,16 +36,17 @@ impl Trace {
     }
 
     ///
-    /// Computes `a` such that `Tr(aY)` is the map that maps `Y = sum_i c_i X^i` to `c_j`.
+    /// Computes `a` such that `Tr(aY)` is the given `Fp`-linear map `GR(p, e, d) -> Z/p^eZ`.
     /// 
     /// We assume that the frobenius automorphism in the given ring is given by `X -> X^p`
     /// where `X` is its canonical generator. At the moment this always true, since we currently
     /// choose the canonical generator to be a root of unity.
     /// 
-    pub fn extract_coefficient_map<'a, R, A>(&self, slot_ring: &SlotRing<'a, R, A>, coefficient_j: usize) -> El<SlotRing<'a, R, A>>
+    pub fn extract_linear_map<'a, R, A, G>(&self, slot_ring: &SlotRing<'a, R, A>, mut function: G) -> El<SlotRing<'a, R, A>>
         where R: RingStore,
             R::Type: StdZn,
-            A: Allocator + Clone
+            A: Allocator + Clone,
+            G: FnMut(El<SlotRing<'a, R, A>>) -> El<R>
     {
         assert_eq!(self.trace_rank_quo as usize, slot_ring.rank());
 
@@ -70,11 +71,28 @@ impl Trace {
                 *lhs.at_mut(i, j) = trace(slot_ring.pow(slot_ring.canonical_gen(), i + j));
             }
         }
-        *rhs.at_mut(coefficient_j, 0) = slot_ring.base_ring().one();
+        for j in 0..slot_ring.rank() {
+            *rhs.at_mut(j, 0) = function(slot_ring.pow(slot_ring.canonical_gen(), j));
+        }
 
         slot_ring.base_ring().solve_right(lhs.data_mut(), rhs.data_mut(), sol.data_mut()).assert_solved();
 
         return slot_ring.from_canonical_basis((0..slot_ring.rank()).map(|i| slot_ring.base_ring().clone_el(sol.at(i, 0))));
+    }
+
+    ///
+    /// Computes `a` such that `Tr(aY)` is the map that maps `Y = sum_i c_i X^i` to `c_j`.
+    /// 
+    /// We assume that the frobenius automorphism in the given ring is given by `X -> X^p`
+    /// where `X` is its canonical generator. At the moment this always true, since we currently
+    /// choose the canonical generator to be a root of unity.
+    /// 
+    pub fn extract_coefficient_map<'a, R, A>(&self, slot_ring: &SlotRing<'a, R, A>, coefficient_j: usize) -> El<SlotRing<'a, R, A>>
+        where R: RingStore,
+            R::Type: StdZn,
+            A: Allocator + Clone
+    {
+        self.extract_linear_map(slot_ring, |a| slot_ring.wrt_canonical_basis(&a).at(coefficient_j))
     }
 
     pub fn evaluate_generic<T, Add, ApplyGalois, Clone>(&self, input: T, add_fn: Add, apply_galois_fn: ApplyGalois, clone: Clone) -> T
@@ -115,6 +133,18 @@ impl Trace {
             ()
         }, |()| ());
         return result.into_iter();
+    }
+}
+
+impl<R, F, A> NTTRingBase<R, F, A> 
+    where R: RingStore,
+        R::Type: StdZn,
+        F: RingDecompositionSelfIso<R::Type> + CyclotomicRingDecomposition<R::Type>,
+        A: Allocator + Clone,
+        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
+{
+    pub fn compute_trace(&self, el: &<Self as RingBase>::Element, trace: &Trace) -> <Self as RingBase>::Element {
+        trace.evaluate_generic(self.clone_el(el), |x, y| self.add_ref_snd(x, y), |x, g| self.apply_galois_action(x, *g), |x| self.clone_el(x))
     }
 }
 

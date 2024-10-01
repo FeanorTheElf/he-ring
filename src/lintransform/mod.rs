@@ -44,6 +44,13 @@ struct GaloisElementIndex {
 
 impl GaloisElementIndex {
 
+    fn identity(dim_count: usize) -> GaloisElementIndex {
+        GaloisElementIndex {
+            shift_steps: (0..dim_count).map(|_| 0).collect(),
+            frobenius_count: 0
+        }
+    }
+
     fn shift_1d(dim_count: usize, dim_index: usize, steps: i64) -> GaloisElementIndex {
         GaloisElementIndex {
             shift_steps: (0..dim_count).map(|i| if i == dim_index { steps } else { 0 }).collect::<Vec<_>>(),
@@ -151,6 +158,12 @@ impl<R, F, A> LinearTransform<R, F, A>
         };
         result.canonicalize(H);
         return result;
+    }
+
+    pub fn slot_scalar_mult<'a>(H: &HypercubeIsomorphism<'a, R, F, A>, scalar: &El<SlotRing<'a, R, A>>) -> LinearTransform<R, F, A> {
+        return LinearTransform {
+            data: vec![(GaloisElementIndex::identity(H.dim_count()), H.from_slot_vec((0..H.slot_count()).map(|_| H.slot_ring().clone_el(scalar))))]
+        };
     }
     
     ///
@@ -385,6 +398,7 @@ impl<R, F, A> NTTRingBase<R, F, A>
         NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
 {
     pub fn compute_linear_transform(&self, H: &HypercubeIsomorphism<R, F, A>, el: &<Self as RingBase>::Element, transform: &LinearTransform<R, F, A>) -> <Self as RingBase>::Element {
+        assert!(H.ring().get_ring() == self);
         <_ as RingBase>::sum(self, transform.data.iter().map(|(s, c)| self.mul_ref_fst(c, self.apply_galois_action(el, s.galois_element(H)))))
     }
 }
