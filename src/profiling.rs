@@ -1,6 +1,7 @@
 
 #[cfg(feature = "record_timings")]
 use std::sync::Mutex;
+use std::time::Instant;
 
 #[cfg(feature = "record_timings")]
 pub static PRINT_TIMINGS: Mutex<Vec<(&'static std::sync::atomic::AtomicBool, Box<dyn 'static + Send + Fn()>)>> = Mutex::new(Vec::new());
@@ -58,4 +59,20 @@ macro_rules! timed {
             }
         }
     };
+}
+
+pub fn timed_step<F, T, const LOG: bool, const COUNTER_VAR_COUNT: usize>(description: &str, step_fn: F) -> T
+    where F: FnOnce(&mut [usize; COUNTER_VAR_COUNT]) -> T
+{
+    if LOG {
+        println!("{}", description);
+    }
+    let mut counters = [0; COUNTER_VAR_COUNT];
+    let start = Instant::now();
+    let result = step_fn(&mut counters);
+    let end = Instant::now();
+    if LOG {
+        println!("done in {} ms, {:?}", (end - start).as_millis(), counters);
+    }
+    return result;
 }

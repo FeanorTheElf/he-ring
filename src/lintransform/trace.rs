@@ -59,7 +59,7 @@ impl Trace {
             let result = self.evaluate_generic(
                 a, 
                 |x, y| slot_ring.add_ref_snd(x, y), 
-                |x, g| poly_ring.evaluate(&slot_ring.poly_repr(&poly_ring, &x, &slot_ring.base_ring().identity()), &slot_ring.pow(slot_ring.canonical_gen(), self.Gal.smallest_positive_lift(*g) as usize), &slot_ring.inclusion()), 
+                |x, g| poly_ring.evaluate(&slot_ring.poly_repr(&poly_ring, &x, &slot_ring.base_ring().identity()), &slot_ring.pow(slot_ring.canonical_gen(), self.Gal.smallest_positive_lift(g) as usize), &slot_ring.inclusion()), 
                 |x| slot_ring.clone_el(x)
             );
             let result_wrt_basis = slot_ring.wrt_canonical_basis(&result);
@@ -97,7 +97,7 @@ impl Trace {
 
     pub fn evaluate_generic<T, Add, ApplyGalois, Clone>(&self, input: T, add_fn: Add, apply_galois_fn: ApplyGalois, clone: Clone) -> T
         where Add: FnMut(T, &T) -> T,
-            ApplyGalois: FnMut(&T, &ZnEl) -> T,
+            ApplyGalois: FnMut(&T, ZnEl) -> T,
             Clone: FnMut(&T) -> T
     {
         let add_fn = RefCell::new(add_fn);
@@ -109,7 +109,7 @@ impl Trace {
             StaticRing::<i64>::RING, 
             |(i, x)| {
                 if let Some(x) = x {
-                    Ok((2 * i, Some(add_fn.borrow_mut()(apply_galois_fn.borrow_mut()(x, &self.Gal.pow(self.frobenius, *i)), x))))
+                    Ok((2 * i, Some(add_fn.borrow_mut()(apply_galois_fn.borrow_mut()(x, self.Gal.pow(self.frobenius, *i)), x))))
                 } else {
                     Ok((*i, None))
                 }
@@ -119,7 +119,7 @@ impl Trace {
                 } else if y.is_none() {
                     return Ok((i + j, x.as_ref().map(|x| clone.borrow_mut()(x))));
                 }
-                Ok((i + j, Some(add_fn.borrow_mut()(apply_galois_fn.borrow_mut()(x.as_ref().unwrap(), &self.Gal.pow(self.frobenius, *j)), y.as_ref().unwrap()))))
+                Ok((i + j, Some(add_fn.borrow_mut()(apply_galois_fn.borrow_mut()(x.as_ref().unwrap(), self.Gal.pow(self.frobenius, *j)), y.as_ref().unwrap()))))
             }, 
             |(i, x)| (*i, x.as_ref().map(|x| clone.borrow_mut()(x))), 
             (0, None)
@@ -129,7 +129,7 @@ impl Trace {
     pub fn required_galois_keys(&self) -> impl Iterator<Item = ZnEl> {
         let mut result = Vec::new();
         self.evaluate_generic((), |(), ()| (), |(), g| {
-            result.push(*g);
+            result.push(g);
             ()
         }, |()| ());
         return result.into_iter();
@@ -144,7 +144,7 @@ impl<R, F, A> NTTRingBase<R, F, A>
         NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
 {
     pub fn compute_trace(&self, el: &<Self as RingBase>::Element, trace: &Trace) -> <Self as RingBase>::Element {
-        trace.evaluate_generic(self.clone_el(el), |x, y| self.add_ref_snd(x, y), |x, g| self.apply_galois_action(x, *g), |x| self.clone_el(x))
+        trace.evaluate_generic(self.clone_el(el), |x, y| self.add_ref_snd(x, y), |x, g| self.apply_galois_action(x, g), |x| self.clone_el(x))
     }
 }
 
@@ -175,7 +175,7 @@ fn test_extract_coefficient_map() {
             let actual = trace.evaluate_generic(
                 slot_ring.mul_ref(&b, &extract_constant_coeff), 
                 |x, y| slot_ring.add_ref_snd(x, y), 
-                |x, g| poly_ring.evaluate(&slot_ring.poly_repr(&poly_ring, &x, &slot_ring.base_ring().identity()), &slot_ring.pow(slot_ring.canonical_gen(), Gal.smallest_positive_lift(*g) as usize), &slot_ring.inclusion()),
+                |x, g| poly_ring.evaluate(&slot_ring.poly_repr(&poly_ring, &x, &slot_ring.base_ring().identity()), &slot_ring.pow(slot_ring.canonical_gen(), Gal.smallest_positive_lift(g) as usize), &slot_ring.inclusion()),
                 |x| slot_ring.clone_el(x)
             );
             if i == 0 {

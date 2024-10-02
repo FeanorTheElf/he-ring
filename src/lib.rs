@@ -6,6 +6,7 @@
 #![feature(allocator_api)]
 #![feature(ptr_alignment_type)]
 #![feature(associated_type_defaults)]
+#![feature(generic_arg_infer)]
 
 #![allow(non_snake_case)]
 #![allow(type_alias_bounds)]

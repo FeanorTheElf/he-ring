@@ -5,7 +5,6 @@ use std::fs::File;
 use std::io::BufReader;
 use std::io::BufWriter;
 use std::alloc::Global;
-use std::time::Instant;
 use std::cmp::max;
 
 use de::DeserializeSeed;
@@ -48,6 +47,7 @@ use feanor_math::integer::IntegerRingStore;
 use sparse::SparseMapVector;
 
 use crate::cyclotomic::*;
+use crate::profiling::timed_step;
 use crate::StdZn;
 use crate::euler_phi;
 use super::decomposition::*;
@@ -60,9 +60,13 @@ const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
 fn get_multiplicative_generator(ring: Zn, factorization: &[(i64, usize)]) -> ZnEl {
     let mut rng = oorandom::Rand64::new(ring.integer_ring().default_hash(ring.modulus()) as u128);
     let order = euler_phi(factorization);
+    let order_factorization = int_factor::factor(&ZZ, order);
     'test_generator: loop {
         let potential_generator = ring.random_element(|| rng.rand_u64());
-        for (p, _) in int_factor::factor(&ZZ, order) {
+        if !ring.is_unit(&potential_generator) {
+            continue 'test_generator;
+        }
+        for (p, _) in &order_factorization {
             if ring.is_one(&ring.pow(potential_generator, (order / p) as usize)) {
                 continue 'test_generator;
             }
@@ -113,13 +117,19 @@ impl<R> PowerTable<R>
     }
 }
 
+#[derive(Clone, Copy)]
+struct Pow2SecondaryDimension {
+    g2: ZnEl,
+    order_p_mod_g1: i64
+}
+
 #[derive(Clone)]
 pub struct HypercubeDimension {
     g_main: ZnEl,
+    local_order_of_p: i64,
     order_of_g_main: i64,
-    log_g_p: i64,
     factor_n: (i64, usize),
-    pow2_case: Option<(/* secondary generator */ ZnEl, /* either 0 or 1 such that `g^log_g_p * g2^pow2_case = p` */ i64)>,
+    pow2_case: Option<Pow2SecondaryDimension>,
     is_primary_dim: bool
 }
 
@@ -130,11 +140,7 @@ impl HypercubeDimension {
     }
 
     pub fn order_of_p(&self) -> i64 {
-        if let Some(log_g2_p) = self.pow2_case {
-            return max(self.order_of_g_main / signed_gcd(self.log_g_p, self.order_of_g_main, &ZZ), 2 / signed_gcd(2, log_g2_p.1, &ZZ));
-        } else {
-            return self.order_of_g_main / signed_gcd(self.log_g_p, self.order_of_g_main, &ZZ);
-        }
+        self.local_order_of_p
     }
 
     pub fn base_group_order(&self) -> i64 {
@@ -175,7 +181,9 @@ pub fn compute_hypercube_structure(n: i64, p: i64) -> (Vec<HypercubeDimension>, 
     assert!(signed_gcd(n, p, ZZ) == 1, "n and p must be coprime");
     // the unit group (Z/nZ)* decomposes as X (Z/niZ)*; this gives rise to the natural hypercube structure,
     // although technically many possible hypercube structures are possible
-    let factorization = int_factor::factor(&ZZ, n);
+    let mut factorization = int_factor::factor(&ZZ, n);
+    // this makes debugging easier, since we have a canonical order
+    factorization.sort_unstable_by_key(|(p, _)| *p);
     let Zn_rns = zn_rns::Zn::new(factorization.iter().map(|(q, k)| Zn::new(ZZ.pow(*q, *k) as u64)).collect(), ZZ);
     let Zn = Zn::new(n as u64);
     let iso = Zn.into_can_hom(zn_big::Zn::new(ZZ, n)).ok().unwrap().compose((&Zn_rns).into_can_iso(zn_big::Zn::new(ZZ, n)).ok().unwrap());
@@ -199,8 +207,8 @@ pub fn compute_hypercube_structure(n: i64, p: i64) -> (Vec<HypercubeDimension>, 
                     // `p` is in `<g1>`
                     let logg1_p = unit_group_dlog(Zqk, g1, ord_g1, Zqk.can_hom(&ZZ).unwrap().map(p)).unwrap();
                     dims.push(HypercubeDimension {
-                        pow2_case: Some((from_crt(i, g2), 0)),
-                        log_g_p: logg1_p, 
+                        pow2_case: Some(Pow2SecondaryDimension { g2: from_crt(i, g2), order_p_mod_g1: 1 }),
+                        local_order_of_p: ord_g1 / signed_gcd(logg1_p, ord_g1, &ZZ), 
                         order_of_g_main: ord_g1,
                         g_main: from_crt(i, g1),
                         factor_n: (2, k - 1),
@@ -210,8 +218,8 @@ pub fn compute_hypercube_structure(n: i64, p: i64) -> (Vec<HypercubeDimension>, 
                     // `<p, g1> = (Z/2^kZ)*` and `p * g2 in <g1>`
                     let logg1_pg2 = unit_group_dlog(Zqk, g1, ord_g1, Zqk.mul(Zqk.can_hom(&ZZ).unwrap().map(p), g2)).unwrap();
                     dims.push(HypercubeDimension {
-                        pow2_case: Some((from_crt(i, g2), 1)),
-                        log_g_p: logg1_pg2,
+                        pow2_case: Some(Pow2SecondaryDimension { g2: from_crt(i, g2), order_p_mod_g1: 2 }),
+                        local_order_of_p: max(ord_g1 / signed_gcd(logg1_pg2, ord_g1, &ZZ), 2),
                         order_of_g_main: ord_g1,
                         g_main: from_crt(i, g1),
                         factor_n: (2, *k - 2),
@@ -225,27 +233,14 @@ pub fn compute_hypercube_structure(n: i64, p: i64) -> (Vec<HypercubeDimension>, 
             let ord_g = euler_phi(&[(*q, *k)]);
             let logg_p = unit_group_dlog(Zqk, g, ord_g, Zqk.can_hom(&ZZ).unwrap().map(p)).unwrap();
             let ord_p = ord_g / signed_gcd(logg_p, ord_g, ZZ);
-            if signed_gcd(ord_g / ord_p, ord_p, &ZZ) == 1 {
-                // good dimension
-                let local_gen = Zqk.pow(g, ord_p as usize);
-                dims.push(HypercubeDimension {
-                    log_g_p: logg_p, 
-                    order_of_g_main: ord_g,
-                    g_main: from_crt(i, local_gen),
-                    factor_n: (*q, *k),
-                    pow2_case: None,
-                    is_primary_dim: true
-                });
-            } else {
-                dims.push(HypercubeDimension {
-                    log_g_p: logg_p, 
-                    order_of_g_main: ord_g,
-                    g_main: from_crt(i, g),
-                    factor_n: (*q, *k),
-                    pow2_case: None,
-                    is_primary_dim: true
-                });
-            }
+            dims.push(HypercubeDimension {
+                local_order_of_p: ord_p, 
+                order_of_g_main: ord_g,
+                g_main: from_crt(i, g),
+                factor_n: (*q, *k),
+                pow2_case: None,
+                is_primary_dim: true
+            });
         }
     }
     return (dims, Zn);
@@ -265,12 +260,12 @@ pub fn order_hypercube_dimensions(mut dims: Vec<HypercubeDimension>) -> (Vec<Hyp
 
     // expand the possible pow2-dimension
     if let Some((idx, _)) = dims.iter().enumerate().filter(|d| d.1.pow2_case.is_some()).next() {
-        if dims[idx].pow2_case.unwrap().1 == 0 {
+        if dims[idx].pow2_case.unwrap().order_p_mod_g1 == 1 {
             dims.insert(idx + 1, dims[idx].clone());
             dims[idx + 1].is_primary_dim = false;
-            dims[idx + 1].g_main = dims[idx].pow2_case.unwrap().0;
+            dims[idx + 1].g_main = dims[idx].pow2_case.unwrap().g2;
             dims[idx + 1].order_of_g_main = 2;
-            dims[idx + 1].log_g_p = dims[idx].pow2_case.unwrap().1;
+            dims[idx + 1].local_order_of_p = dims[idx].pow2_case.unwrap().order_p_mod_g1;
             dims[idx + 1].pow2_case = None;
 
             result.insert(idx + 1, 2);
@@ -333,60 +328,37 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
         let t = int_cast(ring.base_ring().integer_ring().clone_el(ring.base_ring().modulus()), ZZ, ring.base_ring().integer_ring());
         let (p, e) = is_prime_power(&ZZ, &t).unwrap();
 
-        if LOG {
-            println!("computing hypercube structure");
-        }
-        let start = Instant::now();
-        let (dims, galois_group_ring) = compute_hypercube_structure(ring.n() as i64, p);
-        let (dims, dim_lengths) = order_hypercube_dimensions(dims);
-        let end = Instant::now();
-        if LOG {
-            println!("done in {} ms", (end - start).as_millis());
-        }
+        let (dims, dim_lengths, galois_group_ring) = timed_step::<_, _, LOG, _>("Computing hypercube structure", |[]| {
+            let (dims, galois_group_ring) = compute_hypercube_structure(ring.n() as i64, p);
+            let (dims, dim_lengths) = order_hypercube_dimensions(dims);
+            (dims, dim_lengths, galois_group_ring)
+        });
 
         let frobenius = galois_group_ring.can_hom(&ZZ).unwrap().map(p);
         let slot_count: usize = dim_lengths.iter().copied().product();
         let d = ring.rank() / slot_count;
-
         let max_log2_len = ZZ.abs_log2_ceil(&(d as i64)).unwrap() + 1;
-        if LOG {
-            println!("computing representation of slot ring");
-        }
-        let start = Instant::now();
-        let convolution = FFTRNSBasedConvolutionZn::from(FFTRNSBasedConvolution::<R::Type>::new_with(max_log2_len, BigIntRing::RING, Global));
-        let tmp_slot_ring = GaloisField::new(p, d).get_ring().galois_ring_with(AsLocalPIR::from_zn(RingRef::new(ring.base_ring().get_ring())).unwrap(), Global, convolution);
-        let end = Instant::now();
-        if LOG {
-            println!("done in {} ms", (end - start).as_millis());
-        }
-        
-        if LOG {
-            println!("computing root of unity in slot ring");
-        }
-        let start = Instant::now();
-        let root_of_unity = get_prim_root_of_unity(&tmp_slot_ring, ring.n());
-        let end = Instant::now();
-        if LOG {
-            println!("done in {} ms", (end - start).as_millis());
-        }
+    
+        let tmp_slot_ring = timed_step::<_, _, LOG, _>("Computing representation of slot ring", |[]| {
+            let convolution = FFTRNSBasedConvolutionZn::from(FFTRNSBasedConvolution::<R::Type>::new_with(max_log2_len, BigIntRing::RING, Global));
+            GaloisField::new(p, d).get_ring().galois_ring_with(AsLocalPIR::from_zn(RingRef::new(ring.base_ring().get_ring())).unwrap(), Global, convolution)
+        });
+
+        let root_of_unity = timed_step::<_, _, LOG, _>("Computing root of unity in slot ring", |[]| 
+            get_prim_root_of_unity(&tmp_slot_ring, ring.n())
+        );
         
         let poly_ring = DensePolyRing::new(&tmp_slot_ring, "X");
-        if LOG {
-            println!("computing minimal polynomial of root of unity");
-        }
-        let start = Instant::now();
-        let mut slot_generating_poly = poly_ring.prod((0..d).scan(tmp_slot_ring.clone_el(&root_of_unity), |current_root_of_unity, _| {
-            let result = poly_ring.sub(poly_ring.indeterminate(), poly_ring.inclusion().map_ref(current_root_of_unity));
-            *current_root_of_unity = tmp_slot_ring.pow(tmp_slot_ring.clone_el(current_root_of_unity), galois_group_ring.smallest_positive_lift(frobenius) as usize);
-            return Some(result);
-        }));
-        let end = Instant::now();
-        if LOG {
-            println!("done in {} ms", (end - start).as_millis());
-        }
-        
-        let normalization_factor = poly_ring.base_ring().invert(poly_ring.lc(&slot_generating_poly).unwrap()).unwrap();
-        poly_ring.inclusion().mul_assign_map(&mut slot_generating_poly, normalization_factor);
+        let slot_generating_poly = timed_step::<_, _, LOG, _>("Computing minimal polynomial of root of unity", |[]| {
+            let mut result = poly_ring.prod((0..d).scan(tmp_slot_ring.clone_el(&root_of_unity), |current_root_of_unity, _| {
+                let result = poly_ring.sub(poly_ring.indeterminate(), poly_ring.inclusion().map_ref(current_root_of_unity));
+                *current_root_of_unity = tmp_slot_ring.pow(tmp_slot_ring.clone_el(current_root_of_unity), galois_group_ring.smallest_positive_lift(frobenius) as usize);
+                return Some(result);
+            }));
+            let normalization_factor = poly_ring.base_ring().invert(poly_ring.lc(&result).unwrap()).unwrap();
+            poly_ring.inclusion().mul_assign_map(&mut result, normalization_factor);
+            result
+        });
 
         let hom = ring.base_ring().can_hom(tmp_slot_ring.base_ring()).unwrap();
         let mut slot_ring_modulus = SparseMapVector::new(d, ring.base_ring());
@@ -407,6 +379,7 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
         }));
 
         slot_ring_modulus.scan(|_, x| ring.base_ring().negate_inplace(x));
+
         let max_log2_len = ZZ.abs_log2_ceil(&(d as i64)).unwrap() + 1;
         let slot_ring = FreeAlgebraImpl::new_with(ring.base_ring(), tmp_slot_ring.rank(), slot_ring_modulus, "𝜁", ring.allocator().clone(), FFTRNSBasedConvolution::new_with(max_log2_len, BigIntRing::RING, Global).into());
         let max_ideal_gen = slot_ring.inclusion().map(slot_ring.base_ring().coerce(&ZZ, p));
@@ -422,29 +395,24 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
             slot_unit_vec: ring.zero()
         };
 
-        if LOG {
-            println!("computing slot unit vector representation");
-        }
-        let start = Instant::now();
-        let unnormalized_slot_unit_vector = ring.prod(result.slot_iter(|idxs| if idxs.iter().all(|x| *x == 0) {
-            None
-        } else {
-            Some(galois_group_ring.prod(result.dims.iter().enumerate().map(|(i, dim)| galois_group_ring.pow(dim.g_main, idxs[i]))))
-        })
-            .filter_map(|x| x)
-            .map(|s| ring.apply_galois_action(&irred_factor, s)));
-        let end = Instant::now();
-        if LOG {
-            println!("done in {} ms", (end - start).as_millis());
-        }
+        let slot_unit_vector = timed_step::<_, _, LOG, _>("Computing slot unit vector representation", |[]| {
+            let unormalized_result = ring.prod(result.slot_iter(|idxs| if idxs.iter().all(|x| *x == 0) {
+                    None
+                } else {
+                    Some(galois_group_ring.prod(result.dims.iter().enumerate().map(|(i, dim)| galois_group_ring.pow(dim.g_main, idxs[i]))))
+                })
+                .filter_map(|x| x)
+                .map(|s| ring.apply_galois_action(&irred_factor, s)));
+                
+            let normalization_factor = result.slot_ring().invert(&result.get_slot_values(&unormalized_result).next().unwrap()).unwrap();
+            let normalization_factor_wrt_basis = result.slot_ring().wrt_canonical_basis(&normalization_factor);
+            ring.mul(
+                ring.from_canonical_basis((0..ring.rank()).map(|i| if i < normalization_factor_wrt_basis.len() { normalization_factor_wrt_basis.at(i) } else { ring.base_ring().zero() })),
+                unormalized_result
+            )
+        });
 
-        let normalization_factor = result.slot_ring().invert(&result.get_slot_values(&unnormalized_slot_unit_vector).next().unwrap()).unwrap();
-        let normalization_factor_wrt_basis = result.slot_ring().wrt_canonical_basis(&normalization_factor);
-
-        result.slot_unit_vec = ring.mul(
-            ring.from_canonical_basis((0..ring.rank()).map(|i| if i < normalization_factor_wrt_basis.len() { normalization_factor_wrt_basis.at(i) } else { ring.base_ring().zero() })),
-            unnormalized_slot_unit_vector
-        );
+        result.slot_unit_vec = slot_unit_vector;
 
         return result;
     }
@@ -632,7 +600,7 @@ pub mod serialization {
     struct HypercubeDimensionSerializable {
         g_main: i64,
         order_of_g_main: i64,
-        log_g_p: i64,
+        local_order_of_p: i64,
         factor_n: (i64, usize),
         pow2_case: Option<(i64, i64)>,
         is_primary_dim: bool
@@ -893,10 +861,10 @@ pub mod serialization {
                 dims: value.dims.into_iter().map(|d| HypercubeDimension {
                     factor_n: d.factor_n,
                     g_main: hom.map(d.g_main),
-                    log_g_p: d.log_g_p,
+                    local_order_of_p: d.local_order_of_p,
                     order_of_g_main: d.order_of_g_main,
                     is_primary_dim: d.is_primary_dim,
-                    pow2_case: d.pow2_case.map(|(g2, log_g2_p)| (hom.map(g2), log_g2_p))
+                    pow2_case: d.pow2_case.map(|(g2, order_p_mod_g1)| Pow2SecondaryDimension { g2: hom.map(g2), order_p_mod_g1: order_p_mod_g1 })
                 }).collect(),
                 galois_group_ring: galois_group_ring,
                 dim_lengths: value.dim_lengths
@@ -921,11 +889,11 @@ pub mod serialization {
                 n: self.ring().n(),
                 dims: self.dims.iter().map(|d| HypercubeDimensionSerializable {
                     factor_n: d.factor_n,
-                    log_g_p: d.log_g_p,
+                    local_order_of_p: d.local_order_of_p,
                     order_of_g_main: d.order_of_g_main,
                     g_main: self.galois_group_mulrepr().smallest_positive_lift(d.g_main) as i64,
                     is_primary_dim: d.is_primary_dim,
-                    pow2_case: d.pow2_case.map(|(g2, log_g2_p)| (self.galois_group_mulrepr().smallest_positive_lift(g2), log_g2_p))
+                    pow2_case: d.pow2_case.map(|secondary_dim| (self.galois_group_mulrepr().smallest_positive_lift(secondary_dim.g2), secondary_dim.order_p_mod_g1))
                 }).collect(),
                 galois_group_ring_modulus: *self.galois_group_mulrepr().modulus() as u64,
                 slot_rank: self.d,
@@ -940,9 +908,9 @@ pub mod serialization {
 #[cfg(test)]
 use feanor_math::assert_el_eq;
 #[cfg(test)]
-use crate::rings::pow2_cyclotomic::DefaultPow2CyclotomicNTTRing;
+use crate::rings::pow2_cyclotomic::{DefaultPow2CyclotomicNTTRing, DefaultPow2CyclotomicNTTRingBase};
 #[cfg(test)]
-use crate::rings::pow2_cyclotomic::DefaultPow2CyclotomicNTTRingBase;
+use crate::rings::odd_cyclotomic::{DefaultOddCyclotomicNTTRing, DefaultOddCyclotomicNTTRingBase};
 
 #[test]
 fn test_compute_hypercube_structure_pow2() {
@@ -951,7 +919,7 @@ fn test_compute_hypercube_structure_pow2() {
         assert_eq!(1, dims.len());
         assert_eq!(256, dims[0].order_of_p());
         assert!(dims[0].pow2_case.is_some());
-        assert_eq!(1, dims[0].pow2_case.unwrap().1);
+        assert_eq!(2, dims[0].pow2_case.unwrap().order_p_mod_g1);
         assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(3), 256, dims[0].g_main).is_none());
         assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(3), 256, Z_2n.negate(dims[0].g_main)).is_some());
         assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(3), 256, Z_2n.pow(dims[0].g_main, 2)).is_some());
@@ -961,7 +929,7 @@ fn test_compute_hypercube_structure_pow2() {
         assert_eq!(1, dims.len());
         assert_eq!(128, dims[0].order_of_p());
         assert!(dims[0].pow2_case.is_some());
-        assert_eq!(1, dims[0].pow2_case.unwrap().1);
+        assert_eq!(2, dims[0].pow2_case.unwrap().order_p_mod_g1);
         assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(23), 128, Z_2n.pow(dims[0].g_main, 2)).is_none());
         assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(23), 128, Z_2n.negate(Z_2n.pow(dims[0].g_main, 2))).is_some());
         assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(23), 128, Z_2n.pow(dims[0].g_main, 4)).is_some());
@@ -971,34 +939,36 @@ fn test_compute_hypercube_structure_pow2() {
         assert_eq!(1, dims.len());
         assert_eq!(256, dims[0].order_of_p());
         assert!(dims[0].pow2_case.is_some());
-        assert_eq!(0, dims[0].pow2_case.unwrap().1);
+        assert_eq!(1, dims[0].pow2_case.unwrap().order_p_mod_g1);
         assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(13), 256, dims[0].g_main).is_some());
-        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(13), 256, dims[0].pow2_case.unwrap().0).is_none());
+        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(13), 256, dims[0].pow2_case.unwrap().g2).is_none());
     }
     {
         let (dims, Z_2n) = compute_hypercube_structure(1024, 17);
         assert_eq!(1, dims.len());
         assert_eq!(64, dims[0].order_of_p());
         assert!(dims[0].pow2_case.is_some());
-        assert_eq!(0, dims[0].pow2_case.unwrap().1);
+        assert_eq!(1, dims[0].pow2_case.unwrap().order_p_mod_g1);
         assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(17), 64, Z_2n.pow(dims[0].g_main, 2)).is_none());
         assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(17), 64, Z_2n.pow(dims[0].g_main, 4)).is_some());
-        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(17), 64, dims[0].pow2_case.unwrap().0).is_none());
+        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(17), 64, dims[0].pow2_case.unwrap().g2).is_none());
     }
 }
 
 #[test]
-fn test_compute_hypercube_structure_odd() {
+fn test_compute_hypercube_structure_composite() {
     {
         let (dims, _Zn) = compute_hypercube_structure(257, 3);
         assert_eq!(1, dims.len());
         assert_eq!(256, dims[0].order_of_p());
+        assert_eq!(256, dims[0].order_of_g_main);
         assert!(dims[0].pow2_case.is_none());
     }
     {
         let (dims, Zn) = compute_hypercube_structure(257, 11);
         assert_eq!(1, dims.len());
         assert_eq!(64, dims[0].order_of_p());
+        assert_eq!(256, dims[0].order_of_g_main);
         assert!(dims[0].pow2_case.is_none());
         assert!(unit_group_dlog(&Zn, Zn.int_hom().map(11), 64, Zn.pow(dims[0].g_main, 2)).is_none());
         assert!(unit_group_dlog(&Zn, Zn.int_hom().map(11), 64, Zn.pow(dims[0].g_main, 4)).is_some());
@@ -1007,22 +977,53 @@ fn test_compute_hypercube_structure_odd() {
         let (dims, _Zn) = compute_hypercube_structure(257 * 101, 13);
         assert_eq!(2, dims.len());
         assert_eq!(50, dims[0].order_of_p());
-        assert_eq!(128, dims[1].order_of_p());
+        assert_eq!(100, dims[0].order_of_g_main);
         assert!(dims[0].pow2_case.is_none());
+
+        assert_eq!(128, dims[1].order_of_p());
+        assert_eq!(256, dims[0].order_of_g_main);
         assert!(dims[1].pow2_case.is_none());
     }
     {
         let (dims, _Zn) = compute_hypercube_structure(257 * 101, 2);
         assert_eq!(2, dims.len());
         assert_eq!(100, dims[0].order_of_p());
-        assert_eq!(16, dims[1].order_of_p());
+        assert_eq!(100, dims[0].order_of_g_main);
         assert!(dims[0].pow2_case.is_none());
+
+        assert_eq!(16, dims[1].order_of_p());
+        assert_eq!(256, dims[0].order_of_g_main);
         assert!(dims[1].pow2_case.is_none());
+    }
+    {
+        let (dims, Zn) = compute_hypercube_structure(11 * 31, 2);
+        assert_eq!(2, dims.len());
+
+        assert_eq!(10, dims[0].order_of_p());
+        assert!(dims[0].pow2_case.is_none());
+        assert!(unit_group_dlog(&Zn, Zn.int_hom().map(156), 10, dims[0].g_main).is_some());
+        assert!(unit_group_dlog(&Zn, dims[0].g_main, dims[0].order_of_g_main, Zn.int_hom().map(156)).is_some());
+
+        assert_eq!(5, dims[1].order_of_p());
+        assert!(dims[1].pow2_case.is_none());
+        assert!(unit_group_dlog(&Zn, Zn.int_hom().map(188), 5, Zn.pow(dims[1].g_main, 2)).is_none());
+        assert!(unit_group_dlog(&Zn, Zn.int_hom().map(188), 5, Zn.pow(dims[1].g_main, 3)).is_none());
+        assert!(unit_group_dlog(&Zn, Zn.int_hom().map(188), 5, Zn.pow(dims[1].g_main, 6)).is_some());
     }
 }
 
 #[test]
-fn test_order_hypercube_dimensions() {
+fn test_create_hypercube() {
+    let ring: DefaultOddCyclotomicNTTRing = DefaultOddCyclotomicNTTRingBase::new(Zn::new(2), 31 * 11);
+    let hypercube = HypercubeIsomorphism::new::<false>(ring.get_ring());
+
+    assert_eq!(2, hypercube.dim_count());
+    assert_eq!(1, hypercube.len(0));
+    assert_eq!(30, hypercube.len(1));
+}
+
+#[test]
+fn test_order_hypercube_dimensions_pow2() {
     {
         let ring = Zn::new(32);
         // dims of `<23> <= (Z/32Z)*`
@@ -1030,9 +1031,9 @@ fn test_order_hypercube_dimensions() {
             HypercubeDimension {
                 order_of_g_main: 8,
                 g_main: ring.int_hom().map(5),
-                log_g_p: 6,
+                local_order_of_p: 4,
                 factor_n: (2, 5),
-                pow2_case: Some((ring.int_hom().map(-1), 1)),
+                pow2_case: Some(Pow2SecondaryDimension { g2: ring.int_hom().map(-1), order_p_mod_g1: 2 }),
                 is_primary_dim: true
             }
         ];
@@ -1049,9 +1050,9 @@ fn test_order_hypercube_dimensions() {
             HypercubeDimension {
                 order_of_g_main: 8,
                 g_main: ring.int_hom().map(5),
-                log_g_p: 7,
+                local_order_of_p: 8,
                 factor_n: (2, 5),
-                pow2_case: Some((ring.int_hom().map(-1), 0)),
+                pow2_case: Some(Pow2SecondaryDimension { g2: ring.int_hom().map(-1), order_p_mod_g1: 1 }),
                 is_primary_dim: true
             }
         ];
@@ -1062,6 +1063,45 @@ fn test_order_hypercube_dimensions() {
         assert!(dims[0].is_primary_dim);
         assert_el_eq!(ring, ring.int_hom().map(-1), dims[1].g_main);
         assert!(!dims[1].is_primary_dim);
+    }
+}
+
+#[test]
+fn test_order_hypercube_dimensions_composite() {
+    {
+        let ring = Zn::new(11 * 31);
+        // dims of `<2> <= (Z/341Z)*`
+        let dims = vec![
+            HypercubeDimension {
+                order_of_g_main: 30,
+                g_main: ring.int_hom().map(3),
+                local_order_of_p: 5,
+                factor_n: (31, 1),
+                pow2_case: None,
+                is_primary_dim: true
+            },
+            HypercubeDimension {
+                order_of_g_main: 10,
+                g_main: ring.int_hom().map(2),
+                local_order_of_p: 10,
+                factor_n: (11, 1),
+                pow2_case: None,
+                is_primary_dim: true
+            }
+        ];
+        let (dims, dim_lengths) = order_hypercube_dimensions(dims);
+        assert_eq!(&[1, 30][..], &dim_lengths);
+        assert_eq!(2, dims.len());
+
+        assert_eq!((11, 1), dims[0].factor_n());
+        assert_el_eq!(ring, ring.int_hom().map(2), dims[0].g_main);
+        assert!(dims[0].is_primary_dim);
+        assert_eq!(10, dims[0].order_of_p());
+
+        assert_eq!((31, 1), dims[1].factor_n());
+        assert_el_eq!(ring, ring.int_hom().map(3), dims[1].g_main);
+        assert!(dims[1].is_primary_dim);
+        assert_eq!(5, dims[1].order_of_p());
     }
 }
 

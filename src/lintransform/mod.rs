@@ -383,6 +383,7 @@ impl<R, F, A> LinearTransform<R, F, A>
     }
 
     #[cfg(test)]
+    #[allow(unused)]
     fn print(&self, H: &HypercubeIsomorphism<R, F, A>) {
         for (g, c) in &self.data {
             println!("p^{} {:?}: {}", g.frobenius_count, g.shift_steps, H.ring().format(c));
@@ -981,6 +982,31 @@ fn test_compile() {
     let mut current = H.from_slot_vec((1..17).map(|n| H.slot_ring().int_hom().map(n)));
     let expected = slots_to_coeffs_thin(&H).into_iter().fold(ring.clone_el(&current), |c, T| ring.get_ring().compute_linear_transform(&H, &c, &T));
     current = compiled_composed_transform.evaluate(current, &ring);
+    assert_el_eq!(&ring, &expected, &current);
+}
+
+#[test]
+fn test_compile_including_frobenius() {
+    let ring = DefaultOddCyclotomicNTTRingBase::new(Zn::new(7), 3 * 19);
+    let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
+
+    let mut current = H.from_slot_vec((1..=12).map(|n| H.slot_ring().int_hom().map(n)));
+    let compiled_transform = composite::slots_to_powcoeffs_thin(&H).into_iter().map(|T| CompiledLinearTransform::compile(&H, T)).collect::<Vec<_>>();
+    let expected = composite::slots_to_powcoeffs_thin(&H).into_iter().fold(ring.clone_el(&current), |c, T| ring.get_ring().compute_linear_transform(&H, &c, &T));
+    for T in &compiled_transform {
+        current = T.evaluate(current, &ring);
+    }
+    assert_el_eq!(&ring, &expected, &current);
+    
+    let ring = DefaultOddCyclotomicNTTRingBase::new(Zn::new(2), 11 * 31);
+    let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
+
+    let mut current = H.from_slot_vec((1..=30).map(|n| H.slot_ring().int_hom().map(n)));
+    let compiled_transform = composite::slots_to_powcoeffs_thin(&H).into_iter().map(|T| CompiledLinearTransform::compile(&H, T)).collect::<Vec<_>>();
+    let expected = composite::slots_to_powcoeffs_thin(&H).into_iter().fold(ring.clone_el(&current), |c, T| ring.get_ring().compute_linear_transform(&H, &c, &T));
+    for T in &compiled_transform {
+        current = T.evaluate(current, &ring);
+    }
     assert_el_eq!(&ring, &expected, &current);
 }
 

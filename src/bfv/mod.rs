@@ -38,6 +38,7 @@ use crate::rings::gadget_product::*;
 use crate::rings::double_rns_ring::*;
 use crate::rings::ntt_ring::*;
 use crate::profiling::*;
+use crate::rings::slots::HypercubeIsomorphism;
 use crate::rnsconv;
 use crate::sample_primes;
 
@@ -45,7 +46,7 @@ use rand::thread_rng;
 use rand::{Rng, CryptoRng};
 use rand_distr::StandardNormal;
 
-// pub mod bootstrap;
+pub mod bootstrap;
 
 pub type PlaintextZn = zn_64::Zn;
 pub type CiphertextZn = zn_64::Zn;
@@ -416,6 +417,21 @@ pub fn dec<Params: BFVParams>(P: &PlaintextRing<Params>, C: &CiphertextRing<Para
     let (c0, c1) = ct;
     let noisy_m = C.add(c0.to_ntt(C), C.mul_ref_snd(c1.to_ntt(C), sk));
     return remove_noise::<Params>(P, C, &noisy_m);
+}
+
+pub fn dec_println<Params: BFVParams>(P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, ct: &Ciphertext<Params>, sk: &SecretKey<Params>) {
+    let m = dec(P, C, clone_ct(C, ct), sk);
+    P.println(&m);
+    println!();
+}
+
+pub fn dec_println_slots<Params: BFVParams>(P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, ct: &Ciphertext<Params>, sk: &SecretKey<Params>) {
+    let H = HypercubeIsomorphism::new::<false>(P.get_ring());
+    let m = dec(P, C, clone_ct(C, ct), sk);
+    for a in H.get_slot_values(&m) {
+        H.slot_ring().println(&a);
+    }
+    println!();
 }
 
 pub fn hom_add<Params: BFVParams>(C: &CiphertextRing<Params>, lhs: Ciphertext<Params>, rhs: &Ciphertext<Params>) -> Ciphertext<Params> {

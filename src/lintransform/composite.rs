@@ -113,6 +113,7 @@ fn slots_to_powcoeffs_fat_fst_step<'a, R, F, A>(H: &HypercubeIsomorphism<'a, R, 
 /// If for the linear transform input, the slot `(i1, ..., ir)` contains `sum_j a_(j, i1, ..., ir) 𝜁^j`, this
 /// this transform "puts" `a_(j, i1, ..., ir)` into the powerful-basis coefficient of `X1^(j * m1 + i1) X2^i2 ... Xr^ir`.
 /// 
+#[allow(unused)]
 fn slots_to_powcoeffs_fat<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> Vec<LinearTransform<R, F, A>>
     where R: RingStore,
         R::Type: StdZn,
@@ -262,6 +263,17 @@ fn test_slots_to_powcoeffs_thin() {
     }
     let ring_ref = &ring;
     let expected = ring.sum((0..4).flat_map(|i| (0..6).map(move |j| ring_ref.mul(ring_ref.pow(ring_ref.canonical_gen(), i * 7 + j * 5), ring_ref.int_hom().map((1 + j + i * 6) as i32)))));
+    assert_el_eq!(ring, expected, current);
+
+    // Z/8Z[X]/Phi_341 ~ GR(2, 3, 10)^30
+    let ring = DefaultOddCyclotomicNTTRingBase::new(Zn::new(8), 31 * 11);
+    let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
+
+    let mut current = H.from_slot_vec((1..=30).map(|n| H.slot_ring().int_hom().map(n)));
+    for transform in slots_to_powcoeffs_thin(&H) {
+        current = ring.get_ring().compute_linear_transform(&H, &current, &transform);
+    }
+    let expected = ring.sum((0..30).map(|j| ring.mul(ring.pow(ring.canonical_gen(), j * 11), ring.int_hom().map((j + 1) as i32))));
     assert_el_eq!(ring, expected, current);
 }
 
