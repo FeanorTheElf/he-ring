@@ -117,20 +117,27 @@ impl<R> PowerTable<R>
     }
 }
 
-#[derive(Clone, Copy)]
-struct Pow2SecondaryDimension {
-    g2: ZnEl,
-    order_p_mod_g1: i64
-}
-
+///
+/// Corresponds to a single dimension of the hypercube, i.e. the Galois group
+/// of a tensor-factor of the main ring. In other words, this stores information
+/// about one of the group/subgroup pairs `<p> <= Gi` where `Gal(R/Fp) = G = G1 x ... x Gr`.
+/// The good thing about the tensor product factorization is that we can derive the 
+/// structure of `G / <p>` from just the `Gi` and the orders `ord(p)` in `Gi`.
+/// 
+/// Note that usually the `Gi` are all cyclic, except for one special case where
+/// `Gi` has an index-2 cyclic subgroup (if `2^k | n` and `p = 1 mod 4`). In this case
+/// however, we can write `Gi = <-1> x <g>` and create two hypercube dimensions 
+/// corresponding to `<-1>` and `<g>`. Now the two dimensions are not tensor-product
+/// factors of `R` anymore, but things still work out.
+/// 
 #[derive(Clone)]
-pub struct HypercubeDimension {
+struct HypercubeDimension {
     g_main: ZnEl,
     local_order_of_p: i64,
     order_of_g_main: i64,
+    base_group_order: i64,
     factor_n: (i64, usize),
-    pow2_case: Option<Pow2SecondaryDimension>,
-    is_primary_dim: bool
+    is_primary_dim: bool,
 }
 
 impl HypercubeDimension {
@@ -144,11 +151,7 @@ impl HypercubeDimension {
     }
 
     pub fn base_group_order(&self) -> i64 {
-        if let Some(_) = self.pow2_case {
-            return self.order_of_g_main * 2;
-        } else {
-            return self.order_of_g_main;
-        }
+        self.base_group_order
     }
 }
 
@@ -177,7 +180,7 @@ fn get_prim_root_of_unity<R>(ring: R, m: usize) -> El<R>
     return result;
 }
 
-pub fn compute_hypercube_structure(n: i64, p: i64) -> (Vec<HypercubeDimension>, Zn) {
+fn compute_hypercube_structure(n: i64, p: i64) -> (Vec<HypercubeDimension>, Zn) {
     assert!(signed_gcd(n, p, ZZ) == 1, "n and p must be coprime");
     // the unit group (Z/nZ)* decomposes as X (Z/niZ)*; this gives rise to the natural hypercube structure,
     // although technically many possible hypercube structures are possible
@@ -207,22 +210,30 @@ pub fn compute_hypercube_structure(n: i64, p: i64) -> (Vec<HypercubeDimension>, 
                     // `p` is in `<g1>`
                     let logg1_p = unit_group_dlog(Zqk, g1, ord_g1, Zqk.can_hom(&ZZ).unwrap().map(p)).unwrap();
                     dims.push(HypercubeDimension {
-                        pow2_case: Some(Pow2SecondaryDimension { g2: from_crt(i, g2), order_p_mod_g1: 1 }),
                         local_order_of_p: ord_g1 / signed_gcd(logg1_p, ord_g1, &ZZ), 
+                        base_group_order: ord_g1,
                         order_of_g_main: ord_g1,
                         g_main: from_crt(i, g1),
                         factor_n: (2, k - 1),
                         is_primary_dim: true
                     });
+                    dims.push(HypercubeDimension {
+                        local_order_of_p: 1, 
+                        order_of_g_main: 2,
+                        base_group_order: 2,
+                        g_main: from_crt(i, g2),
+                        factor_n: (2, k - 1),
+                        is_primary_dim: false
+                    });
                 } else {
                     // `<p, g1> = (Z/2^kZ)*` and `p * g2 in <g1>`
                     let logg1_pg2 = unit_group_dlog(Zqk, g1, ord_g1, Zqk.mul(Zqk.can_hom(&ZZ).unwrap().map(p), g2)).unwrap();
                     dims.push(HypercubeDimension {
-                        pow2_case: Some(Pow2SecondaryDimension { g2: from_crt(i, g2), order_p_mod_g1: 2 }),
                         local_order_of_p: max(ord_g1 / signed_gcd(logg1_pg2, ord_g1, &ZZ), 2),
                         order_of_g_main: ord_g1,
+                        base_group_order: 2 * ord_g1,
                         g_main: from_crt(i, g1),
-                        factor_n: (2, *k - 2),
+                        factor_n: (2, *k - 1),
                         is_primary_dim: true
                     });
                 }
@@ -236,9 +247,9 @@ pub fn compute_hypercube_structure(n: i64, p: i64) -> (Vec<HypercubeDimension>, 
             dims.push(HypercubeDimension {
                 local_order_of_p: ord_p, 
                 order_of_g_main: ord_g,
+                base_group_order: ord_g,
                 g_main: from_crt(i, g),
                 factor_n: (*q, *k),
-                pow2_case: None,
                 is_primary_dim: true
             });
         }
@@ -246,33 +257,14 @@ pub fn compute_hypercube_structure(n: i64, p: i64) -> (Vec<HypercubeDimension>, 
     return (dims, Zn);
 }
 
-pub fn order_hypercube_dimensions(mut dims: Vec<HypercubeDimension>) -> (Vec<HypercubeDimension>, Vec<usize>) {
-    // largest order of p first; 
-    // unfortunately we need an exception in the power-of-two case, since we implicitly 
-    // rely on `Fp[X]/(Phi_(n1 n2)) ~ Fp[X]/(Phi_n1) ⊗ Fp[X]/(Phi_n2)`;
+fn order_hypercube_dimensions(mut dims: Vec<HypercubeDimension>) -> (Vec<HypercubeDimension>, Vec<usize>) {
     dims.sort_by_key(|dim| -(dim.order_of_p() as i64));
-    let mut result = dims.iter().scan(1, |current_d, dim| {
+    let result = dims.iter().scan(1, |current_d, dim| {
         let new_d = signed_lcm(*current_d, dim.order_of_p() as i64, ZZ);
         let len = dim.base_group_order() as i64 / (new_d / *current_d);
         *current_d = new_d;
         return Some(len as usize);
     }).collect::<Vec<_>>();
-
-    // expand the possible pow2-dimension
-    if let Some((idx, _)) = dims.iter().enumerate().filter(|d| d.1.pow2_case.is_some()).next() {
-        if dims[idx].pow2_case.unwrap().order_p_mod_g1 == 1 {
-            dims.insert(idx + 1, dims[idx].clone());
-            dims[idx + 1].is_primary_dim = false;
-            dims[idx + 1].g_main = dims[idx].pow2_case.unwrap().g2;
-            dims[idx + 1].order_of_g_main = 2;
-            dims[idx + 1].local_order_of_p = dims[idx].pow2_case.unwrap().order_p_mod_g1;
-            dims[idx + 1].pow2_case = None;
-
-            result.insert(idx + 1, 2);
-            result[idx] = result[idx] / 2;
-        }
-        dims[idx].pow2_case = None;
-    }
     return (dims, result);
 }
 
@@ -602,8 +594,8 @@ pub mod serialization {
         order_of_g_main: i64,
         local_order_of_p: i64,
         factor_n: (i64, usize),
-        pow2_case: Option<(i64, i64)>,
-        is_primary_dim: bool
+        is_primary_dim: bool,
+        base_group_order: i64
     }
     
     pub struct HypercubeIsomorphismSerializable<'a, R, F, A>
@@ -864,7 +856,7 @@ pub mod serialization {
                     local_order_of_p: d.local_order_of_p,
                     order_of_g_main: d.order_of_g_main,
                     is_primary_dim: d.is_primary_dim,
-                    pow2_case: d.pow2_case.map(|(g2, order_p_mod_g1)| Pow2SecondaryDimension { g2: hom.map(g2), order_p_mod_g1: order_p_mod_g1 })
+                    base_group_order: d.base_group_order
                 }).collect(),
                 galois_group_ring: galois_group_ring,
                 dim_lengths: value.dim_lengths
@@ -893,7 +885,7 @@ pub mod serialization {
                     order_of_g_main: d.order_of_g_main,
                     g_main: self.galois_group_mulrepr().smallest_positive_lift(d.g_main) as i64,
                     is_primary_dim: d.is_primary_dim,
-                    pow2_case: d.pow2_case.map(|secondary_dim| (self.galois_group_mulrepr().smallest_positive_lift(secondary_dim.g2), secondary_dim.order_p_mod_g1))
+                    base_group_order: d.base_group_order
                 }).collect(),
                 galois_group_ring_modulus: *self.galois_group_mulrepr().modulus() as u64,
                 slot_rank: self.d,
@@ -918,8 +910,6 @@ fn test_compute_hypercube_structure_pow2() {
         let (dims, Z_2n) = compute_hypercube_structure(1024, 3);
         assert_eq!(1, dims.len());
         assert_eq!(256, dims[0].order_of_p());
-        assert!(dims[0].pow2_case.is_some());
-        assert_eq!(2, dims[0].pow2_case.unwrap().order_p_mod_g1);
         assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(3), 256, dims[0].g_main).is_none());
         assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(3), 256, Z_2n.negate(dims[0].g_main)).is_some());
         assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(3), 256, Z_2n.pow(dims[0].g_main, 2)).is_some());
@@ -928,30 +918,25 @@ fn test_compute_hypercube_structure_pow2() {
         let (dims, Z_2n) = compute_hypercube_structure(1024, 23);
         assert_eq!(1, dims.len());
         assert_eq!(128, dims[0].order_of_p());
-        assert!(dims[0].pow2_case.is_some());
-        assert_eq!(2, dims[0].pow2_case.unwrap().order_p_mod_g1);
         assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(23), 128, Z_2n.pow(dims[0].g_main, 2)).is_none());
         assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(23), 128, Z_2n.negate(Z_2n.pow(dims[0].g_main, 2))).is_some());
         assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(23), 128, Z_2n.pow(dims[0].g_main, 4)).is_some());
     }
     {
         let (dims, Z_2n) = compute_hypercube_structure(1024, 13);
-        assert_eq!(1, dims.len());
+        assert_eq!(2, dims.len());
         assert_eq!(256, dims[0].order_of_p());
-        assert!(dims[0].pow2_case.is_some());
-        assert_eq!(1, dims[0].pow2_case.unwrap().order_p_mod_g1);
+        assert_eq!(1, dims[1].order_of_p());
         assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(13), 256, dims[0].g_main).is_some());
-        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(13), 256, dims[0].pow2_case.unwrap().g2).is_none());
+        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(13), 256, dims[1].g_main).is_none());
     }
     {
         let (dims, Z_2n) = compute_hypercube_structure(1024, 17);
-        assert_eq!(1, dims.len());
+        assert_eq!(2, dims.len());
         assert_eq!(64, dims[0].order_of_p());
-        assert!(dims[0].pow2_case.is_some());
-        assert_eq!(1, dims[0].pow2_case.unwrap().order_p_mod_g1);
+        assert_eq!(1, dims[1].order_of_p());
         assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(17), 64, Z_2n.pow(dims[0].g_main, 2)).is_none());
         assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(17), 64, Z_2n.pow(dims[0].g_main, 4)).is_some());
-        assert!(unit_group_dlog(&Z_2n, Z_2n.int_hom().map(17), 64, dims[0].pow2_case.unwrap().g2).is_none());
     }
 }
 
@@ -962,14 +947,12 @@ fn test_compute_hypercube_structure_composite() {
         assert_eq!(1, dims.len());
         assert_eq!(256, dims[0].order_of_p());
         assert_eq!(256, dims[0].order_of_g_main);
-        assert!(dims[0].pow2_case.is_none());
     }
     {
         let (dims, Zn) = compute_hypercube_structure(257, 11);
         assert_eq!(1, dims.len());
         assert_eq!(64, dims[0].order_of_p());
         assert_eq!(256, dims[0].order_of_g_main);
-        assert!(dims[0].pow2_case.is_none());
         assert!(unit_group_dlog(&Zn, Zn.int_hom().map(11), 64, Zn.pow(dims[0].g_main, 2)).is_none());
         assert!(unit_group_dlog(&Zn, Zn.int_hom().map(11), 64, Zn.pow(dims[0].g_main, 4)).is_some());
     }
@@ -978,34 +961,28 @@ fn test_compute_hypercube_structure_composite() {
         assert_eq!(2, dims.len());
         assert_eq!(50, dims[0].order_of_p());
         assert_eq!(100, dims[0].order_of_g_main);
-        assert!(dims[0].pow2_case.is_none());
 
         assert_eq!(128, dims[1].order_of_p());
-        assert_eq!(256, dims[0].order_of_g_main);
-        assert!(dims[1].pow2_case.is_none());
+        assert_eq!(256, dims[1].order_of_g_main);
     }
     {
         let (dims, _Zn) = compute_hypercube_structure(257 * 101, 2);
         assert_eq!(2, dims.len());
         assert_eq!(100, dims[0].order_of_p());
         assert_eq!(100, dims[0].order_of_g_main);
-        assert!(dims[0].pow2_case.is_none());
 
         assert_eq!(16, dims[1].order_of_p());
-        assert_eq!(256, dims[0].order_of_g_main);
-        assert!(dims[1].pow2_case.is_none());
+        assert_eq!(256, dims[1].order_of_g_main);
     }
     {
         let (dims, Zn) = compute_hypercube_structure(11 * 31, 2);
         assert_eq!(2, dims.len());
 
         assert_eq!(10, dims[0].order_of_p());
-        assert!(dims[0].pow2_case.is_none());
         assert!(unit_group_dlog(&Zn, Zn.int_hom().map(156), 10, dims[0].g_main).is_some());
         assert!(unit_group_dlog(&Zn, dims[0].g_main, dims[0].order_of_g_main, Zn.int_hom().map(156)).is_some());
 
         assert_eq!(5, dims[1].order_of_p());
-        assert!(dims[1].pow2_case.is_none());
         assert!(unit_group_dlog(&Zn, Zn.int_hom().map(188), 5, Zn.pow(dims[1].g_main, 2)).is_none());
         assert!(unit_group_dlog(&Zn, Zn.int_hom().map(188), 5, Zn.pow(dims[1].g_main, 3)).is_none());
         assert!(unit_group_dlog(&Zn, Zn.int_hom().map(188), 5, Zn.pow(dims[1].g_main, 6)).is_some());
@@ -1033,8 +1010,8 @@ fn test_order_hypercube_dimensions_pow2() {
                 g_main: ring.int_hom().map(5),
                 local_order_of_p: 4,
                 factor_n: (2, 5),
-                pow2_case: Some(Pow2SecondaryDimension { g2: ring.int_hom().map(-1), order_p_mod_g1: 2 }),
-                is_primary_dim: true
+                is_primary_dim: true,
+                base_group_order: 16
             }
         ];
         let (dims, dim_lengths) = order_hypercube_dimensions(dims);
@@ -1052,8 +1029,16 @@ fn test_order_hypercube_dimensions_pow2() {
                 g_main: ring.int_hom().map(5),
                 local_order_of_p: 8,
                 factor_n: (2, 5),
-                pow2_case: Some(Pow2SecondaryDimension { g2: ring.int_hom().map(-1), order_p_mod_g1: 1 }),
-                is_primary_dim: true
+                is_primary_dim: true,
+                base_group_order: 8
+            },
+            HypercubeDimension {
+                order_of_g_main: 2,
+                g_main: ring.int_hom().map(-1),
+                local_order_of_p: 1,
+                factor_n: (2, 5),
+                is_primary_dim: false,
+                base_group_order: 2
             }
         ];
         let (dims, dim_lengths) = order_hypercube_dimensions(dims);
@@ -1077,16 +1062,16 @@ fn test_order_hypercube_dimensions_composite() {
                 g_main: ring.int_hom().map(3),
                 local_order_of_p: 5,
                 factor_n: (31, 1),
-                pow2_case: None,
-                is_primary_dim: true
+                is_primary_dim: true,
+                base_group_order: 30
             },
             HypercubeDimension {
                 order_of_g_main: 10,
                 g_main: ring.int_hom().map(2),
                 local_order_of_p: 10,
                 factor_n: (11, 1),
-                pow2_case: None,
-                is_primary_dim: true
+                is_primary_dim: true,
+                base_group_order: 10
             }
         ];
         let (dims, dim_lengths) = order_hypercube_dimensions(dims);
