@@ -288,7 +288,18 @@ pub fn digit_retain_poly<P>(poly_ring: P, k: usize) -> El<P>
 
     let mut current_e = 0;
     while Zn.checked_div(poly_ring.lc(&current).unwrap(), &Zn.pow(hom.map(p), current_e)).is_some() {
-        current = poly_ring.div_rem_monic(current, &falling_factorial_poly(&poly_ring, mu(StaticRing::<i64>::RING.pow(p, k - current_e)) as usize)).1;
+        let null_poly = poly_ring.inclusion().mul_map(
+            falling_factorial_poly(&poly_ring, mu(StaticRing::<i64>::RING.pow(p, k - current_e)) as usize),
+            Zn.pow(hom.map(p), current_e)
+        );
+        while let Some(quo) = Zn.checked_div(poly_ring.lc(&current).unwrap(), &poly_ring.lc(&null_poly).unwrap()) {
+            if poly_ring.degree(&current).unwrap() < poly_ring.degree(&null_poly).unwrap() {
+                break;
+            }
+            let mut subtractor = poly_ring.inclusion().mul_ref_map(&null_poly, &quo);
+            poly_ring.mul_assign_monomial(&mut subtractor, poly_ring.degree(&current).unwrap() - poly_ring.degree(&null_poly).unwrap());
+            poly_ring.sub_assign(&mut current, subtractor);
+        }
         current_e += 1;
     }
     return current;
@@ -330,6 +341,19 @@ fn test_digit_extraction_poly() {
 
 #[test]
 fn test_digit_retain_poly() {
+    let Zn = Zn::new(1024);
+    let P = DensePolyRing::new(Zn, "X");
+    let digit_retain = digit_retain_poly(&P, 3);
+    assert_eq!(Some(3), P.degree(&digit_retain));
+    for k in 0..1024 {
+        assert_eq!(k % 2, Zn.smallest_positive_lift(P.evaluate(&digit_retain, &Zn.coerce(&StaticRing::<i64>::RING, k), &Zn.identity())) % 8);
+    }
+    let digit_retain = digit_retain_poly(&P, 6);
+    assert_eq!(Some(6), P.degree(&digit_retain));
+    for k in 0..1024 {
+        assert_eq!(k % 2, Zn.smallest_positive_lift(P.evaluate(&digit_retain, &Zn.coerce(&StaticRing::<i64>::RING, k), &Zn.identity())) % 64);
+    }
+
     let Zn = Zn::new(17 * 17 * 17);
     let P = DensePolyRing::new(Zn, "X");
     let digit_retain = digit_retain_poly(&P, 3);

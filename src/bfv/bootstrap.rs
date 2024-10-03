@@ -371,7 +371,7 @@ fn test_pow2_bfv_thin_bootstrapping_17() {
         ct, 
         &rk, 
         &gk,
-        Some(&sk)
+        None
     );
 
     assert_el_eq!(P, P.int_hom().map(2), dec(&P, &C, res_ct, &sk));
@@ -411,7 +411,7 @@ fn test_pow2_bfv_thin_bootstrapping_23() {
         ct, 
         &rk, 
         &gk,
-        Some(&sk)
+        None
     );
 
     assert_el_eq!(P, P.int_hom().map(2), dec(&P, &C, res_ct, &sk));
@@ -421,7 +421,6 @@ fn test_pow2_bfv_thin_bootstrapping_23() {
 fn test_composite_bfv_thin_bootstrapping_2() {
     let mut rng = thread_rng();
     
-    // 12 slots of rank 40
     let params = CompositeBFVParams {
         t: 8,
         log2_q_min: 750,
@@ -452,7 +451,7 @@ fn test_composite_bfv_thin_bootstrapping_2() {
         ct, 
         &rk, 
         &gk,
-        Some(&sk)
+        None
     );
 
     assert_el_eq!(P, P.int_hom().map(2), dec(&P, &C, res_ct, &sk));

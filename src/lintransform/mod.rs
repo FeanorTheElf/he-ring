@@ -553,6 +553,7 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
         let (max_step, min_step, gcd_step, sizes) = Self::compute_automorphisms_per_dimension(H, &lin_transform);
 
         let params = Self::baby_step_giant_step_params((0..sizes.len()).map_fn(|i| sizes[i] as usize), preferred_baby_steps);
+
         let mixed_dim_i = params.mixed_step_dimension;
         let mixed_dim_baby_steps = params.mixed_step_dimension_baby_steps as i64;
 
@@ -581,11 +582,19 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
         assert_eq!(params.hoisted_automorphism_count, baby_steps_galois_els.len() - 1);
         assert_eq!(params.unhoisted_automorphism_count, giant_steps_galois_els.len() - 1);
 
+        let mut lin_transform_data = lin_transform.data;
         let compiled_coeffs = giant_steps_galois_els.iter().map(|gs_el| baby_steps_galois_els.iter().map(|bs_el| {
             let gs_el = gs_el.unwrap_or(H.galois_group_mulrepr().one());
             let total_el = H.galois_group_mulrepr().mul(gs_el, *bs_el);
-            let coeff = &lin_transform.data.iter().filter(|(g, _)| H.galois_group_mulrepr().eq_el(&g.galois_element(H), &total_el)).next().map(|(_, c)| c).and_then(|c| if H.ring().is_zero(c) { None } else { Some(c) });
-            let result = coeff.map(|c| H.ring().get_ring().apply_galois_action(c, H.galois_group_mulrepr().invert(&gs_el).unwrap()));
+            let mut coeff = None;
+            lin_transform_data.retain(|(g, c)| if H.galois_group_mulrepr().eq_el(&g.galois_element(H), &total_el) {
+                coeff = Some(H.ring().clone_el(c));
+                false
+            } else {
+                true
+            });
+            coeff = coeff.and_then(|c| if H.ring().is_zero(&c) { None } else { Some(c) });
+            let result = coeff.map(|c| H.ring().get_ring().apply_galois_action(&c, H.galois_group_mulrepr().invert(&gs_el).unwrap()));
             return result;
         }).collect::<Vec<_>>()).collect::<Vec<_>>();
 
@@ -986,28 +995,31 @@ fn test_compile() {
 }
 
 #[test]
-fn test_compile_including_frobenius() {
+fn test_compile_odd_case() {
     let ring = DefaultOddCyclotomicNTTRingBase::new(Zn::new(7), 3 * 19);
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
 
     let mut current = H.from_slot_vec((1..=12).map(|n| H.slot_ring().int_hom().map(n)));
     let compiled_transform = composite::slots_to_powcoeffs_thin(&H).into_iter().map(|T| CompiledLinearTransform::compile(&H, T)).collect::<Vec<_>>();
-    let expected = composite::slots_to_powcoeffs_thin(&H).into_iter().fold(ring.clone_el(&current), |c, T| ring.get_ring().compute_linear_transform(&H, &c, &T));
-    for T in &compiled_transform {
-        current = T.evaluate(current, &ring);
+    let mut expected = ring.clone_el(&current);
+    for (compiled_transform, transform) in compiled_transform.iter().zip(composite::slots_to_powcoeffs_thin(&H).into_iter()) {
+        current = compiled_transform.evaluate(current, &ring);
+        expected = ring.get_ring().compute_linear_transform(&H, &expected, &transform);
+        assert_el_eq!(&ring, &expected, &current);
     }
-    assert_el_eq!(&ring, &expected, &current);
+    println!();
     
     let ring = DefaultOddCyclotomicNTTRingBase::new(Zn::new(2), 11 * 31);
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
 
     let mut current = H.from_slot_vec((1..=30).map(|n| H.slot_ring().int_hom().map(n)));
     let compiled_transform = composite::slots_to_powcoeffs_thin(&H).into_iter().map(|T| CompiledLinearTransform::compile(&H, T)).collect::<Vec<_>>();
-    let expected = composite::slots_to_powcoeffs_thin(&H).into_iter().fold(ring.clone_el(&current), |c, T| ring.get_ring().compute_linear_transform(&H, &c, &T));
-    for T in &compiled_transform {
-        current = T.evaluate(current, &ring);
+    let mut expected = ring.clone_el(&current);
+    for (compiled_transform, transform) in compiled_transform.iter().zip(composite::slots_to_powcoeffs_thin(&H).into_iter()) {
+        current = compiled_transform.evaluate(current, &ring);
+        expected = ring.get_ring().compute_linear_transform(&H, &expected, &transform);
+        assert_el_eq!(&ring, &expected, &current);
     }
-    assert_el_eq!(&ring, &expected, &current);
 }
 
 #[test]

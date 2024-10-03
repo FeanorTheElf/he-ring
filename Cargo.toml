@@ -39,3 +39,7 @@ panic = "abort"
 [profile.release]
 lto = "fat"
 panic = "abort"
+
+# to allow running two different tests at the same time (i.e. cargo uses different directory for output executable)
+[profile.test2]
+inherits = "test"
