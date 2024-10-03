@@ -92,12 +92,32 @@ impl GaloisElementIndex {
         H.galois_group_mulrepr().prod(self.shift_steps.iter().enumerate().map(|(i, s)| H.shift_galois_element(i, *s)).chain([H.frobenius_element(self.frobenius_count)].into_iter()))
     }
 
-    fn index_at(&self, dim_index_or_frobenius: usize) -> i64 {
+    ///
+    /// If `dim_index_or_frobenius = 0`, returns the number of frobenius applications, otherwise
+    /// returns the number of shifting steps along dimension `dim_index_or_frobenius - 1`.
+    /// 
+    fn index_at_including_frobenius(&self, dim_index_or_frobenius: usize) -> i64 {
         if dim_index_or_frobenius == 0 {
             self.frobenius_count
         } else {
             self.shift_steps[dim_index_or_frobenius - 1]
         }
+    }
+
+    fn canonicalize<R, F, A>(&mut self, H: &HypercubeIsomorphism<R, F, A>)
+        where R: RingStore,
+            R::Type: StdZn,
+            F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
+            A: Allocator + Clone,
+            NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
+    {
+        let canonicalize_mod = |a: i64, n: i64| (((a % n) + n) % n);
+        let result = Self {
+            frobenius_count: canonicalize_mod(self.frobenius_count, H.slot_ring().rank() as i64),
+            shift_steps: self.shift_steps.iter().enumerate().map(|(i, s)| canonicalize_mod(*s, H.shift_order(i) as i64)).collect()
+        };
+        debug_assert!(H.galois_group_mulrepr().eq_el(&self.galois_element(H), &result.galois_element(H)));
+        *self = result;
     }
 }
 
@@ -371,6 +391,9 @@ impl<R, F, A> LinearTransform<R, F, A>
 
     fn canonicalize(&mut self, H: &HypercubeIsomorphism<R, F, A>) {
         self.data.sort_unstable_by_key(|(g, _)| H.galois_group_mulrepr().smallest_positive_lift(g.galois_element(H)));
+        for (steps, _) in &mut self.data {
+            steps.canonicalize(H);
+        }
         self.data.dedup_by(|second, first| {
             if H.galois_group_mulrepr().eq_el(&second.0.galois_element(H), &first.0.galois_element(H)) {
                 H.ring().add_assign_ref(&mut first.1, &second.1);
@@ -469,9 +492,9 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
         let mut gcd_step: Vec<i64> = Vec::new();
         let mut sizes: Vec<i64> = Vec::new();
         for i in 0..=H.dim_count() {
-            max_step.push(lin_transform.data.iter().map(|(steps, _)| steps.index_at(i)).max().unwrap());
-            min_step.push(lin_transform.data.iter().map(|(steps, _)| steps.index_at(i)).min().unwrap());
-            let gcd = lin_transform.data.iter().map(|(steps, _)| steps.index_at(i)).fold(0, |a, b| signed_gcd(a, b, StaticRing::<i64>::RING));
+            max_step.push(lin_transform.data.iter().map(|(steps, _)| steps.index_at_including_frobenius(i)).max().unwrap());
+            min_step.push(lin_transform.data.iter().map(|(steps, _)| steps.index_at_including_frobenius(i)).min().unwrap());
+            let gcd = lin_transform.data.iter().map(|(steps, _)| steps.index_at_including_frobenius(i)).fold(0, |a, b| signed_gcd(a, b, StaticRing::<i64>::RING));
             if gcd == 0 {
                 gcd_step.push(1);
             } else {

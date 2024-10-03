@@ -222,7 +222,7 @@ fn compute_hypercube_structure(n: i64, p: i64) -> (Vec<HypercubeDimension>, Zn) 
                         order_of_g_main: 2,
                         base_group_order: 2,
                         g_main: from_crt(i, g2),
-                        factor_n: (2, k - 1),
+                        factor_n: (2, *k),
                         is_primary_dim: false
                     });
                 } else {
@@ -233,7 +233,7 @@ fn compute_hypercube_structure(n: i64, p: i64) -> (Vec<HypercubeDimension>, Zn) 
                         order_of_g_main: ord_g1,
                         base_group_order: 2 * ord_g1,
                         g_main: from_crt(i, g1),
-                        factor_n: (2, *k - 1),
+                        factor_n: (2, *k),
                         is_primary_dim: true
                     });
                 }
@@ -273,12 +273,24 @@ pub type SlotRing<'a, R, A> = AsLocalPIR<FreeAlgebraImpl<&'a R, SparseMapVector<
 ///
 /// Encapsulates the isomorphism
 /// ```text
-/// Z[X] / (Phi_n(X), p)  ->  F_(p^d) ^ G
+/// Fp[X] / (Phi_n)  ->  F_(p^d) ^ G
 /// ```
 /// and its extension to Galois rings, where `G = Gal(K / Q) / <p>` 
-/// with `K = Q[X]/(Phi_n(X))` and `d = phi(n) / #G`.
+/// with `K = Q[X]/(Phi_n)` and `d = phi(n) / #G`.
 /// 
-/// This becomes a hypercube by considering the decomposition
+/// This becomes a hypercube by "indexing" the values of `G`, i.e. writing
+/// ```text
+/// G = { g1^i1 ... gr^ir | i1 < l1, ..., ir < lr }
+/// ```
+/// In other words, every `F_(p^d)` summand of `Fp[X] / (Phi_n)` can
+/// be identified with an index tuple `(i1, ..., ir)`, such that the
+/// permutations of summands given by separately shifting along hypercolumns
+/// are exactly those induced by multiplication of an element of `G`.
+/// Note however that "shifting out" nonzero slots can have unexpected 
+/// behavior, see also [`HypercubeIsomorphism::shift_galois_element()`].
+/// 
+/// The natural way to build this isomorphism is by first considering the
+/// decomposition
 /// ```text
 /// Gal(K / Q) = Z/nZ* = Z/(p1^e1)Z* x ... x Z/(pr^er)Z*
 /// ```
@@ -287,11 +299,15 @@ pub type SlotRing<'a, R, A> = AsLocalPIR<FreeAlgebraImpl<&'a R, SparseMapVector<
 /// If `pi != 2` on the other hand, we find that `Z/(p^e)Z*` is cyclic, thus
 /// giving one hypercube dimension.
 /// 
+/// Afterwards, we still have to quotient out `<p>`, which means that the
+/// hypercube dimensions are not all of length `phi(pi^ei)`, but in general
+/// can be smaller.
+/// 
 /// # Warning
 /// 
 /// Note that this is the "natural" way to write `Gal(K / Q)` as a hypercube,
-/// but other ways would be possible to, since many decompositions of `Gal(K / Q)`
-/// are conceivable.
+/// but other ways would be possible to, since many direct-sum decompositions 
+/// of `Gal(K / Q)` resp. `Gal(K / Q) / <p>` are conceivable.
 /// 
 pub struct HypercubeIsomorphism<'a, R, F, A>
     where R: ZnRingStore,
@@ -456,11 +472,34 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
         let mut deserializer = serde_json::Deserializer::from_reader(BufReader::new(File::open(filename).unwrap()));
         return <_ as DeserializeSeed>::deserialize(DeserializeHypercubeIsomorphismSeed { ring }, &mut deserializer).unwrap().into();
     }
+}
 
+impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
+    where R: ZnRingStore,
+        R::Type: StdZn,
+        F: RingDecompositionSelfIso<R::Type> + CyclotomicRingDecomposition<R::Type>,
+        A: Allocator + Clone,
+        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
+{
+    ///
+    /// Returns the number of dimensions of the hypercube
+    /// 
+    pub fn dim_count(&self) -> usize {
+        self.dims.len()
+    }
+
+    ///
+    /// Returns the length of the hypercube along the given dimension
+    /// 
     pub fn len(&self, dim_index: usize) -> usize {
         self.dim_lengths[dim_index]
     }
 
+    ///
+    /// Returns the prime power factor of the whole cyclotomic modulus corresponding
+    /// to the given dimension. Since the power-of-two factor can give two dimensions,
+    /// it might be returned for two different dimensions.
+    /// 
     pub fn corresponding_factor_n(&self, dim_index: usize) -> i64 {
         StaticRing::<i64>::RING.pow(self.dims[dim_index].factor_n.0, self.dims[dim_index].factor_n.1)
     }
@@ -474,10 +513,23 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
         self.dims[dim_index].order_of_p() as usize
     }
 
-    pub fn dim_count(&self) -> usize {
-        self.dims.len()
+    ///
+    /// Returns the order of the shift-by-one map in the given dimension.
+    /// 
+    /// This is always a multiple of the length of the dimension, but can be strictly larger,
+    /// since "shifting out" nonzero values at the "end" of a hypercolumn in general is not
+    /// just shifting them in at the opposite side.
+    /// 
+    pub fn shift_order(&self, dim_index: usize) -> usize {
+        self.dims[dim_index].order_of_g_main as usize
     }
 
+    ///
+    /// Returns a representation of `F_(p^d)` that is used to represent element within each
+    /// slot. The canonical generator of this ring corresponds to the entry of index `(0, ..., 0)`
+    /// (resp. the identity element of `G`) of the image of `X` under the isomorphism
+    /// `Fp[X] / (Phi_n)  ->  F_(p^d) ^ G`.
+    /// 
     pub fn slot_ring<'b>(&'b self) -> &'b SlotRing<'a, R, A> {
         &self.slot_ring
     }
@@ -486,14 +538,27 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
         RingRef::new(&self.ring)
     }
 
+    ///
+    /// The ring `Z/nZ` such that `Gal(K / Q) ~ (Z/nZ)*`.
+    /// 
+    /// The standard representation for Galois automorphism is thus by
+    /// units in this ring.
+    /// 
     pub fn galois_group_mulrepr(&self) -> &Zn {
         &self.galois_group_ring
     }
 
+    ///
+    /// Total number of slots, i.e. the product `l1 ... lr`.
+    /// 
     pub fn slot_count(&self) -> usize {
         self.dim_lengths.iter().copied().product()
     }
 
+    ///
+    /// Calls the given function for each slot with the index tuple of the slot, and
+    /// returns an iterator over all return values obtained this way.
+    /// 
     pub fn slot_iter<'b, G, T>(&'b self, for_slot: G) -> impl 'b + ExactSizeIterator<Item = T>
         where G: 'b + Clone + FnMut(&[usize]) -> T,
             T: 'b
@@ -506,6 +571,13 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
         (0..self.slot_count()).map(move |_| it.next().unwrap())
     }
 
+    ///
+    /// Computes the inverse of the isomorphism `Fp[X] / (Phi_n)  ->  F_(p^d) ^ G`, taking the element
+    /// of `F_(p^d) ^ G` as "flattened" vector, i.e. 1d-vector of `#G` elements of `F_(p^d)`.
+    /// 
+    /// This flattening is done according to the lexicographic order of index tuples, in particular slots
+    /// that differ only in the last entry of the index tuple are contiguous in the 1d-representation. 
+    /// 
     pub fn from_slot_vec<I>(&self, vec: I) -> El<NTTRing<R, F, A>>
         where I: IntoIterator<Item = El<SlotRing<'a, R, A>>>
     {
@@ -536,6 +608,13 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
         self.slot_ring().from_canonical_basis((0..self.d).map(|i| poly_ring.base_ring().clone_el(poly_ring.coefficient_at(&rem, i))))
     }
 
+    ///
+    /// Computes the isomorphism `Fp[X] / (Phi_n)  ->  F_(p^d) ^ G`, returning the element
+    /// of `F_(p^d) ^ G` as "flattened" vector, i.e. 1d-vector of `#G` elements of `F_(p^d)`.
+    /// 
+    /// This flattening is done according to the lexicographic order of index tuples, in particular slots
+    /// that differ only in the last entry of the index tuple are contiguous in the 1d-representation. 
+    /// 
     pub fn get_slot_values<'b>(&'b self, el: &'b El<NTTRing<R, F, A>>) -> impl 'b + ExactSizeIterator<Item = El<SlotRing<'a, R, A>>> {
         // again we use only a "slow" O(n^2) algorithm, but we only have to run it during preprocessing;
         // maybe use an FFT later?
@@ -546,7 +625,7 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
     ///
     /// Returns a galois element that represents a shift along the given hypercube dimension.
     /// 
-    /// Note that the behavior on "overflow", i.e. when a non-null slot is "shifted out" at the
+    /// Note that the behavior on "overflow", i.e. when a nonzero slot is "shifted out" at the
     /// end (or the beginning in case of negative `steps`) is quite complicated. If the current
     /// dimension corresponds to a power-of-two factor, this can even influence another hypercolumn.
     /// In other cases, this will stay within the current hypercolumn, but potentially affect every
