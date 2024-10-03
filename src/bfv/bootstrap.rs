@@ -50,8 +50,19 @@ const DEFAULT_CONFIG: BootstrapperConfig = BootstrapperConfig {
 };
 
 pub struct BootstrappingDataBundle<Params: BFVParams> {
+    ///
+    /// Plaintext ring with modulus `p^i` for each `r < i <= e`; 
+    /// Entries are stored reversed (i.e. starting with `i = e`).
+    /// 
     pub plaintext_ring_hierarchy: Vec<PlaintextRing<Params>>,
+    ///
+    /// Data for multiplication with plaintext modulus `p^i` for each `r < i <= e`; 
+    /// Entries are stored reversed (i.e. starting with `i = e`).
+    /// 
     pub multiplication_rescale_hierarchy: Vec<MulConversionData>,
+    ///
+    /// Data for the modulus switch `q -> p^e`
+    /// 
     pub mod_switch: ModSwitchData
 }
 
