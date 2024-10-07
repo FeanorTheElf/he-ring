@@ -7,21 +7,17 @@ pub mod decomposition;
 ///  
 pub mod double_rns_ring;
 
-pub mod ntt_ring;
+pub mod number_ring_quo;
 
-///
-/// Contains the [`double_rns_ring::GeneralizedFFT`] for power-of-two cyclotomics [`pow2_cyclotomic::Pow2CyclotomicFFT`].
-/// 
+// pub mod number_ring;
+
 pub mod pow2_cyclotomic;
 
-///
-/// Contains an implementation of "gadget products". For details, see [`double_rns_ring::DoubleRNSRingBase::gadget_product()`].
-/// 
-pub mod gadget_product;
-
-///
-/// Contains the [`double_rns_ring::GeneralizedFFT`] for odd-conductor cyclotomics [`odd_cyclotomic::OddCyclotomicFFT`].
-/// 
 pub mod odd_cyclotomic;
 
-pub mod slots;
+// ///
+// /// Contains an implementation of "gadget products". For details, see [`double_rns_ring::DoubleRNSRingBase::gadget_product()`].
+// /// 
+// pub mod gadget_product;
+
+// pub mod slots;

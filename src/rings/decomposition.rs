@@ -1,73 +1,79 @@
+use feanor_math::integer::IntegerRing;
 use feanor_math::ring::*;
+use feanor_math::rings::extension::FreeAlgebra;
 use feanor_math::rings::zn::zn_64::{Zn, ZnEl};
+use feanor_math::rings::zn::ZnRing;
+
+use crate::cyclotomic::CyclotomicRing;
 
 ///
-/// A number ring `R` with a canonical generator `a`, with arithmetic modulo a prime `p`.
-/// This must be given by a way to compute the the decomposition of `R/pR` into prime fields `Fp`. 
-/// This of course requires that `f` splits modulo `p`.
+/// Trait for objects that represent number rings `R = Z[X]/(f)` by the isomorphisms
+/// ```text
+/// R/(p) -> Fp^deg(f)
+/// ```
+/// that exist whenever `p` is a prime that splits in `R`.
 /// 
-pub trait RingDecomposition<R: ?Sized + RingBase>: PartialEq {
+/// As usually, an object of this trait describes a number ring together with a canonical
+/// generator (or equivalently, the polynomial `f`). Two objects describing the same number
+/// ring, but with different generators are considered to be inequal.
+/// 
+pub trait DecomposableNumberRing<R>: PartialEq
+    where R: RingStore,
+        R::Type: ZnRing
+{
+    type Decomposed: DecomposedNumberRing<R::Type>;
+
+    fn mod_p(&self, Fp: R) -> Self::Decomposed;
+
+    fn largest_suitable_prime(&self, leq_than: i64) -> Option<i64>;
 
     ///
-    /// Rank of the ring `R`
+    /// Returns an upper bound on the value
+    /// ```text
+    ///   sup_(x in R \ {0}) | x |_can / | x |_inf
+    /// ```
     /// 
+    /// Note that while the canonical norm `|.|_can` depends only on the
+    /// number ring `R`, the infinity norm refers to the infinity norm
+    /// in the coefficient-representation w.r.t. the canonical generator,
+    /// and thus depends on the canonical generator.
+    /// 
+    fn inf_to_can_norm_expansion_factor(&self) -> f64;
+
+    ///
+    /// Returns an upper bound on the value
+    /// ```text
+    ///   sup_(x in R \ {0}) | x |_inf / | x |_can
+    /// ```
+    /// 
+    /// Note that while the canonical norm `|.|_can` depends only on the
+    /// number ring `R`, the infinity norm refers to the infinity norm
+    /// in the coefficient-representation w.r.t. the canonical generator,
+    /// and thus depends on the canonical generator.
+    /// 
+    fn can_to_inf_norm_expansion_factor(&self) -> f64;
+
+    ///
+    /// Returns an upper bound on the value
+    /// ```text
+    ///   sup_(x, y in R \ {0}) | xy |_inf / (| x |_inf | y |_inf)
+    /// ```
+    /// 
+    fn product_expansion_factor(&self) -> f64 {
+        self.inf_to_can_norm_expansion_factor().powi(2) * self.can_to_inf_norm_expansion_factor()
+    }
+}
+
+///
+/// A [`DecomposableNumberRing`] `R` modulo a prime `p` that splits completely in `R`.
+/// 
+pub trait DecomposedNumberRing<R: ?Sized + ZnRing>: PartialEq {
+
+    fn base_ring(&self) -> RingRef<R>;
+
     fn rank(&self) -> usize;
 
-    ///
-    /// Value `C > 0` such that
-    /// ```text
-    /// (a0 + a1 X + ... + a(n - 1) X^(n - 1)) * (b0 + b1 X + ... + b(n - 1) X^(n - 1)) mod f
-    /// ```
-    /// has coefficients bounded by `C * max |ai| * max |bi|` in absolute value.
-    /// Note that this depends only on the generating polynomial `f` of `R` and not on `p`.
-    /// 
-    /// Used for size estimation when implementing [`super::ntt_ring::NTTRing`]. Please
-    /// don't use it for error estimation during FHE, since using the canonical norm will
-    /// give tighter bounds.
-    ///  
-    fn expansion_factor(&self) -> i64;
+    fn fft_forward(&self, data: &mut [R::Element]);
 
-    ///
-    /// Computes the decomposition isomorphism
-    /// ```text
-    /// Z[X]/(f(X), p) -> Zp x ... x Zp,    g -> (g(x))_x where f(x) = 0
-    /// ```
-    /// For a more detailed explanation, see the trait-level doc [`RingDecomposition`].
-    /// 
-    fn fft_forward(&self, data: &mut [R::Element], ring: &R);
-
-    ///
-    /// Computes the inverse of [`RingDecomposition::fft_forward()`].
-    /// 
-    fn fft_backward(&self, data: &mut [R::Element], ring: &R);
-}
-
-pub trait IsomorphismInfo<R1: ?Sized + RingBase, R2: ?Sized + RingBase, F: RingDecomposition<R2>>: RingDecomposition<R1> {
-
-    ///
-    /// Returns if the number ring `R` and the generator `a` (inducing the generating polynomial `f`)
-    /// are the same for both rings.
-    /// 
-    /// This considers neither the prime modulus `p` nor the the implementation of the decomposition isomorphism
-    /// ```text
-    /// Z[X]/(f(X), p) -> Zp x ... x Zp,    g -> (g(x))_x where f(x) = 0
-    /// ```
-    /// 
-    fn is_same_number_ring(&self, other: &F) -> bool;
-}
-
-pub trait RingDecompositionSelfIso<R: ?Sized + RingBase>: Sized + PartialEq + IsomorphismInfo<R, R, Self> {}
-
-impl<R: ?Sized + RingBase, F: RingDecomposition<R> + IsomorphismInfo<R, R, F>> RingDecompositionSelfIso<R> for F {}
-
-pub trait CyclotomicRingDecomposition<R: ?Sized + RingBase>: RingDecomposition<R> {
-
-    ///
-    /// Returns `Z/nZ` such that the galois group of this number ring
-    /// is `(Z/nZ)*`
-    /// 
-    fn galois_group_mulrepr(&self) -> Zn;
-
-    fn permute_galois_action<S>(&self, src: &[R::Element], dst: &mut [R::Element], galois_element: ZnEl, ring: S)
-        where S: RingStore<Type = R>;
+    fn fft_backward(&self, data: &mut [R::Element]);
 }

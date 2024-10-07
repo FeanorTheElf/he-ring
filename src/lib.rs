@@ -10,6 +10,7 @@
 
 #![allow(non_snake_case)]
 #![allow(type_alias_bounds)]
+#![allow(unused_imports)]
 #![allow(non_camel_case_types)]
 #![allow(non_upper_case_globals)]
 
@@ -71,38 +72,48 @@ impl<R> StdZn for R
     + SerializableElementRing
 {}
 
-pub fn sample_primes(min_bits: usize, max_bits: usize, max_bits_each_modulus: usize, congruent_to_one_mod: &El<BigIntRing>) -> Option<Vec<El<BigIntRing>>> {
+pub fn largest_prime_congruent_one(modulus: El<BigIntRing>) -> impl Fn(El<BigIntRing>) -> Option<El<BigIntRing>> {
+    move |leq_than| {
+        let ZZbig = BigIntRing::RING;
+        let lt_than = ZZbig.sub(leq_than, ZZbig.one());
+        let mut current = ZZbig.add(ZZbig.sub(ZZbig.clone_el(&lt_than), ZZbig.euclidean_rem(lt_than, &modulus)), ZZbig.one());
+        while ZZbig.is_pos(&current) && !is_prime(ZZbig, &current, 10) {
+            ZZbig.sub_assign_ref(&mut current, &modulus);
+        }
+        if ZZbig.is_pos(&current) {
+            return Some(current);
+        } else {
+            return None;
+        }
+    }
+}
+
+pub fn sample_primes<F>(min_bits: usize, max_bits: usize, max_bits_each_modulus: usize, mut largest_prime_leq: F) -> Option<Vec<El<BigIntRing>>>
+    where F: FnMut(El<BigIntRing>) -> Option<El<BigIntRing>>
+{
     let ZZbig = BigIntRing::RING;
     assert!(max_bits > min_bits);
 
     let mut result = Vec::new();
     let mut current_bits = 0.;
+    let mut current_upper_bound = ZZbig.power_of_two(max_bits_each_modulus);
+
+    let min = |x, y| if ZZbig.is_gt(&x, &y) { y } else { x };
+
     while current_bits < min_bits as f64 {
 
-        let prime_of_bits = if min_bits as f64 - current_bits < max_bits_each_modulus as f64 {
-            f64::min(max_bits as f64 - current_bits, max_bits_each_modulus as f64)
+        if min_bits as f64 - current_bits < max_bits_each_modulus as f64 {  
+            current_upper_bound = min(current_upper_bound, ZZbig.power_of_two(f64::min(max_bits as f64 - current_bits, max_bits_each_modulus as f64).floor() as usize));
         } else {
             let required_number_of_primes = ((min_bits as f64 - current_bits) / max_bits_each_modulus as f64).ceil() as usize;
-            f64::min(max_bits as f64 / required_number_of_primes as f64, max_bits_each_modulus as f64)
-        };
-
-        let mut current = ZZbig.from_float_approx(2f64.powf(prime_of_bits)).unwrap();
-        current = ZZbig.add(ZZbig.sub_ref_fst(&current, ZZbig.euclidean_rem(ZZbig.clone_el(&current), congruent_to_one_mod)), ZZbig.one());
-
-        let mut added_any = false;
-        while ZZbig.is_pos(&current) {
-            if is_prime(&ZZbig, &current, 10) && result.iter().all(|p| !ZZbig.eq_el(p, &current)) {
-                let bits = ZZbig.to_float_approx(&current).log2();
-                added_any = true;
-                current_bits += bits;
-                result.push(ZZbig.clone_el(&current));
-                break;
-            }
-            ZZbig.sub_assign_ref(&mut current, congruent_to_one_mod);
+            current_upper_bound = min(current_upper_bound, ZZbig.power_of_two(f64::min((max_bits as f64 - current_bits) / required_number_of_primes as f64, max_bits_each_modulus as f64).floor() as usize));
         }
-        if !added_any {
-            return None;
-        }
+
+        let prime = largest_prime_leq(ZZbig.clone_el(&current_upper_bound))?;
+        let bits = ZZbig.to_float_approx(&prime).log2();
+        current_bits += bits;
+        result.push(ZZbig.clone_el(&prime));
+        current_upper_bound = ZZbig.sub(prime, ZZbig.one());
     }
     debug_assert!(ZZbig.is_geq(&ZZbig.prod(result.iter().map(|n| ZZbig.clone_el(n))), &ZZbig.power_of_two(min_bits)));
     debug_assert!(ZZbig.is_lt(&ZZbig.prod(result.iter().map(|n| ZZbig.clone_el(n))), &ZZbig.power_of_two(max_bits)));
@@ -114,6 +125,10 @@ pub fn sample_primes(min_bits: usize, max_bits: usize, max_bits_each_modulus: us
 /// 
 fn euler_phi(factorization: &[(i64, usize)]) -> i64 {
     StaticRing::<i64>::RING.prod(factorization.iter().map(|(p, e)| (p - 1) * StaticRing::<i64>::RING.pow(*p, e - 1)))
+}
+
+fn euler_phi_squarefree(factorization: &[i64]) -> i64 {
+    StaticRing::<i64>::RING.prod(factorization.iter().map(|p| p - 1))
 }
 
 #[macro_use]
@@ -134,12 +149,12 @@ pub mod rnsconv;
 /// 
 pub mod rings;
 
-pub mod lintransform;
+// pub mod lintransform;
 
-pub mod digitextract;
+// pub mod digitextract;
 
-#[cfg(test)]
-pub mod bfv;
+// #[cfg(test)]
+// pub mod bfv;
 
 #[cfg(test)]
 use feanor_math::integer::int_cast;
@@ -147,10 +162,26 @@ use feanor_math::integer::int_cast;
 #[test]
 fn test_sample_primes() {
     let ZZbig = BigIntRing::RING;
-    let result = sample_primes(60, 62, 58, &int_cast(422144, ZZbig, StaticRing::<i64>::RING)).unwrap();
+    let result = sample_primes(60, 62, 58, largest_prime_congruent_one(int_cast(422144, ZZbig, StaticRing::<i64>::RING))).unwrap();
     assert_eq!(result.len(), 2);
     let prod = ZZbig.prod(result.iter().map(|n| ZZbig.clone_el(n)));
     assert!(ZZbig.abs_log2_floor(&prod).unwrap() >= 60);
-    assert!(ZZbig.abs_log2_ceil(&prod).unwrap() <= 71);
+    assert!(ZZbig.abs_log2_ceil(&prod).unwrap() <= 62);
+    assert!(result.iter().all(|n| ZZbig.is_one(&ZZbig.euclidean_rem(ZZbig.clone_el(n), &int_cast(422144, ZZbig, StaticRing::<i64>::RING)))));
+
+    let ZZbig = BigIntRing::RING;
+    let result = sample_primes(135, 138, 58, largest_prime_congruent_one(int_cast(422144, ZZbig, StaticRing::<i64>::RING))).unwrap();
+    assert_eq!(result.len(), 3);
+    let prod = ZZbig.prod(result.iter().map(|n| ZZbig.clone_el(n)));
+    assert!(ZZbig.abs_log2_floor(&prod).unwrap() >= 135);
+    assert!(ZZbig.abs_log2_ceil(&prod).unwrap() <= 138);
+    assert!(result.iter().all(|n| ZZbig.is_one(&ZZbig.euclidean_rem(ZZbig.clone_el(n), &int_cast(422144, ZZbig, StaticRing::<i64>::RING)))));
+
+    let ZZbig = BigIntRing::RING;
+    let result = sample_primes(115, 118, 58, largest_prime_congruent_one(int_cast(422144, ZZbig, StaticRing::<i64>::RING))).unwrap();
+    assert_eq!(result.len(), 2);
+    let prod = ZZbig.prod(result.iter().map(|n| ZZbig.clone_el(n)));
+    assert!(ZZbig.abs_log2_floor(&prod).unwrap() >= 115);
+    assert!(ZZbig.abs_log2_ceil(&prod).unwrap() <= 118);
     assert!(result.iter().all(|n| ZZbig.is_one(&ZZbig.euclidean_rem(ZZbig.clone_el(n), &int_cast(422144, ZZbig, StaticRing::<i64>::RING)))));
 }

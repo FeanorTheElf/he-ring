@@ -32,7 +32,7 @@ use crate::rings::decomposition::CyclotomicRingDecomposition;
 use crate::rings::decomposition::IsomorphismInfo;
 use crate::rings::decomposition::RingDecomposition;
 use crate::rings::decomposition::RingDecompositionSelfIso;
-use crate::rings::odd_cyclotomic::OddCyclotomicFFT;
+use crate::rings::odd_cyclotomic::OddCyclotomicDecomposition;
 use crate::rings::pow2_cyclotomic::*;
 use crate::rings::gadget_product::*;
 use crate::rings::double_rns_ring::*;
@@ -260,19 +260,19 @@ pub struct Pow2BFVParams {
 
 impl BFVParams for Pow2BFVParams {
 
-    type CiphertextRingDecomposition = Pow2CyclotomicFFT<CiphertextZn, cooley_tuckey::CooleyTuckeyFFT<<CiphertextZn as RingStore>::Type, <zn_64::ZnFastmul as RingStore>::Type, CanHom<zn_64::ZnFastmul, CiphertextZn>>>;
-    type PlaintextRingDecomposition = Pow2CyclotomicFFT<PlaintextZn, cooley_tuckey::CooleyTuckeyFFT<<PlaintextZn as RingStore>::Type, <PlaintextZn as RingStore>::Type, Identity<PlaintextZn>>>;
+    type CiphertextRingDecomposition = Pow2CyclotomicDecomposition<CiphertextZn, cooley_tuckey::CooleyTuckeyFFT<<CiphertextZn as RingStore>::Type, <zn_64::ZnFastmul as RingStore>::Type, CanHom<zn_64::ZnFastmul, CiphertextZn>>>;
+    type PlaintextRingDecomposition = Pow2CyclotomicDecomposition<PlaintextZn, cooley_tuckey::CooleyTuckeyFFT<<PlaintextZn as RingStore>::Type, <PlaintextZn as RingStore>::Type, Identity<PlaintextZn>>>;
 
     fn create_ciphertext_ring_part(&self, modulus: i64) -> Self::CiphertextRingDecomposition {
         let Zp = CiphertextZn::new(modulus as u64);
         let root_of_unity = get_prim_root_of_unity_pow2((&Zp).as_field().ok().unwrap(), self.log2_N + 1).unwrap();
         let root_of_unity = Zp.coerce(&(&Zp).as_field().ok().unwrap(), root_of_unity);
         let Zp_fastmul = zn_64::ZnFastmul::new(Zp);
-        Pow2CyclotomicFFT::create(Zp, cooley_tuckey::CooleyTuckeyFFT::new_with_hom(Zp.into_can_hom(Zp_fastmul).ok().unwrap(), Zp_fastmul.coerce(&Zp, Zp.pow(root_of_unity, 2)), self.log2_N), root_of_unity)
+        Pow2CyclotomicDecomposition::create(Zp, cooley_tuckey::CooleyTuckeyFFT::new_with_hom(Zp.into_can_hom(Zp_fastmul).ok().unwrap(), Zp_fastmul.coerce(&Zp, Zp.pow(root_of_unity, 2)), self.log2_N), root_of_unity)
     }
 
     fn create_plaintext_ring(&self, modulus: i64) -> PlaintextRing<Self> {
-        NTTRingBase::<_, Pow2CyclotomicFFT<_, _>, _>::new(PlaintextZn::new(modulus as u64), self.log2_N)
+        NTTRingBase::<_, Pow2CyclotomicDecomposition<_, _>, _>::new(PlaintextZn::new(modulus as u64), self.log2_N)
     }
 
     fn n(&self) -> usize {
@@ -303,14 +303,14 @@ pub struct CompositeBFVParams {
 
 impl BFVParams for CompositeBFVParams {
 
-    type CiphertextRingDecomposition = OddCyclotomicFFT<CiphertextZn, factor_fft::CoprimeCooleyTuckeyFFT<
+    type CiphertextRingDecomposition = OddCyclotomicDecomposition<CiphertextZn, factor_fft::CoprimeCooleyTuckeyFFT<
         <CiphertextZn as RingStore>::Type, 
         <CiphertextZn as RingStore>::Type, 
         Identity<CiphertextZn>,
         bluestein::BluesteinFFT<<CiphertextZn as RingStore>::Type, <CiphertextZn as RingStore>::Type, Identity<CiphertextZn>>,
         bluestein::BluesteinFFT<<CiphertextZn as RingStore>::Type, <CiphertextZn as RingStore>::Type, Identity<CiphertextZn>>,
     >>;
-    type PlaintextRingDecomposition = OddCyclotomicFFT<PlaintextZn, factor_fft::CoprimeCooleyTuckeyFFT<
+    type PlaintextRingDecomposition = OddCyclotomicDecomposition<PlaintextZn, factor_fft::CoprimeCooleyTuckeyFFT<
         <PlaintextZn as RingStore>::Type, 
         <PlaintextZn as RingStore>::Type, 
         Identity<PlaintextZn>,
@@ -324,7 +324,7 @@ impl BFVParams for CompositeBFVParams {
         let as_field = (&Fp).as_field().ok().unwrap();
         let pow2_root_of_unity = Fp.coerce(&as_field, get_prim_root_of_unity_pow2(as_field, log2_m).unwrap());
         let root_of_unity = Fp.coerce(&as_field, get_prim_root_of_unity(as_field, 2 * self.n()).unwrap());
-        OddCyclotomicFFT::create(Fp, factor_fft::CoprimeCooleyTuckeyFFT::new(
+        OddCyclotomicDecomposition::create(Fp, factor_fft::CoprimeCooleyTuckeyFFT::new(
             Fp, 
             Fp.pow(root_of_unity, 2), 
             bluestein::BluesteinFFT::new(Fp, Fp.pow(root_of_unity, self.n2), Fp.pow(pow2_root_of_unity, 1 << (log2_m - ZZ.abs_log2_ceil(&(self.n1 as i64)).unwrap() - 1)), self.n1, ZZ.abs_log2_ceil(&(self.n1 as i64)).unwrap() + 1, Global), 
@@ -339,7 +339,7 @@ impl BFVParams for CompositeBFVParams {
 
     fn create_plaintext_ring(&self, modulus: i64) -> PlaintextRing<Self> {
         assert!(self.n() % 2 == 1);
-        let expansion_factor = ZZ.pow(euler_phi(&factor(&ZZ, self.n() as i64)), 3);
+        let expansion_factor = self.create_ciphertext_ring_part(int_cast(sample_primes(10, 60, 60, &int_cast(self.n(), ZZbig, ZZ)).unwrap().pop().unwrap(), ZZ, ZZbig)).expansion_factor();
         let required_bits = ((modulus as f64).log2() * 2. + (expansion_factor as f64).log2()).ceil() as usize;
 
         let log2_m = max(ZZ.abs_log2_ceil(&(self.n1 as i64)).unwrap(), ZZ.abs_log2_ceil(&(self.n2 as i64)).unwrap()) + 1;
@@ -359,7 +359,7 @@ impl BFVParams for CompositeBFVParams {
                 bluestein::BluesteinFFT::new(Fp, Fp.pow(root_of_unity, self.n2), Fp.pow(pow2_root_of_unity, 1 << (log2_m - ZZ.abs_log2_ceil(&(self.n1 as i64)).unwrap() - 1)), self.n1, ZZ.abs_log2_ceil(&(self.n1 as i64)).unwrap() + 1, Global), 
                 bluestein::BluesteinFFT::new(Fp, Fp.pow(root_of_unity, self.n1), Fp.pow(pow2_root_of_unity, 1 << (log2_m - ZZ.abs_log2_ceil(&(self.n2 as i64)).unwrap() - 1)), self.n2, ZZ.abs_log2_ceil(&(self.n2 as i64)).unwrap() + 1, Global),
             );
-            ring_decompositions.push(OddCyclotomicFFT::create(Fp.clone(), fft_table, Global));
+            ring_decompositions.push(OddCyclotomicDecomposition::create(Fp.clone(), fft_table, Global));
             assert_eq!(expansion_factor, ring_decompositions.last().unwrap().expansion_factor());
             rns_base.push(Fp);
         }
