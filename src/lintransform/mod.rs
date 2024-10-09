@@ -89,7 +89,7 @@ impl GaloisElementIndex {
             A: Allocator + Clone,
             NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
     {
-        H.galois_group_mulrepr().prod(self.shift_steps.iter().enumerate().map(|(i, s)| H.shift_galois_element(i, *s)).chain([H.frobenius_element(self.frobenius_count)].into_iter()))
+        H.cyclotomic_index_ring().prod(self.shift_steps.iter().enumerate().map(|(i, s)| H.shift_galois_element(i, *s)).chain([H.frobenius_element(self.frobenius_count)].into_iter()))
     }
 
     ///
@@ -116,7 +116,7 @@ impl GaloisElementIndex {
             frobenius_count: canonicalize_mod(self.frobenius_count, H.slot_ring().rank() as i64),
             shift_steps: self.shift_steps.iter().enumerate().map(|(i, s)| canonicalize_mod(*s, H.shift_order(i) as i64)).collect()
         };
-        debug_assert!(H.galois_group_mulrepr().eq_el(&self.galois_element(H), &result.galois_element(H)));
+        debug_assert!(H.cyclotomic_index_ring().eq_el(&self.galois_element(H), &result.galois_element(H)));
         *self = result;
     }
 }
@@ -145,7 +145,7 @@ impl<R, F, A> LinearTransform<R, F, A>
             return false;
         }
         for (self_d, other_d) in self.data.iter().zip(other.data.iter()) {
-            if !H.galois_group_mulrepr().eq_el(&self_d.0.galois_element(H), &other_d.0.galois_element(H)) {
+            if !H.cyclotomic_index_ring().eq_el(&self_d.0.galois_element(H), &other_d.0.galois_element(H)) {
                 return false;
             }
             if !H.ring().eq_el(&self_d.1, &other_d.1) {
@@ -194,7 +194,7 @@ impl<R, F, A> LinearTransform<R, F, A>
         where G: Fn(usize, usize, &[usize]) -> El<R>
     {
         let d = H.slot_ring().rank();
-        let Gal = H.galois_group_mulrepr();
+        let Gal = H.cyclotomic_index_ring();
         let trace = Trace::new(&Gal, Gal.smallest_positive_lift(H.frobenius_element(1)), d);
         let extract_coeff_factors = (0..d).map(|j| trace.extract_coefficient_map(H.slot_ring(), j)).collect::<Vec<_>>();
         
@@ -239,7 +239,7 @@ impl<R, F, A> LinearTransform<R, F, A>
     {
         let m = H.len(dim_index) as i64;
         let d = H.slot_ring().rank();
-        let Gal = H.galois_group_mulrepr();
+        let Gal = H.cyclotomic_index_ring();
         let trace = Trace::new(&Gal, Gal.smallest_positive_lift(H.frobenius_element(1)), d);
         let extract_coeff_factors = (0..d).map(|j| trace.extract_coefficient_map(H.slot_ring(), j)).collect::<Vec<_>>();
         
@@ -292,17 +292,17 @@ impl<R, F, A> LinearTransform<R, F, A>
     pub fn inverse(&self, H: &HypercubeIsomorphism<R, F, A>) -> Self {
         self.check_valid(H);
         let original_automorphisms = self.data.iter().map(|(g, _)| g.galois_element(H));
-        let inverse_automorphisms = original_automorphisms.clone().map(|g| H.galois_group_mulrepr().invert(&g).unwrap()).collect::<Vec<_>>();
-        let mut composed_automorphisms = original_automorphisms.clone().flat_map(|g| inverse_automorphisms.iter().map(move |s| H.galois_group_mulrepr().mul_ref(&g, s))).collect::<Vec<_>>();
-        composed_automorphisms.sort_unstable_by_key(|g| H.galois_group_mulrepr().smallest_positive_lift(*g));
-        composed_automorphisms.dedup_by(|a, b| H.galois_group_mulrepr().eq_el(a, b));
+        let inverse_automorphisms = original_automorphisms.clone().map(|g| H.cyclotomic_index_ring().invert(&g).unwrap()).collect::<Vec<_>>();
+        let mut composed_automorphisms = original_automorphisms.clone().flat_map(|g| inverse_automorphisms.iter().map(move |s| H.cyclotomic_index_ring().mul_ref(&g, s))).collect::<Vec<_>>();
+        composed_automorphisms.sort_unstable_by_key(|g| H.cyclotomic_index_ring().smallest_positive_lift(*g));
+        composed_automorphisms.dedup_by(|a, b| H.cyclotomic_index_ring().eq_el(a, b));
 
         let mut matrix: OwnedMatrix<_> = OwnedMatrix::zero(composed_automorphisms.len(), inverse_automorphisms.len(), H.ring());
         for (i, g) in original_automorphisms.enumerate() {
             for (j, s) in inverse_automorphisms.iter().enumerate() {
                 let row_index = composed_automorphisms.binary_search_by_key(
-                    &H.galois_group_mulrepr().smallest_positive_lift(H.galois_group_mulrepr().mul_ref(&g, s)), 
-                    |g| H.galois_group_mulrepr().smallest_positive_lift(*g)
+                    &H.cyclotomic_index_ring().smallest_positive_lift(H.cyclotomic_index_ring().mul_ref(&g, s)), 
+                    |g| H.cyclotomic_index_ring().smallest_positive_lift(*g)
                 ).unwrap();
                 let entry = H.ring().get_ring().apply_galois_action(&self.data[i].1, *s);
                 *matrix.at_mut(row_index, j) = entry;
@@ -321,7 +321,7 @@ impl<R, F, A> LinearTransform<R, F, A>
                     *lhs.at_mut(i, j) = matrix_by_slots[i][j].next().unwrap();
                 }
             }
-            assert!(H.galois_group_mulrepr().is_one(&composed_automorphisms[0]));
+            assert!(H.cyclotomic_index_ring().is_one(&composed_automorphisms[0]));
             *rhs.at_mut(0, 0) = H.slot_ring().one();
             for j in 1..matrix.row_count() {
                 *rhs.at_mut(j, 0) = H.slot_ring().zero();
@@ -355,7 +355,7 @@ impl<R, F, A> LinearTransform<R, F, A>
         #[cfg(test)] {
             let check = self.compose(&result, H);
             assert_eq!(1, check.data.len());
-            assert!(H.galois_group_mulrepr().is_one(&check.data[0].0.galois_element(H)));
+            assert!(H.cyclotomic_index_ring().is_one(&check.data[0].0.galois_element(H)));
             assert!(H.ring().is_one(&check.data[0].1));
         }
 
@@ -390,12 +390,12 @@ impl<R, F, A> LinearTransform<R, F, A>
     }
 
     fn canonicalize(&mut self, H: &HypercubeIsomorphism<R, F, A>) {
-        self.data.sort_unstable_by_key(|(g, _)| H.galois_group_mulrepr().smallest_positive_lift(g.galois_element(H)));
+        self.data.sort_unstable_by_key(|(g, _)| H.cyclotomic_index_ring().smallest_positive_lift(g.galois_element(H)));
         for (steps, _) in &mut self.data {
             steps.canonicalize(H);
         }
         self.data.dedup_by(|second, first| {
-            if H.galois_group_mulrepr().eq_el(&second.0.galois_element(H), &first.0.galois_element(H)) {
+            if H.cyclotomic_index_ring().eq_el(&second.0.galois_element(H), &first.0.galois_element(H)) {
                 H.ring().add_assign_ref(&mut first.1, &second.1);
                 return true;
             } else {
@@ -457,28 +457,28 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
         A: Allocator + Clone,
         NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
 {
-    pub fn save(&self, filename: &str, ring: &NTTRing<R, F, A>, galois_group_mulrepr: &Zn) {
+    pub fn save(&self, filename: &str, ring: &NTTRing<R, F, A>, cyclotomic_index_ring: &Zn) {
         serde_json::to_writer_pretty(
             BufWriter::new(File::create(filename).unwrap()), 
-            &serialization::CompiledLinearTransformSerializable::from(ring, galois_group_mulrepr, self)
+            &serialization::CompiledLinearTransformSerializable::from(ring, cyclotomic_index_ring, self)
         ).unwrap()
     }
 
-    pub fn load(filename: &str, ring: &NTTRing<R, F, A>, galois_group_mulrepr: &Zn) -> Self {
+    pub fn load(filename: &str, ring: &NTTRing<R, F, A>, cyclotomic_index_ring: &Zn) -> Self {
         let mut deserializer = serde_json::Deserializer::from_reader(BufReader::new(File::open(filename).unwrap()));
-        return <_ as DeserializeSeed>::deserialize(serialization::DeserializeLinearTransformSeed { galois_group_mulrepr: galois_group_mulrepr, ring: ring.get_ring() }, &mut deserializer).unwrap().into();
+        return <_ as DeserializeSeed>::deserialize(serialization::DeserializeLinearTransformSeed { cyclotomic_index_ring: cyclotomic_index_ring, ring: ring.get_ring() }, &mut deserializer).unwrap().into();
     }
 
-    pub fn save_seq(data: &[Self], filename: &str, ring: &NTTRing<R, F, A>, galois_group_mulrepr: &Zn) {
+    pub fn save_seq(data: &[Self], filename: &str, ring: &NTTRing<R, F, A>, cyclotomic_index_ring: &Zn) {
         serde_json::to_writer_pretty(
             BufWriter::new(File::create(filename).unwrap()), 
-            &data.iter().map(|t| serialization::CompiledLinearTransformSerializable::from(ring, galois_group_mulrepr, t)).collect::<Vec<_>>()
+            &data.iter().map(|t| serialization::CompiledLinearTransformSerializable::from(ring, cyclotomic_index_ring, t)).collect::<Vec<_>>()
         ).unwrap()
     }
 
-    pub fn load_seq(filename: &str, ring: &NTTRing<R, F, A>, galois_group_mulrepr: &Zn) -> Vec<Self> {
+    pub fn load_seq(filename: &str, ring: &NTTRing<R, F, A>, cyclotomic_index_ring: &Zn) -> Vec<Self> {
         let mut deserializer = serde_json::Deserializer::from_reader(BufReader::new(File::open(filename).unwrap()));
-        return <_ as DeserializeSeed>::deserialize(serialization::VecDeserializeSeed { base_seed: serialization::DeserializeLinearTransformSeed { galois_group_mulrepr: galois_group_mulrepr, ring: ring.get_ring() } }, &mut deserializer).unwrap().into();
+        return <_ as DeserializeSeed>::deserialize(serialization::VecDeserializeSeed { base_seed: serialization::DeserializeLinearTransformSeed { cyclotomic_index_ring: cyclotomic_index_ring, ring: ring.get_ring() } }, &mut deserializer).unwrap().into();
     }
 
     /// 
@@ -595,7 +595,7 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
         let giant_steps_galois_els = multi_cartesian_product(giant_step_range_iters, |indices| {
             indices[1..].iter().enumerate().map(|(i, s)| shift_or_frobenius(i + params.pure_giant_step_dimensions.start, *s)).fold(shift_or_frobenius(mixed_dim_i, indices[0]), |a, b| a.compose(&b)).galois_element(H)
         }, |_, x| *x)
-            .map(|g_el| if H.galois_group_mulrepr().is_one(&g_el) { None } else { Some(g_el) })
+            .map(|g_el| if H.cyclotomic_index_ring().is_one(&g_el) { None } else { Some(g_el) })
             .collect::<Vec<_>>();
 
         let baby_steps_galois_els = multi_cartesian_product(baby_step_range_iters, move |indices| {
@@ -607,17 +607,17 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
 
         let mut lin_transform_data = lin_transform.data;
         let compiled_coeffs = giant_steps_galois_els.iter().map(|gs_el| baby_steps_galois_els.iter().map(|bs_el| {
-            let gs_el = gs_el.unwrap_or(H.galois_group_mulrepr().one());
-            let total_el = H.galois_group_mulrepr().mul(gs_el, *bs_el);
+            let gs_el = gs_el.unwrap_or(H.cyclotomic_index_ring().one());
+            let total_el = H.cyclotomic_index_ring().mul(gs_el, *bs_el);
             let mut coeff = None;
-            lin_transform_data.retain(|(g, c)| if H.galois_group_mulrepr().eq_el(&g.galois_element(H), &total_el) {
+            lin_transform_data.retain(|(g, c)| if H.cyclotomic_index_ring().eq_el(&g.galois_element(H), &total_el) {
                 coeff = Some(H.ring().clone_el(c));
                 false
             } else {
                 true
             });
             coeff = coeff.and_then(|c| if H.ring().is_zero(&c) { None } else { Some(c) });
-            let result = coeff.map(|c| H.ring().get_ring().apply_galois_action(&c, H.galois_group_mulrepr().invert(&gs_el).unwrap()));
+            let result = coeff.map(|c| H.ring().get_ring().apply_galois_action(&c, H.cyclotomic_index_ring().invert(&gs_el).unwrap()));
             return result;
         }).collect::<Vec<_>>()).collect::<Vec<_>>();
 
@@ -820,7 +820,7 @@ mod serialization {
             A: Allocator + Clone,
             NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
     {
-        pub galois_group_mulrepr: &'a Zn,
+        pub cyclotomic_index_ring: &'a Zn,
         pub ring: &'a NTTRingBase<R, F, A>
     }
     
@@ -863,7 +863,7 @@ mod serialization {
                     A: Allocator + Clone,
                     NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
             {
-                galois_group_mulrepr: &'a Zn,
+                cyclotomic_index_ring: &'a Zn,
                 ring: &'a NTTRingBase<R, F, A>
             }
             
@@ -883,8 +883,8 @@ mod serialization {
                 fn visit_seq<S>(self, mut seq: S) -> Result<Self::Value, S::Error>
                     where S: serde::de::SeqAccess<'de>
                 {
-                    let baby_step_galois_elements = seq.next_element_seed(VecDeserializeSeed { base_seed: DeserializeWithRing::new(self.galois_group_mulrepr) })?.ok_or_else(|| de::Error::invalid_length(0, &self))?;
-                    let giant_step_galois_elements = seq.next_element_seed(VecDeserializeSeed { base_seed: OptionDeserializeSeed { base_seed: DeserializeWithRing::new(self.galois_group_mulrepr) } })?.ok_or_else(|| de::Error::invalid_length(1, &self))?;
+                    let baby_step_galois_elements = seq.next_element_seed(VecDeserializeSeed { base_seed: DeserializeWithRing::new(self.cyclotomic_index_ring) })?.ok_or_else(|| de::Error::invalid_length(0, &self))?;
+                    let giant_step_galois_elements = seq.next_element_seed(VecDeserializeSeed { base_seed: OptionDeserializeSeed { base_seed: DeserializeWithRing::new(self.cyclotomic_index_ring) } })?.ok_or_else(|| de::Error::invalid_length(1, &self))?;
                     let coeffs = seq.next_element_seed(VecDeserializeSeed { base_seed: VecDeserializeSeed { base_seed: OptionDeserializeSeed { base_seed: DeserializeWithRing::new(RingRef::new(self.ring)) } } })?.ok_or_else(|| de::Error::invalid_length(1, &self))?;
                     return Ok(CompiledLinearTransform {
                         baby_step_galois_elements,
@@ -913,13 +913,13 @@ mod serialization {
                                 if baby_step_galois_elements.is_some() {
                                     return Err(de::Error::duplicate_field("baby_step_galois_elements"));
                                 }
-                                baby_step_galois_elements = Some(map.next_value_seed(VecDeserializeSeed { base_seed: DeserializeWithRing::new(self.galois_group_mulrepr) })?);
+                                baby_step_galois_elements = Some(map.next_value_seed(VecDeserializeSeed { base_seed: DeserializeWithRing::new(self.cyclotomic_index_ring) })?);
                             },
                             Field::giant_step_galois_elements => {
                                 if giant_step_galois_elements.is_some() {
                                     return Err(de::Error::duplicate_field("giant_step_galois_elements"));
                                 }
-                                giant_step_galois_elements = Some(map.next_value_seed(VecDeserializeSeed { base_seed: OptionDeserializeSeed { base_seed: DeserializeWithRing::new(self.galois_group_mulrepr) } })?);
+                                giant_step_galois_elements = Some(map.next_value_seed(VecDeserializeSeed { base_seed: OptionDeserializeSeed { base_seed: DeserializeWithRing::new(self.cyclotomic_index_ring) } })?);
                             },
                             Field::coeffs => {
                                 if coeffs.is_some() {
@@ -943,7 +943,7 @@ mod serialization {
 
             deserializer.deserialize_struct("CompiledLinearTransform", &["baby_step_galois_elements", "giant_step_galois_elements", "coeffs"], FieldsVisitor {
                 ring: self.ring,
-                galois_group_mulrepr: self.galois_group_mulrepr
+                cyclotomic_index_ring: self.cyclotomic_index_ring
             })
         }
     }

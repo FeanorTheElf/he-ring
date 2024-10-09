@@ -9,15 +9,13 @@ pub mod double_rns_ring;
 
 pub mod number_ring_quo;
 
-// pub mod number_ring;
-
 pub mod pow2_cyclotomic;
 
 pub mod odd_cyclotomic;
 
-// ///
-// /// Contains an implementation of "gadget products". For details, see [`double_rns_ring::DoubleRNSRingBase::gadget_product()`].
-// /// 
-// pub mod gadget_product;
+pub mod slots;
 
-// pub mod slots;
+///
+/// Contains an implementation of "gadget products". For details, see [`double_rns_ring::DoubleRNSRingBase::gadget_product()`].
+/// 
+pub mod gadget_product;

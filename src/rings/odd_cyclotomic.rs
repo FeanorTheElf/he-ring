@@ -5,10 +5,11 @@ use std::cmp::max;
 use bluestein::BluesteinFFT;
 use factor_fft::CoprimeCooleyTuckeyFFT;
 use feanor_math::algorithms::eea::signed_gcd;
-use feanor_math::algorithms::int_factor::{self, factor};
+use feanor_math::algorithms::int_factor::factor;
 use feanor_math::algorithms::miller_rabin::is_prime;
+use feanor_math::algorithms::cyclotomic::cyclotomic_polynomial;
 use feanor_math::algorithms::unity_root::{get_prim_root_of_unity, get_prim_root_of_unity_pow2};
-use feanor_math::algorithms::{fft::*, self};
+use feanor_math::algorithms::fft::*;
 use feanor_math::integer::IntegerRingStore;
 use feanor_math::integer::*;
 use feanor_math::rings::poly::*;
@@ -18,12 +19,14 @@ use feanor_math::ring::*;
 use feanor_math::homomorphism::*;
 use feanor_math::rings::poly::sparse_poly::SparsePolyRing;
 use feanor_math::rings::zn::*;
+use crate::feanor_math::rings::extension::*;
 use feanor_math::seq::*;
 
 use crate::rings::double_rns_ring::*;
 use crate::rings::decomposition::*;
 use super::number_ring_quo::*;
 use crate::{euler_phi, euler_phi_squarefree, sample_primes, StdZn};
+use crate::cyclotomic::CyclotomicRing;
 
 pub struct OddCyclotomicDecomposableNumberRing {
     n_factorization_squarefree: Vec<i64>
@@ -34,7 +37,7 @@ impl OddCyclotomicDecomposableNumberRing {
     pub fn new(n: usize) -> Self {
         assert!(n % 2 == 1);
         assert!(n > 1);
-        let factorization = int_factor::factor(StaticRing::<i64>::RING, n as i64);
+        let factorization = factor(StaticRing::<i64>::RING, n as i64);
         // while most of the arithmetic still works with non-squarefree n, our statements about the geometry
         // of the number ring as lattice don't hold anymore (currently this refers to the `norm1_to_norm2_expansion_factor`
         // functions)
@@ -99,14 +102,20 @@ impl OddCyclotomicDecomposableNumberRing {
     /// the doc of [`OddCyclotomicDecomposableNumberRing::powful_inf_to_can_norm_expansion_factor()`].
     /// 
     pub fn powful_inf_to_inf_norm_expansion_factor(&self) -> f64 {
-        // the map we are considering is the identity on powerful monomials
-        // `X^(n i1 / p1 + ... + n ir / pr)` if `n i1 / p1 + ... + n ir / pr < phi(n)`
-        // and reduction modulo `Phi_n` otherwise
-        unimplemented!()
+        // TODO: Fix
+        // conjecture: this is `<= n`; I have no proof currently, but note the following:
+        // If the powerful-basis indices `n1 i1 / p1 + ... + nr ir / pr` were distributed
+        // at random, about `n / phi(n)` of them would have to be "reduced", i.e. fall
+        // into `{ phi(n), ..., n - 1 }` modulo `n`. Each of them contributes to the inf-operator
+        // norm, up to the maximal coefficient of `Phi_n`. This maximal coefficient seems
+        // to behave as `n^(1/r)`, and `n / phi(n) ~ n^((r - 1)/r)`
+        let rank = euler_phi_squarefree(&self.n_factorization_squarefree);
+        return rank as f64;
     }
 }
 
 impl PartialEq for OddCyclotomicDecomposableNumberRing {
+
     fn eq(&self, other: &Self) -> bool {
         self.n_factorization_squarefree == other.n_factorization_squarefree
     }
@@ -133,7 +142,6 @@ impl<FpTy> DecomposableNumberRing<FpTy> for OddCyclotomicDecomposableNumberRing
     fn mod_p(&self, Fp: FpTy) -> Self::Decomposed {
         let n_factorization = &self.n_factorization_squarefree;
         let n = n_factorization.iter().copied().product::<i64>();
-        let rank = euler_phi_squarefree(&n_factorization) as usize;
 
         let Fp_as_field = (&Fp).as_field().ok().unwrap();
         let zeta = get_prim_root_of_unity(&Fp_as_field, 2 * n as usize).unwrap();
@@ -159,6 +167,17 @@ impl<FpTy> DecomposableNumberRing<FpTy> for OddCyclotomicDecomposableNumberRing
         } else {
             return Some(current);
         }
+    }
+}
+
+impl<FpTy> DecomposableCyclotomicNumberRing<FpTy> for OddCyclotomicDecomposableNumberRing
+    where FpTy: RingStore + Clone,
+        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>
+{
+    type DecomposedAsCyclotomic = OddCyclotomicDecomposedNumberRing<FpTy, BluesteinFFT<FpTy::Type, FpTy::Type, Identity<FpTy>>>;
+
+    fn cyclotomic_index_ring(&self) -> zn_64::Zn {
+        zn_64::Zn::new(self.n_factorization_squarefree.iter().copied().product::<i64>() as u64)
     }
 }
 
@@ -191,6 +210,17 @@ impl PartialEq for CompositeCyclotomicDecomposableNumberRing {
     }
 }
 
+impl<FpTy> DecomposableCyclotomicNumberRing<FpTy> for CompositeCyclotomicDecomposableNumberRing
+    where FpTy: RingStore + Clone,
+        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>
+{
+    type DecomposedAsCyclotomic = OddCyclotomicDecomposedNumberRing<FpTy, CoprimeCooleyTuckeyFFT<FpTy::Type, FpTy::Type, Identity<FpTy>, BluesteinFFT<FpTy::Type, FpTy::Type, Identity<FpTy>>, BluesteinFFT<FpTy::Type, FpTy::Type, Identity<FpTy>>>>;
+
+    fn cyclotomic_index_ring(&self) -> zn_64::Zn {
+        <_ as DecomposableCyclotomicNumberRing<FpTy>>::cyclotomic_index_ring(&self.base)
+    }
+}
+
 impl<FpTy> DecomposableNumberRing<FpTy> for CompositeCyclotomicDecomposableNumberRing
     where FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>
@@ -200,7 +230,6 @@ impl<FpTy> DecomposableNumberRing<FpTy> for CompositeCyclotomicDecomposableNumbe
     fn mod_p(&self, Fp: FpTy) -> Self::Decomposed {
         let n_factorization = &self.base.n_factorization_squarefree;
         let n = n_factorization.iter().copied().product::<i64>();
-        let rank = euler_phi_squarefree(&n_factorization) as usize;
 
         let Fp_as_field = (&Fp).as_field().ok().unwrap();
         let zeta = get_prim_root_of_unity(&Fp_as_field, 2 * n as usize).unwrap();
@@ -287,7 +316,7 @@ impl<R, F, A> OddCyclotomicDecomposedNumberRing<R, F, A>
         let rank = euler_phi_squarefree(&n_factorization) as usize;
 
         let poly_ring = SparsePolyRing::new(&Fp, "X");
-        let cyclotomic_poly = algorithms::cyclotomic::cyclotomic_polynomial(&poly_ring, n as usize);
+        let cyclotomic_poly = cyclotomic_polynomial(&poly_ring, n as usize);
         assert_eq!(poly_ring.degree(&cyclotomic_poly).unwrap(), rank);
         let mut zeta_pow_rank = HashMap::new();
         for (a, i) in poly_ring.terms(&cyclotomic_poly) {
@@ -371,4 +400,104 @@ impl<R, F, A> DecomposedNumberRing<R::Type> for OddCyclotomicDecomposedNumberRin
     fn base_ring(&self) -> RingRef<R::Type> {
         RingRef::new(self.ring.get_ring())
     }
+}
+
+impl<R, F, A> DecomposedCyclotomicNumberRing<R::Type> for OddCyclotomicDecomposedNumberRing<R, F , A> 
+    where R: RingStore,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + DivisibilityRing,
+        F: FFTAlgorithm<R::Type> + PartialEq,
+        A: Allocator + Clone
+{
+    fn cyclotomic_index_ring(&self) -> zn_64::Zn {
+        zn_64::Zn::new(self.fft_table.len() as u64)
+    }
+
+    fn permute_galois_action(&self, src: &[<R::Type as RingBase>::Element], dst: &mut [<R::Type as RingBase>::Element], galois_element: zn_64::ZnEl) {
+        assert_eq!(self.rank(), src.len());
+        assert_eq!(self.rank(), dst.len());
+        let ring = self.base_ring();
+        let index_ring = self.cyclotomic_index_ring();
+        let hom = index_ring.can_hom(&StaticRing::<i64>::RING).unwrap();
+        
+        for (j, i) in self.fft_output_indices() {
+            dst[j] = ring.clone_el(&src[self.fft_output_indices_to_indices[self.fft_table.unordered_fft_permutation_inv(
+                index_ring.smallest_positive_lift(index_ring.mul(galois_element, hom.map(self.fft_table.unordered_fft_permutation(i) as i64))) as usize
+            )]]);
+        }
+    }
+}
+
+#[cfg(test)]
+use feanor_math::assert_el_eq;
+
+#[cfg(test)]
+fn edge_case_elements<'a, NumberRing, FpTy, A>(R: &'a DoubleRNSRing<NumberRing, FpTy, A>) -> impl 'a + Iterator<Item = El<DoubleRNSRing<NumberRing, FpTy, A>>>
+    where NumberRing: DecomposableNumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        A: Allocator + Clone
+{
+    assert_eq!(2, R.get_ring().rns_base().len());
+    assert_eq!(113, int_cast(R.get_ring().rns_base().at(0).integer_ring().clone_el(R.get_ring().rns_base().at(0).modulus()), StaticRing::<i64>::RING, R.get_ring().rns_base().at(0).integer_ring()));
+    assert_eq!(6, R.rank());
+    [
+        ring_literal!(&R, [0, 0, 0, 0, 0, 0]),
+        ring_literal!(&R, [1, 0, 0, 0, 0, 0]),
+        ring_literal!(&R, [-1, 0, 0, 0, 0, 0]),
+        ring_literal!(&R, [0, 0, 0, 0, 0, 1]),
+        ring_literal!(&R, [0, 0, 0, 0, 0, -1]),
+        ring_literal!(&R, [1, 1, 1, 1, 1, 1]),
+        ring_literal!(&R, [1, -1, 0, 0, 0, 0]),
+        ring_literal!(&R, [435, 287, 1, 0, 0, 0]),
+        ring_literal!(&R, [256, 1, 0, 0, 0, 0]),
+        ring_literal!(&R, [0, 435, 287, 1, 0, 0]),
+    ].into_iter()
+}
+
+#[test]
+fn test_ring_axioms() {
+    let rns_base = zn_rns::Zn::new(vec![zn_64::Zn::new(113), zn_64::Zn::new(337)], BigIntRing::RING);
+    let R = DoubleRNSRingBase::new_with(OddCyclotomicDecomposableNumberRing::new(7), rns_base, Global);
+    feanor_math::ring::generic_tests::test_ring_axioms(&R, edge_case_elements(&R));
+}
+
+#[test]
+fn test_divisibility_axioms() {
+    let rns_base = zn_rns::Zn::new(vec![zn_64::Zn::new(113), zn_64::Zn::new(337)], BigIntRing::RING);
+    let R = DoubleRNSRingBase::new_with(OddCyclotomicDecomposableNumberRing::new(7), rns_base, Global);
+    feanor_math::divisibility::generic_tests::test_divisibility_axioms(&R, edge_case_elements(&R));
+}
+
+#[test]
+fn test_free_algebra_axioms() {
+    let rns_base = zn_rns::Zn::new(vec![zn_64::Zn::new(113), zn_64::Zn::new(337)], BigIntRing::RING);
+    let R = DoubleRNSRingBase::new_with(OddCyclotomicDecomposableNumberRing::new(7), rns_base, Global);
+    feanor_math::rings::extension::generic_tests::test_free_algebra_axioms(R);
+}
+
+#[test]
+fn test_cyclotomic_ring_axioms() {
+    let rns_base = zn_rns::Zn::new(vec![zn_64::Zn::new(113), zn_64::Zn::new(337)], BigIntRing::RING);
+    let R = DoubleRNSRingBase::new_with(OddCyclotomicDecomposableNumberRing::new(7), rns_base, Global);
+    crate::cyclotomic::generic_test_cyclotomic_ring_axioms(R);
+}
+
+#[test]
+fn test_permute_galois_automorphism() {
+    let Fp = zn_64::Zn::new(257);
+    let R = NumberRingQuoBase::new(OddCyclotomicDecomposableNumberRing::new(7), Fp);
+    let hom = R.get_ring().cyclotomic_index_ring().into_int_hom();
+
+    assert_el_eq!(R, ring_literal!(&R, [0, 0, 1, 0, 0, 0]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 1, 0, 0, 0, 0]), hom.map(2)));
+    assert_el_eq!(R, ring_literal!(&R, [0, 0, 0, 1, 0, 0]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 1, 0, 0, 0, 0]), hom.map(3)));
+    assert_el_eq!(R, ring_literal!(&R, [0, 0, 0, 0, 1, 0]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 0, 1, 0, 0, 0]), hom.map(2)));
+    assert_el_eq!(R, ring_literal!(&R, [-1, -1, -1, -1, -1, -1]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 0, 1, 0, 0, 0]), hom.map(3)));
+
+    let R = NumberRingQuoBase::new(CompositeCyclotomicDecomposableNumberRing::new(5, 3), Fp);
+    let hom = R.get_ring().cyclotomic_index_ring().into_int_hom();
+
+    assert_el_eq!(R, ring_literal!(&R, [0, 0, 1, 0, 0, 0, 0, 0]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 1, 0, 0, 0, 0, 0, 0]), hom.map(2)));
+    assert_el_eq!(R, ring_literal!(&R, [0, 0, 0, 0, 1, 0, 0, 0]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 1, 0, 0, 0, 0, 0, 0]), hom.map(4)));
+    assert_el_eq!(R, ring_literal!(&R, [-1, 1, 0, -1, 1, -1, 0, 1]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 1, 0, 0, 0, 0, 0, 0]), hom.map(8)));
+    assert_el_eq!(R, ring_literal!(&R, [-1, 1, 0, -1, 1, -1, 0, 1]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 0, 0, 0, 1, 0, 0, 0]), hom.map(2)));
 }

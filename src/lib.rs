@@ -123,6 +123,7 @@ pub fn sample_primes<F>(min_bits: usize, max_bits: usize, max_bits_each_modulus:
 ///
 /// Euler's totient function
 /// 
+#[allow(unused)]
 fn euler_phi(factorization: &[(i64, usize)]) -> i64 {
     StaticRing::<i64>::RING.prod(factorization.iter().map(|(p, e)| (p - 1) * StaticRing::<i64>::RING.pow(*p, e - 1)))
 }

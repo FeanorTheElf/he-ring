@@ -71,14 +71,14 @@ impl<NumberRing, FpTy, A> DoubleRNSRingBase<NumberRing, FpTy, A>
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
 {
-    pub fn new_with(number_ring: NumberRing, rns_base: zn_rns::Zn<FpTy, BigIntRing>, allocator: A) -> Self {
+    pub fn new_with(number_ring: NumberRing, rns_base: zn_rns::Zn<FpTy, BigIntRing>, allocator: A) -> RingValue<Self> {
         assert!(rns_base.len() > 0);
-        Self {
+        RingValue::from(Self {
             ring_decompositions: rns_base.as_iter().map(|Fp| number_ring.mod_p(Fp.clone())).collect(),
             number_ring: number_ring,
             rns_base: rns_base,
             allocator: allocator
-        }
+        })
     }
 
     pub fn ring_decompositions(&self) -> &[<NumberRing as DecomposableNumberRing<FpTy>>::Decomposed] {
@@ -412,6 +412,30 @@ impl<NumberRing, FpTy, A> RingBase for DoubleRNSRingBase<NumberRing, FpTy, A>
         where I::Type: IntegerRing
     {
         self.base_ring().characteristic(ZZ)     
+    }
+}
+
+impl<NumberRing, FpTy, A> CyclotomicRing for DoubleRNSRingBase<NumberRing, FpTy, A> 
+    where NumberRing: DecomposableNumberRing<FpTy>,
+        NumberRing::Decomposed: DecomposedCyclotomicNumberRing<FpTy::Type>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        A: Allocator + Clone
+{
+    fn n(&self) -> usize {
+        *self.ring_decompositions()[0].cyclotomic_index_ring().modulus() as usize
+    }
+
+    fn apply_galois_action(&self, el: &Self::Element, g: zn_64::ZnEl) -> Self::Element {
+        let mut result = self.zero();
+        for (i, _) in self.rns_base().as_iter().enumerate() {
+            self.ring_decompositions()[i].permute_galois_action(
+                &el.data[(i * self.rank())..((i + 1) * self.rank())],
+                &mut result.data[(i * self.rank())..((i + 1) * self.rank())],
+                g
+            );
+        }
+        return result;
     }
 }
 

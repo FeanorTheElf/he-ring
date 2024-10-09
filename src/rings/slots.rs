@@ -51,8 +51,7 @@ use crate::profiling::timed_step;
 use crate::StdZn;
 use crate::euler_phi;
 use super::decomposition::*;
-use super::ntt_ring::NTTRing;
-use super::ntt_ring::NTTRingBase;
+use super::number_ring_quo::*;
 use oorandom;
 
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
@@ -142,6 +141,7 @@ struct HypercubeDimension {
 
 impl HypercubeDimension {
 
+    #[allow(unused)]
     pub fn factor_n(&self) -> (i64, usize) {
         self.factor_n
     }
@@ -268,7 +268,7 @@ fn order_hypercube_dimensions(mut dims: Vec<HypercubeDimension>) -> (Vec<Hypercu
     return (dims, result);
 }
 
-pub type SlotRing<'a, R, A> = AsLocalPIR<FreeAlgebraImpl<&'a R, SparseMapVector<&'a R>, A, FFTRNSBasedConvolutionZn>>;
+pub type SlotRing<'a, FpTy, A> = AsLocalPIR<FreeAlgebraImpl<&'a FpTy, SparseMapVector<&'a FpTy>, A, FFTRNSBasedConvolutionZn>>;
 
 ///
 /// Encapsulates the isomorphism
@@ -309,30 +309,30 @@ pub type SlotRing<'a, R, A> = AsLocalPIR<FreeAlgebraImpl<&'a R, SparseMapVector<
 /// but other ways would be possible to, since many direct-sum decompositions 
 /// of `Gal(K / Q)` resp. `Gal(K / Q) / <p>` are conceivable.
 /// 
-pub struct HypercubeIsomorphism<'a, R, F, A>
-    where R: ZnRingStore,
-        R::Type: StdZn,
-        F: RingDecompositionSelfIso<R::Type> + CyclotomicRingDecomposition<R::Type>,
+pub struct HypercubeIsomorphism<'a, NumberRing, FpTy, A>
+    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: StdZn,
         A: Allocator + Clone,
-        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
+        NumberRingQuoBase<NumberRing, FpTy, A>: CyclotomicRing + RingExtension<BaseRing = FpTy>,
 {
-    ring: &'a NTTRingBase<R, F, A>,
-    slot_unit_vec: El<NTTRing<R, F, A>>,
-    slot_ring: SlotRing<'a, R, A>,
+    ring: &'a NumberRingQuoBase<NumberRing, FpTy, A>,
+    slot_unit_vec: El<NumberRingQuo<NumberRing, FpTy, A>>,
+    slot_ring: SlotRing<'a, FpTy, A>,
     dims: Vec<HypercubeDimension>,
     dim_lengths: Vec<usize>,
     galois_group_ring: Zn,
     d: usize
 }
 
-impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
-    where R: ZnRingStore,
-        R::Type: StdZn,
-        F: RingDecompositionSelfIso<R::Type> + CyclotomicRingDecomposition<R::Type>,
+impl<'a, NumberRing, FpTy, A> HypercubeIsomorphism<'a, NumberRing, FpTy, A>
+    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: StdZn,
         A: Allocator + Clone,
-        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
+        NumberRingQuoBase<NumberRing, FpTy, A>: CyclotomicRing + RingExtension<BaseRing = FpTy>,
 {
-    pub fn new<const LOG: bool>(ring: &'a NTTRingBase<R, F, A>) -> Self {
+    pub fn new<const LOG: bool>(ring: &'a NumberRingQuoBase<NumberRing, FpTy, A>) -> Self {
         let t = int_cast(ring.base_ring().integer_ring().clone_el(ring.base_ring().modulus()), ZZ, ring.base_ring().integer_ring());
         let (p, e) = is_prime_power(&ZZ, &t).unwrap();
 
@@ -348,7 +348,7 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
         let max_log2_len = ZZ.abs_log2_ceil(&(d as i64)).unwrap() + 1;
     
         let tmp_slot_ring = timed_step::<_, _, LOG, _>("Computing representation of slot ring", |[]| {
-            let convolution = FFTRNSBasedConvolutionZn::from(FFTRNSBasedConvolution::<R::Type>::new_with(max_log2_len, BigIntRing::RING, Global));
+            let convolution = FFTRNSBasedConvolutionZn::from(FFTRNSBasedConvolution::<FpTy::Type>::new_with(max_log2_len, BigIntRing::RING, Global));
             GaloisField::new(p, d).get_ring().galois_ring_with(AsLocalPIR::from_zn(RingRef::new(ring.base_ring().get_ring())).unwrap(), Global, convolution)
         });
 
@@ -425,7 +425,7 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
         return result;
     }
 
-    pub fn reduce_modulus<'b>(&self, new_ring: &'b NTTRingBase<R, F, A>) -> HypercubeIsomorphism<'b, R, F, A> {
+    pub fn reduce_modulus<'b>(&self, new_ring: &'b NumberRingQuoBase<NumberRing, FpTy, A>) -> HypercubeIsomorphism<'b, NumberRing, FpTy, A> {
         assert_eq!(new_ring.n(), self.ring().n());
         let t = int_cast(self.ring.base_ring().integer_ring().clone_el(self.ring.base_ring().modulus()), ZZ, self.ring.base_ring().integer_ring());
         let (p, e) = is_prime_power(&ZZ, &t).unwrap();
@@ -468,18 +468,18 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
         );
     }
 
-    pub fn load(filename: &str, ring: &'a NTTRingBase<R, F, A>) -> Self {
+    pub fn load(filename: &str, ring: &'a NumberRingQuoBase<NumberRing, FpTy, A>) -> Self {
         let mut deserializer = serde_json::Deserializer::from_reader(BufReader::new(File::open(filename).unwrap()));
         return <_ as DeserializeSeed>::deserialize(DeserializeHypercubeIsomorphismSeed { ring }, &mut deserializer).unwrap().into();
     }
 }
 
-impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
-    where R: ZnRingStore,
-        R::Type: StdZn,
-        F: RingDecompositionSelfIso<R::Type> + CyclotomicRingDecomposition<R::Type>,
+impl<'a, NumberRing, FpTy, A> HypercubeIsomorphism<'a, NumberRing, FpTy, A>
+    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: StdZn,
         A: Allocator + Clone,
-        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
+        NumberRingQuoBase<NumberRing, FpTy, A>: CyclotomicRing + RingExtension<BaseRing = FpTy>,
 {
     ///
     /// Returns the number of dimensions of the hypercube
@@ -530,11 +530,11 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
     /// (resp. the identity element of `G`) of the image of `X` under the isomorphism
     /// `Fp[X] / (Phi_n)  ->  F_(p^d) ^ G`.
     /// 
-    pub fn slot_ring<'b>(&'b self) -> &'b SlotRing<'a, R, A> {
+    pub fn slot_ring<'b>(&'b self) -> &'b SlotRing<'a, FpTy, A> {
         &self.slot_ring
     }
 
-    pub fn ring<'b>(&'b self) -> RingRef<'b, NTTRingBase<R, F, A>> {
+    pub fn ring<'b>(&'b self) -> RingRef<'b, NumberRingQuoBase<NumberRing, FpTy, A>> {
         RingRef::new(&self.ring)
     }
 
@@ -544,7 +544,7 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
     /// The standard representation for Galois automorphism is thus by
     /// units in this ring.
     /// 
-    pub fn galois_group_mulrepr(&self) -> &Zn {
+    pub fn cyclotomic_index_ring(&self) -> &Zn {
         &self.galois_group_ring
     }
 
@@ -578,13 +578,13 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
     /// This flattening is done according to the lexicographic order of index tuples, in particular slots
     /// that differ only in the last entry of the index tuple are contiguous in the 1d-representation. 
     /// 
-    pub fn from_slot_vec<I>(&self, vec: I) -> El<NTTRing<R, F, A>>
-        where I: IntoIterator<Item = El<SlotRing<'a, R, A>>>
+    pub fn from_slot_vec<I>(&self, vec: I) -> El<NumberRingQuo<NumberRing, FpTy, A>>
+        where I: IntoIterator<Item = El<SlotRing<'a, FpTy, A>>>
     {
         let mut given_len = 0;
         let mut vec_it = vec.into_iter().inspect(|_| given_len += 1);
 
-        let move_to_slot_gens = self.slot_iter(|idxs| self.galois_group_mulrepr().prod(idxs.iter().enumerate().map(|(j, e)| self.shift_galois_element(j, *e as i64))));
+        let move_to_slot_gens = self.slot_iter(|idxs| self.cyclotomic_index_ring().prod(idxs.iter().enumerate().map(|(j, e)| self.shift_galois_element(j, *e as i64))));
         let result = self.ring.sum_galois_transforms(move_to_slot_gens.zip(vec_it.by_ref())
             .filter(|(_, x)| !self.slot_ring().is_zero(&x))
             .map(|(g, x)| {
@@ -599,7 +599,7 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
         return result;
     }
 
-    pub fn get_slot_value(&self, el: &El<NTTRing<R, F, A>>, move_to_slot_zero_el: ZnEl) -> El<SlotRing<'a, R, A>> {
+    pub fn get_slot_value(&self, el: &El<NumberRingQuo<NumberRing, FpTy, A>>, move_to_slot_zero_el: ZnEl) -> El<SlotRing<'a, FpTy, A>> {
         let el = self.ring.apply_galois_action(el, move_to_slot_zero_el);
         let poly_ring = DensePolyRing::new(self.ring.base_ring(), "X");
         let el_as_poly = RingRef::new(self.ring).poly_repr(&poly_ring, &el, self.ring.base_ring().identity());
@@ -615,10 +615,10 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
     /// This flattening is done according to the lexicographic order of index tuples, in particular slots
     /// that differ only in the last entry of the index tuple are contiguous in the 1d-representation. 
     /// 
-    pub fn get_slot_values<'b>(&'b self, el: &'b El<NTTRing<R, F, A>>) -> impl 'b + ExactSizeIterator<Item = El<SlotRing<'a, R, A>>> {
+    pub fn get_slot_values<'b>(&'b self, el: &'b El<NumberRingQuo<NumberRing, FpTy, A>>) -> impl 'b + ExactSizeIterator<Item = El<SlotRing<'a, FpTy, A>>> {
         // again we use only a "slow" O(n^2) algorithm, but we only have to run it during preprocessing;
         // maybe use an FFT later?
-        let mut move_to_slot_gens = self.slot_iter(|idxs| self.galois_group_mulrepr().prod(idxs.iter().enumerate().map(|(j, e)| self.shift_galois_element(j, -(*e as i64)))));
+        let mut move_to_slot_gens = self.slot_iter(|idxs| self.cyclotomic_index_ring().prod(idxs.iter().enumerate().map(|(j, e)| self.shift_galois_element(j, -(*e as i64)))));
         (0..self.slot_count()).map(move |_| self.get_slot_value(el, move_to_slot_gens.next().unwrap()))
     }
 
@@ -634,9 +634,9 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
     /// 
     pub fn shift_galois_element(&self, dim_index: usize, steps: i64) -> ZnEl {
         let g = self.dims[dim_index].g_main;
-        let forward_galois_element = self.galois_group_mulrepr().pow(g, steps.abs() as usize);
+        let forward_galois_element = self.cyclotomic_index_ring().pow(g, steps.abs() as usize);
         if steps > 0 {
-            self.galois_group_mulrepr().invert(&forward_galois_element).unwrap()
+            self.cyclotomic_index_ring().invert(&forward_galois_element).unwrap()
         } else {
             forward_galois_element
         }
@@ -654,11 +654,11 @@ impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
     pub fn frobenius_element(&self, count: i64) -> ZnEl {
         let t = int_cast(self.ring().base_ring().integer_ring().clone_el(self.ring().base_ring().modulus()), ZZ, self.ring().base_ring().integer_ring());
         let (p, _) = is_prime_power(&ZZ, &t).unwrap();
-        let frobenius = self.galois_group_mulrepr().can_hom(&ZZ).unwrap().map(p);
+        let frobenius = self.cyclotomic_index_ring().can_hom(&ZZ).unwrap().map(p);
         if count < 0 {
-            self.galois_group_mulrepr().pow(frobenius, self.slot_ring().rank() - ((-count) % self.slot_ring().rank() as i64) as usize)
+            self.cyclotomic_index_ring().pow(frobenius, self.slot_ring().rank() - ((-count) % self.slot_ring().rank() as i64) as usize)
         } else {
-            self.galois_group_mulrepr().pow(frobenius, (count % self.slot_ring().rank() as i64) as usize)
+            self.cyclotomic_index_ring().pow(frobenius, (count % self.slot_ring().rank() as i64) as usize)
         }
     }
 }
@@ -677,29 +677,29 @@ pub mod serialization {
         base_group_order: i64
     }
     
-    pub struct HypercubeIsomorphismSerializable<'a, R, F, A>
-        where R: ZnRingStore,
-            R::Type: StdZn,
-            F: RingDecompositionSelfIso<R::Type> + CyclotomicRingDecomposition<R::Type>,
+    pub struct HypercubeIsomorphismSerializable<'a, NumberRing, FpTy, A>
+        where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+            FpTy: RingStore + Clone,
+            FpTy::Type: StdZn,
             A: Allocator + Clone,
-            NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
+            NumberRingQuoBase<NumberRing, FpTy, A>: CyclotomicRing + RingExtension<BaseRing = FpTy>,
     {
         t: i64,
         n: usize,
         slot_rank: usize,
-        slot_ring_modulus: SerializeWithRing<'a, DensePolyRing<&'a <NTTRingBase<R, F, A> as RingExtension>::BaseRing>>,
-        slot_unit_vec: SerializeWithRing<'a, RingRef<'a, NTTRingBase<R, F, A>>>,
+        slot_ring_modulus: SerializeWithRing<'a, DensePolyRing<&'a <NumberRingQuoBase<NumberRing, FpTy, A> as RingExtension>::BaseRing>>,
+        slot_unit_vec: SerializeWithRing<'a, RingRef<'a, NumberRingQuoBase<NumberRing, FpTy, A>>>,
         galois_group_ring_modulus: u64,
         dims: Vec<HypercubeDimensionSerializable>,
         dim_lengths: Vec<usize>
     }
 
-    impl<'a, R, F, A> Serialize for HypercubeIsomorphismSerializable<'a, R, F, A>
-        where R: ZnRingStore,
-            R::Type: StdZn,
-            F: RingDecompositionSelfIso<R::Type> + CyclotomicRingDecomposition<R::Type>,
+    impl<'a, NumberRing, FpTy, A> Serialize for HypercubeIsomorphismSerializable<'a, NumberRing, FpTy, A>
+        where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+            FpTy: RingStore + Clone,
+            FpTy::Type: StdZn,
             A: Allocator + Clone,
-            NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
+            NumberRingQuoBase<NumberRing, FpTy, A>: CyclotomicRing + RingExtension<BaseRing = FpTy>,
     {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
             where S: Serializer
@@ -717,66 +717,66 @@ pub mod serialization {
         }
     }
 
-    pub struct DeserializeHypercubeIsomorphismSeed<'a, R, F, A>
-        where R: ZnRingStore,
-            R::Type: StdZn,
-            F: RingDecompositionSelfIso<R::Type> + CyclotomicRingDecomposition<R::Type>,
+    pub struct DeserializeHypercubeIsomorphismSeed<'a, NumberRing, FpTy, A>
+        where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+            FpTy: RingStore + Clone,
+            FpTy::Type: StdZn,
             A: Allocator + Clone,
-            NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
+            NumberRingQuoBase<NumberRing, FpTy, A>: CyclotomicRing + RingExtension<BaseRing = FpTy>,
     {
-        pub ring: &'a NTTRingBase<R, F, A>
+        pub ring: &'a NumberRingQuoBase<NumberRing, FpTy, A>
     }
 
-    pub struct HypercubeIsomorphismDeserializable<'a, R, F, A>
-        where R: ZnRingStore,
-            R::Type: StdZn,
-            F: RingDecompositionSelfIso<R::Type> + CyclotomicRingDecomposition<R::Type>,
+    pub struct HypercubeIsomorphismDeserializable<'a, NumberRing, FpTy, A>
+        where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+            FpTy: RingStore + Clone,
+            FpTy::Type: StdZn,
             A: Allocator + Clone,
-            NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
+            NumberRingQuoBase<NumberRing, FpTy, A>: CyclotomicRing + RingExtension<BaseRing = FpTy>,
     {
         t: i64,
         n: usize,
         slot_rank: usize,
-        slot_ring_modulus: El<DensePolyRing<&'a R>>,
-        slot_unit_vec: El<NTTRing<R, F, A>>,
+        slot_ring_modulus: El<DensePolyRing<&'a FpTy>>,
+        slot_unit_vec: El<NumberRingQuo<NumberRing, FpTy, A>>,
         galois_group_ring_modulus: u64,
         dims: Vec<HypercubeDimensionSerializable>,
         dim_lengths: Vec<usize>,
-        ring: &'a NTTRingBase<R, F, A>,
-        poly_ring: DensePolyRing<&'a R>
+        ring: &'a NumberRingQuoBase<NumberRing, FpTy, A>,
+        poly_ring: DensePolyRing<&'a FpTy>
     }
 
-    impl<'a, 'de, R, F, A> DeserializeSeed<'de> for DeserializeHypercubeIsomorphismSeed<'a, R, F, A>
-        where R: ZnRingStore,
-            R::Type: StdZn,
-            F: RingDecompositionSelfIso<R::Type> + CyclotomicRingDecomposition<R::Type>,
+    impl<'a, 'de, NumberRing, FpTy, A> DeserializeSeed<'de> for DeserializeHypercubeIsomorphismSeed<'a, NumberRing, FpTy, A>
+        where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+            FpTy: RingStore + Clone,
+            FpTy::Type: StdZn,
             A: Allocator + Clone,
-            NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
+            NumberRingQuoBase<NumberRing, FpTy, A>: CyclotomicRing + RingExtension<BaseRing = FpTy>,
     {
-        type Value = HypercubeIsomorphismDeserializable<'a, R, F, A>;
+        type Value = HypercubeIsomorphismDeserializable<'a, NumberRing, FpTy, A>;
 
         fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
             where D: Deserializer<'de>
         {
-            struct FieldsVisitor<'a, R, F, A>
-                where R: ZnRingStore,
-                    R::Type: StdZn,
-                    F: RingDecompositionSelfIso<R::Type>,
+            struct FieldsVisitor<'a, NumberRing, FpTy, A>
+                where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+                    FpTy: RingStore + Clone,
+                    FpTy::Type: StdZn,
                     A: Allocator + Clone,
-                    NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
+                    NumberRingQuoBase<NumberRing, FpTy, A>: CyclotomicRing + RingExtension<BaseRing = FpTy>,
             {
-                poly_ring: DensePolyRing<&'a R>,
-                ring: &'a NTTRingBase<R, F, A>
+                poly_ring: DensePolyRing<&'a FpTy>,
+                ring: &'a NumberRingQuoBase<NumberRing, FpTy, A>
             }
 
-            impl<'a, 'de, R, F, A> Visitor<'de> for FieldsVisitor<'a, R, F, A>
-                where R: ZnRingStore,
-                    R::Type: StdZn,
-                    F: RingDecompositionSelfIso<R::Type> + CyclotomicRingDecomposition<R::Type>,
+            impl<'a, 'de, NumberRing, FpTy, A> Visitor<'de> for FieldsVisitor<'a, NumberRing, FpTy, A>
+                where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+                    FpTy: RingStore + Clone,
+                    FpTy::Type: StdZn,
                     A: Allocator + Clone,
-                    NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
+                    NumberRingQuoBase<NumberRing, FpTy, A>: CyclotomicRing + RingExtension<BaseRing = FpTy>,
             {
-                type Value = HypercubeIsomorphismDeserializable<'a, R, F, A>;
+                type Value = HypercubeIsomorphismDeserializable<'a, NumberRing, FpTy, A>;
 
                 fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                     write!(formatter, "struct `HypercubeIsomorphism` with fields `slot_rank`, `slot_ring_modulus`, `slot_unit_vec`, `galois_group_ring_modulus`, `dims`, `dim_lengths")
@@ -897,14 +897,14 @@ pub mod serialization {
         }
     }
 
-    impl<'a, R, F, A> From<HypercubeIsomorphismDeserializable<'a, R, F, A>> for HypercubeIsomorphism<'a, R, F, A>
-        where R: ZnRingStore,
-            R::Type: StdZn,
-            F: RingDecompositionSelfIso<R::Type> + CyclotomicRingDecomposition<R::Type>,
+    impl<'a, NumberRing, FpTy, A> From<HypercubeIsomorphismDeserializable<'a, NumberRing, FpTy, A>> for HypercubeIsomorphism<'a, NumberRing, FpTy, A>
+        where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+            FpTy: RingStore + Clone,
+            FpTy::Type: StdZn,
             A: Allocator + Clone,
-            NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
+            NumberRingQuoBase<NumberRing, FpTy, A>: CyclotomicRing + RingExtension<BaseRing = FpTy>,
     {
-        fn from(value: HypercubeIsomorphismDeserializable<'a, R, F, A>) -> Self {
+        fn from(value: HypercubeIsomorphismDeserializable<'a, NumberRing, FpTy, A>) -> Self {
             let t = int_cast(value.ring.base_ring().integer_ring().clone_el(value.ring.base_ring().modulus()), ZZ, value.ring.base_ring().integer_ring());
             assert_eq!(t, value.t);
             assert_eq!(value.n, value.ring.n());
@@ -922,7 +922,7 @@ pub mod serialization {
             let max_log2_len = ZZ.abs_log2_ceil(&(value.slot_rank as i64)).unwrap() + 1;
             let slot_ring = FreeAlgebraImpl::new_with(value.ring.base_ring(), value.slot_rank, slot_ring_modulus, "𝜁", value.ring.allocator().clone(), FFTRNSBasedConvolution::new_with(max_log2_len, BigIntRing::RING, Global).into());
             let max_ideal_gen = slot_ring.inclusion().map(slot_ring.base_ring().coerce(&ZZ, p));
-            let slot_ring: SlotRing<'a, R, A> = AsLocalPIR::from(AsLocalPIRBase::promise_is_local_pir(slot_ring, max_ideal_gen, Some(e)));
+            let slot_ring: SlotRing<'a, FpTy, A> = AsLocalPIR::from(AsLocalPIRBase::promise_is_local_pir(slot_ring, max_ideal_gen, Some(e)));
 
             Self {
                 d: value.slot_rank,
@@ -943,15 +943,15 @@ pub mod serialization {
         }
     }
 
-    impl<'a, R, F, A> HypercubeIsomorphism<'a, R, F, A>
-        where R: ZnRingStore,
-            R::Type: StdZn,
-            F: RingDecompositionSelfIso<R::Type> + CyclotomicRingDecomposition<R::Type>,
+    impl<'a, NumberRing, FpTy, A> HypercubeIsomorphism<'a, NumberRing, FpTy, A>
+        where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+            FpTy: RingStore + Clone,
+            FpTy::Type: StdZn,
             A: Allocator + Clone,
-            NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
+            NumberRingQuoBase<NumberRing, FpTy, A>: CyclotomicRing + RingExtension<BaseRing = FpTy>,
     {
         pub fn with_serializable<G>(&self, op: G)
-            where G: FnOnce(HypercubeIsomorphismSerializable<R, F, A>)
+            where G: FnOnce(HypercubeIsomorphismSerializable<NumberRing, FpTy, A>)
         {
             let poly_ring = DensePolyRing::new(self.ring.base_ring(), "X");
 
@@ -962,11 +962,11 @@ pub mod serialization {
                     factor_n: d.factor_n,
                     local_order_of_p: d.local_order_of_p,
                     order_of_g_main: d.order_of_g_main,
-                    g_main: self.galois_group_mulrepr().smallest_positive_lift(d.g_main) as i64,
+                    g_main: self.cyclotomic_index_ring().smallest_positive_lift(d.g_main) as i64,
                     is_primary_dim: d.is_primary_dim,
                     base_group_order: d.base_group_order
                 }).collect(),
-                galois_group_ring_modulus: *self.galois_group_mulrepr().modulus() as u64,
+                galois_group_ring_modulus: *self.cyclotomic_index_ring().modulus() as u64,
                 slot_rank: self.d,
                 slot_ring_modulus: SerializeWithRing::new(&self.slot_ring().generating_poly(&poly_ring, &poly_ring.base_ring().identity()), poly_ring),
                 slot_unit_vec: SerializeWithRing::new(&self.slot_unit_vec, self.ring()),
@@ -979,9 +979,9 @@ pub mod serialization {
 #[cfg(test)]
 use feanor_math::assert_el_eq;
 #[cfg(test)]
-use crate::rings::pow2_cyclotomic::{DefaultPow2CyclotomicNTTRing, DefaultPow2CyclotomicNTTRingBase};
+use crate::rings::pow2_cyclotomic::*;
 #[cfg(test)]
-use crate::rings::odd_cyclotomic::{DefaultOddCyclotomicNTTRing, DefaultOddCyclotomicNTTRingBase};
+use crate::rings::odd_cyclotomic::*;
 
 #[test]
 fn test_compute_hypercube_structure_pow2() {
@@ -1070,7 +1070,7 @@ fn test_compute_hypercube_structure_composite() {
 
 #[test]
 fn test_create_hypercube() {
-    let ring: DefaultOddCyclotomicNTTRing = DefaultOddCyclotomicNTTRingBase::new(Zn::new(2), 31 * 11);
+    let ring = NumberRingQuoBase::new(OddCyclotomicDecomposableNumberRing::new(31 * 11), Zn::new(23 * 23 * 23));
     let hypercube = HypercubeIsomorphism::new::<false>(ring.get_ring());
 
     assert_eq!(2, hypercube.dim_count());
@@ -1172,7 +1172,7 @@ fn test_order_hypercube_dimensions_composite() {
 #[test]
 fn test_rotation() {
     // `F23[X]/(X^16 + 1) ~ F_(23^4)^4`
-    let ring: DefaultPow2CyclotomicNTTRing = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(23), 4);
+    let ring = NumberRingQuoBase::new(Pow2CyclotomicDecomposableNumberRing::new(32), Zn::new(23 * 23 * 23));
     let hypercube = HypercubeIsomorphism::new::<false>(ring.get_ring());
     assert_eq!(1, hypercube.dim_count());
 
@@ -1202,9 +1202,8 @@ fn test_rotation() {
 
 #[test]
 fn test_hypercube_galois_ring() {
-    
     // `F(23^3)[X]/(X^16 + 1) ~ GF(23, 3, 4)^4`
-    let ring: DefaultPow2CyclotomicNTTRing = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(23 * 23 * 23), 4);
+    let ring = NumberRingQuoBase::new(Pow2CyclotomicDecomposableNumberRing::new(32), Zn::new(23 * 23 * 23));
     let hypercube = HypercubeIsomorphism::new::<false>(ring.get_ring());
     
     let a = hypercube.slot_ring().from_canonical_basis([1, 2, 0, 1].into_iter().map(|x| hypercube.slot_ring().base_ring().int_hom().map(x)));

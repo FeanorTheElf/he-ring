@@ -8,7 +8,7 @@ use feanor_math::primitive_int::StaticRing;
 use feanor_math::rings::extension::{FreeAlgebra, FreeAlgebraStore};
 use feanor_math::rings::finite::FiniteRing;
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
-use feanor_math::rings::zn::{zn_rns, zn_64, ZnRing, ZnRingStore};
+use feanor_math::rings::zn::{zn_64, zn_rns, FromModulusCreateableZnRing, ZnRing, ZnRingStore};
 use feanor_math::ring::*;
 use feanor_math::seq::{CloneElFn, CloneRingEl};
 use feanor_math::seq::VectorView;
@@ -19,6 +19,7 @@ use feanor_math::rings::finite::*;
 use serde::{de, Deserializer, Serializer};
 use serde_json::Number;
 
+use crate::cyclotomic::CyclotomicRing;
 use crate::sample_primes;
 
 use super::decomposition::*;
@@ -49,30 +50,41 @@ pub struct NumberRingQuoEl<NumberRing, FpTy, A = Global>
     pub(super) data: Vec<El<FpTy>, A>
 }
 
+impl<NumberRing, FpTy> NumberRingQuoBase<NumberRing, RingValue<FpTy>, Global>
+    where NumberRing: DecomposableNumberRing<RingValue<FpTy>>,
+        FpTy: Clone + ZnRing + CanHomFrom<BigIntRingBase> + FromModulusCreateableZnRing
+{
+    pub fn new(number_ring: NumberRing, base_ring: RingValue<FpTy>) -> RingValue<Self> {
+        let max_product_expansion_factor = number_ring.product_expansion_factor();
+        let max_lift_size = int_cast(base_ring.integer_ring().clone_el(base_ring.modulus()), StaticRing::<i64>::RING, base_ring.integer_ring()) as f64 / 2.;
+        let max_product_size = max_lift_size * max_lift_size * max_product_expansion_factor;
+        let required_bits = max_product_size.log2().ceil() as usize;
+        let rns_base_primes = sample_primes(required_bits, required_bits + 10, 57, |n| number_ring.largest_suitable_prime(int_cast(n, StaticRing::<i64>::RING, BigIntRing::RING)).map(|n| int_cast(n, BigIntRing::RING, StaticRing::<i64>::RING))).unwrap();
+        let rns_base = zn_rns::Zn::new(rns_base_primes.into_iter().map(|p| RingValue::from(FpTy::create::<_, !>(|ZZ| Ok(int_cast(p, RingRef::new(ZZ), BigIntRing::RING))).unwrap())).collect(), BigIntRing::RING);
+        return Self::new_with(number_ring, base_ring, rns_base, Global);
+    }
+}
+
 impl<NumberRing, FpTy, A> NumberRingQuoBase<NumberRing, FpTy, A>
     where NumberRing: DecomposableNumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
 {
-    pub fn new_with(number_ring: NumberRing, base_ring: FpTy, rns_base: zn_rns::Zn<FpTy, BigIntRing>, allocator: A) -> Self {
+    pub fn new_with(number_ring: NumberRing, base_ring: FpTy, rns_base: zn_rns::Zn<FpTy, BigIntRing>, allocator: A) -> RingValue<Self> {
         assert!(rns_base.len() > 0);
-        Self {
+        let max_product_expansion_factor = number_ring.product_expansion_factor();
+        let max_lift_size = int_cast(base_ring.integer_ring().clone_el(base_ring.modulus()), StaticRing::<i64>::RING, base_ring.integer_ring()) as f64 / 2.;
+        let max_product_size = max_lift_size * max_lift_size * max_product_expansion_factor;
+        let ZZbig = BigIntRing::RING;
+        assert!(ZZbig.is_gt(&ZZbig.prod(rns_base.as_iter().map(|rns_base_ring| int_cast(rns_base_ring.integer_ring().clone_el(rns_base_ring.modulus()), ZZbig, rns_base_ring.integer_ring()))), &ZZbig.from_float_approx(max_product_size).unwrap()));
+        RingValue::from(Self {
             base_ring: base_ring,
             ring_decompositions: rns_base.as_iter().map(|Fp| number_ring.mod_p(Fp.clone())).collect(),
             number_ring: number_ring,
             rns_base: rns_base,
             allocator: allocator
-        }
-    }
-
-    pub fn new(number_ring: NumberRing, base_ring: FpTy) -> Self {
-        let max_product_expansion_factor = number_ring.product_expansion_factor();
-        let max_lift_size = int_cast(base_ring.integer_ring().clone_el(base_ring.modulus()), StaticRing::<i64>::RING, base_ring.integer_ring()) as f64 / 2.;
-        let max_product_size = max_lift_size * max_lift_size * max_product_expansion_factor;
-        let required_bits = max_product_size.log2().ceil() as usize;
-        // let rns_base = sample_primes(required_bits, required_bits + 10, 57, congruent_to_one_mod)
-        unimplemented!()
+        })
     }
 
     pub fn allocator(&self) -> &A {
@@ -85,6 +97,111 @@ impl<NumberRing, FpTy, A> NumberRingQuoBase<NumberRing, FpTy, A>
 
     pub fn rns_base(&self) -> &zn_rns::Zn<FpTy, BigIntRing> {
         &self.rns_base
+    }
+
+    
+    ///
+    /// Computes `sum sigma_i(x_i)` where `els` yields pairs `(x_i, sigma_i)` with `sigma_i` being
+    /// a Galois automorphism.
+    /// 
+    /// Note that this can be faster than directly computing the sum, since we can avoid some of the 
+    /// intermediate DFTs. This is possible, since we only add elements, so the coefficients grow quite
+    /// slowly, as opposed to multiplications.
+    /// 
+    pub fn sum_galois_transforms<I>(&self, els: I) -> <Self as RingBase>::Element
+        where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+            I: Iterator<Item = (<Self as RingBase>::Element, zn_64::ZnEl)>
+    {
+        let mut unreduced_result = Vec::with_capacity_in(self.rank() * self.rns_base.len(), &self.allocator);
+        unreduced_result.resize_with(self.rank() * self.rns_base.len(), || self.rns_base.at(0).zero());
+        let mut tmp = Vec::with_capacity_in(self.rank(), &self.allocator);
+        tmp.resize_with(self.rank(), || self.rns_base.at(0).zero());
+        let mut tmp_perm = Vec::with_capacity_in(self.rank(), &self.allocator);
+        tmp_perm.resize_with(self.rank(), || self.rns_base.at(0).zero());
+
+        let mut len = 0;
+        for (x, g) in els {
+            len += 1;
+            for i in 0..self.rns_base.len() {
+                let Zp = self.rns_base.at(i);
+                let from_lifted = Zp.can_hom(self.base_ring().integer_ring()).unwrap();
+                for j in 0..self.rank() {
+                    tmp[j] = from_lifted.map(self.base_ring().smallest_lift(self.base_ring().clone_el(&x.data[j])));
+                }
+                self.ring_decompositions[i].fft_forward(&mut tmp[..]);
+                <_ as DecomposedCyclotomicNumberRing<_>>::permute_galois_action(<NumberRing::DecomposedAsCyclotomic>::from_ref(&self.ring_decompositions[i]), &tmp, &mut tmp_perm, g);
+                for j in 0..self.rank() {
+                    Zp.add_assign_ref(&mut unreduced_result[i * self.rank() + j], &tmp_perm[j]);
+                }
+            }
+        }
+        drop(tmp);
+        drop(tmp_perm);
+
+        // if this is satisfied, we have enough precision to not get an overflow
+        assert!(len < int_cast(self.rns_base.integer_ring().clone_el(self.rns_base.modulus()), StaticRing::<i64>::RING, self.rns_base.integer_ring()) as usize);
+        for i in 0..self.rns_base.len() {
+            self.ring_decompositions[i].fft_backward(&mut unreduced_result[(i * self.rank())..((i + 1) * self.rank())]);
+        }
+
+        let hom = self.base_ring().can_hom(&BigIntRing::RING).unwrap();
+        let mut result = Vec::with_capacity_in(self.rank(), self.allocator.clone());
+        for j in 0..self.rank() {
+            result.push(hom.map(self.rns_base.smallest_lift(
+                self.rns_base.from_congruence((0..self.rns_base.len()).map(|i| self.rns_base.at(i).clone_el(&unreduced_result[i * self.rank() + j])))
+            )));
+        }
+        return NumberRingQuoEl {
+            data: result,
+            number_ring: PhantomData,
+            allocator: PhantomData
+        };
+    }
+}
+
+impl<NumberRing, FpTy, A> CyclotomicRing for NumberRingQuoBase<NumberRing, FpTy, A>
+    where NumberRing: DecomposableNumberRing<FpTy>,
+        NumberRing::Decomposed: DecomposedCyclotomicNumberRing<FpTy::Type>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        A: Allocator + Clone
+{
+    fn n(&self) -> usize {
+        *self.ring_decompositions()[0].cyclotomic_index_ring().modulus() as usize
+    }
+
+    fn apply_galois_action(&self, el: &<Self as RingBase>::Element, g: zn_64::ZnEl) -> <Self as RingBase>::Element {
+        assert_eq!(el.data.len(), self.rank());
+
+        let mut unreduced_result = Vec::with_capacity_in(self.rank() * self.rns_base.len(), &self.allocator);
+        unreduced_result.resize_with(self.rank() * self.rns_base.len(), || self.rns_base.at(0).zero());
+        let mut tmp = Vec::with_capacity_in(self.rank(), &self.allocator);
+        tmp.resize_with(self.rank(), || self.rns_base.at(0).zero());
+
+        for i in 0..self.rns_base.len() {
+            let Zp = self.rns_base.at(i);
+            let from_lifted = Zp.can_hom(self.base_ring().integer_ring()).unwrap();
+            for j in 0..self.rank() {
+                tmp[j] = from_lifted.map(self.base_ring().smallest_lift(self.base_ring().clone_el(&el.data[j])));
+            }
+            self.ring_decompositions[i].fft_forward(&mut tmp[..]);
+            self.ring_decompositions[i].permute_galois_action(&tmp, &mut unreduced_result[(i * self.rank())..((i + 1) * self.rank())], g);
+            self.ring_decompositions[i].fft_backward(&mut unreduced_result[(i * self.rank())..((i + 1) * self.rank())]);
+        }
+        drop(tmp);
+
+        let hom = self.base_ring().can_hom(&BigIntRing::RING).unwrap();
+        let mut result = Vec::with_capacity_in(self.rank(), self.allocator.clone());
+        for j in 0..self.rank() {
+            result.push(hom.map(self.rns_base.smallest_lift(
+                self.rns_base.from_congruence((0..self.rns_base.len()).map(|i| self.rns_base.at(i).clone_el(&unreduced_result[i * self.rank() + j])))
+            )));
+        }
+        return NumberRingQuoEl {
+            data: result,
+            number_ring: PhantomData,
+            allocator: PhantomData
+        };
     }
 }
 
@@ -501,4 +618,59 @@ impl<NumberRing, FpTy1, FpTy2, A1, A2> CanIsoFromTo<NumberRingQuoBase<NumberRing
             number_ring: PhantomData
         };
     }
+}
+
+#[cfg(test)]
+use super::pow2_cyclotomic::Pow2CyclotomicDecomposableNumberRing;
+#[cfg(test)]
+use feanor_math::algorithms::fft::cooley_tuckey::CooleyTuckeyFFT;
+#[cfg(test)]
+use feanor_math::algorithms::unity_root::get_prim_root_of_unity_pow2;
+
+#[cfg(test)]
+fn test_ring_and_elements() -> (
+    NumberRingQuo<Pow2CyclotomicDecomposableNumberRing, zn_64::Zn>,
+    Vec<NumberRingQuoEl<Pow2CyclotomicDecomposableNumberRing, zn_64::Zn>>
+) {
+    let rns_base = zn_rns::Zn::new([113, 193, 241, 257, 337].into_iter().map(zn_64::Zn::new).collect(), BigIntRing::RING);
+    let test_ring = NumberRingQuoBase::new_with(
+        Pow2CyclotomicDecomposableNumberRing::new(16),
+        zn_64::Zn::new(65536),
+        rns_base,
+        Global
+    );
+    assert_eq!(8, test_ring.rank());
+
+    let mut test_elements = Vec::new();
+    for i in [0, 1, 2, 4, 7] {
+        for j in [0, 1] {
+            for a in [-1, 1, 32768] {
+                test_elements.push(test_ring.from_canonical_basis((0..8).map(|k| if k == i { test_ring.base_ring().int_hom().map(a) } else if k == j { test_ring.base_ring().one() } else { test_ring.base_ring().zero() })));
+            }
+        }
+    }
+
+    return (test_ring, test_elements);
+}
+
+#[test]
+fn test_ring_axioms() {
+    let (ring, els) = test_ring_and_elements();
+    feanor_math::ring::generic_tests::test_ring_axioms(ring, els.into_iter());
+}
+
+#[test]
+fn test_nilpotent() {
+    let (ring, _els) = test_ring_and_elements();
+    let two_x = ring.int_hom().mul_map(ring.canonical_gen(), 2);
+    for i in 0..15 {
+        assert!(!ring.is_zero(&ring.pow(ring.clone_el(&two_x), i)));
+    }
+    assert!(ring.is_zero(&ring.pow(ring.clone_el(&two_x), 16)));
+}
+
+#[test]
+fn test_free_algebra_axioms() {
+    let (ring, _els) = test_ring_and_elements();
+    feanor_math::rings::extension::generic_tests::test_free_algebra_axioms(ring);
 }

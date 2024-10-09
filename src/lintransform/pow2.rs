@@ -42,7 +42,7 @@ use super::*;
 ///  - `row_autos` can be given to use different `𝜁`s for each block; in particular, for the block with hypercube indices `idxs`, the DWT with root
 ///    of unity `𝜁 = root_of_unity_4l^row_autos(idxs)` is used. Note that the index passed to `row_autos` is the hypercube index of some element in the
 ///    block. It does not make sense for `row_autos` to behave differently on different indices in the same block, this will lead to 
-///    `pow2_bitreversed_dwt_butterfly` to give nonsensical results. If you pass `row_autos = |_| H.galois_group_mulrepr().one()` then this uses the same
+///    `pow2_bitreversed_dwt_butterfly` to give nonsensical results. If you pass `row_autos = |_| H.cyclotomic_index_ring().one()` then this uses the same
 ///    roots of unity everywhere, i.e. results in the behavior as outlined above.
 /// 
 fn pow2_bitreversed_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'b, R, F, A>, dim_index: usize, l: usize, root_of_unity_4l: El<SlotRing<'b, R, A>>, row_autos: G) -> LinearTransform<R, F, A>
@@ -55,9 +55,9 @@ fn pow2_bitreversed_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'b, R
 {
     let m = H.len(dim_index);
     let g = H.shift_galois_element(dim_index, -1);
-    let smaller_galois_group_mulrepr = Zn::new(4 * l as u64);
-    let red = ReductionMap::new(H.galois_group_mulrepr(), &smaller_galois_group_mulrepr).unwrap();
-    assert_el_eq!(&smaller_galois_group_mulrepr, &smaller_galois_group_mulrepr.one(), &smaller_galois_group_mulrepr.pow(red.map(g), l));
+    let smaller_cyclotomic_index_ring = Zn::new(4 * l as u64);
+    let red = ReductionMap::new(H.cyclotomic_index_ring(), &smaller_cyclotomic_index_ring).unwrap();
+    assert_el_eq!(&smaller_cyclotomic_index_ring, &smaller_cyclotomic_index_ring.one(), &smaller_cyclotomic_index_ring.pow(red.map(g), l));
 
     let log2_m = ZZ.abs_log2_ceil(&(m as i64)).unwrap();
     assert!(m == 1 << log2_m, "pow2_bitreversed_cooley_tuckey_butterfly() only valid for hypercube dimensions that have a power-of-2 length");
@@ -71,15 +71,15 @@ fn pow2_bitreversed_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'b, R
     }
 
     let pow_of_zeta = |factor: TwiddleFactor| match factor {
-        TwiddleFactor::PosPowerZeta(pow) => H.slot_ring().clone_el(&zeta_power_table.get_power(H.galois_group_mulrepr().smallest_positive_lift(pow))),
-        TwiddleFactor::NegPowerZeta(pow) => H.slot_ring().negate(H.slot_ring().clone_el(&zeta_power_table.get_power(H.galois_group_mulrepr().smallest_positive_lift(pow)))),
+        TwiddleFactor::PosPowerZeta(pow) => H.slot_ring().clone_el(&zeta_power_table.get_power(H.cyclotomic_index_ring().smallest_positive_lift(pow))),
+        TwiddleFactor::NegPowerZeta(pow) => H.slot_ring().negate(H.slot_ring().clone_el(&zeta_power_table.get_power(H.cyclotomic_index_ring().smallest_positive_lift(pow)))),
         TwiddleFactor::Zero => H.slot_ring().zero()
     };
 
     let forward_mask = H.from_slot_vec(H.slot_iter(|idxs| {
         let idx_in_block = idxs[dim_index] % l;
         if idx_in_block >= l / 2 {
-            TwiddleFactor::PosPowerZeta(H.galois_group_mulrepr().zero())
+            TwiddleFactor::PosPowerZeta(H.cyclotomic_index_ring().zero())
         } else {
             TwiddleFactor::Zero
         }
@@ -88,16 +88,16 @@ fn pow2_bitreversed_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'b, R
     let diagonal_mask = H.from_slot_vec(H.slot_iter(|idxs| {
         let idx_in_block = idxs[dim_index] % l;
         if idx_in_block >= l / 2 {
-            TwiddleFactor::NegPowerZeta(H.galois_group_mulrepr().mul(H.galois_group_mulrepr().pow(g, idx_in_block - l / 2), row_autos(&idxs)))
+            TwiddleFactor::NegPowerZeta(H.cyclotomic_index_ring().mul(H.cyclotomic_index_ring().pow(g, idx_in_block - l / 2), row_autos(&idxs)))
         } else {
-            TwiddleFactor::PosPowerZeta(H.galois_group_mulrepr().zero())
+            TwiddleFactor::PosPowerZeta(H.cyclotomic_index_ring().zero())
         }
     }).map(&pow_of_zeta));
 
     let backward_mask = H.from_slot_vec(H.slot_iter(|idxs| {
         let idx_in_block = idxs[dim_index] % l;
         if idx_in_block < l / 2 {
-            TwiddleFactor::PosPowerZeta(H.galois_group_mulrepr().mul(H.galois_group_mulrepr().pow(g, idx_in_block), row_autos(&idxs)))
+            TwiddleFactor::PosPowerZeta(H.cyclotomic_index_ring().mul(H.cyclotomic_index_ring().pow(g, idx_in_block), row_autos(&idxs)))
         } else {
             TwiddleFactor::Zero
         }
@@ -136,9 +136,9 @@ fn pow2_bitreversed_inv_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'
 {
     let m = H.len(dim_index);
     let g = H.shift_galois_element(dim_index, -1);
-    let smaller_galois_group_mulrepr = Zn::new(4 * l as u64);
-    let red = ReductionMap::new(H.galois_group_mulrepr(), &smaller_galois_group_mulrepr).unwrap();
-    assert_el_eq!(&smaller_galois_group_mulrepr, &smaller_galois_group_mulrepr.one(), &smaller_galois_group_mulrepr.pow(red.map(g), l));
+    let smaller_cyclotomic_index_ring = Zn::new(4 * l as u64);
+    let red = ReductionMap::new(H.cyclotomic_index_ring(), &smaller_cyclotomic_index_ring).unwrap();
+    assert_el_eq!(&smaller_cyclotomic_index_ring, &smaller_cyclotomic_index_ring.one(), &smaller_cyclotomic_index_ring.pow(red.map(g), l));
 
     let log2_m = ZZ.abs_log2_ceil(&(m as i64)).unwrap();
     assert!(m == 1 << log2_m, "pow2_bitreversed_inv_dwt_butterfly() only valid for hypercube dimensions that have a power-of-2 length");
@@ -152,8 +152,8 @@ fn pow2_bitreversed_inv_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'
     }
 
     let pow_of_zeta = |factor: TwiddleFactor| match factor {
-        TwiddleFactor::PosPowerZeta(pow) => H.slot_ring().clone_el(&zeta_power_table.get_power(H.galois_group_mulrepr().smallest_positive_lift(pow))),
-        TwiddleFactor::NegPowerZeta(pow) => H.slot_ring().negate(H.slot_ring().clone_el(&zeta_power_table.get_power(H.galois_group_mulrepr().smallest_positive_lift(pow)))),
+        TwiddleFactor::PosPowerZeta(pow) => H.slot_ring().clone_el(&zeta_power_table.get_power(H.cyclotomic_index_ring().smallest_positive_lift(pow))),
+        TwiddleFactor::NegPowerZeta(pow) => H.slot_ring().negate(H.slot_ring().clone_el(&zeta_power_table.get_power(H.cyclotomic_index_ring().smallest_positive_lift(pow)))),
         TwiddleFactor::Zero => H.slot_ring().zero()
     };
 
@@ -162,7 +162,7 @@ fn pow2_bitreversed_inv_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'
     let mut forward_mask = H.from_slot_vec(H.slot_iter(|idxs| {
         let idx_in_block = idxs[dim_index] % l;
         if idx_in_block >= l / 2 {
-            TwiddleFactor::PosPowerZeta(H.galois_group_mulrepr().mul(H.galois_group_mulrepr().negate(H.galois_group_mulrepr().pow(g, idx_in_block - l / 2)), row_autos(&idxs)))
+            TwiddleFactor::PosPowerZeta(H.cyclotomic_index_ring().mul(H.cyclotomic_index_ring().negate(H.cyclotomic_index_ring().pow(g, idx_in_block - l / 2)), row_autos(&idxs)))
         } else {
             TwiddleFactor::Zero
         }
@@ -172,9 +172,9 @@ fn pow2_bitreversed_inv_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'
     let mut diagonal_mask = H.from_slot_vec(H.slot_iter(|idxs| {
         let idx_in_block = idxs[dim_index] % l;
         if idx_in_block >= l / 2 {
-            TwiddleFactor::NegPowerZeta(H.galois_group_mulrepr().mul(H.galois_group_mulrepr().negate(H.galois_group_mulrepr().pow(g, idx_in_block - l / 2)), row_autos(&idxs)))
+            TwiddleFactor::NegPowerZeta(H.cyclotomic_index_ring().mul(H.cyclotomic_index_ring().negate(H.cyclotomic_index_ring().pow(g, idx_in_block - l / 2)), row_autos(&idxs)))
         } else {
-            TwiddleFactor::PosPowerZeta(H.galois_group_mulrepr().zero())
+            TwiddleFactor::PosPowerZeta(H.cyclotomic_index_ring().zero())
         }
     }).map(&pow_of_zeta));
     H.ring().inclusion().mul_assign_ref_map(&mut diagonal_mask, &inv_2);
@@ -182,7 +182,7 @@ fn pow2_bitreversed_inv_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'
     let mut backward_mask = H.from_slot_vec(H.slot_iter(|idxs| {
         let idx_in_block = idxs[dim_index] % l;
         if idx_in_block < l / 2 {
-            TwiddleFactor::PosPowerZeta(H.galois_group_mulrepr().zero())
+            TwiddleFactor::PosPowerZeta(H.cyclotomic_index_ring().zero())
         } else {
             TwiddleFactor::Zero
         }
@@ -348,17 +348,17 @@ pub fn slots_to_coeffs_thin<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> Vec<L
         // then map the `ai0 + 𝜁^(n/4) ai1` to `sum_i (ai0 + 𝜁^(n/4) ai1) 𝜁^(n/(2m) i g^k)` for each slot `(k, 0)`, and similarly
         // for the slots `(*, 1)`. The negation in the second hypercolumn comes from the fact that `-𝜁^(n/4) = 𝜁^(-n/4)`
         result.extend(pow2_bitreversed_dwt(H, 0, |idxs| if idxs[1] == 0 {
-            H.galois_group_mulrepr().one()
+            H.cyclotomic_index_ring().one()
         } else {
             debug_assert!(idxs[1] == 1);
-            H.galois_group_mulrepr().neg_one()
+            H.cyclotomic_index_ring().neg_one()
         }));
         
         return result;
     } else {
         // this is the `p = 3 mod 4` case
         assert_eq!(1, H.dim_count());
-        return pow2_bitreversed_dwt(H, 0, |_idxs| H.galois_group_mulrepr().one());
+        return pow2_bitreversed_dwt(H, 0, |_idxs| H.cyclotomic_index_ring().one());
     }
 }
 
@@ -385,10 +385,10 @@ pub fn slots_to_coeffs_thin_inv<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> V
         let mut result = Vec::new();
 
         result.extend(pow2_bitreversed_inv_dwt(H, 0, |idxs| if idxs[1] == 0 {
-            H.galois_group_mulrepr().one()
+            H.cyclotomic_index_ring().one()
         } else {
             debug_assert!(idxs[1] == 1);
-            H.galois_group_mulrepr().neg_one()
+            H.cyclotomic_index_ring().neg_one()
         }));
 
         result.push(LinearTransform {
@@ -418,7 +418,7 @@ pub fn slots_to_coeffs_thin_inv<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> V
         return result;
     } else {
         assert_eq!(1, H.dim_count());
-        return pow2_bitreversed_inv_dwt(H, 0, |_idxs| H.galois_group_mulrepr().one());
+        return pow2_bitreversed_inv_dwt(H, 0, |_idxs| H.cyclotomic_index_ring().one());
     }
 }
 
@@ -429,7 +429,7 @@ pub fn coeffs_to_slots_thin<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> (Vec<
         A: Allocator + Clone,
         NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
 {
-    let trace = Trace::new(&H.galois_group_mulrepr(), H.galois_group_mulrepr().smallest_positive_lift(H.frobenius_element(1)), H.slot_ring().rank());
+    let trace = Trace::new(&H.cyclotomic_index_ring(), H.cyclotomic_index_ring().smallest_positive_lift(H.frobenius_element(1)), H.slot_ring().rank());
     let mut result = slots_to_coeffs_thin_inv(H);
     let last = LinearTransform::slot_scalar_mult(H, &H.slot_ring().inclusion().map(H.slot_ring().base_ring().invert(&H.slot_ring().base_ring().int_hom().map(H.slot_ring().rank() as i32)).unwrap()));
     result.push(last);

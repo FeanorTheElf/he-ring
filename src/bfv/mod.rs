@@ -641,11 +641,11 @@ fn test_pow2_hom_galois() {
     let P = params.create_plaintext_ring(params.t());
     let (C, _C_mul) = params.create_ciphertext_rings();    
     let sk = gen_sk::<_, Pow2BFVParams>(&C, &mut rng);
-    let gk = gen_gk::<_, Pow2BFVParams>(&C, &mut rng, &sk, P.get_ring().galois_group_mulrepr().int_hom().map(3));
+    let gk = gen_gk::<_, Pow2BFVParams>(&C, &mut rng, &sk, P.get_ring().cyclotomic_index_ring().int_hom().map(3));
     
     let m = P.canonical_gen();
     let ct = enc_sym(&P, &C, &mut rng, &m, &sk);
-    let ct_res = hom_galois::<Pow2BFVParams>(&C, ct, P.get_ring().galois_group_mulrepr().int_hom().map(3), &gk);
+    let ct_res = hom_galois::<Pow2BFVParams>(&C, ct, P.get_ring().cyclotomic_index_ring().int_hom().map(3), &gk);
     let res = dec(&P, &C, ct_res, &sk);
 
     assert_el_eq!(&P, &P.pow(P.canonical_gen(), 3), &res);

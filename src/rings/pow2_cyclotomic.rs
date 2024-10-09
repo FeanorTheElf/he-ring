@@ -4,18 +4,20 @@ use feanor_math::algorithms;
 use feanor_math::algorithms::fft::*;
 use feanor_math::algorithms::miller_rabin::is_prime;
 use feanor_math::algorithms::unity_root::get_prim_root_of_unity_pow2;
+use feanor_math::divisibility::DivisibilityRing;
 use feanor_math::primitive_int::StaticRing;
 use feanor_math::ring::*;
 use feanor_math::assert_el_eq;
 use feanor_math::homomorphism::*;
 use feanor_math::integer::*;
+use feanor_math::rings::extension::FreeAlgebra;
+use feanor_math::rings::extension::FreeAlgebraStore;
 use feanor_math::rings::zn::zn_64;
 use feanor_math::rings::zn::zn_64::ZnEl;
 use feanor_math::rings::zn::FromModulusCreateableZnRing;
 use feanor_math::seq::*;
 use feanor_math::rings::zn::{ZnRing, ZnRingStore, zn_rns};
 use feanor_math::rings::zn::zn_64::Zn;
-
 use std::alloc::Allocator;
 use std::alloc::Global;
 
@@ -24,6 +26,8 @@ use super::number_ring_quo::*;
 use crate::rings::decomposition::*;
 use crate::sample_primes;
 use crate::StdZn;
+use crate::cyclotomic::CyclotomicRing;
+
 
 pub struct Pow2CyclotomicDecomposableNumberRing {
     log2_n: usize
@@ -104,6 +108,46 @@ impl<FpTy> DecomposableNumberRing<FpTy> for Pow2CyclotomicDecomposableNumberRing
     }
 }
 
+impl<FpTy> DecomposableCyclotomicNumberRing<FpTy> for Pow2CyclotomicDecomposableNumberRing
+    where FpTy: RingStore + Clone,
+        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>
+{
+    type DecomposedAsCyclotomic = Pow2CyclotomicDecomposedNumberRing<FpTy, CooleyTuckeyFFT<FpTy::Type, FpTy::Type, Identity<FpTy>>>;
+
+    fn cyclotomic_index_ring(&self) -> Zn {
+        zn_64::Zn::new(1 << self.log2_n)
+    }
+}
+
+impl<R, F> DecomposedCyclotomicNumberRing<R::Type> for Pow2CyclotomicDecomposedNumberRing<R, F> 
+    where R: RingStore,
+        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + DivisibilityRing,
+        F: FFTAlgorithm<R::Type> + PartialEq
+{
+    fn cyclotomic_index_ring(&self) -> zn_64::Zn {
+        zn_64::Zn::new(2 * self.fft_table.len() as u64)
+    }
+
+    fn permute_galois_action(&self, src: &[<R::Type as RingBase>::Element], dst: &mut [<R::Type as RingBase>::Element], galois_element: zn_64::ZnEl) {
+        assert_eq!(self.rank(), src.len());
+        assert_eq!(self.rank(), dst.len());
+
+        let ring = self.base_ring();
+        let index_ring = self.cyclotomic_index_ring();
+        let hom = index_ring.can_hom(&StaticRing::<i64>::RING).unwrap();
+        let bitlength = StaticRing::<i64>::RING.abs_log2_ceil(&(self.rank() as i64)).unwrap();
+        debug_assert_eq!(1 << bitlength, self.rank());
+
+        // the elements of src resp. dst follow an order derived from the bitreversing order of the underlying FFT
+        let index_to_galois_el = |i: usize| hom.map(2 * bitreverse(i, bitlength) as i64 + 1);
+        let galois_el_to_index = |s: ZnEl| bitreverse((index_ring.smallest_positive_lift(s) as usize - 1) / 2, bitlength);
+
+        for i in 0..self.rank() {
+            dst[i] = ring.clone_el(&src[galois_el_to_index(index_ring.mul(galois_element, index_to_galois_el(i)))]);
+        }
+    }
+}
+
 pub struct Pow2CyclotomicDecomposedNumberRing<R, F> 
     where R: RingStore,
         R::Type: ZnRing,
@@ -151,4 +195,65 @@ impl<R, F> DecomposedNumberRing<R::Type> for Pow2CyclotomicDecomposedNumberRing<
     fn base_ring(&self) -> RingRef<R::Type> {
         RingRef::new(self.ring.get_ring())
     }
+}
+
+#[cfg(test)]
+fn edge_case_elements<'a, NumberRing, FpTy, A>(R: &'a DoubleRNSRing<NumberRing, FpTy, A>) -> impl 'a + Iterator<Item = El<DoubleRNSRing<NumberRing, FpTy, A>>>
+    where NumberRing: DecomposableNumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        A: Allocator + Clone
+{
+    assert_eq!(2, R.get_ring().rns_base().len());
+    assert_eq!(17, int_cast(R.get_ring().rns_base().at(0).integer_ring().clone_el(R.get_ring().rns_base().at(0).modulus()), StaticRing::<i64>::RING, R.get_ring().rns_base().at(0).integer_ring()));
+    assert_eq!(8, R.rank());
+    [
+        ring_literal!(&R, [0, 0, 0, 0, 0, 0, 0, 0]),
+        ring_literal!(&R, [1, 0, 0, 0, 0, 0, 0, 0]),
+        ring_literal!(&R, [-1, 0, 0, 0, 0, 0, 0, 0]),
+        ring_literal!(&R, [0, 0, 0, 0, 0, 0, 0, 1]),
+        ring_literal!(&R, [0, 0, 0, 0, 0, 0, 0, -1]),
+        ring_literal!(&R, [1, 1, 1, 1, 1, 1, 1, 1]),
+        ring_literal!(&R, [1, -1, 0, 0, 0, 0, 0, 0]),
+        // these elements are non-invertible, but in the same prime ideal `(X + 3)`
+        ring_literal!(&R, [15, 8, 1, 0, 0, 0, 0, 0]),
+        ring_literal!(&R, [3, 1, 0, 0, 0, 0, 0, 0]),
+        ring_literal!(&R, [0, 15, 8, 1, 0, 0, 0, 0])
+    ].into_iter()
+}
+
+#[test]
+fn test_ring_axioms() {
+    let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
+    let R = DoubleRNSRingBase::new_with(Pow2CyclotomicDecomposableNumberRing::new(16), rns_base, Global);
+    feanor_math::ring::generic_tests::test_ring_axioms(&R, edge_case_elements(&R));
+}
+
+#[test]
+fn test_divisibility_axioms() {
+    let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
+    let R = DoubleRNSRingBase::new_with(Pow2CyclotomicDecomposableNumberRing::new(16), rns_base, Global);
+    feanor_math::divisibility::generic_tests::test_divisibility_axioms(&R, edge_case_elements(&R));
+}
+
+#[test]
+fn test_free_algebra_axioms() {
+    let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
+    let R = DoubleRNSRingBase::new_with(Pow2CyclotomicDecomposableNumberRing::new(16), rns_base, Global);
+    feanor_math::rings::extension::generic_tests::test_free_algebra_axioms(R);
+}
+
+#[test]
+fn test_cyclotomic_ring_axioms() {
+    let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
+    let R = DoubleRNSRingBase::new_with(Pow2CyclotomicDecomposableNumberRing::new(16), rns_base, Global);
+    feanor_math::rings::extension::generic_tests::test_free_algebra_axioms(R);
+}
+
+#[test]
+fn test_permute_galois_automorphism() {
+    let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
+    let R = DoubleRNSRingBase::new_with(Pow2CyclotomicDecomposableNumberRing::new(16), rns_base, Global);
+    assert_el_eq!(R, R.pow(R.canonical_gen(), 3), R.get_ring().apply_galois_action(&R.canonical_gen(), R.get_ring().cyclotomic_index_ring().int_hom().map(3)));
+    assert_el_eq!(R, R.pow(R.canonical_gen(), 6), R.get_ring().apply_galois_action(&R.pow(R.canonical_gen(), 2), R.get_ring().cyclotomic_index_ring().int_hom().map(3)));
 }

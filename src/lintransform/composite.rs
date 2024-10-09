@@ -20,16 +20,16 @@ fn column_dwt_matrix<'a, R, F, A>(H: &HypercubeIsomorphism<'a, R, F, A>, dim_ind
         A: Allocator + Clone,
         NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
 {
-    let Gal = H.galois_group_mulrepr();
+    let Gal = H.cyclotomic_index_ring();
     let ZZ_to_Gal = Gal.can_hom(&StaticRing::<i64>::RING).unwrap();
 
     OwnedMatrix::from_fn(H.len(dim_index), H.len(dim_index), |i, j| {
-        let exponent = H.galois_group_mulrepr().prod([
+        let exponent = H.cyclotomic_index_ring().prod([
             H.shift_galois_element(dim_index, -(i as i64)),
             ZZ_to_Gal.map(j as i64),
             ZZ_to_Gal.map(H.ring().n() as i64 / H.corresponding_factor_n(dim_index))
         ]);
-        return H.slot_ring().clone_el(&*zeta_powertable.get_power(H.galois_group_mulrepr().smallest_lift(exponent)));
+        return H.slot_ring().clone_el(&*zeta_powertable.get_power(H.cyclotomic_index_ring().smallest_lift(exponent)));
     })
 }
 
@@ -88,7 +88,7 @@ fn slots_to_powcoeffs_fat_fst_step<'a, R, F, A>(H: &HypercubeIsomorphism<'a, R, 
         A: Allocator + Clone,
         NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
 {
-    let Gal = H.galois_group_mulrepr();
+    let Gal = H.cyclotomic_index_ring();
     let ZZ_to_Gal = Gal.can_hom(&StaticRing::<i64>::RING).unwrap();
 
     OwnedMatrix::from_fn(H.len(dim_index) * H.slot_ring().rank(), H.len(dim_index) * H.slot_ring().rank(), |row_idx, col_idx| {

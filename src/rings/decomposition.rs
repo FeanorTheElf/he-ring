@@ -1,7 +1,7 @@
 use feanor_math::integer::IntegerRing;
 use feanor_math::ring::*;
 use feanor_math::rings::extension::FreeAlgebra;
-use feanor_math::rings::zn::zn_64::{Zn, ZnEl};
+use feanor_math::rings::zn::zn_64::{self, Zn, ZnEl};
 use feanor_math::rings::zn::ZnRing;
 
 use crate::cyclotomic::CyclotomicRing;
@@ -64,6 +64,27 @@ pub trait DecomposableNumberRing<R>: PartialEq
     }
 }
 
+pub trait IsEq<T: ?Sized> {
+
+    fn from_ref<'a>(t: &'a T) -> &'a Self;
+    fn to_ref<'a>(&'a self) -> &'a T;
+}
+
+impl<T: ?Sized> IsEq<T> for T {
+    
+    fn from_ref<'a>(t: &'a T) -> &'a Self { t }
+    fn to_ref<'a>(&'a self) -> &'a T { self }
+}
+
+pub trait DecomposableCyclotomicNumberRing<R>: DecomposableNumberRing<R>
+    where R: RingStore,
+        R::Type: ZnRing
+{    
+    type DecomposedAsCyclotomic: DecomposedCyclotomicNumberRing<R::Type> + IsEq<Self::Decomposed>;
+
+    fn cyclotomic_index_ring(&self) -> Zn;
+}
+
 ///
 /// A [`DecomposableNumberRing`] `R` modulo a prime `p` that splits completely in `R`.
 /// 
@@ -76,4 +97,11 @@ pub trait DecomposedNumberRing<R: ?Sized + ZnRing>: PartialEq {
     fn fft_forward(&self, data: &mut [R::Element]);
 
     fn fft_backward(&self, data: &mut [R::Element]);
+}
+
+pub trait DecomposedCyclotomicNumberRing<R: ?Sized + ZnRing>: DecomposedNumberRing<R> {
+
+    fn cyclotomic_index_ring(&self) -> Zn;
+
+    fn permute_galois_action(&self, src: &[R::Element], dst: &mut [R::Element], galois_element: zn_64::ZnEl);
 }

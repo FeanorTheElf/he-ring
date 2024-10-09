@@ -32,7 +32,7 @@ pub trait CyclotomicRing: FreeAlgebra {
     ///
     fn n(&self) -> usize;
 
-    fn galois_group_mulrepr(&self) -> zn_64::Zn {
+    fn cyclotomic_index_ring(&self) -> zn_64::Zn {
         zn_64::Zn::new(self.n() as u64)
     }
 

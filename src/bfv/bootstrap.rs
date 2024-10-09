@@ -93,8 +93,8 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
             let H = HypercubeIsomorphism::load(format!("{}_hypercube.json", filename).as_str(), plaintext_ring.get_ring());
             let original_H = H.reduce_modulus(original_plaintext_ring.get_ring());
             
-            let slots_to_coeffs = CompiledLinearTransform::load_seq(format!("{}_slots_to_coeffs.json", filename).as_str(), &original_plaintext_ring, original_H.galois_group_mulrepr());
-            let coeffs_to_slots = CompiledLinearTransform::load_seq(format!("{}_coeffs_to_slots.json", filename).as_str(), &plaintext_ring, H.galois_group_mulrepr());
+            let slots_to_coeffs = CompiledLinearTransform::load_seq(format!("{}_slots_to_coeffs.json", filename).as_str(), &original_plaintext_ring, original_H.cyclotomic_index_ring());
+            let coeffs_to_slots = CompiledLinearTransform::load_seq(format!("{}_coeffs_to_slots.json", filename).as_str(), &plaintext_ring, H.cyclotomic_index_ring());
             let trace = unimplemented!();
 
             return Self {
@@ -133,8 +133,8 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
 
             if let Some(filename) = store_data {
                 H.save(format!("{}_hypercube.json", filename).as_str());
-                CompiledLinearTransform::save_seq(&compiled_slots_to_coeffs_thin, format!("{}_slots_to_coeffs.json", filename).as_str(), &original_plaintext_ring, original_H.galois_group_mulrepr());
-                CompiledLinearTransform::save_seq(&compiled_coeffs_to_slots_thin, format!("{}_coeffs_to_slots.json", filename).as_str(), &plaintext_ring, H.galois_group_mulrepr());
+                CompiledLinearTransform::save_seq(&compiled_slots_to_coeffs_thin, format!("{}_slots_to_coeffs.json", filename).as_str(), &original_plaintext_ring, original_H.cyclotomic_index_ring());
+                CompiledLinearTransform::save_seq(&compiled_coeffs_to_slots_thin, format!("{}_coeffs_to_slots.json", filename).as_str(), &plaintext_ring, H.cyclotomic_index_ring());
             }
     
             return Self {
@@ -199,8 +199,8 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
         if let Some(trace) = &self.coeffs_to_slots_thin.1 {
             result.extend(trace.required_galois_keys());
         }
-        result.sort_by_key(|g| P.get_ring().galois_group_mulrepr().smallest_positive_lift(*g));
-        result.dedup_by(|g, s| P.get_ring().galois_group_mulrepr().eq_el(g, s));
+        result.sort_by_key(|g| P.get_ring().cyclotomic_index_ring().smallest_positive_lift(*g));
+        result.dedup_by(|g, s| P.get_ring().cyclotomic_index_ring().eq_el(g, s));
         return result;
     }
 
@@ -295,7 +295,7 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
 }
 
 fn hom_compute_linear_transform<Params: BFVParams>(P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, input: Ciphertext<Params>, transform: &[CompiledLinearTransform<PlaintextZn, Params::PlaintextRingDecomposition, Global>], gk: &[(ZnEl, KeySwitchKey<Params>)], key_switches: &mut usize) -> Ciphertext<Params> {
-    let Gal = P.get_ring().galois_group_mulrepr();
+    let Gal = P.get_ring().cyclotomic_index_ring();
     let get_gk = |g: &ZnEl| &gk.iter().filter(|(s, _)| Gal.eq_el(g, s)).next().unwrap().1;
     return transform.iter().fold(input, |current, T| T.evaluate_generic(
         current,
@@ -314,7 +314,7 @@ fn hom_compute_linear_transform<Params: BFVParams>(P: &PlaintextRing<Params>, C:
 }
 
 fn hom_compute_trace<Params: BFVParams>(P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, input: Ciphertext<Params>, trace: &Trace, gk: &[(ZnEl, KeySwitchKey<Params>)], key_switches: &mut usize) -> Ciphertext<Params> {
-    let Gal = P.get_ring().galois_group_mulrepr();
+    let Gal = P.get_ring().cyclotomic_index_ring();
     let get_gk = |g: &ZnEl| &gk.iter().filter(|(s, _)| Gal.eq_el(g, s)).next().unwrap().1;
     return trace.evaluate_generic(input, |x, y| hom_add(C, x, y), |x, g| {
         if !Gal.is_one(&g) {
