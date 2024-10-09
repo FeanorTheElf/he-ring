@@ -95,14 +95,15 @@ impl<FpTy> DecomposableNumberRing<FpTy> for Pow2CyclotomicDecomposableNumberRing
     }
 
     fn largest_suitable_prime(&self, leq_than: i64) -> Option<i64> {
-        let n = 1 << self.log2_n;
-        let mut current = leq_than - (leq_than % n) + 1;
+        let modulus = 1 << self.log2_n;
+        let mut current = (leq_than - 1) - ((leq_than - 1) % modulus) + 1;
         while current > 0 && !is_prime(StaticRing::<i64>::RING, &current, 10) {
-            current -= n;
+            current -= modulus;
         }
         if current <= 0 {
             return None;
         } else {
+            assert!(current <= leq_than);
             return Some(current);
         }
     }

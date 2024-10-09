@@ -18,6 +18,7 @@ use super::double_rns_ring::*;
 use crate::cyclotomic::CyclotomicRing;
 use crate::rnsconv::*;
 use crate::rings::decomposition::*;
+use crate::IsEq;
 
 // don't use the matrix one here, as in our case, one dimension is very small (e.g. 3), and the matrix
 // version pads to multiples of 16
@@ -293,11 +294,11 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, Zn, A>
     /// # use feanor_math::integer::BigIntRing;
     /// # use feanor_math::algorithms::fft::cooley_tuckey::CooleyTuckeyFFT;
     /// # use he_ring::rings::double_rns_ring::DoubleRNSRingBase;
-    /// # use he_ring::rings::pow2_cyclotomic::Pow2CyclotomicFFT;
+    /// # use he_ring::rings::pow2_cyclotomic::Pow2CyclotomicDecomposableNumberRing;
     /// # use feanor_math::rings::extension::FreeAlgebraStore;
     /// # use feanor_math::seq::*;
     /// let rns_base = vec![Zn::new(17), Zn::new(97), Zn::new(113)];
-    /// let ring = DoubleRNSRingBase::<_, Pow2CyclotomicFFT<Zn, CooleyTuckeyFFT<ZnBase, ZnBase, Identity<Zn>>>>::new(zn_rns::Zn::new(rns_base.clone(), BigIntRing::RING), 3);
+    /// let ring = DoubleRNSRingBase::new(Pow2CyclotomicDecomposableNumberRing::new(16), zn_rns::Zn::new(rns_base.clone(), BigIntRing::RING));
     /// let mut rng = oorandom::Rand64::new(1);
     /// 
     /// // build the right-hand side operand
@@ -324,7 +325,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, Zn, A>
     /// # use feanor_math::rings::zn::zn_64::*;
     /// # use feanor_math::algorithms::fft::cooley_tuckey::CooleyTuckeyFFT;
     /// # use he_ring::rings::double_rns_ring::DoubleRNSRingBase;
-    /// # use he_ring::rings::pow2_cyclotomic::Pow2CyclotomicFFT;
+    /// # use he_ring::rings::pow2_cyclotomic::Pow2CyclotomicDecomposableNumberRing;
     /// # use feanor_math::rings::extension::FreeAlgebraStore;
     /// # use feanor_math::integer::BigIntRing;
     /// # use feanor_math::rings::finite::*;
@@ -332,7 +333,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, Zn, A>
     /// # use feanor_math::primitive_int::StaticRing;
     /// # use feanor_math::seq::*;
     /// let rns_base = vec![Zn::new(17), Zn::new(97), Zn::new(113)];
-    /// let ring = DoubleRNSRingBase::<Zn, Pow2CyclotomicFFT<Zn, CooleyTuckeyFFT<ZnBase, ZnBase, Identity<Zn>>>>::new(zn_rns::Zn::new(rns_base.clone(), BigIntRing::RING), 3);
+    /// let ring = DoubleRNSRingBase::new(Pow2CyclotomicDecomposableNumberRing::new(16), zn_rns::Zn::new(rns_base.clone(), BigIntRing::RING));
     /// 
     /// let mut rng = oorandom::Rand64::new(1);
     /// 

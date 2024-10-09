@@ -192,7 +192,7 @@ fn compute_hypercube_structure(n: i64, p: i64) -> (Vec<HypercubeDimension>, Zn) 
     let iso = Zn.into_can_hom(zn_big::Zn::new(ZZ, n)).ok().unwrap().compose((&Zn_rns).into_can_iso(zn_big::Zn::new(ZZ, n)).ok().unwrap());
     let from_crt = |index: usize, value: ZnEl| iso.map(Zn_rns.from_congruence((0..factorization.len()).map(|j| if j == index { value } else { Zn_rns.at(j).one() })));
 
-    let mut dims = Vec::new();
+    let mut result = Vec::new();
     for (i, (q, k)) in factorization.iter().enumerate() {
         let Zqk = Zn_rns.at(i);
         if *q == 2 {
@@ -209,7 +209,7 @@ fn compute_hypercube_structure(n: i64, p: i64) -> (Vec<HypercubeDimension>, Zn) 
                 if p % 4 == 1 {
                     // `p` is in `<g1>`
                     let logg1_p = unit_group_dlog(Zqk, g1, ord_g1, Zqk.can_hom(&ZZ).unwrap().map(p)).unwrap();
-                    dims.push(HypercubeDimension {
+                    result.push(HypercubeDimension {
                         local_order_of_p: ord_g1 / signed_gcd(logg1_p, ord_g1, &ZZ), 
                         base_group_order: ord_g1,
                         order_of_g_main: ord_g1,
@@ -217,7 +217,7 @@ fn compute_hypercube_structure(n: i64, p: i64) -> (Vec<HypercubeDimension>, Zn) 
                         factor_n: (2, k - 1),
                         is_primary_dim: true
                     });
-                    dims.push(HypercubeDimension {
+                    result.push(HypercubeDimension {
                         local_order_of_p: 1, 
                         order_of_g_main: 2,
                         base_group_order: 2,
@@ -228,7 +228,7 @@ fn compute_hypercube_structure(n: i64, p: i64) -> (Vec<HypercubeDimension>, Zn) 
                 } else {
                     // `<p, g1> = (Z/2^kZ)*` and `p * g2 in <g1>`
                     let logg1_pg2 = unit_group_dlog(Zqk, g1, ord_g1, Zqk.mul(Zqk.can_hom(&ZZ).unwrap().map(p), g2)).unwrap();
-                    dims.push(HypercubeDimension {
+                    result.push(HypercubeDimension {
                         local_order_of_p: max(ord_g1 / signed_gcd(logg1_pg2, ord_g1, &ZZ), 2),
                         order_of_g_main: ord_g1,
                         base_group_order: 2 * ord_g1,
@@ -244,7 +244,7 @@ fn compute_hypercube_structure(n: i64, p: i64) -> (Vec<HypercubeDimension>, Zn) 
             let ord_g = euler_phi(&[(*q, *k)]);
             let logg_p = unit_group_dlog(Zqk, g, ord_g, Zqk.can_hom(&ZZ).unwrap().map(p)).unwrap();
             let ord_p = ord_g / signed_gcd(logg_p, ord_g, ZZ);
-            dims.push(HypercubeDimension {
+            result.push(HypercubeDimension {
                 local_order_of_p: ord_p, 
                 order_of_g_main: ord_g,
                 base_group_order: ord_g,
@@ -254,7 +254,7 @@ fn compute_hypercube_structure(n: i64, p: i64) -> (Vec<HypercubeDimension>, Zn) 
             });
         }
     }
-    return (dims, Zn);
+    return (result, Zn);
 }
 
 fn order_hypercube_dimensions(mut dims: Vec<HypercubeDimension>) -> (Vec<HypercubeDimension>, Vec<usize>) {
@@ -314,7 +314,7 @@ pub struct HypercubeIsomorphism<'a, NumberRing, FpTy, A>
         FpTy: RingStore + Clone,
         FpTy::Type: StdZn,
         A: Allocator + Clone,
-        NumberRingQuoBase<NumberRing, FpTy, A>: CyclotomicRing + RingExtension<BaseRing = FpTy>,
+        
 {
     ring: &'a NumberRingQuoBase<NumberRing, FpTy, A>,
     slot_unit_vec: El<NumberRingQuo<NumberRing, FpTy, A>>,
@@ -330,7 +330,7 @@ impl<'a, NumberRing, FpTy, A> HypercubeIsomorphism<'a, NumberRing, FpTy, A>
         FpTy: RingStore + Clone,
         FpTy::Type: StdZn,
         A: Allocator + Clone,
-        NumberRingQuoBase<NumberRing, FpTy, A>: CyclotomicRing + RingExtension<BaseRing = FpTy>,
+        
 {
     pub fn new<const LOG: bool>(ring: &'a NumberRingQuoBase<NumberRing, FpTy, A>) -> Self {
         let t = int_cast(ring.base_ring().integer_ring().clone_el(ring.base_ring().modulus()), ZZ, ring.base_ring().integer_ring());
@@ -479,7 +479,7 @@ impl<'a, NumberRing, FpTy, A> HypercubeIsomorphism<'a, NumberRing, FpTy, A>
         FpTy: RingStore + Clone,
         FpTy::Type: StdZn,
         A: Allocator + Clone,
-        NumberRingQuoBase<NumberRing, FpTy, A>: CyclotomicRing + RingExtension<BaseRing = FpTy>,
+        
 {
     ///
     /// Returns the number of dimensions of the hypercube
@@ -682,7 +682,7 @@ pub mod serialization {
             FpTy: RingStore + Clone,
             FpTy::Type: StdZn,
             A: Allocator + Clone,
-            NumberRingQuoBase<NumberRing, FpTy, A>: CyclotomicRing + RingExtension<BaseRing = FpTy>,
+            
     {
         t: i64,
         n: usize,
@@ -699,7 +699,7 @@ pub mod serialization {
             FpTy: RingStore + Clone,
             FpTy::Type: StdZn,
             A: Allocator + Clone,
-            NumberRingQuoBase<NumberRing, FpTy, A>: CyclotomicRing + RingExtension<BaseRing = FpTy>,
+            
     {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
             where S: Serializer
@@ -722,7 +722,7 @@ pub mod serialization {
             FpTy: RingStore + Clone,
             FpTy::Type: StdZn,
             A: Allocator + Clone,
-            NumberRingQuoBase<NumberRing, FpTy, A>: CyclotomicRing + RingExtension<BaseRing = FpTy>,
+            
     {
         pub ring: &'a NumberRingQuoBase<NumberRing, FpTy, A>
     }
@@ -732,7 +732,7 @@ pub mod serialization {
             FpTy: RingStore + Clone,
             FpTy::Type: StdZn,
             A: Allocator + Clone,
-            NumberRingQuoBase<NumberRing, FpTy, A>: CyclotomicRing + RingExtension<BaseRing = FpTy>,
+            
     {
         t: i64,
         n: usize,
@@ -751,7 +751,7 @@ pub mod serialization {
             FpTy: RingStore + Clone,
             FpTy::Type: StdZn,
             A: Allocator + Clone,
-            NumberRingQuoBase<NumberRing, FpTy, A>: CyclotomicRing + RingExtension<BaseRing = FpTy>,
+            
     {
         type Value = HypercubeIsomorphismDeserializable<'a, NumberRing, FpTy, A>;
 
@@ -763,7 +763,7 @@ pub mod serialization {
                     FpTy: RingStore + Clone,
                     FpTy::Type: StdZn,
                     A: Allocator + Clone,
-                    NumberRingQuoBase<NumberRing, FpTy, A>: CyclotomicRing + RingExtension<BaseRing = FpTy>,
+                    
             {
                 poly_ring: DensePolyRing<&'a FpTy>,
                 ring: &'a NumberRingQuoBase<NumberRing, FpTy, A>
@@ -774,7 +774,7 @@ pub mod serialization {
                     FpTy: RingStore + Clone,
                     FpTy::Type: StdZn,
                     A: Allocator + Clone,
-                    NumberRingQuoBase<NumberRing, FpTy, A>: CyclotomicRing + RingExtension<BaseRing = FpTy>,
+                    
             {
                 type Value = HypercubeIsomorphismDeserializable<'a, NumberRing, FpTy, A>;
 
@@ -902,7 +902,7 @@ pub mod serialization {
             FpTy: RingStore + Clone,
             FpTy::Type: StdZn,
             A: Allocator + Clone,
-            NumberRingQuoBase<NumberRing, FpTy, A>: CyclotomicRing + RingExtension<BaseRing = FpTy>,
+            
     {
         fn from(value: HypercubeIsomorphismDeserializable<'a, NumberRing, FpTy, A>) -> Self {
             let t = int_cast(value.ring.base_ring().integer_ring().clone_el(value.ring.base_ring().modulus()), ZZ, value.ring.base_ring().integer_ring());
@@ -948,7 +948,7 @@ pub mod serialization {
             FpTy: RingStore + Clone,
             FpTy::Type: StdZn,
             A: Allocator + Clone,
-            NumberRingQuoBase<NumberRing, FpTy, A>: CyclotomicRing + RingExtension<BaseRing = FpTy>,
+            
     {
         pub fn with_serializable<G>(&self, op: G)
             where G: FnOnce(HypercubeIsomorphismSerializable<NumberRing, FpTy, A>)
@@ -1070,12 +1070,19 @@ fn test_compute_hypercube_structure_composite() {
 
 #[test]
 fn test_create_hypercube() {
-    let ring = NumberRingQuoBase::new(OddCyclotomicDecomposableNumberRing::new(31 * 11), Zn::new(23 * 23 * 23));
+    let ring = NumberRingQuoBase::new(OddCyclotomicDecomposableNumberRing::new(31 * 11), Zn::new(8));
     let hypercube = HypercubeIsomorphism::new::<false>(ring.get_ring());
 
     assert_eq!(2, hypercube.dim_count());
     assert_eq!(1, hypercube.len(0));
     assert_eq!(30, hypercube.len(1));
+
+    let ring = NumberRingQuoBase::new(OddCyclotomicDecomposableNumberRing::new(31 * 11), Zn::new(23 * 23));
+    let hypercube = HypercubeIsomorphism::new::<false>(ring.get_ring());
+
+    assert_eq!(2, hypercube.dim_count());
+    assert_eq!(3, hypercube.len(0));
+    assert_eq!(10, hypercube.len(1));
 }
 
 #[test]
@@ -1137,20 +1144,20 @@ fn test_order_hypercube_dimensions_composite() {
         // dims of `<2> <= (Z/341Z)*`
         let dims = vec![
             HypercubeDimension {
-                order_of_g_main: 30,
-                g_main: ring.int_hom().map(3),
-                local_order_of_p: 5,
-                factor_n: (31, 1),
-                is_primary_dim: true,
-                base_group_order: 30
-            },
-            HypercubeDimension {
                 order_of_g_main: 10,
                 g_main: ring.int_hom().map(2),
                 local_order_of_p: 10,
                 factor_n: (11, 1),
                 is_primary_dim: true,
                 base_group_order: 10
+            },
+            HypercubeDimension {
+                order_of_g_main: 30,
+                g_main: ring.int_hom().map(3),
+                local_order_of_p: 5,
+                factor_n: (31, 1),
+                is_primary_dim: true,
+                base_group_order: 30
             }
         ];
         let (dims, dim_lengths) = order_hypercube_dimensions(dims);
@@ -1166,6 +1173,44 @@ fn test_order_hypercube_dimensions_composite() {
         assert_el_eq!(ring, ring.int_hom().map(3), dims[1].g_main);
         assert!(dims[1].is_primary_dim);
         assert_eq!(5, dims[1].order_of_p());
+    }
+    {
+        let ring = Zn::new(11 * 31);
+        // dims of `<23> <= (Z/341Z)*`
+        let dims = vec![
+            HypercubeDimension {
+                order_of_g_main: 10,
+                base_group_order: 10,
+                g_main: ring.int_hom().map(3),
+                local_order_of_p: 1,
+                factor_n: (11, 1),
+                is_primary_dim: true
+            },
+            HypercubeDimension {
+                order_of_g_main: 30,
+                base_group_order: 30,
+                g_main: ring.int_hom().map(2),
+                local_order_of_p: 10,
+                factor_n: (31, 1),
+                is_primary_dim: true
+            }
+        ];
+        // the resulting order is fixed, since we use a stable sort, thus
+        // in this case (where the `local_order_of_p`s are the same), the
+        // dimension order remains unchanged
+        let (dims, dim_lengths) = order_hypercube_dimensions(dims);
+        assert_eq!(&[3, 10][..], &dim_lengths);
+        assert_eq!(2, dims.len());
+
+        assert_eq!((31, 1), dims[0].factor_n());
+        assert_el_eq!(ring, ring.int_hom().map(2), dims[0].g_main);
+        assert!(dims[0].is_primary_dim);
+        assert_eq!(10, dims[0].order_of_p());
+
+        assert_eq!((11, 1), dims[1].factor_n());
+        assert_el_eq!(ring, ring.int_hom().map(3), dims[1].g_main);
+        assert!(dims[1].is_primary_dim);
+        assert_eq!(1, dims[1].order_of_p());
     }
 }
 

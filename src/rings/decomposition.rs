@@ -5,6 +5,7 @@ use feanor_math::rings::zn::zn_64::{self, Zn, ZnEl};
 use feanor_math::rings::zn::ZnRing;
 
 use crate::cyclotomic::CyclotomicRing;
+use crate::IsEq;
 
 ///
 /// Trait for objects that represent number rings `R = Z[X]/(f)` by the isomorphisms
@@ -62,18 +63,6 @@ pub trait DecomposableNumberRing<R>: PartialEq
     fn product_expansion_factor(&self) -> f64 {
         self.inf_to_can_norm_expansion_factor().powi(2) * self.can_to_inf_norm_expansion_factor()
     }
-}
-
-pub trait IsEq<T: ?Sized> {
-
-    fn from_ref<'a>(t: &'a T) -> &'a Self;
-    fn to_ref<'a>(&'a self) -> &'a T;
-}
-
-impl<T: ?Sized> IsEq<T> for T {
-    
-    fn from_ref<'a>(t: &'a T) -> &'a Self { t }
-    fn to_ref<'a>(&'a self) -> &'a T { self }
 }
 
 pub trait DecomposableCyclotomicNumberRing<R>: DecomposableNumberRing<R>

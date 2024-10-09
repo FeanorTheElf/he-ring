@@ -26,8 +26,9 @@ use trace::Trace;
 
 use crate::cyclotomic::*;
 use crate::rings::decomposition::*;
+use crate::rings::number_ring_quo::*;
+use crate::rings::odd_cyclotomic::*;
 use crate::rings::slots::*;
-use crate::rings::ntt_ring::*;
 use crate::StdZn;
 
 pub mod pow2;
@@ -82,12 +83,11 @@ impl GaloisElementIndex {
         return self;
     }
 
-    fn galois_element<R, F, A>(&self, H: &HypercubeIsomorphism<R, F, A>) -> ZnEl
-        where R: RingStore,
-            R::Type: StdZn,
-            F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
-            A: Allocator + Clone,
-            NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
+    fn galois_element<NumberRing, FpTy, A>(&self, H: &HypercubeIsomorphism<NumberRing, FpTy, A>) -> ZnEl
+        where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+            FpTy: RingStore + Clone,
+            FpTy::Type: StdZn,
+            A: Allocator + Clone
     {
         H.cyclotomic_index_ring().prod(self.shift_steps.iter().enumerate().map(|(i, s)| H.shift_galois_element(i, *s)).chain([H.frobenius_element(self.frobenius_count)].into_iter()))
     }
@@ -104,12 +104,11 @@ impl GaloisElementIndex {
         }
     }
 
-    fn canonicalize<R, F, A>(&mut self, H: &HypercubeIsomorphism<R, F, A>)
-        where R: RingStore,
-            R::Type: StdZn,
-            F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
-            A: Allocator + Clone,
-            NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
+    fn canonicalize<NumberRing, FpTy, A>(&mut self, H: &HypercubeIsomorphism<NumberRing, FpTy, A>)
+        where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+            FpTy: RingStore + Clone,
+            FpTy::Type: StdZn,
+            A: Allocator + Clone
     {
         let canonicalize_mod = |a: i64, n: i64| (((a % n) + n) % n);
         let result = Self {
@@ -121,24 +120,22 @@ impl GaloisElementIndex {
     }
 }
 
-pub struct LinearTransform<R, F, A>
-    where R: RingStore,
-        R::Type: StdZn,
-        F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
-        A: Allocator + Clone,
-        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
+pub struct LinearTransform<NumberRing, FpTy, A>
+    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: StdZn,
+        A: Allocator + Clone
 {
-    data: Vec<(GaloisElementIndex, El<NTTRing<R, F, A>>)>
+    data: Vec<(GaloisElementIndex, El<NumberRingQuo<NumberRing, FpTy, A>>)>
 }
 
-impl<R, F, A> LinearTransform<R, F, A>
-    where R: RingStore,
-        R::Type: StdZn,
-        F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
-        A: Allocator + Clone,
-        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
+impl<NumberRing, FpTy, A> LinearTransform<NumberRing, FpTy, A>
+    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: StdZn,
+        A: Allocator + Clone
 {
-    pub fn eq(&self, other: &Self, H: &HypercubeIsomorphism<R, F, A>) -> bool {
+    pub fn eq(&self, other: &Self, H: &HypercubeIsomorphism<NumberRing, FpTy, A>) -> bool {
         self.check_valid(H);
         other.check_valid(H);
         if self.data.len() != other.data.len() {
@@ -159,8 +156,8 @@ impl<R, F, A> LinearTransform<R, F, A>
     /// `matrix` is called on `output_index, input_index, column_indices` to give the `(output_index, input_index)`-th
     /// entry of the matrix corresponding to the hypercolumn containing the slot `column_indices`.
     /// 
-    pub fn matmul1d<'a, G>(H: &HypercubeIsomorphism<'a, R, F, A>, dim_index: usize, matrix: G) -> LinearTransform<R, F, A>
-        where G: Fn(usize, usize, &[usize]) -> El<SlotRing<'a, R, A>>
+    pub fn matmul1d<'a, G>(H: &HypercubeIsomorphism<'a, NumberRing, FpTy, A>, dim_index: usize, matrix: G) -> LinearTransform<NumberRing, FpTy, A>
+        where G: Fn(usize, usize, &[usize]) -> El<SlotRing<'a, FpTy, A>>
     {
         let m = H.len(dim_index) as i64;
         let mut result = LinearTransform {
@@ -180,7 +177,7 @@ impl<R, F, A> LinearTransform<R, F, A>
         return result;
     }
 
-    pub fn slot_scalar_mult<'a>(H: &HypercubeIsomorphism<'a, R, F, A>, scalar: &El<SlotRing<'a, R, A>>) -> LinearTransform<R, F, A> {
+    pub fn slot_scalar_mult<'a>(H: &HypercubeIsomorphism<'a, NumberRing, FpTy, A>, scalar: &El<SlotRing<'a, FpTy, A>>) -> LinearTransform<NumberRing, FpTy, A> {
         return LinearTransform {
             data: vec![(GaloisElementIndex::identity(H.dim_count()), H.from_slot_vec((0..H.slot_count()).map(|_| H.slot_ring().clone_el(scalar))))]
         };
@@ -190,8 +187,8 @@ impl<R, F, A> LinearTransform<R, F, A>
     /// Applies a linea transform on each slot separately. The transform is given by its matrix w.r.t. the basis
     /// `1, X, ..., X^(d - 1)` where `X` is the canonical generator of the slot ring.
     /// 
-    pub fn blockmatmul0d<'a, G>(H: &HypercubeIsomorphism<'a, R, F, A>, matrix: G) -> LinearTransform<R, F, A>
-        where G: Fn(usize, usize, &[usize]) -> El<R>
+    pub fn blockmatmul0d<'a, G>(H: &HypercubeIsomorphism<'a, NumberRing, FpTy, A>, matrix: G) -> LinearTransform<NumberRing, FpTy, A>
+        where G: Fn(usize, usize, &[usize]) -> El<FpTy>
     {
         let d = H.slot_ring().rank();
         let Gal = H.cyclotomic_index_ring();
@@ -234,8 +231,8 @@ impl<R, F, A> LinearTransform<R, F, A>
     /// should return the `(i, k), (j, l)`-th entry of the matrix of the linear transform (w.r.t. basis `X^k e_U(i)`) 
     /// when called on `((i, k), (j, l), U(<unspecified value>))`.
     /// 
-    pub fn blockmatmul1d<'a, G>(H: &HypercubeIsomorphism<'a, R, F, A>, dim_index: usize, matrix: G) -> LinearTransform<R, F, A>
-        where G: Fn((usize, usize), (usize, usize), &[usize]) -> El<R>
+    pub fn blockmatmul1d<'a, G>(H: &HypercubeIsomorphism<'a, NumberRing, FpTy, A>, dim_index: usize, matrix: G) -> LinearTransform<NumberRing, FpTy, A>
+        where G: Fn((usize, usize), (usize, usize), &[usize]) -> El<FpTy>
     {
         let m = H.len(dim_index) as i64;
         let d = H.slot_ring().rank();
@@ -278,18 +275,18 @@ impl<R, F, A> LinearTransform<R, F, A>
         return result;
     }
 
-    pub fn switch_ring(&self, H_from: &HypercubeIsomorphism<R, F, A>, to: &NTTRingBase<R, F, A>) -> Self {
+    pub fn switch_ring(&self, H_from: &HypercubeIsomorphism<NumberRing, FpTy, A>, to: &NumberRingQuoBase<NumberRing, FpTy, A>) -> Self {
         self.check_valid(H_from);
         assert_eq!(H_from.ring().n(), to.n());
         let from = H_from.ring();
         let red_map = ReductionMap::new(from.base_ring(), to.base_ring()).unwrap();
-        let hom = |x: &El<NTTRing<R, F, A>>| to.from_canonical_basis(H_from.ring().wrt_canonical_basis(x).into_iter().map(|x| red_map.map(x)));
+        let hom = |x: &El<NumberRingQuo<NumberRing, FpTy, A>>| to.from_canonical_basis(H_from.ring().wrt_canonical_basis(x).into_iter().map(|x| red_map.map(x)));
         Self {
             data: self.data.iter().map(|(g, coeff)| (g.clone(), hom(coeff))).collect()
         }
     }
 
-    pub fn inverse(&self, H: &HypercubeIsomorphism<R, F, A>) -> Self {
+    pub fn inverse(&self, H: &HypercubeIsomorphism<NumberRing, FpTy, A>) -> Self {
         self.check_valid(H);
         let original_automorphisms = self.data.iter().map(|(g, _)| g.galois_element(H));
         let inverse_automorphisms = original_automorphisms.clone().map(|g| H.cyclotomic_index_ring().invert(&g).unwrap()).collect::<Vec<_>>();
@@ -362,7 +359,7 @@ impl<R, F, A> LinearTransform<R, F, A>
         return result;
     }
 
-    fn check_valid(&self, _H: &HypercubeIsomorphism<R, F, A>) {
+    fn check_valid(&self, _H: &HypercubeIsomorphism<NumberRing, FpTy, A>) {
         for (i, (g, _)) in self.data.iter().enumerate() {
             for (j, (s, _)) in self.data.iter().enumerate() {
                 assert!(i == j || g != s);
@@ -370,7 +367,7 @@ impl<R, F, A> LinearTransform<R, F, A>
         }
     }
 
-    fn compose(&self, run_first: &LinearTransform<R, F, A>, H: &HypercubeIsomorphism<R, F, A>) -> Self {
+    fn compose(&self, run_first: &LinearTransform<NumberRing, FpTy, A>, H: &HypercubeIsomorphism<NumberRing, FpTy, A>) -> Self {
         self.check_valid(H);
         run_first.check_valid(H);
         let mut result = Self {
@@ -383,13 +380,13 @@ impl<R, F, A> LinearTransform<R, F, A>
         return result;
     }
 
-    fn identity(H: &HypercubeIsomorphism<R, F, A>) -> Self {
+    fn identity(H: &HypercubeIsomorphism<NumberRing, FpTy, A>) -> Self {
         Self {
             data: vec![(GaloisElementIndex::shift_1d(H.dim_count(), 0, 0), H.ring().one())]
         }
     }
 
-    fn canonicalize(&mut self, H: &HypercubeIsomorphism<R, F, A>) {
+    fn canonicalize(&mut self, H: &HypercubeIsomorphism<NumberRing, FpTy, A>) {
         self.data.sort_unstable_by_key(|(g, _)| H.cyclotomic_index_ring().smallest_positive_lift(g.galois_element(H)));
         for (steps, _) in &mut self.data {
             steps.canonicalize(H);
@@ -407,37 +404,35 @@ impl<R, F, A> LinearTransform<R, F, A>
 
     #[cfg(test)]
     #[allow(unused)]
-    fn print(&self, H: &HypercubeIsomorphism<R, F, A>) {
+    fn print(&self, H: &HypercubeIsomorphism<NumberRing, FpTy, A>) {
         for (g, c) in &self.data {
             println!("p^{} {:?}: {}", g.frobenius_count, g.shift_steps, H.ring().format(c));
         }
     }
 }
 
-impl<R, F, A> NTTRingBase<R, F, A> 
-    where R: RingStore,
-        R::Type: StdZn,
-        F: RingDecompositionSelfIso<R::Type> + CyclotomicRingDecomposition<R::Type>,
-        A: Allocator + Clone,
-        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
+impl<NumberRing, FpTy, A> NumberRingQuoBase<NumberRing, FpTy, A> 
+    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: StdZn,
+        A: Allocator + Clone
 {
-    pub fn compute_linear_transform(&self, H: &HypercubeIsomorphism<R, F, A>, el: &<Self as RingBase>::Element, transform: &LinearTransform<R, F, A>) -> <Self as RingBase>::Element {
+    pub fn compute_linear_transform(&self, H: &HypercubeIsomorphism<NumberRing, FpTy, A>, el: &<Self as RingBase>::Element, transform: &LinearTransform<NumberRing, FpTy, A>) -> <Self as RingBase>::Element {
         assert!(H.ring().get_ring() == self);
         <_ as RingBase>::sum(self, transform.data.iter().map(|(s, c)| self.mul_ref_fst(c, self.apply_galois_action(el, s.galois_element(H)))))
     }
 }
 
-pub struct CompiledLinearTransform<R, F, A>
-    where R: RingStore,
-        R::Type: StdZn,
-        F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
-        A: Allocator + Clone,
-        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
+pub struct CompiledLinearTransform<NumberRing, FpTy, A>
+    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: StdZn,
+        A: Allocator + Clone
 {
     baby_step_galois_elements: Vec<ZnEl>,
     giant_step_galois_elements: Vec<Option<ZnEl>>,
-    coeffs: Vec<Vec<Option<El<NTTRing<R, F, A>>>>>,
-    one: El<NTTRing<R, F, A>>
+    coeffs: Vec<Vec<Option<El<NumberRingQuo<NumberRing, FpTy, A>>>>>,
+    one: El<NumberRingQuo<NumberRing, FpTy, A>>
 }
 
 #[derive(Debug)]
@@ -450,33 +445,32 @@ pub struct BabyStepGiantStepParams {
     unhoisted_automorphism_count: usize
 }
 
-impl<R, F, A> CompiledLinearTransform<R, F, A>
-    where R: RingStore,
-        R::Type: StdZn,
-        F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
-        A: Allocator + Clone,
-        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
+impl<NumberRing, FpTy, A> CompiledLinearTransform<NumberRing, FpTy, A>
+    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: StdZn,
+        A: Allocator + Clone
 {
-    pub fn save(&self, filename: &str, ring: &NTTRing<R, F, A>, cyclotomic_index_ring: &Zn) {
+    pub fn save(&self, filename: &str, ring: &NumberRingQuo<NumberRing, FpTy, A>, cyclotomic_index_ring: &Zn) {
         serde_json::to_writer_pretty(
             BufWriter::new(File::create(filename).unwrap()), 
             &serialization::CompiledLinearTransformSerializable::from(ring, cyclotomic_index_ring, self)
         ).unwrap()
     }
 
-    pub fn load(filename: &str, ring: &NTTRing<R, F, A>, cyclotomic_index_ring: &Zn) -> Self {
+    pub fn load(filename: &str, ring: &NumberRingQuo<NumberRing, FpTy, A>, cyclotomic_index_ring: &Zn) -> Self {
         let mut deserializer = serde_json::Deserializer::from_reader(BufReader::new(File::open(filename).unwrap()));
         return <_ as DeserializeSeed>::deserialize(serialization::DeserializeLinearTransformSeed { cyclotomic_index_ring: cyclotomic_index_ring, ring: ring.get_ring() }, &mut deserializer).unwrap().into();
     }
 
-    pub fn save_seq(data: &[Self], filename: &str, ring: &NTTRing<R, F, A>, cyclotomic_index_ring: &Zn) {
+    pub fn save_seq(data: &[Self], filename: &str, ring: &NumberRingQuo<NumberRing, FpTy, A>, cyclotomic_index_ring: &Zn) {
         serde_json::to_writer_pretty(
             BufWriter::new(File::create(filename).unwrap()), 
             &data.iter().map(|t| serialization::CompiledLinearTransformSerializable::from(ring, cyclotomic_index_ring, t)).collect::<Vec<_>>()
         ).unwrap()
     }
 
-    pub fn load_seq(filename: &str, ring: &NTTRing<R, F, A>, cyclotomic_index_ring: &Zn) -> Vec<Self> {
+    pub fn load_seq(filename: &str, ring: &NumberRingQuo<NumberRing, FpTy, A>, cyclotomic_index_ring: &Zn) -> Vec<Self> {
         let mut deserializer = serde_json::Deserializer::from_reader(BufReader::new(File::open(filename).unwrap()));
         return <_ as DeserializeSeed>::deserialize(serialization::VecDeserializeSeed { base_seed: serialization::DeserializeLinearTransformSeed { cyclotomic_index_ring: cyclotomic_index_ring, ring: ring.get_ring() } }, &mut deserializer).unwrap().into();
     }
@@ -484,7 +478,7 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
     /// 
     /// In the returned lists, we use the first entry for the "frobenius-dimension"
     /// 
-    fn compute_automorphisms_per_dimension(H: &HypercubeIsomorphism<R, F, A>, lin_transform: &LinearTransform<R, F, A>) -> (Vec<i64>, Vec<i64>, Vec<i64>, Vec<i64>) {
+    fn compute_automorphisms_per_dimension(H: &HypercubeIsomorphism<NumberRing, FpTy, A>, lin_transform: &LinearTransform<NumberRing, FpTy, A>) -> (Vec<i64>, Vec<i64>, Vec<i64>, Vec<i64>) {
         lin_transform.check_valid(H);
         
         let mut max_step: Vec<i64> = Vec::new();
@@ -547,7 +541,7 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
         };
     }
 
-    pub fn compile(H: &HypercubeIsomorphism<R, F, A>, lin_transform: LinearTransform<R, F, A>) -> Self {
+    pub fn compile(H: &HypercubeIsomorphism<NumberRing, FpTy, A>, lin_transform: LinearTransform<NumberRing, FpTy, A>) -> Self {
         lin_transform.check_valid(H);
 
         let (_, _, _, sizes) = Self::compute_automorphisms_per_dimension(H, &lin_transform);
@@ -562,15 +556,15 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
         return Self::create_from(H, lin_transform, preferred_baby_steps);
     }
 
-    pub fn compile_merged(H: &HypercubeIsomorphism<R, F, A>, lin_transforms: &[LinearTransform<R, F, A>]) -> Self {
+    pub fn compile_merged(H: &HypercubeIsomorphism<NumberRing, FpTy, A>, lin_transforms: &[LinearTransform<NumberRing, FpTy, A>]) -> Self {
         Self::compile(H, lin_transforms.iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H)))
     }
 
-    pub fn create_from_merged(H: &HypercubeIsomorphism<R, F, A>, lin_transforms: &[LinearTransform<R, F, A>], preferred_baby_steps: usize) -> CompiledLinearTransform<R, F, A> {
+    pub fn create_from_merged(H: &HypercubeIsomorphism<NumberRing, FpTy, A>, lin_transforms: &[LinearTransform<NumberRing, FpTy, A>], preferred_baby_steps: usize) -> CompiledLinearTransform<NumberRing, FpTy, A> {
         Self::create_from(H, lin_transforms.iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H)), preferred_baby_steps)
     }
 
-    pub fn create_from(H: &HypercubeIsomorphism<R, F, A>, lin_transform: LinearTransform<R, F, A>, preferred_baby_steps: usize) -> CompiledLinearTransform<R, F, A> {
+    pub fn create_from(H: &HypercubeIsomorphism<NumberRing, FpTy, A>, lin_transform: LinearTransform<NumberRing, FpTy, A>, preferred_baby_steps: usize) -> CompiledLinearTransform<NumberRing, FpTy, A> {
         lin_transform.check_valid(H);
 
         let (max_step, min_step, gcd_step, sizes) = Self::compute_automorphisms_per_dimension(H, &lin_transform);
@@ -629,8 +623,8 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
         };
     }
 
-    pub fn evaluate<S>(&self, input: El<NTTRing<R, F, A>>, ring: S) -> El<NTTRing<R, F, A>>
-        where S: RingStore<Type = NTTRingBase<R, F, A>>
+    pub fn evaluate<S>(&self, input: El<NumberRingQuo<NumberRing, FpTy, A>>, ring: S) -> El<NumberRingQuo<NumberRing, FpTy, A>>
+        where S: RingStore<Type = NumberRingQuoBase<NumberRing, FpTy, A>>
     {
         self.evaluate_generic(input, |a, b, c| {
             ring.add_assign(a, ring.mul_ref(b, c));
@@ -644,7 +638,7 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
     }
 
     pub fn evaluate_generic<T, AddScaled, ApplyGalois, Zero>(&self, input: T, mut add_scaled_fn: AddScaled, mut apply_galois_fn: ApplyGalois, mut zero_fn: Zero) -> T
-        where AddScaled: FnMut(&mut T, &T, &El<NTTRing<R, F, A>>),
+        where AddScaled: FnMut(&mut T, &T, &El<NumberRingQuo<NumberRing, FpTy, A>>),
             ApplyGalois: FnMut(T, &[ZnEl]) -> Vec<T>,
             Zero: FnMut() -> T
     {
@@ -675,26 +669,26 @@ impl<R, F, A> CompiledLinearTransform<R, F, A>
 mod serialization {
     use feanor_math::serialization::{DeserializeWithRing, SerializeWithRing};
     use serde::{de::{self, DeserializeSeed, Visitor}, ser::SerializeStruct, Deserialize, Serialize};
+    use crate::rings::number_ring_quo::NumberRingQuoBase;
+
     use super::*;
 
-    pub struct CompiledLinearTransformSerializable<'a, R, F, A>
-        where R: RingStore,
-            R::Type: StdZn,
-            F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
-            A: Allocator + Clone,
-            NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
+    pub struct CompiledLinearTransformSerializable<'a, NumberRing, FpTy, A>
+        where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+            FpTy: RingStore + Clone,
+            FpTy::Type: StdZn,
+            A: Allocator + Clone
     {
         baby_step_galois_elements: Vec<SerializeWithRing<'a, &'a Zn>>,
         giant_step_galois_elements: Vec<Option<SerializeWithRing<'a, &'a Zn>>>,
-        coeffs: Vec<Vec<Option<SerializeWithRing<'a, &'a NTTRing<R, F, A>>>>>,
+        coeffs: Vec<Vec<Option<SerializeWithRing<'a, &'a NumberRingQuo<NumberRing, FpTy, A>>>>>,
     }
 
-    impl<'a, R, F, A> Serialize for CompiledLinearTransformSerializable<'a, R, F, A>
-        where R: RingStore,
-            R::Type: StdZn,
-            F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
-            A: Allocator + Clone,
-            NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
+    impl<'a, NumberRing, FpTy, A> Serialize for CompiledLinearTransformSerializable<'a, NumberRing, FpTy, A>
+        where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+            FpTy: RingStore + Clone,
+            FpTy::Type: StdZn,
+            A: Allocator + Clone
     {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
             where S: serde::Serializer
@@ -707,14 +701,13 @@ mod serialization {
         }
     }
 
-    impl<'a, R, F, A> CompiledLinearTransformSerializable<'a, R, F, A>
-        where R: RingStore,
-            R::Type: StdZn,
-            F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
-            A: Allocator + Clone,
-            NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
+    impl<'a, NumberRing, FpTy, A> CompiledLinearTransformSerializable<'a, NumberRing, FpTy, A>
+        where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+            FpTy: RingStore + Clone,
+            FpTy::Type: StdZn,
+            A: Allocator + Clone
     {
-        pub fn from(ring: &'a NTTRing<R, F, A>, galois_group_ring: &'a Zn, transform: &'a CompiledLinearTransform<R, F, A>) -> Self {
+        pub fn from(ring: &'a NumberRingQuo<NumberRing, FpTy, A>, galois_group_ring: &'a Zn, transform: &'a CompiledLinearTransform<NumberRing, FpTy, A>) -> Self {
             Self {
                 baby_step_galois_elements: transform.baby_step_galois_elements.iter().map(|x| SerializeWithRing::new(x, galois_group_ring)).collect(),
                 giant_step_galois_elements: transform.giant_step_galois_elements.iter().map(|x| x.as_ref().map(|x| SerializeWithRing::new(x, galois_group_ring))).collect(),
@@ -813,68 +806,62 @@ mod serialization {
         }
     }
 
-    pub struct DeserializeLinearTransformSeed<'a, R, F, A>
-        where R: ZnRingStore,
-            R::Type: StdZn,
-            F: RingDecompositionSelfIso<R::Type> + CyclotomicRingDecomposition<R::Type>,
-            A: Allocator + Clone,
-            NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
+    pub struct DeserializeLinearTransformSeed<'a, NumberRing, FpTy, A>
+        where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+            FpTy: RingStore + Clone,
+            FpTy::Type: StdZn,
+            A: Allocator + Clone
     {
         pub cyclotomic_index_ring: &'a Zn,
-        pub ring: &'a NTTRingBase<R, F, A>
+        pub ring: &'a NumberRingQuoBase<NumberRing, FpTy, A>
     }
     
-    impl<'a, R, F, A> Clone for DeserializeLinearTransformSeed<'a, R, F, A>
-        where R: RingStore,
-            R::Type: StdZn,
-            F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
-            A: Allocator + Clone,
-            NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
+    impl<'a, NumberRing, FpTy, A> Clone for DeserializeLinearTransformSeed<'a, NumberRing, FpTy, A>
+        where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+            FpTy: RingStore + Clone,
+            FpTy::Type: StdZn,
+            A: Allocator + Clone
     {
         fn clone(&self) -> Self {
             *self
         }
     }
 
-    impl<'a, R, F, A> Copy for DeserializeLinearTransformSeed<'a, R, F, A>
-        where R: RingStore,
-            R::Type: StdZn,
-            F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
-            A: Allocator + Clone,
-            NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
+    impl<'a, NumberRing, FpTy, A> Copy for DeserializeLinearTransformSeed<'a, NumberRing, FpTy, A>
+        where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+            FpTy: RingStore + Clone,
+            FpTy::Type: StdZn,
+            A: Allocator + Clone
     {}
 
-    impl<'a, 'de, R, F, A> DeserializeSeed<'de> for DeserializeLinearTransformSeed<'a, R, F, A>
-        where R: RingStore,
-            R::Type: StdZn,
-            F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
-            A: Allocator + Clone,
-            NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
+    impl<'a, 'de, NumberRing, FpTy, A> DeserializeSeed<'de> for DeserializeLinearTransformSeed<'a, NumberRing, FpTy, A>
+        where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+            FpTy: RingStore + Clone,
+            FpTy::Type: StdZn,
+            A: Allocator + Clone
     {
-        type Value = CompiledLinearTransform<R, F, A>;
+        type Value = CompiledLinearTransform<NumberRing, FpTy, A>;
 
         fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
             where D: serde::Deserializer<'de>
         {
-            struct FieldsVisitor<'a, R, F, A>
-                where R: ZnRingStore,
-                    R::Type: StdZn,
-                    F: RingDecompositionSelfIso<R::Type>,
-                    A: Allocator + Clone,
-                    NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
+            struct FieldsVisitor<'a, NumberRing, FpTy, A>
+                where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+                    FpTy: RingStore + Clone,
+                    FpTy::Type: StdZn,
+                    A: Allocator + Clone
             {
                 cyclotomic_index_ring: &'a Zn,
-                ring: &'a NTTRingBase<R, F, A>
+                ring: &'a NumberRingQuoBase<NumberRing, FpTy, A>
             }
             
-            impl<'a, 'de, R, F, A> Visitor<'de> for FieldsVisitor<'a, R, F, A>
-                where R: ZnRingStore,
-                    R::Type: StdZn,
-                    F: RingDecompositionSelfIso<R::Type> + CyclotomicRingDecomposition<R::Type>,
-                    A: Allocator + Clone,
-                    NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
+            impl<'a, 'de, NumberRing, FpTy, A> Visitor<'de> for FieldsVisitor<'a, NumberRing, FpTy, A>
+                where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+                    FpTy: RingStore + Clone,
+                    FpTy::Type: StdZn,
+                    A: Allocator + Clone
             {
-                type Value = CompiledLinearTransform<R, F, A>;
+                type Value = CompiledLinearTransform<NumberRing, FpTy, A>;
 
                 fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                     write!(formatter, "struct `CompiledLinearTransform` with fields `baby_step_galois_elements`, `giant_step_galois_elements`, `coeffs`")
@@ -965,12 +952,10 @@ use pow2::slots_to_coeffs_thin;
 use crate::rings::pow2_cyclotomic::*;
 #[cfg(test)]
 use feanor_math::assert_el_eq;
-#[cfg(test)]
-use crate::rings::odd_cyclotomic::DefaultOddCyclotomicNTTRingBase;
 
 #[test]
 fn test_compile() {
-    let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(23), 5);
+    let ring = NumberRingQuoBase::new(Pow2CyclotomicDecomposableNumberRing::new(64), Zn::new(23));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
     let compiled_transform = slots_to_coeffs_thin(&H).into_iter().map(|T| CompiledLinearTransform::create_from(&H, T, 2)).collect::<Vec<_>>();
 
@@ -987,7 +972,7 @@ fn test_compile() {
     current = compiled_composed_transform.evaluate(current, &ring);
     assert_el_eq!(&ring, &expected, &current);
 
-    let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(97), 5);
+    let ring = NumberRingQuoBase::new(Pow2CyclotomicDecomposableNumberRing::new(64), Zn::new(97));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
     let compiled_transform = slots_to_coeffs_thin(&H).into_iter().map(|T| CompiledLinearTransform::create_from(&H, T, 2)).collect::<Vec<_>>();
     
@@ -1019,7 +1004,7 @@ fn test_compile() {
 
 #[test]
 fn test_compile_odd_case() {
-    let ring = DefaultOddCyclotomicNTTRingBase::new(Zn::new(7), 3 * 19);
+    let ring = NumberRingQuoBase::new(CompositeCyclotomicDecomposableNumberRing::new(3, 19), Zn::new(7));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
 
     let mut current = H.from_slot_vec((1..=12).map(|n| H.slot_ring().int_hom().map(n)));
@@ -1032,7 +1017,7 @@ fn test_compile_odd_case() {
     }
     println!();
     
-    let ring = DefaultOddCyclotomicNTTRingBase::new(Zn::new(2), 11 * 31);
+    let ring = NumberRingQuoBase::new(CompositeCyclotomicDecomposableNumberRing::new(11, 31), Zn::new(2));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
 
     let mut current = H.from_slot_vec((1..=30).map(|n| H.slot_ring().int_hom().map(n)));
@@ -1047,7 +1032,7 @@ fn test_compile_odd_case() {
 
 #[test]
 fn test_compose() {
-    let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(23), 5);
+    let ring = NumberRingQuoBase::new(Pow2CyclotomicDecomposableNumberRing::new(64), Zn::new(23));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
     let composed_transform = slots_to_coeffs_thin(&H).into_iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H));
 
@@ -1058,7 +1043,7 @@ fn test_compose() {
 
     assert_el_eq!(&ring, &expected, &current);
     
-    let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(97), 5);
+    let ring = NumberRingQuoBase::new(Pow2CyclotomicDecomposableNumberRing::new(64), Zn::new(97));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
     let composed_transform = slots_to_coeffs_thin(&H).into_iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H));
     
@@ -1072,7 +1057,7 @@ fn test_compose() {
 
 #[test]
 fn test_invert() {
-    let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(23), 5);
+    let ring = NumberRingQuoBase::new(Pow2CyclotomicDecomposableNumberRing::new(64), Zn::new(23));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
     let composed_transform = slots_to_coeffs_thin(&H).into_iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H));
     let inv_transform = composed_transform.inverse(&H);
@@ -1082,7 +1067,7 @@ fn test_invert() {
     let actual = ring.get_ring().compute_linear_transform(&H, &current, &inv_transform);
     assert_el_eq!(&ring, &expected, &actual);
     
-    let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(97), 5);
+    let ring = NumberRingQuoBase::new(Pow2CyclotomicDecomposableNumberRing::new(64), Zn::new(97));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
     let composed_transform = slots_to_coeffs_thin(&H).into_iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H));
     let inv_transform = composed_transform.inverse(&H);
@@ -1097,7 +1082,7 @@ fn test_invert() {
 #[test]
 fn test_blockmatmul1d() {
     // F23[X]/(Phi_5) ~ F_(23^4)
-    let ring = DefaultOddCyclotomicNTTRingBase::new(Zn::new(23), 5);
+    let ring = NumberRingQuoBase::new(OddCyclotomicDecomposableNumberRing::new(5), Zn::new(23));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
     let matrix = [
         [1, 0, 1, 0],
@@ -1121,7 +1106,7 @@ fn test_blockmatmul1d() {
 
 
     // F23[X]/(Phi_7) ~ F_(23^3)^2
-    let ring = DefaultOddCyclotomicNTTRingBase::new(Zn::new(23), 7);
+    let ring = NumberRingQuoBase::new(OddCyclotomicDecomposableNumberRing::new(7), Zn::new(23));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
     let matrix = [
         [1, 0, 0],

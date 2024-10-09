@@ -1,5 +1,6 @@
 use std::alloc::Allocator;
 
+use feanor_math::algorithms::fft::cooley_tuckey::bitreverse;
 use feanor_math::algorithms::unity_root::is_prim_root_of_unity;
 use feanor_math::homomorphism::Homomorphism;
 use feanor_math::integer::IntegerRingStore;
@@ -11,7 +12,7 @@ use feanor_math::assert_el_eq;
 
 use crate::cyclotomic::*;
 use crate::rings::decomposition::*;
-use crate::rings::ntt_ring::*;
+use crate::rings::number_ring_quo::*;
 use crate::StdZn;
 use super::*;
 
@@ -45,12 +46,11 @@ use super::*;
 ///    `pow2_bitreversed_dwt_butterfly` to give nonsensical results. If you pass `row_autos = |_| H.cyclotomic_index_ring().one()` then this uses the same
 ///    roots of unity everywhere, i.e. results in the behavior as outlined above.
 /// 
-fn pow2_bitreversed_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'b, R, F, A>, dim_index: usize, l: usize, root_of_unity_4l: El<SlotRing<'b, R, A>>, row_autos: G) -> LinearTransform<R, F, A>
-    where R: RingStore,
-        R::Type: StdZn,
-        F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
+fn pow2_bitreversed_dwt_butterfly<'b, NumberRing, FpTy, A, G>(H: &HypercubeIsomorphism<'b, NumberRing, FpTy, A>, dim_index: usize, l: usize, root_of_unity_4l: El<SlotRing<'b, FpTy, A>>, row_autos: G) -> LinearTransform<NumberRing, FpTy, A>
+    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: StdZn,
         A: Allocator + Clone,
-        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
         G: Fn(&[usize]) -> ZnEl
 {
     let m = H.len(dim_index);
@@ -126,12 +126,11 @@ fn pow2_bitreversed_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'b, R
 ///
 /// Inverse of [`pow2_bitreversed_dwt_butterfly()`]
 /// 
-fn pow2_bitreversed_inv_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'b, R, F, A>, dim_index: usize, l: usize, root_of_unity_4l: El<SlotRing<'b, R, A>>, row_autos: G) -> LinearTransform<R, F, A>
-    where R: RingStore,
-        R::Type: StdZn,
-        F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
+fn pow2_bitreversed_inv_dwt_butterfly<'b, NumberRing, FpTy, A, G>(H: &HypercubeIsomorphism<'b, NumberRing, FpTy, A>, dim_index: usize, l: usize, root_of_unity_4l: El<SlotRing<'b, FpTy, A>>, row_autos: G) -> LinearTransform<NumberRing, FpTy, A>
+    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: StdZn,
         A: Allocator + Clone,
-        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
         G: Fn(&[usize]) -> ZnEl
 {
     let m = H.len(dim_index);
@@ -226,12 +225,11 @@ fn pow2_bitreversed_inv_dwt_butterfly<'b, R, F, A, G>(H: &HypercubeIsomorphism<'
 /// for `j` from `0` to `m`.
 /// Here `𝜁` is the canonical generator of the slot ring, which is a primitive `n`-th root of unity.
 /// 
-fn pow2_bitreversed_dwt<R, F, A, G>(H: &HypercubeIsomorphism<R, F, A>, dim_index: usize, row_autos: G) -> Vec<LinearTransform<R, F, A>>
-    where R: RingStore,
-        R::Type: StdZn,
-        F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
+fn pow2_bitreversed_dwt<NumberRing, FpTy, A, G>(H: &HypercubeIsomorphism<NumberRing, FpTy, A>, dim_index: usize, row_autos: G) -> Vec<LinearTransform<NumberRing, FpTy, A>>
+    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: StdZn,
         A: Allocator + Clone,
-        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
         G: Fn(&[usize]) -> ZnEl
 {
     let m = H.len(dim_index);
@@ -261,12 +259,11 @@ fn pow2_bitreversed_dwt<R, F, A, G>(H: &HypercubeIsomorphism<R, F, A>, dim_index
 ///
 /// Inverse to [`pow2_bitreversed_dwt()`]
 /// 
-fn pow2_bitreversed_inv_dwt<R, F, A, G>(H: &HypercubeIsomorphism<R, F, A>, dim_index: usize, row_autos: G) -> Vec<LinearTransform<R, F, A>>
-    where R: RingStore,
-        R::Type: StdZn,
-        F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
+fn pow2_bitreversed_inv_dwt<NumberRing, FpTy, A, G>(H: &HypercubeIsomorphism<NumberRing, FpTy, A>, dim_index: usize, row_autos: G) -> Vec<LinearTransform<NumberRing, FpTy, A>>
+    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: StdZn,
         A: Allocator + Clone,
-        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
         G: Fn(&[usize]) -> ZnEl
 {
     let m = H.len(dim_index);
@@ -303,12 +300,11 @@ fn pow2_bitreversed_inv_dwt<R, F, A, G>(H: &HypercubeIsomorphism<R, F, A>, dim_i
 /// If `p = 3 mod 4`, the slots are enumerated by `i` with `0 <= i < m` and the transform will put the value of slot `i` into the coefficient
 /// of `X^(bitrev(i, m) * n/(4m))`
 /// 
-pub fn slots_to_coeffs_thin<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> Vec<LinearTransform<R, F, A>>
-    where R: RingStore,
-        R::Type: StdZn,
-        F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
-        A: Allocator + Clone,
-        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
+pub fn slots_to_coeffs_thin<NumberRing, FpTy, A>(H: &HypercubeIsomorphism<NumberRing, FpTy, A>) -> Vec<LinearTransform<NumberRing, FpTy, A>>
+    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: StdZn,
+        A: Allocator + Clone
 {
     let n = H.ring().get_ring().n();
     let log2_n = ZZ.abs_log2_ceil(&(n as i64)).unwrap();
@@ -367,12 +363,11 @@ pub fn slots_to_coeffs_thin<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> Vec<L
 /// "Coeffs-to-Slots" map, as it does not discard unused factors. However, it is not
 /// too hard to build the "coeffs-to-slots" map from this, see [`coeffs_to_slots_thin()`]. 
 /// 
-pub fn slots_to_coeffs_thin_inv<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> Vec<LinearTransform<R, F, A>>
-    where R: RingStore,
-        R::Type: StdZn,
-        F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
-        A: Allocator + Clone,
-        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
+pub fn slots_to_coeffs_thin_inv<NumberRing, FpTy, A>(H: &HypercubeIsomorphism<NumberRing, FpTy, A>) -> Vec<LinearTransform<NumberRing, FpTy, A>>
+    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: StdZn,
+        A: Allocator + Clone
 {
     let n = H.ring().get_ring().n();
     let log2_n = ZZ.abs_log2_ceil(&(n as i64)).unwrap();
@@ -422,12 +417,11 @@ pub fn slots_to_coeffs_thin_inv<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> V
     }
 }
 
-pub fn coeffs_to_slots_thin<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> (Vec<LinearTransform<R, F, A>>, Trace)
-    where R: RingStore,
-        R::Type: StdZn,
-        F: CyclotomicRingDecomposition<R::Type> + RingDecompositionSelfIso<R::Type>,
+pub fn coeffs_to_slots_thin<NumberRing, FpTy, A>(H: &HypercubeIsomorphism<NumberRing, FpTy, A>) -> (Vec<LinearTransform<NumberRing, FpTy, A>>, Trace)
+    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: StdZn,
         A: Allocator + Clone,
-        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>,
 {
     let trace = Trace::new(&H.cyclotomic_index_ring(), H.cyclotomic_index_ring().smallest_positive_lift(H.frobenius_element(1)), H.slot_ring().rank());
     let mut result = slots_to_coeffs_thin_inv(H);
@@ -436,15 +430,10 @@ pub fn coeffs_to_slots_thin<R, F, A>(H: &HypercubeIsomorphism<R, F, A>) -> (Vec<
     return (result, trace);
 }
 
-#[cfg(test)]
-use crate::rings::pow2_cyclotomic::DefaultPow2CyclotomicNTTRingBase;
-#[cfg(test)]
-use feanor_math::algorithms::fft::cooley_tuckey::bitreverse;
-
 #[test]
 fn test_slots_to_coeffs_thin() {
     // `F97[X]/(X^32 + 1) ~ F_(97^2)^16`
-    let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(97), 5);
+    let ring = NumberRingQuoBase::new(Pow2CyclotomicDecomposableNumberRing::new(64), Zn::new(97));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
     
     let mut current = H.from_slot_vec((1..17).map(|n| H.slot_ring().int_hom().map(n)));
@@ -461,7 +450,7 @@ fn test_slots_to_coeffs_thin() {
     assert_el_eq!(&ring, &ring_literal!(&ring, expected), &current);
 
     // `F23[X]/(X^32 + 1) ~ F_(23^8)^4`
-    let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(23), 5);
+    let ring = NumberRingQuoBase::new(Pow2CyclotomicDecomposableNumberRing::new(64), Zn::new(23));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
 
     let mut current = H.from_slot_vec([1, 2, 3, 4].into_iter().map(|n| H.slot_ring().int_hom().map(n)));
@@ -479,7 +468,7 @@ fn test_slots_to_coeffs_thin() {
 #[test]
 fn test_slots_to_coeffs_thin_inv() {
     // `F23[X]/(X^32 + 1) ~ F_(23^8)^4`
-    let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(23), 5);
+    let ring = NumberRingQuoBase::new(Pow2CyclotomicDecomposableNumberRing::new(64), Zn::new(23));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
 
     for (transform, actual) in slots_to_coeffs_thin(&H).into_iter().rev().zip(slots_to_coeffs_thin_inv(&H).into_iter()) {
@@ -488,7 +477,7 @@ fn test_slots_to_coeffs_thin_inv() {
     }
     
     // `F97[X]/(X^32 + 1) ~ F_(97^2)^16`
-    let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(97), 5);
+    let ring = NumberRingQuoBase::new(Pow2CyclotomicDecomposableNumberRing::new(64), Zn::new(97));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
     
     for (transform, actual) in slots_to_coeffs_thin(&H).into_iter().rev().zip(slots_to_coeffs_thin_inv(&H).into_iter()) {
@@ -500,7 +489,7 @@ fn test_slots_to_coeffs_thin_inv() {
 #[test]
 fn test_coeffs_to_slots_thin() {
     // `F97[X]/(X^32 + 1) ~ F_(97^2)^16`
-    let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(97), 5);
+    let ring = NumberRingQuoBase::new(Pow2CyclotomicDecomposableNumberRing::new(64), Zn::new(97));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
     
     let mut input = [0; 32];
@@ -521,7 +510,7 @@ fn test_coeffs_to_slots_thin() {
     assert_el_eq!(&ring, &expected, &current);
 
     // `F23[X]/(X^32 + 1) ~ F_(23^8)^4`
-    let ring = DefaultPow2CyclotomicNTTRingBase::new(Zn::new(23), 5);
+    let ring = NumberRingQuoBase::new(Pow2CyclotomicDecomposableNumberRing::new(64), Zn::new(23));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
 
     let mut input = [0; 32];

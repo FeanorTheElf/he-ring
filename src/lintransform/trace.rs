@@ -1,7 +1,8 @@
 use std::alloc::*;
 use std::cell::RefCell;
 
-use feanor_math::homomorphism::Homomorphism;
+use feanor_math::homomorphism::*;
+use feanor_math::integer::*;
 use feanor_math::matrix::OwnedMatrix;
 use feanor_math::rings::extension::FreeAlgebraStore;
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
@@ -11,13 +12,11 @@ use feanor_math::rings::zn::zn_64::ZnEl;
 use feanor_math::primitive_int::StaticRing;
 use feanor_math::ring::*;
 use feanor_math::rings::zn::zn_64::Zn;
-use feanor_math::rings::zn::ZnRingStore;
+use feanor_math::rings::zn::*;
 use feanor_math::seq::*;
 use feanor_math::algorithms::linsolve::LinSolveRingStore;
 
 use crate::StdZn;
-
-use super::{CyclotomicRing, CyclotomicRingDecomposition, NTTRingBase, RingDecompositionSelfIso, SlotRing};
 
 pub struct Trace {
     Gal: Zn,
@@ -136,12 +135,11 @@ impl Trace {
     }
 }
 
-impl<R, F, A> NTTRingBase<R, F, A> 
-    where R: RingStore,
-        R::Type: StdZn,
-        F: RingDecompositionSelfIso<R::Type> + CyclotomicRingDecomposition<R::Type>,
-        A: Allocator + Clone,
-        NTTRingBase<R, F, A>: CyclotomicRing + RingExtension<BaseRing = R>
+impl<NumberRing, FpTy, A> NumberRingQuoBase<NumberRing, FpTy, A> 
+    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        A: Allocator + Clone
 {
     pub fn compute_trace(&self, el: &<Self as RingBase>::Element, trace: &Trace) -> <Self as RingBase>::Element {
         trace.evaluate_generic(self.clone_el(el), |x, y| self.add_ref_snd(x, y), |x, g| self.apply_galois_action(x, g), |x| self.clone_el(x))
@@ -162,6 +160,11 @@ use feanor_math::algorithms::unity_root::is_prim_root_of_unity;
 use feanor_math::integer::BigIntRing;
 #[cfg(test)]
 use feanor_math::rings::extension::extension_impl::FreeAlgebraImpl;
+
+use super::NumberRingQuo;
+use super::NumberRingQuoBase;
+use super::SlotRing;
+use super::{CyclotomicRing, DecomposableCyclotomicNumberRing};
 
 #[test]
 fn test_extract_coefficient_map() {

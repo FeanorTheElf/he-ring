@@ -65,6 +65,16 @@ pub struct CoeffEl<NumberRing, FpTy, A = Global>
     pub(super) data: Vec<El<FpTy>, A>
 }
 
+impl<NumberRing, FpTy> DoubleRNSRingBase<NumberRing, FpTy, Global> 
+    where NumberRing: DecomposableNumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>
+{
+    pub fn new(number_ring: NumberRing, rns_base: zn_rns::Zn<FpTy, BigIntRing>) -> RingValue<Self> {
+        Self::new_with(number_ring, rns_base, Global)
+    }
+}
+
 impl<NumberRing, FpTy, A> DoubleRNSRingBase<NumberRing, FpTy, A> 
     where NumberRing: DecomposableNumberRing<FpTy>,
         FpTy: RingStore + Clone,

@@ -158,7 +158,7 @@ impl<FpTy> DecomposableNumberRing<FpTy> for OddCyclotomicDecomposableNumberRing
         let n = self.n_factorization_squarefree.iter().copied().product::<i64>();
         let log2_m = StaticRing::<i64>::RING.abs_log2_ceil(&n).unwrap() + 1;
         let modulus = n << log2_m;
-        let mut current = leq_than - (leq_than % modulus) + 1;
+        let mut current = (leq_than - 1) - ((leq_than - 1) % modulus) + 1;
         while current > 0 && !is_prime(StaticRing::<i64>::RING, &current, 10) {
             current -= modulus;
         }
@@ -259,13 +259,14 @@ impl<FpTy> DecomposableNumberRing<FpTy> for CompositeCyclotomicDecomposableNumbe
             StaticRing::<i64>::RING.abs_log2_ceil(&self.n2).unwrap() + 1
         );
         let modulus = n << log2_m;
-        let mut current = leq_than - (leq_than % modulus) + 1;
+        let mut current = (leq_than - 1) - ((leq_than - 1) % modulus) + 1;
         while current > 0 && !is_prime(StaticRing::<i64>::RING, &current, 10) {
             current -= modulus;
         }
         if current <= 0 {
             return None;
         } else {
+            assert!(current <= leq_than);
             return Some(current);
         }
     }

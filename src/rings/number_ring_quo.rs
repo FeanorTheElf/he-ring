@@ -21,8 +21,8 @@ use serde_json::Number;
 
 use crate::cyclotomic::CyclotomicRing;
 use crate::sample_primes;
-
-use super::decomposition::*;
+use crate::IsEq;
+use crate::rings::decomposition::*;
 
 pub struct NumberRingQuoBase<NumberRing, FpTy, A = Global> 
     where NumberRing: DecomposableNumberRing<FpTy>,
@@ -160,14 +160,13 @@ impl<NumberRing, FpTy, A> NumberRingQuoBase<NumberRing, FpTy, A>
 }
 
 impl<NumberRing, FpTy, A> CyclotomicRing for NumberRingQuoBase<NumberRing, FpTy, A>
-    where NumberRing: DecomposableNumberRing<FpTy>,
-        NumberRing::Decomposed: DecomposedCyclotomicNumberRing<FpTy::Type>,
+    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
 {
     fn n(&self) -> usize {
-        *self.ring_decompositions()[0].cyclotomic_index_ring().modulus() as usize
+        *<NumberRing::DecomposedAsCyclotomic>::from_ref(&self.ring_decompositions()[0]).cyclotomic_index_ring().modulus() as usize
     }
 
     fn apply_galois_action(&self, el: &<Self as RingBase>::Element, g: zn_64::ZnEl) -> <Self as RingBase>::Element {
@@ -185,7 +184,7 @@ impl<NumberRing, FpTy, A> CyclotomicRing for NumberRingQuoBase<NumberRing, FpTy,
                 tmp[j] = from_lifted.map(self.base_ring().smallest_lift(self.base_ring().clone_el(&el.data[j])));
             }
             self.ring_decompositions[i].fft_forward(&mut tmp[..]);
-            self.ring_decompositions[i].permute_galois_action(&tmp, &mut unreduced_result[(i * self.rank())..((i + 1) * self.rank())], g);
+            <NumberRing::DecomposedAsCyclotomic>::from_ref(&self.ring_decompositions()[i]).permute_galois_action(&tmp, &mut unreduced_result[(i * self.rank())..((i + 1) * self.rank())], g);
             self.ring_decompositions[i].fft_backward(&mut unreduced_result[(i * self.rank())..((i + 1) * self.rank())]);
         }
         drop(tmp);

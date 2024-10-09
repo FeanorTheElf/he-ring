@@ -47,6 +47,18 @@ macro_rules! ring_literal {
 extern crate feanor_math;
 extern crate test;
 
+pub trait IsEq<T: ?Sized> {
+
+    fn from_ref<'a>(t: &'a T) -> &'a Self;
+    fn to_ref<'a>(&'a self) -> &'a T;
+}
+
+impl<T: ?Sized> IsEq<T> for T {
+    
+    fn from_ref<'a>(t: &'a T) -> &'a Self { t }
+    fn to_ref<'a>(&'a self) -> &'a T { self }
+}
+
 pub trait StdZn: ZnRing 
     + FromModulusCreateableZnRing 
     + CanHomFrom<<<<GaloisField as RingStore>::Type as RingExtension>::BaseRing as RingStore>::Type> 
@@ -150,9 +162,9 @@ pub mod rnsconv;
 /// 
 pub mod rings;
 
-// pub mod lintransform;
+pub mod lintransform;
 
-// pub mod digitextract;
+pub mod digitextract;
 
 // #[cfg(test)]
 // pub mod bfv;
