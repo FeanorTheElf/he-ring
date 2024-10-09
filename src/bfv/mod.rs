@@ -28,15 +28,13 @@ use feanor_math::pid::EuclideanRingStore;
 
 use crate::cyclotomic::CyclotomicRing;
 use crate::euler_phi;
-use crate::rings::decomposition::CyclotomicRingDecomposition;
-use crate::rings::decomposition::IsomorphismInfo;
-use crate::rings::decomposition::RingDecomposition;
-use crate::rings::decomposition::RingDecompositionSelfIso;
-use crate::rings::odd_cyclotomic::OddCyclotomicDecomposition;
+use crate::extend_sampled_primes;
+use crate::rings::decomposition::*;
+use crate::rings::number_ring_quo::*;
+use crate::rings::odd_cyclotomic::*;
 use crate::rings::pow2_cyclotomic::*;
 use crate::rings::gadget_product::*;
 use crate::rings::double_rns_ring::*;
-use crate::rings::ntt_ring::*;
 use crate::profiling::*;
 use crate::rings::slots::HypercubeIsomorphism;
 use crate::rnsconv;
@@ -46,18 +44,18 @@ use rand::thread_rng;
 use rand::{Rng, CryptoRng};
 use rand_distr::StandardNormal;
 
-pub mod bootstrap;
+// pub mod bootstrap;
 
 pub type PlaintextZn = zn_64::Zn;
 pub type CiphertextZn = zn_64::Zn;
 pub type PlaintextAllocator = Global;
 pub type CiphertextAllocator = Global;
 
-pub type CiphertextRing<Params: BFVParams> = DoubleRNSRing<CiphertextZn, Params::CiphertextRingDecomposition, CiphertextAllocator>;
-pub type PlaintextRing<Params: BFVParams> = NTTRing<PlaintextZn, Params::PlaintextRingDecomposition, PlaintextAllocator>;
+pub type CiphertextRing<Params: BFVParams> = DoubleRNSRing<Params::NumberRing, CiphertextZn, CiphertextAllocator>;
+pub type PlaintextRing<Params: BFVParams> = NumberRingQuo<Params::NumberRing, PlaintextZn, PlaintextAllocator>;
 pub type SecretKey<Params: BFVParams> = El<CiphertextRing<Params>>;
 pub type Ciphertext<Params: BFVParams> = (CoeffOrNTTRingEl<Params>, CoeffOrNTTRingEl<Params>);
-pub type GadgetProductOperand<'a, Params: BFVParams> = GadgetProductRhsOperand<'a, Params::CiphertextRingDecomposition, CiphertextAllocator>;
+pub type GadgetProductOperand<'a, Params: BFVParams> = GadgetProductRhsOperand<'a, Params::NumberRing, CiphertextAllocator>;
 pub type KeySwitchKey<'a, Params: BFVParams> = (GadgetProductOperand<'a, Params>, GadgetProductOperand<'a, Params>);
 pub type RelinKey<'a, Params: BFVParams> = (GadgetProductOperand<'a, Params>, GadgetProductOperand<'a, Params>);
 
@@ -72,43 +70,40 @@ pub struct ModSwitchData {
 
 pub trait BFVParams {
 
-    type PlaintextRingDecomposition: RingDecompositionSelfIso<<PlaintextZn as RingStore>::Type> + CyclotomicRingDecomposition<<PlaintextZn as RingStore>::Type>;
-    type CiphertextRingDecomposition: RingDecompositionSelfIso<<CiphertextZn as RingStore>::Type> + CyclotomicRingDecomposition<<CiphertextZn as RingStore>::Type> + IsomorphismInfo<<CiphertextZn as RingStore>::Type, <PlaintextZn as RingStore>::Type, Self::PlaintextRingDecomposition>;
+    type NumberRing: DecomposableCyclotomicNumberRing<CiphertextZn> + DecomposableCyclotomicNumberRing<PlaintextZn>;
 
     fn log2_q(&self) -> Range<usize>;
-    fn n(&self) -> usize;
+    fn number_ring(&self) -> Self::NumberRing;
     fn t(&self) -> i64;
-    fn double_rns_moduli_congruent_to_one_mod(&self) -> i64;
-    fn create_plaintext_ring(&self, modulus: i64) -> PlaintextRing<Self>;
-    fn create_ciphertext_ring_part(&self, modulus: i64) -> Self::CiphertextRingDecomposition;
+
+    fn create_plaintext_ring(&self, modulus: i64) -> PlaintextRing<Self> {
+        NumberRingQuoBase::new(self.number_ring(), PlaintextZn::new(modulus as u64))
+    }
 
     fn create_ciphertext_rings(&self) -> (CiphertextRing<Self>, CiphertextRing<Self>) {
         let log2_q = self.log2_q();
-        let congruent_to_one_mod = self.double_rns_moduli_congruent_to_one_mod();
-        let mut C_rns_base = sample_primes(log2_q.start, log2_q.end, 57, &int_cast(congruent_to_one_mod, ZZbig, ZZ)).unwrap();
+        let number_ring = self.number_ring();
+
+        let mut C_rns_base = sample_primes(log2_q.start, log2_q.end, 56, |bound| number_ring.largest_suitable_prime(int_cast(bound, ZZ, ZZbig)).map(|p| int_cast(p, ZZbig, ZZ))).unwrap();
         C_rns_base.sort_unstable_by(|l, r| ZZbig.cmp(l, r));
 
-        let mut Cmul_rns_base = Vec::new();
-        let mut current_bits = 0;
-        let largest_C_prime = C_rns_base.iter().max_by(|l, r| ZZbig.cmp(l, r)).unwrap();
-        let start = ZZbig.add(ZZbig.sub_ref_fst(largest_C_prime, ZZbig.euclidean_rem(ZZbig.clone_el(largest_C_prime), &int_cast(congruent_to_one_mod, ZZbig, ZZ))), ZZbig.one());
-        let mut primes = (1..).map(|k| ZZbig.add_ref_fst(&start, int_cast(congruent_to_one_mod * k, ZZbig, ZZ))).filter(|p| is_prime(ZZbig, p, 10));
-        while current_bits <= log2_q.end {
-            let next_prime = primes.next().unwrap();
-            current_bits += ZZbig.abs_log2_floor(&next_prime).unwrap();
-            Cmul_rns_base.push(next_prime);
-        }
-        let C = DoubleRNSRingBase::from_ring_decompositions(
-            zn_rns::Zn::new(C_rns_base.iter().map(|p| CiphertextZn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect(), ZZbig),
-            C_rns_base.iter().map(|p| self.create_ciphertext_ring_part(int_cast(ZZbig.clone_el(p), ZZ, ZZbig))).collect(),
-            Global
+        println!("{:?}", C_rns_base.iter().map(|p| ZZbig.format(p)).collect::<Vec<_>>());
+
+        let mut Cmul_rns_base = extend_sampled_primes(&C_rns_base, log2_q.end * 2, log2_q.end * 2 + 57, 57, |bound| number_ring.largest_suitable_prime(int_cast(bound, ZZ, ZZbig)).map(|p| int_cast(p, ZZbig, ZZ))).unwrap();
+        assert!(ZZbig.is_gt(&Cmul_rns_base[Cmul_rns_base.len() - 1], &C_rns_base[C_rns_base.len() - 1]));
+        Cmul_rns_base.sort_unstable_by(|l, r| ZZbig.cmp(l, r));
+
+        println!("{:?}", Cmul_rns_base.iter().map(|p| ZZbig.format(p)).collect::<Vec<_>>());
+
+        let C = DoubleRNSRingBase::new(
+            self.number_ring(),
+            zn_rns::Zn::new(C_rns_base.iter().map(|p| CiphertextZn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect(), ZZbig)
         );
-        let Cmul = DoubleRNSRingBase::from_ring_decompositions(
-            zn_rns::Zn::new(C_rns_base.iter().chain(Cmul_rns_base.iter()).map(|p| CiphertextZn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect(), ZZbig),
-            C_rns_base.iter().chain(Cmul_rns_base.iter()).map(|p| self.create_ciphertext_ring_part(int_cast(ZZbig.clone_el(p), ZZ, ZZbig))).collect(),
-            Global
+        let Cmul = DoubleRNSRingBase::new(
+            number_ring,
+            zn_rns::Zn::new(Cmul_rns_base.iter().map(|p| CiphertextZn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect(), ZZbig)
         );
-        return (RingValue::from(C), RingValue::from(Cmul));
+        return (C, Cmul);
     }
 
     fn create_multiplication_rescale(&self, P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, Cmul: &CiphertextRing<Self>) -> MulConversionData {
@@ -131,8 +126,8 @@ pub trait BFVParams {
 }
 
 pub struct CoeffOrNTTRingEl<P: BFVParams> {
-    ntt_part: Option<DoubleRNSEl<CiphertextZn, P::CiphertextRingDecomposition, CiphertextAllocator>>,
-    coeff_part: Option<DoubleRNSNonFFTEl<CiphertextZn, P::CiphertextRingDecomposition, CiphertextAllocator>>,
+    ntt_part: Option<DoubleRNSEl<P::NumberRing, CiphertextZn, CiphertextAllocator>>,
+    coeff_part: Option<CoeffEl<P::NumberRing, CiphertextZn, CiphertextAllocator>>,
     params: PhantomData<P>
 }
 
@@ -154,7 +149,7 @@ impl<P: BFVParams> CoeffOrNTTRingEl<P> {
         }
     }
 
-    pub fn from_coeff(el: DoubleRNSNonFFTEl<CiphertextZn, P::CiphertextRingDecomposition, CiphertextAllocator>) -> Self {
+    pub fn from_coeff(el: CoeffEl<P::NumberRing, CiphertextZn, CiphertextAllocator>) -> Self {
         Self {
             coeff_part: Some(el),
             ntt_part: None, 
@@ -183,7 +178,7 @@ impl<P: BFVParams> CoeffOrNTTRingEl<P> {
         }
     }
 
-    pub fn to_coeff(self, C: &CiphertextRing<P>) -> DoubleRNSNonFFTEl<CiphertextZn, P::CiphertextRingDecomposition, CiphertextAllocator> {
+    pub fn to_coeff(self, C: &CiphertextRing<P>) -> CoeffEl<P::NumberRing, CiphertextZn, CiphertextAllocator> {
         if let Some(mut result) = self.coeff_part {
             if let Some(ntt_part) = self.ntt_part {
                 C.get_ring().add_assign_non_fft(&mut result, &C.get_ring().undo_fft(ntt_part));
@@ -196,7 +191,7 @@ impl<P: BFVParams> CoeffOrNTTRingEl<P> {
         }
     }
 
-    pub fn gadget_product<'a>(lhs: &GadgetProductLhsOperand<'a, P::CiphertextRingDecomposition, CiphertextAllocator>, rhs: &GadgetProductRhsOperand<'a, P::CiphertextRingDecomposition, CiphertextAllocator>, C: &CiphertextRing<P>) -> CoeffOrNTTRingEl<P> {
+    pub fn gadget_product<'a>(lhs: &GadgetProductLhsOperand<'a, P::NumberRing, CiphertextAllocator>, rhs: &GadgetProductRhsOperand<'a, P::NumberRing, CiphertextAllocator>, C: &CiphertextRing<P>) -> CoeffOrNTTRingEl<P> {
         match C.get_ring().preferred_output_repr(lhs, rhs) {
             ElRepr::Coeff => CoeffOrNTTRingEl { ntt_part: None, coeff_part: Some(C.get_ring().gadget_product_coeff(lhs, rhs)), params: PhantomData },
             ElRepr::NTT => CoeffOrNTTRingEl { ntt_part: Some(C.get_ring().gadget_product_ntt(lhs, rhs)), coeff_part: None, params: PhantomData },
@@ -260,31 +255,14 @@ pub struct Pow2BFVParams {
 
 impl BFVParams for Pow2BFVParams {
 
-    type CiphertextRingDecomposition = Pow2CyclotomicDecomposition<CiphertextZn, cooley_tuckey::CooleyTuckeyFFT<<CiphertextZn as RingStore>::Type, <zn_64::ZnFastmul as RingStore>::Type, CanHom<zn_64::ZnFastmul, CiphertextZn>>>;
-    type PlaintextRingDecomposition = Pow2CyclotomicDecomposition<PlaintextZn, cooley_tuckey::CooleyTuckeyFFT<<PlaintextZn as RingStore>::Type, <PlaintextZn as RingStore>::Type, Identity<PlaintextZn>>>;
-
-    fn create_ciphertext_ring_part(&self, modulus: i64) -> Self::CiphertextRingDecomposition {
-        let Zp = CiphertextZn::new(modulus as u64);
-        let root_of_unity = get_prim_root_of_unity_pow2((&Zp).as_field().ok().unwrap(), self.log2_N + 1).unwrap();
-        let root_of_unity = Zp.coerce(&(&Zp).as_field().ok().unwrap(), root_of_unity);
-        let Zp_fastmul = zn_64::ZnFastmul::new(Zp);
-        Pow2CyclotomicDecomposition::create(Zp, cooley_tuckey::CooleyTuckeyFFT::new_with_hom(Zp.into_can_hom(Zp_fastmul).ok().unwrap(), Zp_fastmul.coerce(&Zp, Zp.pow(root_of_unity, 2)), self.log2_N), root_of_unity)
-    }
-
-    fn create_plaintext_ring(&self, modulus: i64) -> PlaintextRing<Self> {
-        NTTRingBase::<_, Pow2CyclotomicDecomposition<_, _>, _>::new(PlaintextZn::new(modulus as u64), self.log2_N)
-    }
-
-    fn n(&self) -> usize {
-        2 << self.log2_N
-    }
+    type NumberRing = Pow2CyclotomicDecomposableNumberRing;
 
     fn t(&self) -> i64 {
         self.t
     }
 
-    fn double_rns_moduli_congruent_to_one_mod(&self) -> i64 {
-        2 << self.log2_N
+    fn number_ring(&self) -> Self::NumberRing {
+        Pow2CyclotomicDecomposableNumberRing::new(2 << self.log2_N)
     }
 
     fn log2_q(&self) -> Range<usize> {
@@ -303,76 +281,10 @@ pub struct CompositeBFVParams {
 
 impl BFVParams for CompositeBFVParams {
 
-    type CiphertextRingDecomposition = OddCyclotomicDecomposition<CiphertextZn, factor_fft::CoprimeCooleyTuckeyFFT<
-        <CiphertextZn as RingStore>::Type, 
-        <CiphertextZn as RingStore>::Type, 
-        Identity<CiphertextZn>,
-        bluestein::BluesteinFFT<<CiphertextZn as RingStore>::Type, <CiphertextZn as RingStore>::Type, Identity<CiphertextZn>>,
-        bluestein::BluesteinFFT<<CiphertextZn as RingStore>::Type, <CiphertextZn as RingStore>::Type, Identity<CiphertextZn>>,
-    >>;
-    type PlaintextRingDecomposition = OddCyclotomicDecomposition<PlaintextZn, factor_fft::CoprimeCooleyTuckeyFFT<
-        <PlaintextZn as RingStore>::Type, 
-        <PlaintextZn as RingStore>::Type, 
-        Identity<PlaintextZn>,
-        bluestein::BluesteinFFT<<PlaintextZn as RingStore>::Type, <PlaintextZn as RingStore>::Type, Identity<PlaintextZn>>,
-        bluestein::BluesteinFFT<<PlaintextZn as RingStore>::Type, <PlaintextZn as RingStore>::Type, Identity<PlaintextZn>>,
-    >>;
+    type NumberRing = CompositeCyclotomicDecomposableNumberRing;
 
-    fn create_ciphertext_ring_part(&self, modulus: i64) -> Self::CiphertextRingDecomposition {
-        let Fp = CiphertextZn::new(modulus as u64);
-        let log2_m = max(ZZ.abs_log2_ceil(&(self.n1 as i64)).unwrap(), ZZ.abs_log2_ceil(&(self.n2 as i64)).unwrap()) + 1;
-        let as_field = (&Fp).as_field().ok().unwrap();
-        let pow2_root_of_unity = Fp.coerce(&as_field, get_prim_root_of_unity_pow2(as_field, log2_m).unwrap());
-        let root_of_unity = Fp.coerce(&as_field, get_prim_root_of_unity(as_field, 2 * self.n()).unwrap());
-        OddCyclotomicDecomposition::create(Fp, factor_fft::CoprimeCooleyTuckeyFFT::new(
-            Fp, 
-            Fp.pow(root_of_unity, 2), 
-            bluestein::BluesteinFFT::new(Fp, Fp.pow(root_of_unity, self.n2), Fp.pow(pow2_root_of_unity, 1 << (log2_m - ZZ.abs_log2_ceil(&(self.n1 as i64)).unwrap() - 1)), self.n1, ZZ.abs_log2_ceil(&(self.n1 as i64)).unwrap() + 1, Global), 
-            bluestein::BluesteinFFT::new(Fp, Fp.pow(root_of_unity, self.n1), Fp.pow(pow2_root_of_unity, 1 << (log2_m - ZZ.abs_log2_ceil(&(self.n2 as i64)).unwrap() - 1)), self.n2, ZZ.abs_log2_ceil(&(self.n2 as i64)).unwrap() + 1, Global),
-        ), Global)
-    }
-
-    fn double_rns_moduli_congruent_to_one_mod(&self) -> i64 {
-        let log2_m = max(ZZ.abs_log2_ceil(&(self.n1 as i64)).unwrap(), ZZ.abs_log2_ceil(&(self.n2 as i64)).unwrap()) + 1;
-        return (self.n() << log2_m) as i64;
-    }
-
-    fn create_plaintext_ring(&self, modulus: i64) -> PlaintextRing<Self> {
-        assert!(self.n() % 2 == 1);
-        let expansion_factor = self.create_ciphertext_ring_part(int_cast(sample_primes(10, 60, 60, &int_cast(self.n(), ZZbig, ZZ)).unwrap().pop().unwrap(), ZZ, ZZbig)).expansion_factor();
-        let required_bits = ((modulus as f64).log2() * 2. + (expansion_factor as f64).log2()).ceil() as usize;
-
-        let log2_m = max(ZZ.abs_log2_ceil(&(self.n1 as i64)).unwrap(), ZZ.abs_log2_ceil(&(self.n2 as i64)).unwrap()) + 1;
-        let congruent_to_one_mod = self.n() << log2_m;
-        let primes = sample_primes(required_bits, required_bits + log2_m + 3, 58, &BigIntRing::RING.coerce(&ZZ, congruent_to_one_mod as i64)).unwrap();
-
-        let mut rns_base = Vec::new();
-        let mut ring_decompositions = Vec::new();
-        for p in primes {
-            let Fp = PlaintextZn::new(int_cast(p, ZZ, ZZbig) as u64);
-            let as_field = (&Fp).as_field().ok().unwrap();
-            let pow2_root_of_unity = Fp.coerce(&as_field, get_prim_root_of_unity_pow2(as_field, log2_m).unwrap());
-            let root_of_unity = Fp.coerce(&as_field, get_prim_root_of_unity(as_field, 2 * self.n()).unwrap());
-            let fft_table = factor_fft::CoprimeCooleyTuckeyFFT::new(
-                Fp, 
-                Fp.pow(root_of_unity, 2), 
-                bluestein::BluesteinFFT::new(Fp, Fp.pow(root_of_unity, self.n2), Fp.pow(pow2_root_of_unity, 1 << (log2_m - ZZ.abs_log2_ceil(&(self.n1 as i64)).unwrap() - 1)), self.n1, ZZ.abs_log2_ceil(&(self.n1 as i64)).unwrap() + 1, Global), 
-                bluestein::BluesteinFFT::new(Fp, Fp.pow(root_of_unity, self.n1), Fp.pow(pow2_root_of_unity, 1 << (log2_m - ZZ.abs_log2_ceil(&(self.n2 as i64)).unwrap() - 1)), self.n2, ZZ.abs_log2_ceil(&(self.n2 as i64)).unwrap() + 1, Global),
-            );
-            ring_decompositions.push(OddCyclotomicDecomposition::create(Fp.clone(), fft_table, Global));
-            assert_eq!(expansion_factor, ring_decompositions.last().unwrap().expansion_factor());
-            rns_base.push(Fp);
-        }
-        return RingValue::from(NTTRingBase::from_ring_decompositions(
-            PlaintextZn::new(modulus as u64), 
-            zn_rns::Zn::new(rns_base, BigIntRing::RING), 
-            ring_decompositions, 
-            Global
-        ));
-    }
-
-    fn n(&self) -> usize {
-        self.n1 * self.n2
+    fn number_ring(&self) -> Self::NumberRing {
+        CompositeCyclotomicDecomposableNumberRing::new(self.n1, self.n2)
     }
 
     fn t(&self) -> i64 {
@@ -451,7 +363,7 @@ pub fn clone_ct<Params: BFVParams>(C: &CiphertextRing<Params>, ct: &Ciphertext<P
 }
 
 pub fn hom_add_plain<Params: BFVParams>(P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, m: &El<PlaintextRing<Params>>, ct: Ciphertext<Params>) -> Ciphertext<Params> {
-    let mut m = C.get_ring().exact_convert_from_nttring(P.get_ring(), m);
+    let mut m = C.get_ring().exact_convert_from_nttring(P, m);
     let Delta = C.base_ring().coerce(&ZZbig, ZZbig.rounded_div(
         ZZbig.clone_el(C.base_ring().modulus()), 
         &int_cast(*P.base_ring().modulus() as i32, &ZZbig, &StaticRing::<i32>::RING)
@@ -461,7 +373,7 @@ pub fn hom_add_plain<Params: BFVParams>(P: &PlaintextRing<Params>, C: &Ciphertex
 }
 
 pub fn hom_mul_plain<Params: BFVParams>(P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, m: &El<PlaintextRing<Params>>, ct: Ciphertext<Params>) -> Ciphertext<Params> {
-    let m = C.get_ring().do_fft(C.get_ring().exact_convert_from_nttring(P.get_ring(), m));
+    let m = C.get_ring().do_fft(C.get_ring().exact_convert_from_nttring(P, m));
     let c0 = ct.0.to_ntt(C);
     let c1 = ct.1.to_ntt(C);
     return (CoeffOrNTTRingEl::from_ntt(C.mul_ref_snd(c0, &m)), CoeffOrNTTRingEl::from_ntt(C.mul(c1, m)));
@@ -494,7 +406,7 @@ pub fn gen_rk<'a, R: Rng + CryptoRng, Params: BFVParams>(C: &'a CiphertextRing<P
 pub fn hom_mul<Params: BFVParams>(C: &CiphertextRing<Params>, C_mul: &CiphertextRing<Params>, lhs: Ciphertext<Params>, rhs: Ciphertext<Params>, rk: &RelinKey<Params>, conv_data: &MulConversionData) -> Ciphertext<Params> {
     let (c00, c01) = lhs;
     let (c10, c11) = rhs;
-    let lift = |c: DoubleRNSNonFFTEl<CiphertextZn, Params::CiphertextRingDecomposition, CiphertextAllocator>| 
+    let lift = |c: CoeffEl<Params::NumberRing, CiphertextZn, CiphertextAllocator>| 
         C_mul.get_ring().do_fft(C_mul.get_ring().perform_rns_op_from(C.get_ring(), &c, &conv_data.lift_to_C_mul));
 
     let c00_lifted = lift(c00.to_coeff(C));
@@ -551,8 +463,8 @@ pub fn key_switch<Params: BFVParams>(C: &CiphertextRing<Params>, ct: Ciphertext<
 pub fn mod_switch_to_plaintext<Params: BFVParams>(target: &PlaintextRing<Params>, C: &CiphertextRing<Params>, ct: Ciphertext<Params>, switch_data: &ModSwitchData) -> (El<PlaintextRing<Params>>, El<PlaintextRing<Params>>) {
     let (c0, c1) = ct;
     return (
-        C.get_ring().perform_rns_op_to_nttring::<Params::PlaintextRingDecomposition, _, _>(target.get_ring(), &c0.to_coeff(C), &switch_data.scale),
-        C.get_ring().perform_rns_op_to_nttring::<Params::PlaintextRingDecomposition, _, _>(target.get_ring(), &c1.to_coeff(C), &switch_data.scale)
+        C.get_ring().perform_rns_op_to_nttring(target, &c0.to_coeff(C), &switch_data.scale),
+        C.get_ring().perform_rns_op_to_nttring(target, &c1.to_coeff(C), &switch_data.scale)
     );
 }
 
@@ -569,7 +481,7 @@ pub fn hom_galois<Params: BFVParams>(C: &CiphertextRing<Params>, ct: Ciphertext<
 
 pub fn hom_galois_many<'a, V, Params: BFVParams>(C: &CiphertextRing<Params>, ct: Ciphertext<Params>, gs: &[ZnEl], gks: V) -> Vec<Ciphertext<Params>>
     where V: VectorView<KeySwitchKey<'a, Params>>,
-        Params::CiphertextRingDecomposition: 'a
+        Params::NumberRing: 'a
 {
     let (c0, c1) = ct;
     let c0_ntt = c0.to_ntt(&C);
@@ -582,49 +494,6 @@ pub fn hom_galois_many<'a, V, Params: BFVParams>(C: &CiphertextRing<Params>, ct:
         let c0_g = CoeffOrNTTRingEl::from_ntt(C.get_ring().apply_galois_action(&c0_ntt, gs[i]));
         return (CoeffOrNTTRingEl::add(r0, &c0_g, C), r1);
     }).collect();
-}
-
-#[test]
-#[ignore]
-fn run_pow2_bfv() {
-    let mut rng = thread_rng();
-    
-    let params = Pow2BFVParams {
-        t: 3,
-        log2_q_min: 790,
-        log2_q_max: 800,
-        log2_N: 15
-    };
-    
-    let P = params.create_plaintext_ring(params.t());
-    let (C, C_mul) = params.create_ciphertext_rings();
-    println!("Created rings, RNS base length is {}", C.base_ring().get_ring().len());
-    
-    let sk = gen_sk::<_, Pow2BFVParams>(&C, &mut rng);
-    
-    let m = P.int_hom().map(2);
-    let ct = enc_sym(&P, &C, &mut rng, &m, &sk);
-    println!("Encrypted message");
-    
-    let mul_rescale_data = params.create_multiplication_rescale(&P, &C, &C_mul);
-    let relin_key = gen_rk::<_, Pow2BFVParams>(&C, &mut rng, &sk);
-    println!("Created relin key");
-
-    const COUNT: usize = 10;
-
-    clear_all_timings();
-    let start = Instant::now();
-    let mut ct_sqr = hom_mul(&C, &C_mul, clone_ct::<Pow2BFVParams>(&C, &ct), clone_ct(&C, &ct), &relin_key, &mul_rescale_data);
-    for _ in 0..(COUNT - 1) {
-        ct_sqr = hom_mul(&C, &C_mul, clone_ct(&C, &ct), clone_ct(&C, &ct), &relin_key, &mul_rescale_data);
-    }
-    let end = Instant::now();
-    println!("Performed multiplication in {} ms", (end - start).as_millis() as f64 / COUNT as f64);
-    print_all_timings();
-
-    let m_sqr = dec(&P, &C, ct_sqr, &sk);
-    println!("Decrypted result");
-    assert_el_eq!(&P, &P.one(), &m_sqr);
 }
 
 #[test]

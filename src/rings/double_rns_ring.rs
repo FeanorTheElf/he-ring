@@ -16,10 +16,12 @@ use feanor_math::rings::poly::dense_poly::DensePolyRing;
 use feanor_math::rings::zn::*;
 use feanor_math::homomorphism::*;
 use feanor_math::seq::*;
+use serde_json::Number;
 
 use crate::cyclotomic::CyclotomicRing;
 use crate::rings::decomposition::*;
 use crate::rnsconv::*;
+use crate::IsEq;
 
 ///
 /// The ring `R/qR` specified by a collection of [`RingDecomposition`] for all prime factors `p | q`. 
@@ -294,6 +296,84 @@ impl<NumberRing, FpTy, A> DoubleRNSRingBase<NumberRing, FpTy, A>
             inv_fft_data: self.clone_el_non_fft(el)
         }
     }
+
+    pub fn perform_rns_op_from<FpTy2, A2, Op>(
+        &self, 
+        from: &DoubleRNSRingBase<NumberRing, FpTy2, A2>, 
+        el: &CoeffEl<NumberRing, FpTy2, A2>, 
+        op: &Op
+    ) -> CoeffEl<NumberRing, FpTy, A> 
+        where NumberRing: DecomposableNumberRing<FpTy2>,
+            FpTy2: RingStore<Type = FpTy::Type> + Clone,
+            A2: Allocator + Clone,
+            Op: RNSOperation<RingType = FpTy::Type>
+    {
+        assert!(self.number_ring == from.number_ring);
+        assert_eq!(self.rns_base().len(), op.output_rings().len());
+        assert_eq!(from.rns_base().len(), op.input_rings().len());
+
+        for i in 0..from.rns_base().len() {
+            assert!(from.rns_base().at(i).get_ring() == op.input_rings().at(i).get_ring());
+        }
+        for i in 0..self.rns_base().len() {
+            assert!(self.rns_base().at(i).get_ring() == op.output_rings().at(i).get_ring());
+        }
+        timed!("perform_rns_op_from", || {
+            let mut result = self.non_fft_zero();
+            op.apply(from.as_matrix(el), self.as_matrix_mut(&mut result));
+            return result;
+        })
+    }
+
+    pub fn exact_convert_from_nttring<FpTy2, A2>(
+        &self, 
+        from: &NumberRingQuo<NumberRing, FpTy2, A2>, 
+        element: &<NumberRingQuoBase<NumberRing, FpTy2, A2> as RingBase>::Element
+    ) -> CoeffEl<NumberRing, FpTy, A> 
+        where NumberRing: DecomposableNumberRing<FpTy2>,
+            FpTy2: RingStore<Type = FpTy::Type> + Clone,
+            A2: Allocator + Clone
+    {
+        assert!(&self.number_ring == from.get_ring().number_ring());
+
+        let mut result = self.non_fft_zero();
+        for j in 0..self.rank() {
+            let x = int_cast(from.base_ring().smallest_lift(from.base_ring().clone_el(&element.data[j])), &StaticRing::<i32>::RING, from.base_ring().integer_ring());
+            for i in 0..self.rns_base().len() {
+                result.data[j + i * self.rank()] = self.rns_base().at(i).int_hom().map(x);
+            }
+        }
+        return result;
+    }
+
+    pub fn perform_rns_op_to_nttring<FpTy2, A2, Op>(
+        &self, 
+        to: &NumberRingQuo<NumberRing, FpTy2, A2>, 
+        element: &CoeffEl<NumberRing, FpTy, A>, 
+        op: &Op
+    ) -> <NumberRingQuoBase<NumberRing, FpTy2, A2> as RingBase>::Element 
+        where NumberRing: DecomposableNumberRing<FpTy2>,
+            FpTy2: RingStore<Type = FpTy::Type> + Clone,
+            A2: Allocator + Clone,
+            Op: RNSOperation<RingType = FpTy::Type>
+    {
+        assert!(&self.number_ring == to.get_ring().number_ring());
+        assert_eq!(self.rns_base().len(), op.input_rings().len());
+        assert_eq!(1, op.output_rings().len());
+
+        timed!("perform_rns_op_to_cfft", || {
+            for i in 0..self.rns_base().len() {
+                assert!(self.rns_base().at(i).get_ring() == op.input_rings().at(i).get_ring());
+            }
+            assert!(to.base_ring().get_ring() == op.output_rings().at(0).get_ring());
+         
+            let mut result = to.zero();
+            let result_matrix = SubmatrixMut::from_1d(&mut result.data, 1, to.rank());
+            op.apply(self.as_matrix(element), result_matrix);
+            return result;
+        })
+    }
+
 }
 
 impl<NumberRing, FpTy, A> PartialEq for DoubleRNSRingBase<NumberRing, FpTy, A> 
@@ -426,20 +506,19 @@ impl<NumberRing, FpTy, A> RingBase for DoubleRNSRingBase<NumberRing, FpTy, A>
 }
 
 impl<NumberRing, FpTy, A> CyclotomicRing for DoubleRNSRingBase<NumberRing, FpTy, A> 
-    where NumberRing: DecomposableNumberRing<FpTy>,
-        NumberRing::Decomposed: DecomposedCyclotomicNumberRing<FpTy::Type>,
+    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
 {
     fn n(&self) -> usize {
-        *self.ring_decompositions()[0].cyclotomic_index_ring().modulus() as usize
+        *self.number_ring.cyclotomic_index_ring().modulus() as usize
     }
 
     fn apply_galois_action(&self, el: &Self::Element, g: zn_64::ZnEl) -> Self::Element {
         let mut result = self.zero();
         for (i, _) in self.rns_base().as_iter().enumerate() {
-            self.ring_decompositions()[i].permute_galois_action(
+            <NumberRing::DecomposedAsCyclotomic>::from_ref(&self.ring_decompositions()[i]).permute_galois_action(
                 &el.data[(i * self.rank())..((i + 1) * self.rank())],
                 &mut result.data[(i * self.rank())..((i + 1) * self.rank())],
                 g
@@ -739,3 +818,6 @@ impl<NumberRing, FpTy1, FpTy2, A1, A2> CanIsoFromTo<DoubleRNSRingBase<NumberRing
 use feanor_math::assert_el_eq;
 #[cfg(test)]
 use crate::rnsconv::lift::*;
+
+use super::number_ring_quo::NumberRingQuo;
+use super::number_ring_quo::NumberRingQuoBase;

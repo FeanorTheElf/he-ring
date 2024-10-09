@@ -100,14 +100,21 @@ pub fn largest_prime_congruent_one(modulus: El<BigIntRing>) -> impl Fn(El<BigInt
     }
 }
 
-pub fn sample_primes<F>(min_bits: usize, max_bits: usize, max_bits_each_modulus: usize, mut largest_prime_leq: F) -> Option<Vec<El<BigIntRing>>>
+pub fn sample_primes<F>(min_bits: usize, max_bits: usize, max_bits_each_modulus: usize, largest_prime_leq: F) -> Option<Vec<El<BigIntRing>>>
+    where F: FnMut(El<BigIntRing>) -> Option<El<BigIntRing>>
+{
+    extend_sampled_primes(&[], min_bits, max_bits, max_bits_each_modulus, largest_prime_leq)
+}
+
+pub fn extend_sampled_primes<F>(begin_with: &[El<BigIntRing>], min_bits: usize, max_bits: usize, max_bits_each_modulus: usize, mut largest_prime_leq: F) -> Option<Vec<El<BigIntRing>>>
     where F: FnMut(El<BigIntRing>) -> Option<El<BigIntRing>>
 {
     let ZZbig = BigIntRing::RING;
     assert!(max_bits > min_bits);
 
-    let mut result = Vec::new();
-    let mut current_bits = 0.;
+    let mut result = begin_with.iter().map(|p| ZZbig.clone_el(p)).collect::<Vec<_>>();
+    let mut current_bits = result.iter().map(|n| ZZbig.to_float_approx(n).log2()).sum::<f64>();
+    assert!((current_bits.floor() as usize) < max_bits);
     let mut current_upper_bound = ZZbig.power_of_two(max_bits_each_modulus);
 
     let min = |x, y| if ZZbig.is_gt(&x, &y) { y } else { x };
@@ -121,11 +128,15 @@ pub fn sample_primes<F>(min_bits: usize, max_bits: usize, max_bits_each_modulus:
             current_upper_bound = min(current_upper_bound, ZZbig.power_of_two(f64::min((max_bits as f64 - current_bits) / required_number_of_primes as f64, max_bits_each_modulus as f64).floor() as usize));
         }
 
-        let prime = largest_prime_leq(ZZbig.clone_el(&current_upper_bound))?;
+        let mut prime = largest_prime_leq(ZZbig.clone_el(&current_upper_bound))?;
+        current_upper_bound = ZZbig.sub_ref_fst(&prime, ZZbig.one());
+        while begin_with.iter().any(|p| ZZbig.eq_el(p, &prime)) {
+            prime = largest_prime_leq(ZZbig.clone_el(&current_upper_bound))?;
+            current_upper_bound = ZZbig.sub_ref_fst(&prime, ZZbig.one());
+        }
         let bits = ZZbig.to_float_approx(&prime).log2();
         current_bits += bits;
         result.push(ZZbig.clone_el(&prime));
-        current_upper_bound = ZZbig.sub(prime, ZZbig.one());
     }
     debug_assert!(ZZbig.is_geq(&ZZbig.prod(result.iter().map(|n| ZZbig.clone_el(n))), &ZZbig.power_of_two(min_bits)));
     debug_assert!(ZZbig.is_lt(&ZZbig.prod(result.iter().map(|n| ZZbig.clone_el(n))), &ZZbig.power_of_two(max_bits)));
@@ -166,8 +177,8 @@ pub mod lintransform;
 
 pub mod digitextract;
 
-// #[cfg(test)]
-// pub mod bfv;
+#[cfg(test)]
+pub mod bfv;
 
 #[cfg(test)]
 use feanor_math::integer::int_cast;

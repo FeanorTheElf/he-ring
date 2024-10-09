@@ -99,6 +99,9 @@ impl<NumberRing, FpTy, A> NumberRingQuoBase<NumberRing, FpTy, A>
         &self.rns_base
     }
 
+    pub fn number_ring(&self) -> &NumberRing {
+        &self.number_ring
+    }
     
     ///
     /// Computes `sum sigma_i(x_i)` where `els` yields pairs `(x_i, sigma_i)` with `sigma_i` being
