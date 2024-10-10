@@ -66,9 +66,57 @@ pub struct BootstrappingDataBundle<Params: BFVParams> {
     pub mod_switch: ModSwitchData
 }
 
+impl ThinBootstrapParams<Pow2BFVParams> {
+
+    pub fn build_pow2<const LOG: bool>(params: Pow2BFVParams, config: BootstrapperConfig) -> Self {
+        let (p, r) = is_prime_power(&ZZ, &params.t()).unwrap();
+        let s_can_norm = <_ as DecomposableNumberRing<CiphertextZn>>::inf_to_can_norm_expansion_factor(&params.number_ring());
+        let v = config.set_v.unwrap_or(((s_can_norm + 1.).log2() / (p as f64).log2()).ceil() as usize);
+        let e = r + v;
+        if LOG {
+            println!("Setting up bootstrapping for plaintext modulus p^r = {}^{} = {} within the cyclotomic ring Q[X]/(Phi_{})", p, r, params.t(), <_ as DecomposableCyclotomicNumberRing<CiphertextZn>>::n(&params.number_ring()));
+            println!("Choosing e = r + v = {} + {}", r, v);
+        }
+
+        let digit_extraction_circuits = timed_step::<_, _, LOG, _>("Computing digit extraction polynomials", |[]| {
+            (1..=v).rev().map(|remaining_v| {
+                let poly_ring = DensePolyRing::new(PlaintextZn::new(ZZ.pow(p, remaining_v + r) as u64), "X");
+                poly_to_circuit(&poly_ring, &(2..=remaining_v).chain([r + remaining_v].into_iter()).map(|j| digit_retain_poly(&poly_ring, j)).collect::<Vec<_>>())
+            }).collect::<Vec<_>>()
+        });
+
+        let plaintext_ring = params.create_plaintext_ring(ZZ.pow(p, e));
+        let original_plaintext_ring = params.create_plaintext_ring(ZZ.pow(p, r));
+
+        let H = HypercubeIsomorphism::new::<LOG>(plaintext_ring.get_ring());
+        let original_H = H.reduce_modulus(original_plaintext_ring.get_ring());
+        let slots_to_coeffs = timed_step::<_, _, LOG, _>("Creating Slots-to-Coeffs transform", |[]| pow2::slots_to_coeffs_thin(&original_H));
+        let (coeffs_to_slots, trace) = timed_step::<_, _, LOG, _>("Creating Coeffs-to-Slots transform", |[]| {
+            let (transforms, trace) = pow2::coeffs_to_slots_thin(&H);
+            (transforms, Some(trace))
+        });
+        let (compiled_coeffs_to_slots_thin, compiled_slots_to_coeffs_thin): (Vec<_>, Vec<_>) = timed_step::<_, _, LOG, _>("Compiling transforms", |[]| (
+            coeffs_to_slots.into_iter().map(|T| CompiledLinearTransform::compile(&H, T)).collect::<Vec<_>>(),
+            slots_to_coeffs.into_iter().map(|T| CompiledLinearTransform::compile(&original_H, T)).collect::<Vec<_>>()
+        ));
+
+        return Self::new_with(
+            params,
+            r,
+            e,
+            p,
+            digit_extraction_circuits,
+            compiled_slots_to_coeffs_thin,
+            (compiled_coeffs_to_slots_thin, trace)
+        );
+    }
+}
+
 impl<Params: BFVParams> ThinBootstrapParams<Params> {
 
-    pub fn create_for<const LOG: bool>(params: Params, config: BootstrapperConfig, load_data: Option<&str>, store_data: Option<&str>) -> Self {
+    pub fn build_odd<const LOG: bool>(params: Params, config: BootstrapperConfig) -> Self {
+        assert!(params.number_ring().n() % 2 != 0);
+
         let (p, r) = is_prime_power(&ZZ, &params.t()).unwrap();
         let s_can_norm = params.number_ring().inf_to_can_norm_expansion_factor();
         let v = config.set_v.unwrap_or(((s_can_norm + 1.).log2() / (p as f64).log2()).ceil() as usize);
@@ -88,65 +136,60 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
         let plaintext_ring = params.create_plaintext_ring(ZZ.pow(p, e));
         let original_plaintext_ring = params.create_plaintext_ring(ZZ.pow(p, r));
 
-        if let Some(filename) = load_data {
+        let H = HypercubeIsomorphism::new::<LOG>(plaintext_ring.get_ring());
+        let original_H = H.reduce_modulus(original_plaintext_ring.get_ring());
+        let slots_to_coeffs = timed_step::<_, _, LOG, _>("Creating Slots-to-Coeffs transform", |[]| composite::slots_to_powcoeffs_thin(&original_H));
+        let coeffs_to_slots = timed_step::<_, _, LOG, _>("Creating Coeffs-to-Slots transform", |[]| composite::powcoeffs_to_slots_thin(&H));
 
-            let H = HypercubeIsomorphism::load(format!("{}_hypercube.json", filename).as_str(), plaintext_ring.get_ring());
-            let original_H = H.reduce_modulus(original_plaintext_ring.get_ring());
-            
-            let slots_to_coeffs = CompiledLinearTransform::load_seq(format!("{}_slots_to_coeffs.json", filename).as_str(), &original_plaintext_ring, original_H.cyclotomic_index_ring());
-            let coeffs_to_slots = CompiledLinearTransform::load_seq(format!("{}_coeffs_to_slots.json", filename).as_str(), &plaintext_ring, H.cyclotomic_index_ring());
-            let trace = unimplemented!();
+        let (compiled_coeffs_to_slots_thin, compiled_slots_to_coeffs_thin): (Vec<_>, Vec<_>) = timed_step::<_, _, LOG, _>("Compiling transforms", |[]| (
+            coeffs_to_slots.into_iter().map(|T| CompiledLinearTransform::compile(&H, T)).collect::<Vec<_>>(),
+            slots_to_coeffs.into_iter().map(|T| CompiledLinearTransform::compile(&original_H, T)).collect::<Vec<_>>()
+        ));
 
-            return Self {
-                params: params,
-                e: e,
-                r: r,
-                p: p,
-                digit_extract_circuits: digit_extraction_circuits,
-                slots_to_coeffs_thin: slots_to_coeffs,
-                coeffs_to_slots_thin: (coeffs_to_slots, Some(trace))
-            };
-        } else {
-            let H = HypercubeIsomorphism::new::<LOG>(plaintext_ring.get_ring());
+        return Self::new_with(
+            params,
+            r,
+            e,
+            p,
+            digit_extraction_circuits,
+            compiled_slots_to_coeffs_thin,
+            (compiled_coeffs_to_slots_thin, None)
+        );
+    }
+}
 
-            let original_H = H.reduce_modulus(original_plaintext_ring.get_ring());
-    
-            let slots_to_coeffs = timed_step::<_, _, LOG, _>("Creating Slots-to-Coeffs transform", |[]| {
-                if H.ring().n() % 2 == 0 {
-                    pow2::slots_to_coeffs_thin(&original_H)
-                } else {
-                    composite::slots_to_powcoeffs_thin(&original_H)
-                }
-            });
+impl<Params: BFVParams> ThinBootstrapParams<Params> {
 
-            let (coeffs_to_slots, trace) = timed_step::<_, _, LOG, _>("Creating Coeffs-to-Slots transform", |[]| if H.ring().n() % 2 == 0 {
-                let (transforms, trace) = pow2::coeffs_to_slots_thin(&H);
-                (transforms, Some(trace))
-            } else {
-                (composite::powcoeffs_to_slots_thin(&H), None)
-            });
-    
-            let (compiled_coeffs_to_slots_thin, compiled_slots_to_coeffs_thin): (Vec<_>, Vec<_>) = timed_step::<_, _, LOG, _>("Compiling transforms", |[]| (
-                coeffs_to_slots.into_iter().map(|T| CompiledLinearTransform::compile(&H, T)).collect::<Vec<_>>(),
-                slots_to_coeffs.into_iter().map(|T| CompiledLinearTransform::compile(&original_H, T)).collect::<Vec<_>>()
-            ));
-
-            if let Some(filename) = store_data {
-                H.save(format!("{}_hypercube.json", filename).as_str());
-                CompiledLinearTransform::save_seq(&compiled_slots_to_coeffs_thin, format!("{}_slots_to_coeffs.json", filename).as_str(), &original_plaintext_ring, original_H.cyclotomic_index_ring());
-                CompiledLinearTransform::save_seq(&compiled_coeffs_to_slots_thin, format!("{}_coeffs_to_slots.json", filename).as_str(), &plaintext_ring, H.cyclotomic_index_ring());
-            }
-    
-            return Self {
-                params: params,
-                e: e,
-                r: r,
-                p: p,
-                digit_extract_circuits: digit_extraction_circuits,
-                slots_to_coeffs_thin: compiled_slots_to_coeffs_thin,
-                coeffs_to_slots_thin: (compiled_coeffs_to_slots_thin, trace)
-            };
+    pub fn new_with(
+        params: Params,
+        r: usize,
+        e: usize,
+        p: i64,
+        digit_extract_circuits: Vec<ArithCircuit>,
+        slots_to_coeffs_thin: Vec<CompiledLinearTransform<Params::NumberRing, PlaintextZn, Global>>,
+        coeffs_to_slots_thin: (Vec<CompiledLinearTransform<Params::NumberRing, PlaintextZn, Global>>, Option<Trace>)
+    ) -> Self {
+        assert_eq!(params.t(), ZZ.pow(p, r));
+        let v = e - r;
+        assert_eq!(v, digit_extract_circuits.len());
+        for k in 0..v {
+            assert_eq!(1, digit_extract_circuits[k].input_count());
+            assert_eq!(v - k, digit_extract_circuits[k].output_count());
         }
+        Self {
+            params,
+            r,
+            e,
+            p,
+            digit_extract_circuits,
+            slots_to_coeffs_thin,
+            coeffs_to_slots_thin
+        }
+    }
+
+    #[allow(unused)]
+    pub fn load(params: Params, load_dir_name: &str) -> Self {
+        unimplemented!()
     }
 
     pub fn create_bootstrapping_plaintext_ring_hierarchy(&self) -> Vec<PlaintextRing<Params>> {
@@ -359,7 +402,7 @@ fn test_pow2_bfv_thin_bootstrapping_17() {
         log2_q_max: 800,
         log2_N: 7
     };
-    let bootstrapper = ThinBootstrapParams::create_for::<true>(params.clone(), DEFAULT_CONFIG, None, None);
+    let bootstrapper = ThinBootstrapParams::build_pow2::<true>(params.clone(), DEFAULT_CONFIG);
     
     let P = params.create_plaintext_ring(params.t());
     let (C, C_mul) = params.create_ciphertext_rings();
@@ -399,7 +442,7 @@ fn test_pow2_bfv_thin_bootstrapping_23() {
         log2_q_max: 800,
         log2_N: 7
     };
-    let bootstrapper = ThinBootstrapParams::create_for::<true>(params.clone(), DEFAULT_CONFIG, None, None);
+    let bootstrapper = ThinBootstrapParams::build_pow2::<true>(params.clone(), DEFAULT_CONFIG);
     
     let P = params.create_plaintext_ring(params.t());
     let (C, C_mul) = params.create_ciphertext_rings();
@@ -439,7 +482,7 @@ fn test_composite_bfv_thin_bootstrapping_2() {
         n1: 31,
         n2: 11
     };
-    let bootstrapper = ThinBootstrapParams::create_for::<true>(params.clone(), DEFAULT_CONFIG.set_v(11), None, None);
+    let bootstrapper = ThinBootstrapParams::build_odd::<true>(params.clone(), DEFAULT_CONFIG.set_v(11));
     
     let P = params.create_plaintext_ring(params.t());
     let (C, C_mul) = params.create_ciphertext_rings();

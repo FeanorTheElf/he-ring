@@ -13,6 +13,7 @@ use feanor_math::assert_el_eq;
 use crate::cyclotomic::*;
 use crate::rings::decomposition::*;
 use crate::rings::number_ring_quo::*;
+use crate::rings::pow2_cyclotomic::*;
 use crate::StdZn;
 use super::*;
 
@@ -46,9 +47,8 @@ use super::*;
 ///    `pow2_bitreversed_dwt_butterfly` to give nonsensical results. If you pass `row_autos = |_| H.cyclotomic_index_ring().one()` then this uses the same
 ///    roots of unity everywhere, i.e. results in the behavior as outlined above.
 /// 
-fn pow2_bitreversed_dwt_butterfly<'b, NumberRing, FpTy, A, G>(H: &HypercubeIsomorphism<'b, NumberRing, FpTy, A>, dim_index: usize, l: usize, root_of_unity_4l: El<SlotRing<'b, FpTy, A>>, row_autos: G) -> LinearTransform<NumberRing, FpTy, A>
-    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-        FpTy: RingStore + Clone,
+fn pow2_bitreversed_dwt_butterfly<'b, FpTy, A, G>(H: &HypercubeIsomorphism<'b, Pow2CyclotomicDecomposableNumberRing, FpTy, A>, dim_index: usize, l: usize, root_of_unity_4l: El<SlotRing<'b, FpTy, A>>, row_autos: G) -> LinearTransform<Pow2CyclotomicDecomposableNumberRing, FpTy, A>
+    where FpTy: RingStore + Clone,
         FpTy::Type: StdZn,
         A: Allocator + Clone,
         G: Fn(&[usize]) -> ZnEl
@@ -126,9 +126,8 @@ fn pow2_bitreversed_dwt_butterfly<'b, NumberRing, FpTy, A, G>(H: &HypercubeIsomo
 ///
 /// Inverse of [`pow2_bitreversed_dwt_butterfly()`]
 /// 
-fn pow2_bitreversed_inv_dwt_butterfly<'b, NumberRing, FpTy, A, G>(H: &HypercubeIsomorphism<'b, NumberRing, FpTy, A>, dim_index: usize, l: usize, root_of_unity_4l: El<SlotRing<'b, FpTy, A>>, row_autos: G) -> LinearTransform<NumberRing, FpTy, A>
-    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-        FpTy: RingStore + Clone,
+fn pow2_bitreversed_inv_dwt_butterfly<'b, FpTy, A, G>(H: &HypercubeIsomorphism<'b, Pow2CyclotomicDecomposableNumberRing, FpTy, A>, dim_index: usize, l: usize, root_of_unity_4l: El<SlotRing<'b, FpTy, A>>, row_autos: G) -> LinearTransform<Pow2CyclotomicDecomposableNumberRing, FpTy, A>
+    where FpTy: RingStore + Clone,
         FpTy::Type: StdZn,
         A: Allocator + Clone,
         G: Fn(&[usize]) -> ZnEl
@@ -225,9 +224,8 @@ fn pow2_bitreversed_inv_dwt_butterfly<'b, NumberRing, FpTy, A, G>(H: &HypercubeI
 /// for `j` from `0` to `m`.
 /// Here `𝜁` is the canonical generator of the slot ring, which is a primitive `n`-th root of unity.
 /// 
-fn pow2_bitreversed_dwt<NumberRing, FpTy, A, G>(H: &HypercubeIsomorphism<NumberRing, FpTy, A>, dim_index: usize, row_autos: G) -> Vec<LinearTransform<NumberRing, FpTy, A>>
-    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-        FpTy: RingStore + Clone,
+fn pow2_bitreversed_dwt<FpTy, A, G>(H: &HypercubeIsomorphism<Pow2CyclotomicDecomposableNumberRing, FpTy, A>, dim_index: usize, row_autos: G) -> Vec<LinearTransform<Pow2CyclotomicDecomposableNumberRing, FpTy, A>>
+    where FpTy: RingStore + Clone,
         FpTy::Type: StdZn,
         A: Allocator + Clone,
         G: Fn(&[usize]) -> ZnEl
@@ -259,9 +257,8 @@ fn pow2_bitreversed_dwt<NumberRing, FpTy, A, G>(H: &HypercubeIsomorphism<NumberR
 ///
 /// Inverse to [`pow2_bitreversed_dwt()`]
 /// 
-fn pow2_bitreversed_inv_dwt<NumberRing, FpTy, A, G>(H: &HypercubeIsomorphism<NumberRing, FpTy, A>, dim_index: usize, row_autos: G) -> Vec<LinearTransform<NumberRing, FpTy, A>>
-    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-        FpTy: RingStore + Clone,
+fn pow2_bitreversed_inv_dwt<FpTy, A, G>(H: &HypercubeIsomorphism<Pow2CyclotomicDecomposableNumberRing, FpTy, A>, dim_index: usize, row_autos: G) -> Vec<LinearTransform<Pow2CyclotomicDecomposableNumberRing, FpTy, A>>
+    where FpTy: RingStore + Clone,
         FpTy::Type: StdZn,
         A: Allocator + Clone,
         G: Fn(&[usize]) -> ZnEl
@@ -300,9 +297,8 @@ fn pow2_bitreversed_inv_dwt<NumberRing, FpTy, A, G>(H: &HypercubeIsomorphism<Num
 /// If `p = 3 mod 4`, the slots are enumerated by `i` with `0 <= i < m` and the transform will put the value of slot `i` into the coefficient
 /// of `X^(bitrev(i, m) * n/(4m))`
 /// 
-pub fn slots_to_coeffs_thin<NumberRing, FpTy, A>(H: &HypercubeIsomorphism<NumberRing, FpTy, A>) -> Vec<LinearTransform<NumberRing, FpTy, A>>
-    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-        FpTy: RingStore + Clone,
+pub fn slots_to_coeffs_thin<FpTy, A>(H: &HypercubeIsomorphism<Pow2CyclotomicDecomposableNumberRing, FpTy, A>) -> Vec<LinearTransform<Pow2CyclotomicDecomposableNumberRing, FpTy, A>>
+    where FpTy: RingStore + Clone,
         FpTy::Type: StdZn,
         A: Allocator + Clone
 {
@@ -363,9 +359,8 @@ pub fn slots_to_coeffs_thin<NumberRing, FpTy, A>(H: &HypercubeIsomorphism<Number
 /// "Coeffs-to-Slots" map, as it does not discard unused factors. However, it is not
 /// too hard to build the "coeffs-to-slots" map from this, see [`coeffs_to_slots_thin()`]. 
 /// 
-pub fn slots_to_coeffs_thin_inv<NumberRing, FpTy, A>(H: &HypercubeIsomorphism<NumberRing, FpTy, A>) -> Vec<LinearTransform<NumberRing, FpTy, A>>
-    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-        FpTy: RingStore + Clone,
+pub fn slots_to_coeffs_thin_inv<FpTy, A>(H: &HypercubeIsomorphism<Pow2CyclotomicDecomposableNumberRing, FpTy, A>) -> Vec<LinearTransform<Pow2CyclotomicDecomposableNumberRing, FpTy, A>>
+    where FpTy: RingStore + Clone,
         FpTy::Type: StdZn,
         A: Allocator + Clone
 {
@@ -417,16 +412,15 @@ pub fn slots_to_coeffs_thin_inv<NumberRing, FpTy, A>(H: &HypercubeIsomorphism<Nu
     }
 }
 
-pub fn coeffs_to_slots_thin<NumberRing, FpTy, A>(H: &HypercubeIsomorphism<NumberRing, FpTy, A>) -> (Vec<LinearTransform<NumberRing, FpTy, A>>, Trace)
-    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-        FpTy: RingStore + Clone,
+pub fn coeffs_to_slots_thin<FpTy, A>(H: &HypercubeIsomorphism<Pow2CyclotomicDecomposableNumberRing, FpTy, A>) -> (Vec<LinearTransform<Pow2CyclotomicDecomposableNumberRing, FpTy, A>>, Trace)
+    where FpTy: RingStore + Clone,
         FpTy::Type: StdZn,
         A: Allocator + Clone,
 {
     let trace = Trace::new(&H.cyclotomic_index_ring(), H.cyclotomic_index_ring().smallest_positive_lift(H.frobenius_element(1)), H.slot_ring().rank());
     let mut result = slots_to_coeffs_thin_inv(H);
     let last = LinearTransform::slot_scalar_mult(H, &H.slot_ring().inclusion().map(H.slot_ring().base_ring().invert(&H.slot_ring().base_ring().int_hom().map(H.slot_ring().rank() as i32)).unwrap()));
-    result.push(last);
+    *result.last_mut().unwrap() = result.last().unwrap().compose(&last, H);
     return (result, trace);
 }
 

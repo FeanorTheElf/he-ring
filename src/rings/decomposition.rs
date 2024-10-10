@@ -1,6 +1,7 @@
 use feanor_math::integer::IntegerRing;
 use feanor_math::ring::*;
 use feanor_math::rings::extension::FreeAlgebra;
+use feanor_math::rings::float_complex::Complex64;
 use feanor_math::rings::zn::zn_64::{self, Zn, ZnEl};
 use feanor_math::rings::zn::ZnRing;
 
@@ -76,6 +77,15 @@ pub trait DecomposableCyclotomicNumberRing<R>: DecomposableNumberRing<R>
     fn cyclotomic_index_ring(&self) -> zn_64::Zn {
         zn_64::Zn::new(self.n())
     }
+}
+
+pub trait CCEmbeddedNumberRing<R>: DecomposableNumberRing<R>
+    where R: RingStore,
+        R::Type: ZnRing
+{
+    fn fft_forward(&self, data: &mut [El<Complex64>]);
+
+    fn fft_backward(&self, data: &mut [El<Complex64>]);
 }
 
 ///

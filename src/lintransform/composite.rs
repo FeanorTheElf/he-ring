@@ -19,8 +19,8 @@ fn column_dwt_matrix<'a, NumberRing, FpTy, A>(H: &HypercubeIsomorphism<'a, Numbe
         FpTy::Type: StdZn,
         A: Allocator + Clone,
 {
-    let Gal = H.cyclotomic_index_ring();
-    let ZZ_to_Gal = Gal.can_hom(&StaticRing::<i64>::RING).unwrap();
+    let index_ring = H.cyclotomic_index_ring();
+    let ZZ_to_Gal = index_ring.can_hom(&StaticRing::<i64>::RING).unwrap();
 
     OwnedMatrix::from_fn(H.len(dim_index), H.len(dim_index), |i, j| {
         let exponent = H.cyclotomic_index_ring().prod([

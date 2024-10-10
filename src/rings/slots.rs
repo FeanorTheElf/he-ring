@@ -330,7 +330,6 @@ impl<'a, NumberRing, FpTy, A> HypercubeIsomorphism<'a, NumberRing, FpTy, A>
         FpTy: RingStore + Clone,
         FpTy::Type: StdZn,
         A: Allocator + Clone,
-        
 {
     pub fn new<const LOG: bool>(ring: &'a NumberRingQuoBase<NumberRing, FpTy, A>) -> Self {
         let t = int_cast(ring.base_ring().integer_ring().clone_el(ring.base_ring().modulus()), ZZ, ring.base_ring().integer_ring());
