@@ -353,7 +353,7 @@ impl<'a, NumberRing, FpTy, A> HypercubeIsomorphism<'a, NumberRing, FpTy, A>
         });
 
         let root_of_unity = timed_step::<_, _, LOG, _>("Computing root of unity in slot ring", |[]| 
-            get_prim_root_of_unity(&tmp_slot_ring, ring.n())
+            get_prim_root_of_unity(&tmp_slot_ring, ring.n() as usize)
         );
         
         let poly_ring = DensePolyRing::new(&tmp_slot_ring, "X");
@@ -907,7 +907,7 @@ pub mod serialization {
         fn from(value: HypercubeIsomorphismDeserializable<'a, NumberRing, FpTy, A>) -> Self {
             let t = int_cast(value.ring.base_ring().integer_ring().clone_el(value.ring.base_ring().modulus()), ZZ, value.ring.base_ring().integer_ring());
             assert_eq!(t, value.t);
-            assert_eq!(value.n, value.ring.n());
+            assert_eq!(value.n as u64, value.ring.n());
             let (p, e) = is_prime_power(&ZZ, &t).unwrap();
 
             let galois_group_ring = Zn::new(value.galois_group_ring_modulus);
@@ -957,7 +957,7 @@ pub mod serialization {
 
             op(HypercubeIsomorphismSerializable {
                 t: int_cast(self.ring().base_ring().integer_ring().clone_el(self.ring().base_ring().modulus()), &StaticRing::<i64>::RING, self.ring().base_ring().integer_ring()),
-                n: self.ring().n(),
+                n: self.ring().n() as usize,
                 dims: self.dims.iter().map(|d| HypercubeDimensionSerializable {
                     factor_n: d.factor_n,
                     local_order_of_p: d.local_order_of_p,

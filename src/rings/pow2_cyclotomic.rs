@@ -115,8 +115,8 @@ impl<FpTy> DecomposableCyclotomicNumberRing<FpTy> for Pow2CyclotomicDecomposable
 {
     type DecomposedAsCyclotomic = Pow2CyclotomicDecomposedNumberRing<FpTy, CooleyTuckeyFFT<FpTy::Type, FpTy::Type, Identity<FpTy>>>;
 
-    fn cyclotomic_index_ring(&self) -> Zn {
-        zn_64::Zn::new(1 << self.log2_n)
+    fn n(&self) -> u64 {
+        1 << self.log2_n
     }
 }
 
@@ -125,8 +125,8 @@ impl<R, F> DecomposedCyclotomicNumberRing<R::Type> for Pow2CyclotomicDecomposedN
         R::Type: ZnRing + CanHomFrom<BigIntRingBase> + DivisibilityRing,
         F: FFTAlgorithm<R::Type> + PartialEq
 {
-    fn cyclotomic_index_ring(&self) -> zn_64::Zn {
-        zn_64::Zn::new(2 * self.fft_table.len() as u64)
+    fn n(&self) -> u64 {
+        2 * self.fft_table.len() as u64
     }
 
     fn permute_galois_action(&self, src: &[<R::Type as RingBase>::Element], dst: &mut [<R::Type as RingBase>::Element], galois_element: zn_64::ZnEl) {

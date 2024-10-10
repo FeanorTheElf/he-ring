@@ -235,11 +235,11 @@ fn pow2_bitreversed_dwt<NumberRing, FpTy, A, G>(H: &HypercubeIsomorphism<NumberR
     let m = H.len(dim_index);
     let log2_m = ZZ.abs_log2_ceil(&(m as i64)).unwrap();
     assert!(m == 1 << log2_m, "pow2_bitreversed_dwt() only valid for hypercube dimensions that have a power-of-2 length");
-    assert!((H.ring().n() / m) % 4 == 0, "pow2_bitreversed_dwt() only possible if there is a 4m-th primitive root of unity");
+    assert!((H.ring().n() / m as u64) % 4 == 0, "pow2_bitreversed_dwt() only possible if there is a 4m-th primitive root of unity");
 
-    let zeta = H.slot_ring().pow(H.slot_ring().canonical_gen(), H.ring().n() / m / 4);
+    let zeta = H.slot_ring().pow(H.slot_ring().canonical_gen(), H.ring().n() as usize / m / 4);
 
-    debug_assert!(is_prim_root_of_unity(H.slot_ring(), &H.slot_ring().canonical_gen(), H.ring().n()));
+    debug_assert!(is_prim_root_of_unity(H.slot_ring(), &H.slot_ring().canonical_gen(), H.ring().n() as usize));
     debug_assert!(is_prim_root_of_unity(H.slot_ring(), &zeta, 4 * m));
 
     let mut result = Vec::new();
@@ -269,10 +269,10 @@ fn pow2_bitreversed_inv_dwt<NumberRing, FpTy, A, G>(H: &HypercubeIsomorphism<Num
     let m = H.len(dim_index);
     let log2_m = ZZ.abs_log2_ceil(&(m as i64)).unwrap();
     assert!(m == 1 << log2_m, "pow2_bitreversed_dwt() only valid for hypercube dimensions that have a power-of-2 length");
-    assert!((H.ring().n() / m) % 4 == 0, "pow2_bitreversed_dwt() only possible if there is a 4m-th primitive root of unity");
+    assert!((H.ring().n() / m as u64) % 4 == 0, "pow2_bitreversed_dwt() only possible if there is a 4m-th primitive root of unity");
 
-    let zeta = H.slot_ring().pow(H.slot_ring().canonical_gen(), H.ring().n() / m / 4);
-    debug_assert!(is_prim_root_of_unity(H.slot_ring(), &H.slot_ring().canonical_gen(), H.ring().n()));
+    let zeta = H.slot_ring().pow(H.slot_ring().canonical_gen(), H.ring().n() as usize / m / 4);
+    debug_assert!(is_prim_root_of_unity(H.slot_ring(), &H.slot_ring().canonical_gen(), H.ring().n() as usize));
     debug_assert!(is_prim_root_of_unity(H.slot_ring(), &zeta, 4 * m));
 
     let mut result = Vec::new();
@@ -313,7 +313,7 @@ pub fn slots_to_coeffs_thin<NumberRing, FpTy, A>(H: &HypercubeIsomorphism<Number
     if H.dim_count() == 2 {
         // this is the `p = 1 mod 4` case
         assert_eq!(2, H.len(1));
-        let zeta4 = H.slot_ring().pow(H.slot_ring().canonical_gen(), H.ring().n() / 4);
+        let zeta4 = H.slot_ring().pow(H.slot_ring().canonical_gen(), H.ring().n() as usize / 4);
         let mut result = Vec::new();
 
         // we first combine `ai0` and `ai1` to `(ai0 + 𝜁^(n/4) ai1, ai0 - 𝜁^(n/4) ai1)`
@@ -375,7 +375,7 @@ pub fn slots_to_coeffs_thin_inv<NumberRing, FpTy, A>(H: &HypercubeIsomorphism<Nu
 
     if H.dim_count() == 2 {
         assert_eq!(2, H.len(1));
-        let zeta4_inv = H.slot_ring().pow(H.slot_ring().canonical_gen(), 3 * H.ring().n() / 4);
+        let zeta4_inv = H.slot_ring().pow(H.slot_ring().canonical_gen(), 3 * H.ring().n() as usize / 4);
         let two_inv = H.ring().base_ring().invert(&H.slot_ring().base_ring().int_hom().map(2)).unwrap();
         let mut result = Vec::new();
 

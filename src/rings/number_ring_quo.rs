@@ -59,7 +59,7 @@ impl<NumberRing, FpTy> NumberRingQuoBase<NumberRing, RingValue<FpTy>, Global>
         let max_lift_size = int_cast(base_ring.integer_ring().clone_el(base_ring.modulus()), StaticRing::<i64>::RING, base_ring.integer_ring()) as f64 / 2.;
         let max_product_size = max_lift_size * max_lift_size * max_product_expansion_factor;
         let required_bits = max_product_size.log2().ceil() as usize;
-        let rns_base_primes = sample_primes(required_bits, required_bits + 10, 57, |n| number_ring.largest_suitable_prime(int_cast(n, StaticRing::<i64>::RING, BigIntRing::RING)).map(|n| int_cast(n, BigIntRing::RING, StaticRing::<i64>::RING))).unwrap();
+        let rns_base_primes = sample_primes(required_bits, required_bits + 57, 57, |n| number_ring.largest_suitable_prime(int_cast(n, StaticRing::<i64>::RING, BigIntRing::RING)).map(|n| int_cast(n, BigIntRing::RING, StaticRing::<i64>::RING))).unwrap();
         let rns_base = zn_rns::Zn::new(rns_base_primes.into_iter().map(|p| RingValue::from(FpTy::create::<_, !>(|ZZ| Ok(int_cast(p, RingRef::new(ZZ), BigIntRing::RING))).unwrap())).collect(), BigIntRing::RING);
         return Self::new_with(number_ring, base_ring, rns_base, Global);
     }
@@ -142,7 +142,9 @@ impl<NumberRing, FpTy, A> NumberRingQuoBase<NumberRing, FpTy, A>
         drop(tmp_perm);
 
         // if this is satisfied, we have enough precision to not get an overflow
-        assert!(len < int_cast(self.rns_base.integer_ring().clone_el(self.rns_base.modulus()), StaticRing::<i64>::RING, self.rns_base.integer_ring()) as usize);
+        let toleratable_size_increase = int_cast(self.base_ring.integer_ring().clone_el(self.base_ring.modulus()), StaticRing::<i64>::RING, self.base_ring.integer_ring()) as f64 * self.number_ring.product_expansion_factor();
+        let max_size_increase = len as f64  * self.number_ring.inf_to_can_norm_expansion_factor() * self.number_ring.can_to_inf_norm_expansion_factor();
+        assert!(max_size_increase < toleratable_size_increase);
         for i in 0..self.rns_base.len() {
             self.ring_decompositions[i].fft_backward(&mut unreduced_result[(i * self.rank())..((i + 1) * self.rank())]);
         }
@@ -168,8 +170,8 @@ impl<NumberRing, FpTy, A> CyclotomicRing for NumberRingQuoBase<NumberRing, FpTy,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
 {
-    fn n(&self) -> usize {
-        *<NumberRing::DecomposedAsCyclotomic>::from_ref(&self.ring_decompositions()[0]).cyclotomic_index_ring().modulus() as usize
+    fn n(&self) -> u64 {
+        <NumberRing::DecomposedAsCyclotomic>::from_ref(&self.ring_decompositions()[0]).n()
     }
 
     fn apply_galois_action(&self, el: &<Self as RingBase>::Element, g: zn_64::ZnEl) -> <Self as RingBase>::Element {

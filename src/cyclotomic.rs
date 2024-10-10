@@ -30,10 +30,10 @@ pub trait CyclotomicRing: FreeAlgebra {
     /// The degree of this ring extension is `phi(self.n())` where `phi` is Euler's totient
     /// function.
     ///
-    fn n(&self) -> usize;
+    fn n(&self) -> u64;
 
     fn cyclotomic_index_ring(&self) -> zn_64::Zn {
-        zn_64::Zn::new(self.n() as u64)
+        zn_64::Zn::new(self.n())
     }
 
     fn apply_galois_action(&self, el: &Self::Element, s: zn_64::ZnEl) -> Self::Element;
@@ -45,7 +45,9 @@ pub trait CyclotomicRing: FreeAlgebra {
 pub trait CyclotomicRingStore: RingStore
     where Self::Type: CyclotomicRing
 {
-    delegate!{ CyclotomicRing, fn n(&self) -> usize }
+    delegate!{ CyclotomicRing, fn n(&self) -> u64 }
+    delegate!{ CyclotomicRing, fn cyclotomic_index_ring(&self) -> zn_64::Zn }
+    delegate!{ CyclotomicRing, fn apply_galois_action(&self, el: &El<Self>, s: zn_64::ZnEl) -> El<Self> }
 }
 
 impl<R: RingStore> CyclotomicRingStore for R
@@ -75,14 +77,14 @@ pub fn generic_test_cyclotomic_ring_axioms<R: CyclotomicRingStore>(ring: R)
     let zeta = ring.canonical_gen();
     let n = ring.n();
     
-    assert_el_eq!(&ring, &ring.one(), &ring.pow(ring.clone_el(&zeta), n));
+    assert_el_eq!(&ring, &ring.one(), &ring.pow(ring.clone_el(&zeta), n as usize));
     for (p, _) in algorithms::int_factor::factor(&StaticRing::<i64>::RING, n as i64) {
-        assert!(!ring.eq_el(&ring.one(), &ring.pow(ring.clone_el(&zeta), n / p as usize)));
+        assert!(!ring.eq_el(&ring.one(), &ring.pow(ring.clone_el(&zeta), n as usize / p as usize)));
     }
 
     // test minimal polynomial of zeta
     let poly_ring = SparsePolyRing::new(&StaticRing::<i64>::RING, "X");
-    let cyclo_poly = algorithms::cyclotomic::cyclotomic_polynomial(&poly_ring, n);
+    let cyclo_poly = algorithms::cyclotomic::cyclotomic_polynomial(&poly_ring, n as usize);
 
     let x = ring.pow(ring.clone_el(&zeta), ring.rank());
     let x_vec = ring.wrt_canonical_basis(&x);

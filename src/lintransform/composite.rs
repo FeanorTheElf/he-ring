@@ -120,7 +120,7 @@ fn slots_to_powcoeffs_fat<NumberRing, FpTy, A>(H: &HypercubeIsomorphism<NumberRi
     assert!(H.slot_ring().rank() == H.local_slot_rank(0));
 
     let mut result = Vec::new();
-    let zeta_powertable = PowerTable::new(H.slot_ring(), H.slot_ring().canonical_gen(), H.ring().n());
+    let zeta_powertable = PowerTable::new(H.slot_ring(), H.slot_ring().canonical_gen(), H.ring().n() as usize);
 
     let fst_step_matrix = slots_to_powcoeffs_fat_fst_step(H, 0, &zeta_powertable);
     result.push(LinearTransform::blockmatmul1d(
@@ -150,7 +150,7 @@ fn powcoeffs_to_slots_fat<NumberRing, FpTy, A>(H: &HypercubeIsomorphism<NumberRi
     assert!(H.slot_ring().rank() == H.local_slot_rank(0));
 
     let mut result = Vec::new();
-    let zeta_powertable = PowerTable::new(H.slot_ring(), H.slot_ring().canonical_gen(), H.ring().n());
+    let zeta_powertable = PowerTable::new(H.slot_ring(), H.slot_ring().canonical_gen(), H.ring().n() as usize);
 
     for i in (1..H.dim_count()).rev() {
         result.extend(column_dwt_inv(H, i, &zeta_powertable));
@@ -185,7 +185,7 @@ pub fn slots_to_powcoeffs_thin<NumberRing, FpTy, A>(H: &HypercubeIsomorphism<Num
     assert!(H.ring().n() % 2 != 0);
     assert!(H.slot_ring().rank() == H.local_slot_rank(0));
 
-    let zeta_powertable = PowerTable::new(H.slot_ring(), H.slot_ring().canonical_gen(), H.ring().n());
+    let zeta_powertable = PowerTable::new(H.slot_ring(), H.slot_ring().canonical_gen(), H.ring().n() as usize);
     let mut result = Vec::new();
 
     for i in 0..H.dim_count() {

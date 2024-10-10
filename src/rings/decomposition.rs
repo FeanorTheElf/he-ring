@@ -71,7 +71,11 @@ pub trait DecomposableCyclotomicNumberRing<R>: DecomposableNumberRing<R>
 {    
     type DecomposedAsCyclotomic: DecomposedCyclotomicNumberRing<R::Type> + IsEq<Self::Decomposed>;
 
-    fn cyclotomic_index_ring(&self) -> Zn;
+    fn n(&self) -> u64;
+
+    fn cyclotomic_index_ring(&self) -> zn_64::Zn {
+        zn_64::Zn::new(self.n())
+    }
 }
 
 ///
@@ -90,7 +94,11 @@ pub trait DecomposedNumberRing<R: ?Sized + ZnRing>: PartialEq {
 
 pub trait DecomposedCyclotomicNumberRing<R: ?Sized + ZnRing>: DecomposedNumberRing<R> {
 
-    fn cyclotomic_index_ring(&self) -> Zn;
+    fn n(&self) -> u64;
+
+    fn cyclotomic_index_ring(&self) -> zn_64::Zn {
+        zn_64::Zn::new(self.n())
+    }
 
     fn permute_galois_action(&self, src: &[R::Element], dst: &mut [R::Element], galois_element: zn_64::ZnEl);
 }

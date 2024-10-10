@@ -511,8 +511,8 @@ impl<NumberRing, FpTy, A> CyclotomicRing for DoubleRNSRingBase<NumberRing, FpTy,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
 {
-    fn n(&self) -> usize {
-        *self.number_ring.cyclotomic_index_ring().modulus() as usize
+    fn n(&self) -> u64 {
+        self.number_ring.n()
     }
 
     fn apply_galois_action(&self, el: &Self::Element, g: zn_64::ZnEl) -> Self::Element {

@@ -176,8 +176,8 @@ impl<FpTy> DecomposableCyclotomicNumberRing<FpTy> for OddCyclotomicDecomposableN
 {
     type DecomposedAsCyclotomic = OddCyclotomicDecomposedNumberRing<FpTy, BluesteinFFT<FpTy::Type, FpTy::Type, Identity<FpTy>>>;
 
-    fn cyclotomic_index_ring(&self) -> zn_64::Zn {
-        zn_64::Zn::new(self.n_factorization_squarefree.iter().copied().product::<i64>() as u64)
+    fn n(&self) -> u64 {
+        self.n_factorization_squarefree.iter().copied().product::<i64>() as u64
     }
 }
 
@@ -216,8 +216,8 @@ impl<FpTy> DecomposableCyclotomicNumberRing<FpTy> for CompositeCyclotomicDecompo
 {
     type DecomposedAsCyclotomic = OddCyclotomicDecomposedNumberRing<FpTy, CoprimeCooleyTuckeyFFT<FpTy::Type, FpTy::Type, Identity<FpTy>, BluesteinFFT<FpTy::Type, FpTy::Type, Identity<FpTy>>, BluesteinFFT<FpTy::Type, FpTy::Type, Identity<FpTy>>>>;
 
-    fn cyclotomic_index_ring(&self) -> zn_64::Zn {
-        <_ as DecomposableCyclotomicNumberRing<FpTy>>::cyclotomic_index_ring(&self.base)
+    fn n(&self) -> u64 {
+        <_ as DecomposableCyclotomicNumberRing<FpTy>>::n(&self.base)
     }
 }
 
@@ -409,8 +409,8 @@ impl<R, F, A> DecomposedCyclotomicNumberRing<R::Type> for OddCyclotomicDecompose
         F: FFTAlgorithm<R::Type> + PartialEq,
         A: Allocator + Clone
 {
-    fn cyclotomic_index_ring(&self) -> zn_64::Zn {
-        zn_64::Zn::new(self.fft_table.len() as u64)
+    fn n(&self) -> u64 {
+        self.fft_table.len() as u64
     }
 
     fn permute_galois_action(&self, src: &[<R::Type as RingBase>::Element], dst: &mut [<R::Type as RingBase>::Element], galois_element: zn_64::ZnEl) {

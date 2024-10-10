@@ -272,19 +272,19 @@ pub fn falling_factorial_poly<P>(poly_ring: P, m: usize) -> El<P>
 /// Returns the lowest-degree polynomial `f` such that `f(x) = lift(x mod p) mod p^k`.
 /// 
 pub fn digit_retain_poly<P>(poly_ring: P, k: usize) -> El<P>
-    where P: RingStore,
+    where P: RingStore + Copy,
         P::Type: PolyRing,
         <<P::Type as RingExtension>::BaseRing as RingStore>::Type: ZnRing + DivisibilityRing
 {
+    assert!(k > 0);
+    if k == 1 {
+        return poly_ring.indeterminate();
+    }
     let Zn = poly_ring.base_ring();
     let hom = Zn.can_hom(Zn.integer_ring()).unwrap().compose(Zn.integer_ring().can_hom(&StaticRing::<i64>::RING).unwrap());
     let (p, _) = is_prime_power(Zn.integer_ring(), Zn.modulus()).unwrap();
     let p = int_cast(p, StaticRing::<i64>::RING, Zn.integer_ring());
-    let f = digit_extraction_poly(&poly_ring);
-    let mut current = poly_ring.indeterminate();
-    for _ in 1..k {
-        current = poly_ring.evaluate(&f, &current, &poly_ring.inclusion());
-    }
+    let mut current = poly_ring.evaluate(&digit_extraction_poly(&poly_ring), &digit_retain_poly(poly_ring, k - 1), &poly_ring.inclusion());
 
     let mut current_e = 0;
     while Zn.checked_div(poly_ring.lc(&current).unwrap(), &Zn.pow(hom.map(p), current_e)).is_some() {
