@@ -87,13 +87,9 @@ pub trait BFVParams {
         let mut C_rns_base = sample_primes(log2_q.start, log2_q.end, 56, |bound| number_ring.largest_suitable_prime(int_cast(bound, ZZ, ZZbig)).map(|p| int_cast(p, ZZbig, ZZ))).unwrap();
         C_rns_base.sort_unstable_by(|l, r| ZZbig.cmp(l, r));
 
-        println!("{:?}", C_rns_base.iter().map(|p| ZZbig.format(p)).collect::<Vec<_>>());
-
         let mut Cmul_rns_base = extend_sampled_primes(&C_rns_base, log2_q.end * 2, log2_q.end * 2 + 57, 57, |bound| number_ring.largest_suitable_prime(int_cast(bound, ZZ, ZZbig)).map(|p| int_cast(p, ZZbig, ZZ))).unwrap();
         assert!(ZZbig.is_gt(&Cmul_rns_base[Cmul_rns_base.len() - 1], &C_rns_base[C_rns_base.len() - 1]));
         Cmul_rns_base.sort_unstable_by(|l, r| ZZbig.cmp(l, r));
-
-        println!("{:?}", Cmul_rns_base.iter().map(|p| ZZbig.format(p)).collect::<Vec<_>>());
 
         let C = DoubleRNSRingBase::new(
             self.number_ring(),
@@ -106,22 +102,23 @@ pub trait BFVParams {
         return (C, Cmul);
     }
 
-    fn create_multiplication_rescale(&self, P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, Cmul: &CiphertextRing<Self>) -> MulConversionData {
-        let allocator = C.get_ring().allocator().clone();
-        MulConversionData {
-            lift_to_C_mul: rnsconv::shared_lift::AlmostExactSharedBaseConversion::new_with(
-                C.get_ring().rns_base().as_iter().map(|R| CiphertextZn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
-                Vec::new(),
-                Cmul.get_ring().rns_base().as_iter().skip(C.get_ring().rns_base().len()).map(|R| CiphertextZn::new(*R.modulus() as u64)).collect::<Vec<_>>(),
-                allocator.clone()
-            ),
-            scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert::new_with(
-                Cmul.get_ring().rns_base().as_iter().map(|R| CiphertextZn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
-                vec![ CiphertextZn::new(*P.base_ring().modulus() as u64) ], 
-                C.get_ring().rns_base().len(),
-                allocator
-            )
-        }
+}
+
+pub fn create_multiplication_rescale<Params: BFVParams>(P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, Cmul: &CiphertextRing<Params>) -> MulConversionData {
+    let allocator = C.get_ring().allocator().clone();
+    MulConversionData {
+        lift_to_C_mul: rnsconv::shared_lift::AlmostExactSharedBaseConversion::new_with(
+            C.get_ring().rns_base().as_iter().map(|R| CiphertextZn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
+            Vec::new(),
+            Cmul.get_ring().rns_base().as_iter().skip(C.get_ring().rns_base().len()).map(|R| CiphertextZn::new(*R.modulus() as u64)).collect::<Vec<_>>(),
+            allocator.clone()
+        ),
+        scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert::new_with(
+            Cmul.get_ring().rns_base().as_iter().map(|R| CiphertextZn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
+            vec![ CiphertextZn::new(*P.base_ring().modulus() as u64) ], 
+            C.get_ring().rns_base().len(),
+            allocator
+        )
     }
 }
 
@@ -535,7 +532,7 @@ fn test_pow2_bfv_mul() {
     let (C, C_mul) = params.create_ciphertext_rings();
 
     let sk = gen_sk::<_, Pow2BFVParams>(&C, &mut rng);
-    let mul_rescale_data = params.create_multiplication_rescale(&P, &C, &C_mul);
+    let mul_rescale_data = create_multiplication_rescale::<Pow2BFVParams>(&P, &C, &C_mul);
     let rk = gen_rk::<_, Pow2BFVParams>(&C, &mut rng, &sk);
 
     let m = P.int_hom().map(2);
@@ -566,7 +563,7 @@ fn test_composite_bfv_mul() {
     let (C, C_mul) = params.create_ciphertext_rings();
 
     let sk = gen_sk::<_, CompositeBFVParams>(&C, &mut rng);
-    let mul_rescale_data = params.create_multiplication_rescale(&P, &C, &C_mul);
+    let mul_rescale_data = create_multiplication_rescale::<CompositeBFVParams>(&P, &C, &C_mul);
     let rk = gen_rk::<_, CompositeBFVParams>(&C, &mut rng, &sk);
 
     let m = P.int_hom().map(2);

@@ -208,29 +208,15 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
         }
     }
 
-    pub fn create_multiplication_rescale_hierarchy(&self, C: &CiphertextRing<Params>, C_mul: &CiphertextRing<Params>) -> Vec<MulConversionData> {
-        let allocator = C.get_ring().allocator().clone();
-        ((self.r + 1)..=self.e).rev().map(|k| MulConversionData {
-            lift_to_C_mul: rnsconv::shared_lift::AlmostExactSharedBaseConversion::new_with(
-                C.get_ring().rns_base().as_iter().map(|R| CiphertextZn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
-                Vec::new(),
-                C_mul.get_ring().rns_base().as_iter().skip(C.get_ring().rns_base().len()).map(|R| CiphertextZn::new(*R.modulus() as u64)).collect::<Vec<_>>(),
-                allocator.clone()
-            ),
-            scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert::new_with(
-                C_mul.get_ring().rns_base().as_iter().map(|R| CiphertextZn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
-                vec![ CiphertextZn::new(ZZ.pow(self.p, k) as u64) ], 
-                C.get_ring().rns_base().len(),
-                allocator.clone()
-            )
-        }).collect()
+    pub fn create_multiplication_rescale_hierarchy(&self, P_bootstrap: &[PlaintextRing<Params>], C: &CiphertextRing<Params>, C_mul: &CiphertextRing<Params>) -> Vec<MulConversionData> {
+        ((self.r + 1)..=self.e).rev().enumerate().map(|(i, _k)| create_multiplication_rescale::<Params>(&P_bootstrap[i], C, C_mul)).collect()
     }
 
     pub fn create_all_bootstrapping_data(&self, C: &CiphertextRing<Params>, C_mul: &CiphertextRing<Params>) -> BootstrappingDataBundle<Params> {
         let plaintext_rings = self.create_bootstrapping_plaintext_ring_hierarchy();
         BootstrappingDataBundle {
             mod_switch: self.create_modulus_switch(&plaintext_rings, C),
-            multiplication_rescale_hierarchy: self.create_multiplication_rescale_hierarchy(C, C_mul),
+            multiplication_rescale_hierarchy: self.create_multiplication_rescale_hierarchy(&plaintext_rings, C, C_mul),
             plaintext_ring_hierarchy: plaintext_rings
         }
     }

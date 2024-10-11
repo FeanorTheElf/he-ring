@@ -290,10 +290,23 @@ impl<NumberRing, FpTy, A> DoubleRNSRingBase<NumberRing, FpTy, A>
         }
     }
 
-    pub fn wrt_canonical_basis_non_fft<'a>(&'a self, el: &'a CoeffEl<NumberRing, FpTy, A>) -> DoubleRNSRingBaseElVectorRepresentation<'a, NumberRing, FpTy, A> {
+    pub fn from_canonical_basis_non_fft<V>(&self, vec: V) -> CoeffEl<NumberRing, FpTy, A>
+        where V: IntoIterator<Item = El<<Self as RingExtension>::BaseRing>>
+    {
+        let mut result = self.non_fft_zero();
+        for (j, x) in vec.into_iter().enumerate() {
+            let congruence = self.base_ring().get_ring().get_congruence(&x);
+            for i in 0..self.rns_base().len() {
+                result.data[i * self.rank() + j] = self.rns_base().at(i).clone_el(congruence.at(i));
+            }
+        }
+        return result;
+    }
+
+    pub fn wrt_canonical_basis_non_fft<'a>(&'a self, el: CoeffEl<NumberRing, FpTy, A>) -> DoubleRNSRingBaseElVectorRepresentation<'a, NumberRing, FpTy, A> {
         DoubleRNSRingBaseElVectorRepresentation {
             ring: self,
-            inv_fft_data: self.clone_el_non_fft(el)
+            inv_fft_data: el
         }
     }
 
@@ -596,23 +609,13 @@ impl<NumberRing, FpTy, A> FreeAlgebra for DoubleRNSRingBase<NumberRing, FpTy, A>
     }
 
     fn wrt_canonical_basis<'a>(&'a self, el: &'a Self::Element) -> Self::VectorRepresentation<'a> {
-        DoubleRNSRingBaseElVectorRepresentation {
-            ring: self,
-            inv_fft_data: self.undo_fft(self.clone_el(el))
-        }
+        self.wrt_canonical_basis_non_fft(self.undo_fft(self.clone_el(el)))
     }
 
     fn from_canonical_basis<V>(&self, vec: V) -> Self::Element
         where V: IntoIterator<Item = El<Self::BaseRing>>
     {
-        let mut result = self.non_fft_zero();
-        for (j, x) in vec.into_iter().enumerate() {
-            let congruence = self.base_ring().get_ring().get_congruence(&x);
-            for i in 0..self.rns_base().len() {
-                result.data[i * self.rank() + j] = self.rns_base().at(i).clone_el(congruence.at(i));
-            }
-        }
-        return self.do_fft(result);
+        return self.do_fft(self.from_canonical_basis_non_fft(vec));
     }
 }
 
