@@ -50,7 +50,7 @@ pub struct NumberRingQuoEl<NumberRing, FpTy, A = Global>
     pub(super) data: Vec<El<FpTy>, A>
 }
 
-impl<NumberRing, FpTy> NumberRingQuoBase<NumberRing, RingValue<FpTy>, Global>
+impl<NumberRing, FpTy> NumberRingQuoBase<NumberRing, RingValue<FpTy>>
     where NumberRing: DecomposableNumberRing<RingValue<FpTy>>,
         FpTy: Clone + ZnRing + CanHomFrom<BigIntRingBase> + FromModulusCreateableZnRing
 {

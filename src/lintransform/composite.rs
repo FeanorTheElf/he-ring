@@ -13,10 +13,8 @@ use crate::cyclotomic::*;
 use crate::StdZn;
 use crate::lintransform::*;
 
-fn column_dwt_matrix<'a, NumberRing, FpTy, A>(H: &HypercubeIsomorphism<'a, NumberRing, FpTy, A>, dim_index: usize, zeta_powertable: &PowerTable<&SlotRing<'a, FpTy, A>>) -> OwnedMatrix<El<SlotRing<'a, FpTy, A>>>
-    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-        FpTy: RingStore + Clone,
-        FpTy::Type: StdZn,
+fn column_dwt_matrix<'a, NumberRing, A>(H: &HypercubeIsomorphism<'a, NumberRing, A>, dim_index: usize, zeta_powertable: &PowerTable<&SlotRing<'a, A>>) -> OwnedMatrix<El<SlotRing<'a, A>>>
+    where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
         A: Allocator + Clone,
 {
     let index_ring = H.cyclotomic_index_ring();
@@ -37,10 +35,8 @@ fn column_dwt_matrix<'a, NumberRing, FpTy, A>(H: &HypercubeIsomorphism<'a, Numbe
 /// along this vector, i.e. the evaluation at the primitive roots of unity `𝜁^(n/ni * j)` for `j` coprime
 /// to `ni`
 /// 
-fn column_dwt<'a, NumberRing, FpTy, A>(H: &HypercubeIsomorphism<'a, NumberRing, FpTy, A>, dim_index: usize, zeta_powertable: &PowerTable<&SlotRing<'a, FpTy, A>>) -> Vec<LinearTransform<NumberRing, FpTy, A>>
-    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-        FpTy: RingStore + Clone,
-        FpTy::Type: StdZn,
+fn column_dwt<'a, NumberRing, A>(H: &HypercubeIsomorphism<'a, NumberRing, A>, dim_index: usize, zeta_powertable: &PowerTable<&SlotRing<'a, A>>) -> Vec<LinearTransform<NumberRing, A>>
+    where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
         A: Allocator + Clone,
 {
     // multiplication with the matrix `A(i, j) = 𝜁^(j * shift_element(-i))` if we consider an element as multiple vectors along the `dim_index`-th dimension
@@ -53,10 +49,8 @@ fn column_dwt<'a, NumberRing, FpTy, A>(H: &HypercubeIsomorphism<'a, NumberRing, 
     )]
 }
 
-fn column_dwt_inv<'a, NumberRing, FpTy, A>(H: &HypercubeIsomorphism<'a, NumberRing, FpTy, A>, dim_index: usize, zeta_powertable: &PowerTable<&SlotRing<'a, FpTy, A>>) -> Vec<LinearTransform<NumberRing, FpTy, A>>
-    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-        FpTy: RingStore + Clone,
-        FpTy::Type: StdZn,
+fn column_dwt_inv<'a, NumberRing, A>(H: &HypercubeIsomorphism<'a, NumberRing, A>, dim_index: usize, zeta_powertable: &PowerTable<&SlotRing<'a, A>>) -> Vec<LinearTransform<NumberRing, A>>
+    where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
         A: Allocator + Clone,
 {
     let mut A = column_dwt_matrix(H, dim_index, zeta_powertable);
@@ -78,10 +72,8 @@ fn column_dwt_inv<'a, NumberRing, FpTy, A>(H: &HypercubeIsomorphism<'a, NumberRi
 /// here `𝜁` is the canonical generator of the slot ring, and `X1` is the image of `X1` under the isomorphism
 /// `Fp[X1, ..., Xr]/(Phi_n1(X1), ..., Phi_nr(Xr)) -> Fp[X]/(Phi_n(X))`, i.e. is `X1 = X^(n/n1)`.
 ///
-fn slots_to_powcoeffs_fat_fst_step<'a, NumberRing, FpTy, A>(H: &HypercubeIsomorphism<'a, NumberRing, FpTy, A>, dim_index: usize, zeta_powertable: &PowerTable<&SlotRing<'a, FpTy, A>>) -> OwnedMatrix<El<FpTy>>
-    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-        FpTy: RingStore + Clone,
-        FpTy::Type: StdZn,
+fn slots_to_powcoeffs_fat_fst_step<'a, NumberRing, A>(H: &HypercubeIsomorphism<'a, NumberRing, A>, dim_index: usize, zeta_powertable: &PowerTable<&SlotRing<'a, A>>) -> OwnedMatrix<El<Zn>>
+    where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
         A: Allocator + Clone,
 {
     let Gal = H.cyclotomic_index_ring();
@@ -110,10 +102,8 @@ fn slots_to_powcoeffs_fat_fst_step<'a, NumberRing, FpTy, A>(H: &HypercubeIsomorp
 /// this transform "puts" `a_(j, i1, ..., ir)` into the powerful-basis coefficient of `X1^(j * m1 + i1) X2^i2 ... Xr^ir`.
 /// 
 #[allow(unused)]
-fn slots_to_powcoeffs_fat<NumberRing, FpTy, A>(H: &HypercubeIsomorphism<NumberRing, FpTy, A>) -> Vec<LinearTransform<NumberRing, FpTy, A>>
-    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-        FpTy: RingStore + Clone,
-        FpTy::Type: StdZn,
+fn slots_to_powcoeffs_fat<NumberRing, A>(H: &HypercubeIsomorphism<NumberRing, A>) -> Vec<LinearTransform<NumberRing, A>>
+    where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
         A: Allocator + Clone,
 {
     assert!(H.ring().n() % 2 != 0);
@@ -140,10 +130,8 @@ fn slots_to_powcoeffs_fat<NumberRing, FpTy, A>(H: &HypercubeIsomorphism<NumberRi
 /// Inverse of [`slots_to_powcoeffs_fat()`], i.e. moves the powerful-basis coefficient of `X1^(j * m1 + i1) X2^i2 ... Xr^ir`
 /// to the slot ``(i1, ..., ir)`.
 /// 
-fn powcoeffs_to_slots_fat<NumberRing, FpTy, A>(H: &HypercubeIsomorphism<NumberRing, FpTy, A>) -> Vec<LinearTransform<NumberRing, FpTy, A>>
-    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-        FpTy: RingStore + Clone,
-        FpTy::Type: StdZn,
+fn powcoeffs_to_slots_fat<NumberRing, A>(H: &HypercubeIsomorphism<NumberRing, A>) -> Vec<LinearTransform<NumberRing, A>>
+    where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
         A: Allocator + Clone,
 {
     assert!(H.ring().n() % 2 != 0);
@@ -176,10 +164,8 @@ fn powcoeffs_to_slots_fat<NumberRing, FpTy, A>(H: &HypercubeIsomorphism<NumberRi
 /// If for the linear transform input, the slot `(i1, ..., ir)` contains a scalar `a_(i1, ..., ir)`, this
 /// transform "puts" `a_(i1, ..., ir)` into the powerful-basis coefficient of `X1^i1 ... Xr^ir`.
 /// 
-pub fn slots_to_powcoeffs_thin<NumberRing, FpTy, A>(H: &HypercubeIsomorphism<NumberRing, FpTy, A>) -> Vec<LinearTransform<NumberRing, FpTy, A>>
-    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-        FpTy: RingStore + Clone,
-        FpTy::Type: StdZn,
+pub fn slots_to_powcoeffs_thin<NumberRing, A>(H: &HypercubeIsomorphism<NumberRing, A>) -> Vec<LinearTransform<NumberRing, A>>
+    where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
         A: Allocator + Clone,
 {
     assert!(H.ring().n() % 2 != 0);
@@ -202,10 +188,8 @@ pub fn slots_to_powcoeffs_thin<NumberRing, FpTy, A>(H: &HypercubeIsomorphism<Num
 /// powerful-basis coefficients are discarded, i.e. mapped to zero. In particular this transform does not have
 /// full rank, and cannot be the mathematical inverse of [`slots_to_powcoeffs_thin()`].
 /// 
-pub fn powcoeffs_to_slots_thin<NumberRing, FpTy, A>(H: &HypercubeIsomorphism<NumberRing, FpTy, A>) -> Vec<LinearTransform<NumberRing, FpTy, A>>
-    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-        FpTy: RingStore + Clone,
-        FpTy::Type: StdZn,
+pub fn powcoeffs_to_slots_thin<NumberRing, A>(H: &HypercubeIsomorphism<NumberRing, A>) -> Vec<LinearTransform<NumberRing, A>>
+    where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
         A: Allocator + Clone,
 {
     let mut result = powcoeffs_to_slots_fat(H);

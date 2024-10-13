@@ -67,7 +67,7 @@ pub struct CoeffEl<NumberRing, FpTy, A = Global>
     pub(super) data: Vec<El<FpTy>, A>
 }
 
-impl<NumberRing, FpTy> DoubleRNSRingBase<NumberRing, FpTy, Global> 
+impl<NumberRing, FpTy> DoubleRNSRingBase<NumberRing, FpTy> 
     where NumberRing: DecomposableNumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>

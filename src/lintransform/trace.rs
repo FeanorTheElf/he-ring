@@ -41,11 +41,9 @@ impl Trace {
     /// where `X` is its canonical generator. At the moment this always true, since we currently
     /// choose the canonical generator to be a root of unity.
     /// 
-    pub fn extract_linear_map<'a, R, A, G>(&self, slot_ring: &SlotRing<'a, R, A>, mut function: G) -> El<SlotRing<'a, R, A>>
-        where R: RingStore,
-            R::Type: StdZn,
-            A: Allocator + Clone,
-            G: FnMut(El<SlotRing<'a, R, A>>) -> El<R>
+    pub fn extract_linear_map<'a, A, G>(&self, slot_ring: &SlotRing<'a, A>, mut function: G) -> El<SlotRing<'a, A>>
+        where A: Allocator + Clone,
+            G: FnMut(El<SlotRing<'a, A>>) -> El<Zn>
     {
         assert_eq!(self.trace_rank_quo as usize, slot_ring.rank());
 
@@ -54,7 +52,7 @@ impl Trace {
         let mut sol = OwnedMatrix::zero(slot_ring.rank(), 1, slot_ring.base_ring());
 
         let poly_ring = DensePolyRing::new(slot_ring.base_ring(), "X");
-        let trace = |a: El<SlotRing<'a, R, A>>| {
+        let trace = |a: El<SlotRing<'a, A>>| {
             let result = self.evaluate_generic(
                 a, 
                 |x, y| slot_ring.add_ref_snd(x, y), 
@@ -86,10 +84,8 @@ impl Trace {
     /// where `X` is its canonical generator. At the moment this always true, since we currently
     /// choose the canonical generator to be a root of unity.
     /// 
-    pub fn extract_coefficient_map<'a, R, A>(&self, slot_ring: &SlotRing<'a, R, A>, coefficient_j: usize) -> El<SlotRing<'a, R, A>>
-        where R: RingStore,
-            R::Type: StdZn,
-            A: Allocator + Clone
+    pub fn extract_coefficient_map<'a, A>(&self, slot_ring: &SlotRing<'a, A>, coefficient_j: usize) -> El<SlotRing<'a, A>>
+        where A: Allocator + Clone
     {
         self.extract_linear_map(slot_ring, |a| slot_ring.wrt_canonical_basis(&a).at(coefficient_j))
     }
@@ -169,8 +165,8 @@ use super::{CyclotomicRing, DecomposableCyclotomicNumberRing};
 #[test]
 fn test_extract_coefficient_map() {
 
-    let do_test_for_slot_ring = |slot_ring, trace: &Trace, Gal: &Zn| {
-        let extract_constant_coeff = trace.extract_coefficient_map::<Zn, _>(slot_ring, 0);
+    let do_test_for_slot_ring = |slot_ring: &SlotRing, trace: &Trace, Gal: &Zn| {
+        let extract_constant_coeff = trace.extract_coefficient_map(slot_ring, 0);
 
         let poly_ring = DensePolyRing::new(slot_ring.base_ring(), "X");
         for i in 0..4 {

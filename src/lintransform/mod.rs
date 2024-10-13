@@ -83,10 +83,8 @@ impl GaloisElementIndex {
         return self;
     }
 
-    fn galois_element<NumberRing, FpTy, A>(&self, H: &HypercubeIsomorphism<NumberRing, FpTy, A>) -> ZnEl
-        where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-            FpTy: RingStore + Clone,
-            FpTy::Type: StdZn,
+    fn galois_element<NumberRing, A>(&self, H: &HypercubeIsomorphism<NumberRing, A>) -> ZnEl
+        where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
             A: Allocator + Clone
     {
         H.cyclotomic_index_ring().prod(self.shift_steps.iter().enumerate().map(|(i, s)| H.shift_galois_element(i, *s)).chain([H.frobenius_element(self.frobenius_count)].into_iter()))
@@ -104,10 +102,8 @@ impl GaloisElementIndex {
         }
     }
 
-    fn canonicalize<NumberRing, FpTy, A>(&mut self, H: &HypercubeIsomorphism<NumberRing, FpTy, A>)
-        where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-            FpTy: RingStore + Clone,
-            FpTy::Type: StdZn,
+    fn canonicalize<NumberRing, A>(&mut self, H: &HypercubeIsomorphism<NumberRing, A>)
+        where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
             A: Allocator + Clone
     {
         let canonicalize_mod = |a: i64, n: i64| (((a % n) + n) % n);
@@ -120,22 +116,18 @@ impl GaloisElementIndex {
     }
 }
 
-pub struct LinearTransform<NumberRing, FpTy, A>
-    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-        FpTy: RingStore + Clone,
-        FpTy::Type: StdZn,
+pub struct LinearTransform<NumberRing, A = Global>
+    where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
         A: Allocator + Clone
 {
-    data: Vec<(GaloisElementIndex, El<NumberRingQuo<NumberRing, FpTy, A>>)>
+    data: Vec<(GaloisElementIndex, El<NumberRingQuo<NumberRing, Zn, A>>)>
 }
 
-impl<NumberRing, FpTy, A> LinearTransform<NumberRing, FpTy, A>
-    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-        FpTy: RingStore + Clone,
-        FpTy::Type: StdZn,
+impl<NumberRing, A> LinearTransform<NumberRing, A>
+    where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
         A: Allocator + Clone
 {
-    pub fn eq(&self, other: &Self, H: &HypercubeIsomorphism<NumberRing, FpTy, A>) -> bool {
+    pub fn eq(&self, other: &Self, H: &HypercubeIsomorphism<NumberRing, A>) -> bool {
         self.check_valid(H);
         other.check_valid(H);
         if self.data.len() != other.data.len() {
@@ -156,8 +148,8 @@ impl<NumberRing, FpTy, A> LinearTransform<NumberRing, FpTy, A>
     /// `matrix` is called on `output_index, input_index, column_indices` to give the `(output_index, input_index)`-th
     /// entry of the matrix corresponding to the hypercolumn containing the slot `column_indices`.
     /// 
-    pub fn matmul1d<'a, G>(H: &HypercubeIsomorphism<'a, NumberRing, FpTy, A>, dim_index: usize, matrix: G) -> LinearTransform<NumberRing, FpTy, A>
-        where G: Fn(usize, usize, &[usize]) -> El<SlotRing<'a, FpTy, A>>
+    pub fn matmul1d<'a, G>(H: &HypercubeIsomorphism<'a, NumberRing, A>, dim_index: usize, matrix: G) -> LinearTransform<NumberRing, A>
+        where G: Fn(usize, usize, &[usize]) -> El<SlotRing<'a, A>>
     {
         let m = H.len(dim_index) as i64;
         let mut result = LinearTransform {
@@ -177,7 +169,7 @@ impl<NumberRing, FpTy, A> LinearTransform<NumberRing, FpTy, A>
         return result;
     }
 
-    pub fn slot_scalar_mult<'a>(H: &HypercubeIsomorphism<'a, NumberRing, FpTy, A>, scalar: &El<SlotRing<'a, FpTy, A>>) -> LinearTransform<NumberRing, FpTy, A> {
+    pub fn slot_scalar_mult<'a>(H: &HypercubeIsomorphism<'a, NumberRing, A>, scalar: &El<SlotRing<'a, A>>) -> LinearTransform<NumberRing, A> {
         return LinearTransform {
             data: vec![(GaloisElementIndex::identity(H.dim_count()), H.from_slot_vec((0..H.slot_count()).map(|_| H.slot_ring().clone_el(scalar))))]
         };
@@ -187,8 +179,8 @@ impl<NumberRing, FpTy, A> LinearTransform<NumberRing, FpTy, A>
     /// Applies a linea transform on each slot separately. The transform is given by its matrix w.r.t. the basis
     /// `1, X, ..., X^(d - 1)` where `X` is the canonical generator of the slot ring.
     /// 
-    pub fn blockmatmul0d<'a, G>(H: &HypercubeIsomorphism<'a, NumberRing, FpTy, A>, matrix: G) -> LinearTransform<NumberRing, FpTy, A>
-        where G: Fn(usize, usize, &[usize]) -> El<FpTy>
+    pub fn blockmatmul0d<'a, G>(H: &HypercubeIsomorphism<'a, NumberRing, A>, matrix: G) -> LinearTransform<NumberRing, A>
+        where G: Fn(usize, usize, &[usize]) -> El<Zn>
     {
         let d = H.slot_ring().rank();
         let Gal = H.cyclotomic_index_ring();
@@ -197,7 +189,7 @@ impl<NumberRing, FpTy, A> LinearTransform<NumberRing, FpTy, A>
         
         let poly_ring = DensePolyRing::new(H.slot_ring().base_ring(), "X");
         // this is the map `X -> X^p`, which is the frobenius in our case, since we choose the canonical generator of the slot ring as root of unity
-        let apply_frobenius = |x: &El<SlotRing<'a, _, _>>, count: i64| {
+        let apply_frobenius = |x: &El<SlotRing<'a, _>>, count: i64| {
             poly_ring.evaluate(&H.slot_ring().poly_repr(&poly_ring, x, &H.slot_ring().base_ring().identity()), &H.slot_ring().pow(H.slot_ring().canonical_gen(), Gal.smallest_positive_lift(H.frobenius_element(count)) as usize), &H.slot_ring().inclusion())
         };
         
@@ -231,8 +223,8 @@ impl<NumberRing, FpTy, A> LinearTransform<NumberRing, FpTy, A>
     /// should return the `(i, k), (j, l)`-th entry of the matrix of the linear transform (w.r.t. basis `X^k e_U(i)`) 
     /// when called on `((i, k), (j, l), U(<unspecified value>))`.
     /// 
-    pub fn blockmatmul1d<'a, G>(H: &HypercubeIsomorphism<'a, NumberRing, FpTy, A>, dim_index: usize, matrix: G) -> LinearTransform<NumberRing, FpTy, A>
-        where G: Fn((usize, usize), (usize, usize), &[usize]) -> El<FpTy>
+    pub fn blockmatmul1d<'a, G>(H: &HypercubeIsomorphism<'a, NumberRing, A>, dim_index: usize, matrix: G) -> LinearTransform<NumberRing, A>
+        where G: Fn((usize, usize), (usize, usize), &[usize]) -> El<Zn>
     {
         let m = H.len(dim_index) as i64;
         let d = H.slot_ring().rank();
@@ -242,7 +234,7 @@ impl<NumberRing, FpTy, A> LinearTransform<NumberRing, FpTy, A>
         
         let poly_ring = DensePolyRing::new(H.slot_ring().base_ring(), "X");
         // this is the map `X -> X^p`, which is the frobenius in our case, since we choose the canonical generator of the slot ring as root of unity
-        let apply_frobenius = |x: &El<SlotRing<'a, _, _>>, count: i64| {
+        let apply_frobenius = |x: &El<SlotRing<'a, _>>, count: i64| {
             poly_ring.evaluate(&H.slot_ring().poly_repr(&poly_ring, x, &H.slot_ring().base_ring().identity()), &H.slot_ring().pow(H.slot_ring().canonical_gen(), Gal.smallest_positive_lift(H.frobenius_element(count)) as usize), &H.slot_ring().inclusion())
         };
         
@@ -275,18 +267,18 @@ impl<NumberRing, FpTy, A> LinearTransform<NumberRing, FpTy, A>
         return result;
     }
 
-    pub fn switch_ring(&self, H_from: &HypercubeIsomorphism<NumberRing, FpTy, A>, to: &NumberRingQuoBase<NumberRing, FpTy, A>) -> Self {
+    pub fn switch_ring(&self, H_from: &HypercubeIsomorphism<NumberRing, A>, to: &NumberRingQuoBase<NumberRing, Zn, A>) -> Self {
         self.check_valid(H_from);
         assert_eq!(H_from.ring().n(), to.n());
         let from = H_from.ring();
         let red_map = ReductionMap::new(from.base_ring(), to.base_ring()).unwrap();
-        let hom = |x: &El<NumberRingQuo<NumberRing, FpTy, A>>| to.from_canonical_basis(H_from.ring().wrt_canonical_basis(x).into_iter().map(|x| red_map.map(x)));
+        let hom = |x: &El<NumberRingQuo<NumberRing, Zn, A>>| to.from_canonical_basis(H_from.ring().wrt_canonical_basis(x).into_iter().map(|x| red_map.map(x)));
         Self {
             data: self.data.iter().map(|(g, coeff)| (g.clone(), hom(coeff))).collect()
         }
     }
 
-    pub fn inverse(&self, H: &HypercubeIsomorphism<NumberRing, FpTy, A>) -> Self {
+    pub fn inverse(&self, H: &HypercubeIsomorphism<NumberRing, A>) -> Self {
         self.check_valid(H);
         let original_automorphisms = self.data.iter().map(|(g, _)| g.galois_element(H));
         let inverse_automorphisms = original_automorphisms.clone().map(|g| H.cyclotomic_index_ring().invert(&g).unwrap()).collect::<Vec<_>>();
@@ -359,7 +351,7 @@ impl<NumberRing, FpTy, A> LinearTransform<NumberRing, FpTy, A>
         return result;
     }
 
-    fn check_valid(&self, _H: &HypercubeIsomorphism<NumberRing, FpTy, A>) {
+    fn check_valid(&self, _H: &HypercubeIsomorphism<NumberRing, A>) {
         for (i, (g, _)) in self.data.iter().enumerate() {
             for (j, (s, _)) in self.data.iter().enumerate() {
                 assert!(i == j || g != s);
@@ -367,7 +359,7 @@ impl<NumberRing, FpTy, A> LinearTransform<NumberRing, FpTy, A>
         }
     }
 
-    fn compose(&self, run_first: &LinearTransform<NumberRing, FpTy, A>, H: &HypercubeIsomorphism<NumberRing, FpTy, A>) -> Self {
+    fn compose(&self, run_first: &LinearTransform<NumberRing, A>, H: &HypercubeIsomorphism<NumberRing, A>) -> Self {
         self.check_valid(H);
         run_first.check_valid(H);
         let mut result = Self {
@@ -380,13 +372,13 @@ impl<NumberRing, FpTy, A> LinearTransform<NumberRing, FpTy, A>
         return result;
     }
 
-    fn identity(H: &HypercubeIsomorphism<NumberRing, FpTy, A>) -> Self {
+    fn identity(H: &HypercubeIsomorphism<NumberRing, A>) -> Self {
         Self {
             data: vec![(GaloisElementIndex::shift_1d(H.dim_count(), 0, 0), H.ring().one())]
         }
     }
 
-    fn canonicalize(&mut self, H: &HypercubeIsomorphism<NumberRing, FpTy, A>) {
+    fn canonicalize(&mut self, H: &HypercubeIsomorphism<NumberRing, A>) {
         self.data.sort_unstable_by_key(|(g, _)| H.cyclotomic_index_ring().smallest_positive_lift(g.galois_element(H)));
         for (steps, _) in &mut self.data {
             steps.canonicalize(H);
@@ -404,35 +396,31 @@ impl<NumberRing, FpTy, A> LinearTransform<NumberRing, FpTy, A>
 
     #[cfg(test)]
     #[allow(unused)]
-    fn print(&self, H: &HypercubeIsomorphism<NumberRing, FpTy, A>) {
+    fn print(&self, H: &HypercubeIsomorphism<NumberRing, A>) {
         for (g, c) in &self.data {
             println!("p^{} {:?}: {}", g.frobenius_count, g.shift_steps, H.ring().format(c));
         }
     }
 }
 
-impl<NumberRing, FpTy, A> NumberRingQuoBase<NumberRing, FpTy, A> 
-    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-        FpTy: RingStore + Clone,
-        FpTy::Type: StdZn,
+impl<NumberRing, A> NumberRingQuoBase<NumberRing, Zn, A> 
+    where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
         A: Allocator + Clone
 {
-    pub fn compute_linear_transform(&self, H: &HypercubeIsomorphism<NumberRing, FpTy, A>, el: &<Self as RingBase>::Element, transform: &LinearTransform<NumberRing, FpTy, A>) -> <Self as RingBase>::Element {
+    pub fn compute_linear_transform(&self, H: &HypercubeIsomorphism<NumberRing, A>, el: &<Self as RingBase>::Element, transform: &LinearTransform<NumberRing, A>) -> <Self as RingBase>::Element {
         assert!(H.ring().get_ring() == self);
         <_ as RingBase>::sum(self, transform.data.iter().map(|(s, c)| self.mul_ref_fst(c, self.apply_galois_action(el, s.galois_element(H)))))
     }
 }
 
-pub struct CompiledLinearTransform<NumberRing, FpTy, A>
-    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-        FpTy: RingStore + Clone,
-        FpTy::Type: StdZn,
+pub struct CompiledLinearTransform<NumberRing, A = Global>
+    where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
         A: Allocator + Clone
 {
     baby_step_galois_elements: Vec<ZnEl>,
     giant_step_galois_elements: Vec<Option<ZnEl>>,
-    coeffs: Vec<Vec<Option<El<NumberRingQuo<NumberRing, FpTy, A>>>>>,
-    one: El<NumberRingQuo<NumberRing, FpTy, A>>
+    coeffs: Vec<Vec<Option<El<NumberRingQuo<NumberRing, Zn, A>>>>>,
+    one: El<NumberRingQuo<NumberRing, Zn, A>>
 }
 
 #[derive(Debug)]
@@ -445,32 +433,30 @@ pub struct BabyStepGiantStepParams {
     unhoisted_automorphism_count: usize
 }
 
-impl<NumberRing, FpTy, A> CompiledLinearTransform<NumberRing, FpTy, A>
-    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-        FpTy: RingStore + Clone,
-        FpTy::Type: StdZn,
+impl<NumberRing, A> CompiledLinearTransform<NumberRing, A>
+    where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
         A: Allocator + Clone
 {
-    pub fn save(&self, filename: &str, ring: &NumberRingQuo<NumberRing, FpTy, A>, cyclotomic_index_ring: &Zn) {
+    pub fn save(&self, filename: &str, ring: &NumberRingQuo<NumberRing, Zn, A>, cyclotomic_index_ring: &Zn) {
         serde_json::to_writer_pretty(
             BufWriter::new(File::create(filename).unwrap()), 
             &serialization::CompiledLinearTransformSerializable::from(ring, cyclotomic_index_ring, self)
         ).unwrap()
     }
 
-    pub fn load(filename: &str, ring: &NumberRingQuo<NumberRing, FpTy, A>, cyclotomic_index_ring: &Zn) -> Self {
+    pub fn load(filename: &str, ring: &NumberRingQuo<NumberRing, Zn, A>, cyclotomic_index_ring: &Zn) -> Self {
         let mut deserializer = serde_json::Deserializer::from_reader(BufReader::new(File::open(filename).unwrap()));
         return <_ as DeserializeSeed>::deserialize(serialization::DeserializeLinearTransformSeed { cyclotomic_index_ring: cyclotomic_index_ring, ring: ring.get_ring() }, &mut deserializer).unwrap().into();
     }
 
-    pub fn save_seq(data: &[Self], filename: &str, ring: &NumberRingQuo<NumberRing, FpTy, A>, cyclotomic_index_ring: &Zn) {
+    pub fn save_seq(data: &[Self], filename: &str, ring: &NumberRingQuo<NumberRing, Zn, A>, cyclotomic_index_ring: &Zn) {
         serde_json::to_writer_pretty(
             BufWriter::new(File::create(filename).unwrap()), 
             &data.iter().map(|t| serialization::CompiledLinearTransformSerializable::from(ring, cyclotomic_index_ring, t)).collect::<Vec<_>>()
         ).unwrap()
     }
 
-    pub fn load_seq(filename: &str, ring: &NumberRingQuo<NumberRing, FpTy, A>, cyclotomic_index_ring: &Zn) -> Vec<Self> {
+    pub fn load_seq(filename: &str, ring: &NumberRingQuo<NumberRing, Zn, A>, cyclotomic_index_ring: &Zn) -> Vec<Self> {
         let mut deserializer = serde_json::Deserializer::from_reader(BufReader::new(File::open(filename).unwrap()));
         return <_ as DeserializeSeed>::deserialize(serialization::VecDeserializeSeed { base_seed: serialization::DeserializeLinearTransformSeed { cyclotomic_index_ring: cyclotomic_index_ring, ring: ring.get_ring() } }, &mut deserializer).unwrap().into();
     }
@@ -478,7 +464,7 @@ impl<NumberRing, FpTy, A> CompiledLinearTransform<NumberRing, FpTy, A>
     /// 
     /// In the returned lists, we use the first entry for the "frobenius-dimension"
     /// 
-    fn compute_automorphisms_per_dimension(H: &HypercubeIsomorphism<NumberRing, FpTy, A>, lin_transform: &LinearTransform<NumberRing, FpTy, A>) -> (Vec<i64>, Vec<i64>, Vec<i64>, Vec<i64>) {
+    fn compute_automorphisms_per_dimension(H: &HypercubeIsomorphism<NumberRing, A>, lin_transform: &LinearTransform<NumberRing, A>) -> (Vec<i64>, Vec<i64>, Vec<i64>, Vec<i64>) {
         lin_transform.check_valid(H);
         
         let mut max_step: Vec<i64> = Vec::new();
@@ -541,7 +527,7 @@ impl<NumberRing, FpTy, A> CompiledLinearTransform<NumberRing, FpTy, A>
         };
     }
 
-    pub fn compile(H: &HypercubeIsomorphism<NumberRing, FpTy, A>, lin_transform: LinearTransform<NumberRing, FpTy, A>) -> Self {
+    pub fn compile(H: &HypercubeIsomorphism<NumberRing, A>, lin_transform: LinearTransform<NumberRing, A>) -> Self {
         lin_transform.check_valid(H);
 
         let (_, _, _, sizes) = Self::compute_automorphisms_per_dimension(H, &lin_transform);
@@ -556,15 +542,15 @@ impl<NumberRing, FpTy, A> CompiledLinearTransform<NumberRing, FpTy, A>
         return Self::create_from(H, lin_transform, preferred_baby_steps);
     }
 
-    pub fn compile_merged(H: &HypercubeIsomorphism<NumberRing, FpTy, A>, lin_transforms: &[LinearTransform<NumberRing, FpTy, A>]) -> Self {
+    pub fn compile_merged(H: &HypercubeIsomorphism<NumberRing, A>, lin_transforms: &[LinearTransform<NumberRing, A>]) -> Self {
         Self::compile(H, lin_transforms.iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H)))
     }
 
-    pub fn create_from_merged(H: &HypercubeIsomorphism<NumberRing, FpTy, A>, lin_transforms: &[LinearTransform<NumberRing, FpTy, A>], preferred_baby_steps: usize) -> CompiledLinearTransform<NumberRing, FpTy, A> {
+    pub fn create_from_merged(H: &HypercubeIsomorphism<NumberRing, A>, lin_transforms: &[LinearTransform<NumberRing, A>], preferred_baby_steps: usize) -> CompiledLinearTransform<NumberRing, A> {
         Self::create_from(H, lin_transforms.iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H)), preferred_baby_steps)
     }
 
-    pub fn create_from(H: &HypercubeIsomorphism<NumberRing, FpTy, A>, lin_transform: LinearTransform<NumberRing, FpTy, A>, preferred_baby_steps: usize) -> CompiledLinearTransform<NumberRing, FpTy, A> {
+    pub fn create_from(H: &HypercubeIsomorphism<NumberRing, A>, lin_transform: LinearTransform<NumberRing, A>, preferred_baby_steps: usize) -> CompiledLinearTransform<NumberRing, A> {
         lin_transform.check_valid(H);
 
         let (max_step, min_step, gcd_step, sizes) = Self::compute_automorphisms_per_dimension(H, &lin_transform);
@@ -623,8 +609,8 @@ impl<NumberRing, FpTy, A> CompiledLinearTransform<NumberRing, FpTy, A>
         };
     }
 
-    pub fn evaluate<S>(&self, input: El<NumberRingQuo<NumberRing, FpTy, A>>, ring: S) -> El<NumberRingQuo<NumberRing, FpTy, A>>
-        where S: RingStore<Type = NumberRingQuoBase<NumberRing, FpTy, A>>
+    pub fn evaluate<S>(&self, input: El<NumberRingQuo<NumberRing, Zn, A>>, ring: S) -> El<NumberRingQuo<NumberRing, Zn, A>>
+        where S: RingStore<Type = NumberRingQuoBase<NumberRing, Zn, A>>
     {
         self.evaluate_generic(input, |a, b, c| {
             ring.add_assign(a, ring.mul_ref(b, c));
@@ -638,7 +624,7 @@ impl<NumberRing, FpTy, A> CompiledLinearTransform<NumberRing, FpTy, A>
     }
 
     pub fn evaluate_generic<T, AddScaled, ApplyGalois, Zero>(&self, input: T, mut add_scaled_fn: AddScaled, mut apply_galois_fn: ApplyGalois, mut zero_fn: Zero) -> T
-        where AddScaled: FnMut(&mut T, &T, &El<NumberRingQuo<NumberRing, FpTy, A>>),
+        where AddScaled: FnMut(&mut T, &T, &El<NumberRingQuo<NumberRing, Zn, A>>),
             ApplyGalois: FnMut(T, &[ZnEl]) -> Vec<T>,
             Zero: FnMut() -> T
     {
@@ -673,21 +659,17 @@ mod serialization {
 
     use super::*;
 
-    pub struct CompiledLinearTransformSerializable<'a, NumberRing, FpTy, A>
-        where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-            FpTy: RingStore + Clone,
-            FpTy::Type: StdZn,
+    pub struct CompiledLinearTransformSerializable<'a, NumberRing, A>
+        where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
             A: Allocator + Clone
     {
         baby_step_galois_elements: Vec<SerializeWithRing<'a, &'a Zn>>,
         giant_step_galois_elements: Vec<Option<SerializeWithRing<'a, &'a Zn>>>,
-        coeffs: Vec<Vec<Option<SerializeWithRing<'a, &'a NumberRingQuo<NumberRing, FpTy, A>>>>>,
+        coeffs: Vec<Vec<Option<SerializeWithRing<'a, &'a NumberRingQuo<NumberRing, Zn, A>>>>>,
     }
 
-    impl<'a, NumberRing, FpTy, A> Serialize for CompiledLinearTransformSerializable<'a, NumberRing, FpTy, A>
-        where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-            FpTy: RingStore + Clone,
-            FpTy::Type: StdZn,
+    impl<'a, NumberRing, A> Serialize for CompiledLinearTransformSerializable<'a, NumberRing, A>
+        where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
             A: Allocator + Clone
     {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -701,13 +683,11 @@ mod serialization {
         }
     }
 
-    impl<'a, NumberRing, FpTy, A> CompiledLinearTransformSerializable<'a, NumberRing, FpTy, A>
-        where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-            FpTy: RingStore + Clone,
-            FpTy::Type: StdZn,
+    impl<'a, NumberRing, A> CompiledLinearTransformSerializable<'a, NumberRing, A>
+        where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
             A: Allocator + Clone
     {
-        pub fn from(ring: &'a NumberRingQuo<NumberRing, FpTy, A>, galois_group_ring: &'a Zn, transform: &'a CompiledLinearTransform<NumberRing, FpTy, A>) -> Self {
+        pub fn from(ring: &'a NumberRingQuo<NumberRing, Zn, A>, galois_group_ring: &'a Zn, transform: &'a CompiledLinearTransform<NumberRing, A>) -> Self {
             Self {
                 baby_step_galois_elements: transform.baby_step_galois_elements.iter().map(|x| SerializeWithRing::new(x, galois_group_ring)).collect(),
                 giant_step_galois_elements: transform.giant_step_galois_elements.iter().map(|x| x.as_ref().map(|x| SerializeWithRing::new(x, galois_group_ring))).collect(),
@@ -806,20 +786,16 @@ mod serialization {
         }
     }
 
-    pub struct DeserializeLinearTransformSeed<'a, NumberRing, FpTy, A>
-        where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-            FpTy: RingStore + Clone,
-            FpTy::Type: StdZn,
+    pub struct DeserializeLinearTransformSeed<'a, NumberRing, A>
+        where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
             A: Allocator + Clone
     {
         pub cyclotomic_index_ring: &'a Zn,
-        pub ring: &'a NumberRingQuoBase<NumberRing, FpTy, A>
+        pub ring: &'a NumberRingQuoBase<NumberRing, Zn, A>
     }
     
-    impl<'a, NumberRing, FpTy, A> Clone for DeserializeLinearTransformSeed<'a, NumberRing, FpTy, A>
-        where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-            FpTy: RingStore + Clone,
-            FpTy::Type: StdZn,
+    impl<'a, NumberRing, A> Clone for DeserializeLinearTransformSeed<'a, NumberRing, A>
+        where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
             A: Allocator + Clone
     {
         fn clone(&self) -> Self {
@@ -827,41 +803,33 @@ mod serialization {
         }
     }
 
-    impl<'a, NumberRing, FpTy, A> Copy for DeserializeLinearTransformSeed<'a, NumberRing, FpTy, A>
-        where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-            FpTy: RingStore + Clone,
-            FpTy::Type: StdZn,
+    impl<'a, NumberRing, A> Copy for DeserializeLinearTransformSeed<'a, NumberRing, A>
+        where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
             A: Allocator + Clone
     {}
 
-    impl<'a, 'de, NumberRing, FpTy, A> DeserializeSeed<'de> for DeserializeLinearTransformSeed<'a, NumberRing, FpTy, A>
-        where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-            FpTy: RingStore + Clone,
-            FpTy::Type: StdZn,
+    impl<'a, 'de, NumberRing, A> DeserializeSeed<'de> for DeserializeLinearTransformSeed<'a, NumberRing, A>
+        where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
             A: Allocator + Clone
     {
-        type Value = CompiledLinearTransform<NumberRing, FpTy, A>;
+        type Value = CompiledLinearTransform<NumberRing, A>;
 
         fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
             where D: serde::Deserializer<'de>
         {
-            struct FieldsVisitor<'a, NumberRing, FpTy, A>
-                where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-                    FpTy: RingStore + Clone,
-                    FpTy::Type: StdZn,
+            struct FieldsVisitor<'a, NumberRing, A>
+                where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
                     A: Allocator + Clone
             {
                 cyclotomic_index_ring: &'a Zn,
-                ring: &'a NumberRingQuoBase<NumberRing, FpTy, A>
+                ring: &'a NumberRingQuoBase<NumberRing, Zn, A>
             }
             
-            impl<'a, 'de, NumberRing, FpTy, A> Visitor<'de> for FieldsVisitor<'a, NumberRing, FpTy, A>
-                where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
-                    FpTy: RingStore + Clone,
-                    FpTy::Type: StdZn,
+            impl<'a, 'de, NumberRing, A> Visitor<'de> for FieldsVisitor<'a, NumberRing, A>
+                where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
                     A: Allocator + Clone
             {
-                type Value = CompiledLinearTransform<NumberRing, FpTy, A>;
+                type Value = CompiledLinearTransform<NumberRing, A>;
 
                 fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                     write!(formatter, "struct `CompiledLinearTransform` with fields `baby_step_galois_elements`, `giant_step_galois_elements`, `coeffs`")

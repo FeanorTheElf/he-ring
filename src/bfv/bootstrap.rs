@@ -29,8 +29,8 @@ pub struct ThinBootstrapParams<Params: BFVParams> {
     p: i64,
     // the k-th circuit works modulo `e - k` and outputs values `yi` such that `yi = lift(x mod p) mod p^(i + 2)` for `0 <= i < v - k - 2` as well as a final `y'` with `y' = lift(x mod p)`
     digit_extract_circuits: Vec<ArithCircuit>,
-    slots_to_coeffs_thin: Vec<CompiledLinearTransform<Params::NumberRing, PlaintextZn, Global>>,
-    coeffs_to_slots_thin: (Vec<CompiledLinearTransform<Params::NumberRing, PlaintextZn, Global>>, Option<Trace>)
+    slots_to_coeffs_thin: Vec<CompiledLinearTransform<Params::NumberRing>>,
+    coeffs_to_slots_thin: (Vec<CompiledLinearTransform<Params::NumberRing>>, Option<Trace>)
 }
 
 pub struct BootstrapperConfig {
@@ -70,17 +70,17 @@ impl ThinBootstrapParams<Pow2BFVParams> {
 
     pub fn build_pow2<const LOG: bool>(params: Pow2BFVParams, config: BootstrapperConfig) -> Self {
         let (p, r) = is_prime_power(&ZZ, &params.t()).unwrap();
-        let s_can_norm = <_ as DecomposableNumberRing<CiphertextZn>>::inf_to_can_norm_expansion_factor(&params.number_ring());
+        let s_can_norm = <_ as DecomposableNumberRing<Zn>>::inf_to_can_norm_expansion_factor(&params.number_ring());
         let v = config.set_v.unwrap_or(((s_can_norm + 1.).log2() / (p as f64).log2()).ceil() as usize);
         let e = r + v;
         if LOG {
-            println!("Setting up bootstrapping for plaintext modulus p^r = {}^{} = {} within the cyclotomic ring Q[X]/(Phi_{})", p, r, params.t(), <_ as DecomposableCyclotomicNumberRing<CiphertextZn>>::n(&params.number_ring()));
+            println!("Setting up bootstrapping for plaintext modulus p^r = {}^{} = {} within the cyclotomic ring Q[X]/(Phi_{})", p, r, params.t(), <_ as DecomposableCyclotomicNumberRing<Zn>>::n(&params.number_ring()));
             println!("Choosing e = r + v = {} + {}", r, v);
         }
 
         let digit_extraction_circuits = log_time::<_, _, LOG, _>("Computing digit extraction polynomials", |[]| {
             (1..=v).rev().map(|remaining_v| {
-                let poly_ring = DensePolyRing::new(PlaintextZn::new(ZZ.pow(p, remaining_v + r) as u64), "X");
+                let poly_ring = DensePolyRing::new(Zn::new(ZZ.pow(p, remaining_v + r) as u64), "X");
                 poly_to_circuit(&poly_ring, &(2..=remaining_v).chain([r + remaining_v].into_iter()).map(|j| digit_retain_poly(&poly_ring, j)).collect::<Vec<_>>())
             }).collect::<Vec<_>>()
         });
@@ -128,7 +128,7 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
 
         let digit_extraction_circuits = log_time::<_, _, LOG, _>("Computing digit extraction polynomials", |[]| {
             (1..=v).rev().map(|remaining_v| {
-                let poly_ring = DensePolyRing::new(PlaintextZn::new(ZZ.pow(p, remaining_v + r) as u64), "X");
+                let poly_ring = DensePolyRing::new(Zn::new(ZZ.pow(p, remaining_v + r) as u64), "X");
                 poly_to_circuit(&poly_ring, &(2..=remaining_v).chain([r + remaining_v].into_iter()).map(|j| digit_retain_poly(&poly_ring, j)).collect::<Vec<_>>())
             }).collect::<Vec<_>>()
         });
@@ -166,8 +166,8 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
         e: usize,
         p: i64,
         digit_extract_circuits: Vec<ArithCircuit>,
-        slots_to_coeffs_thin: Vec<CompiledLinearTransform<Params::NumberRing, PlaintextZn, Global>>,
-        coeffs_to_slots_thin: (Vec<CompiledLinearTransform<Params::NumberRing, PlaintextZn, Global>>, Option<Trace>)
+        slots_to_coeffs_thin: Vec<CompiledLinearTransform<Params::NumberRing>>,
+        coeffs_to_slots_thin: (Vec<CompiledLinearTransform<Params::NumberRing>>, Option<Trace>)
     ) -> Self {
         assert_eq!(params.t(), ZZ.pow(p, r));
         let v = e - r;
@@ -200,8 +200,8 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
         let allocator = C.get_ring().allocator().clone();
         ModSwitchData {
             scale: rnsconv::bfv_rescale::AlmostExactRescaling::new_with(
-                C.get_ring().rns_base().as_iter().map(|R| CiphertextZn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
-                vec![ PlaintextZn::new(*P_bootstrap[0].base_ring().modulus() as u64) ], 
+                C.get_ring().rns_base().as_iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
+                vec![ Zn::new(*P_bootstrap[0].base_ring().modulus() as u64) ], 
                 C.get_ring().rns_base().len(), 
                 allocator.clone()
             )
@@ -323,7 +323,7 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
     }
 }
 
-fn hom_compute_linear_transform<Params: BFVParams>(P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, input: Ciphertext<Params>, transform: &[CompiledLinearTransform<Params::NumberRing, PlaintextZn, Global>], gk: &[(ZnEl, KeySwitchKey<Params>)], key_switches: &mut usize) -> Ciphertext<Params> {
+fn hom_compute_linear_transform<Params: BFVParams>(P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, input: Ciphertext<Params>, transform: &[CompiledLinearTransform<Params::NumberRing>], gk: &[(ZnEl, KeySwitchKey<Params>)], key_switches: &mut usize) -> Ciphertext<Params> {
     let Gal = P.get_ring().cyclotomic_index_ring();
     let get_gk = |g: &ZnEl| &gk.iter().filter(|(s, _)| Gal.eq_el(g, s)).next().unwrap().1;
     return transform.iter().fold(input, |current, T| T.evaluate_generic(
