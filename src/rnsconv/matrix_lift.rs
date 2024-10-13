@@ -144,83 +144,85 @@ impl<A> RNSOperation for AlmostExactMatrixBaseConversion<A>
         where V1: AsPointerToSlice<El<Self::Ring>>,
             V2: AsPointerToSlice<El<Self::Ring>>
     {
-        assert_eq!(input.row_count(), self.input_rings().len());
-        assert_eq!(output.row_count(), self.output_rings().len());
-        assert_eq!(input.col_count(), output.col_count());
+        record_time!("AlmostExactMatrixBaseConversion::apply", || {
+            assert_eq!(input.row_count(), self.input_rings().len());
+            assert_eq!(output.row_count(), self.output_rings().len());
+            assert_eq!(input.col_count(), output.col_count());
 
-        let in_len = input.row_count();
-        let out_len = output.row_count();
-        let col_count = input.col_count();
+            let in_len = input.row_count();
+            let out_len = output.row_count();
+            let col_count = input.col_count();
 
-        let int_to_homs = (0..self.output_rings().len()).map(|k| self.output_rings().at(k).can_hom(&ZZi128).unwrap()).collect::<Vec<_>>();
+            let int_to_homs = (0..self.output_rings().len()).map(|k| self.output_rings().at(k).can_hom(&ZZi128).unwrap()).collect::<Vec<_>>();
 
-        let mut lifts = OwnedMatrix::from_fn_in(pad_to_block(in_len), pad_to_block(col_count), |_, _| 0, self.allocator.clone());
-        let mut lifts = lifts.data_mut();
+            let mut lifts = OwnedMatrix::from_fn_in(pad_to_block(in_len), pad_to_block(col_count), |_, _| 0, self.allocator.clone());
+            let mut lifts = lifts.data_mut();
 
-        for i in 0..in_len {
-            for j in 0..col_count {
-                // using `any_lift()` here is slightly dangerous, as I haven't documented anywhere that `zn_64::Zn::any_lift()` returns values `<= 6 * modulus()`, but
-                // it currently does, so this is currently fine
-                *lifts.at_mut(i, j) = self.from_summands[i].any_lift(self.from_summands[i].mul_ref(input.at(i, j), self.q_over_Q.at(i))) as i128;
-                debug_assert!(*lifts.at(i, 0) >= 0 && *lifts.at(i, 0) <= ZN_ANY_LIFT_FACTOR as i128 * *self.from_summands[i].modulus() as i128);
-                *lifts.at_mut(i, j) = self.from_summands[i].smallest_positive_lift(self.from_summands[i].mul_ref(input.at(i, j), self.q_over_Q.at(i))) as i128;
+            for i in 0..in_len {
+                for j in 0..col_count {
+                    // using `any_lift()` here is slightly dangerous, as I haven't documented anywhere that `zn_64::Zn::any_lift()` returns values `<= 6 * modulus()`, but
+                    // it currently does, so this is currently fine
+                    *lifts.at_mut(i, j) = self.from_summands[i].any_lift(self.from_summands[i].mul_ref(input.at(i, j), self.q_over_Q.at(i))) as i128;
+                    debug_assert!(*lifts.at(i, 0) >= 0 && *lifts.at(i, 0) <= ZN_ANY_LIFT_FACTOR as i128 * *self.from_summands[i].modulus() as i128);
+                    *lifts.at_mut(i, j) = self.from_summands[i].smallest_positive_lift(self.from_summands[i].mul_ref(input.at(i, j), self.q_over_Q.at(i))) as i128;
+                }
             }
-        }
 
-        let mut output_unreduced = OwnedMatrix::from_fn_in(pad_to_block(out_len + 1), pad_to_block(col_count), |_, _| 0, self.allocator.clone());
-        let mut output_unreduced = output_unreduced.data_mut();
+            let mut output_unreduced = OwnedMatrix::from_fn_in(pad_to_block(out_len + 1), pad_to_block(col_count), |_, _| 0, self.allocator.clone());
+            let mut output_unreduced = output_unreduced.data_mut();
 
-        // actually using Strassen's algorithm here doesn't make much of a difference, it is basically as fast as without for normal
-        // parameters; however, this way we can claim superior asymptotic performance :)
-        const STRASSEN_THRESHOLD_LOG2: usize = 3;
-        let mem_size = strassen_mem_size(pad_to_block(in_len) > (1 << BLOCK_SIZE_LOG2), BLOCK_SIZE_LOG2, STRASSEN_THRESHOLD_LOG2);
-        let mut memory = Vec::with_capacity_in(mem_size, self.allocator.clone());
-        memory.resize(mem_size, 0);
+            // actually using Strassen's algorithm here doesn't make much of a difference, it is basically as fast as without for normal
+            // parameters; however, this way we can claim superior asymptotic performance :)
+            const STRASSEN_THRESHOLD_LOG2: usize = 3;
+            let mem_size = strassen_mem_size(pad_to_block(in_len) > (1 << BLOCK_SIZE_LOG2), BLOCK_SIZE_LOG2, STRASSEN_THRESHOLD_LOG2);
+            let mut memory = Vec::with_capacity_in(mem_size, self.allocator.clone());
+            memory.resize(mem_size, 0);
 
-        record_time!("AlmostExactMatrixBaseConversion::apply::matmul", || {
-            for i in 0..(pad_to_block(out_len + 1) / (1 << BLOCK_SIZE_LOG2)) {
-                for k in 0..(pad_to_block(in_len) / (1 << BLOCK_SIZE_LOG2)) {
-                    for j in 0..(pad_to_block(col_count) / (1 << BLOCK_SIZE_LOG2)) {
-                        let rows = (i << BLOCK_SIZE_LOG2)..((i + 1) << BLOCK_SIZE_LOG2);
-                        let cols = (j << BLOCK_SIZE_LOG2)..((j + 1) << BLOCK_SIZE_LOG2);
-                        let ks = (k << BLOCK_SIZE_LOG2)..((k + 1) << BLOCK_SIZE_LOG2);
-                        if k == 0 {
-                            feanor_math::algorithms::matmul::strassen::dispatch_strassen_impl::<_, _, _, _, false, false, false, false>(
-                                BLOCK_SIZE_LOG2, 
-                                STRASSEN_THRESHOLD_LOG2, 
-                                TransposableSubmatrix::from(self.Q_over_q_mod_and_downscaled.data().submatrix(rows.clone(), ks.clone())), 
-                                TransposableSubmatrix::from(lifts.as_const().submatrix(ks, cols.clone())), 
-                                TransposableSubmatrixMut::from(output_unreduced.reborrow().submatrix(rows, cols)), 
-                                StaticRing::<i128>::RING, 
-                                &mut memory
-                            );
-                        } else {   
-                            feanor_math::algorithms::matmul::strassen::dispatch_strassen_impl::<_, _, _, _, true, false, false, false>(
-                                BLOCK_SIZE_LOG2, 
-                                STRASSEN_THRESHOLD_LOG2, 
-                                TransposableSubmatrix::from(self.Q_over_q_mod_and_downscaled.data().submatrix(rows.clone(), ks.clone())), 
-                                TransposableSubmatrix::from(lifts.as_const().submatrix(ks, cols.clone())), 
-                                TransposableSubmatrixMut::from(output_unreduced.reborrow().submatrix(rows, cols)), 
-                                StaticRing::<i128>::RING, 
-                                &mut memory
-                            );
+            record_time!("AlmostExactMatrixBaseConversion::apply::matmul", || {
+                for i in 0..(pad_to_block(out_len + 1) / (1 << BLOCK_SIZE_LOG2)) {
+                    for k in 0..(pad_to_block(in_len) / (1 << BLOCK_SIZE_LOG2)) {
+                        for j in 0..(pad_to_block(col_count) / (1 << BLOCK_SIZE_LOG2)) {
+                            let rows = (i << BLOCK_SIZE_LOG2)..((i + 1) << BLOCK_SIZE_LOG2);
+                            let cols = (j << BLOCK_SIZE_LOG2)..((j + 1) << BLOCK_SIZE_LOG2);
+                            let ks = (k << BLOCK_SIZE_LOG2)..((k + 1) << BLOCK_SIZE_LOG2);
+                            if k == 0 {
+                                feanor_math::algorithms::matmul::strassen::dispatch_strassen_impl::<_, _, _, _, false, false, false, false>(
+                                    BLOCK_SIZE_LOG2, 
+                                    STRASSEN_THRESHOLD_LOG2, 
+                                    TransposableSubmatrix::from(self.Q_over_q_mod_and_downscaled.data().submatrix(rows.clone(), ks.clone())), 
+                                    TransposableSubmatrix::from(lifts.as_const().submatrix(ks, cols.clone())), 
+                                    TransposableSubmatrixMut::from(output_unreduced.reborrow().submatrix(rows, cols)), 
+                                    StaticRing::<i128>::RING, 
+                                    &mut memory
+                                );
+                            } else {   
+                                feanor_math::algorithms::matmul::strassen::dispatch_strassen_impl::<_, _, _, _, true, false, false, false>(
+                                    BLOCK_SIZE_LOG2, 
+                                    STRASSEN_THRESHOLD_LOG2, 
+                                    TransposableSubmatrix::from(self.Q_over_q_mod_and_downscaled.data().submatrix(rows.clone(), ks.clone())), 
+                                    TransposableSubmatrix::from(lifts.as_const().submatrix(ks, cols.clone())), 
+                                    TransposableSubmatrixMut::from(output_unreduced.reborrow().submatrix(rows, cols)), 
+                                    StaticRing::<i128>::RING, 
+                                    &mut memory
+                                );
+                            }
                         }
                     }
                 }
-            }
-        });
+            });
 
-        for j in 0..col_count {
-            let mut correction = *output_unreduced.at(out_len, j);
-            correction = ZZi128.rounded_div(correction, &self.gamma);
+            for j in 0..col_count {
+                let mut correction = *output_unreduced.at(out_len, j);
+                correction = ZZi128.rounded_div(correction, &self.gamma);
 
-            for i in 0..out_len {
-                *output.at_mut(i, j) = self.to_summands[i].sub(
-                    int_to_homs.at(i).map_ref(output_unreduced.at(i, j)), 
-                    self.to_summands[i].mul_ref_snd(int_to_homs[i].map(correction), &self.Q_mod_q[i])
-                );
+                for i in 0..out_len {
+                    *output.at_mut(i, j) = self.to_summands[i].sub(
+                        int_to_homs.at(i).map_ref(output_unreduced.at(i, j)), 
+                        self.to_summands[i].mul_ref_snd(int_to_homs[i].map(correction), &self.Q_mod_q[i])
+                    );
+                }
             }
-        }
+        })
     }
 }
 

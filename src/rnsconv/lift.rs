@@ -139,56 +139,58 @@ impl<A> RNSOperation for AlmostExactBaseConversion<A>
         where V1: AsPointerToSlice<El<Self::Ring>>,
             V2: AsPointerToSlice<El<Self::Ring>>
     {
-        assert_eq!(input.row_count(), self.input_rings().len());
-        assert_eq!(output.row_count(), self.output_rings().len());
-        assert_eq!(input.col_count(), output.col_count());
+        record_time!("AlmostExactBaseConversion::apply", || {
+            assert_eq!(input.row_count(), self.input_rings().len());
+            assert_eq!(output.row_count(), self.output_rings().len());
+            assert_eq!(input.col_count(), output.col_count());
 
-        let in_len = input.row_count();
-        let col_count = input.col_count();
+            let in_len = input.row_count();
+            let col_count = input.col_count();
 
-        let int_to_homs = (0..self.output_rings().len()).map(|k| self.output_rings().at(k).can_hom(&ZZi128).unwrap()).collect::<Vec<_>>();
+            let int_to_homs = (0..self.output_rings().len()).map(|k| self.output_rings().at(k).can_hom(&ZZi128).unwrap()).collect::<Vec<_>>();
 
-        let mut lifts = Vec::with_capacity_in(col_count * in_len, self.allocator.clone());
-        lifts.extend((0..(in_len * col_count)).map(|_| 0));
-        for i in 0..in_len {
+            let mut lifts = Vec::with_capacity_in(col_count * in_len, self.allocator.clone());
+            lifts.extend((0..(in_len * col_count)).map(|_| 0));
+            for i in 0..in_len {
+                for j in 0..col_count {
+                    lifts[self.from_summands_permutation[i] + j * in_len] = self.from_summands[i].smallest_positive_lift(self.from_summands[i].mul_ref(input.at(i, j), self.q_over_Q.at(i)))
+                }
+            }
+
+            for k in 0..output.row_count() {
+                let no_red_steps = (0..in_len).take_while(|i| ZZ.is_gt(self.output_rings().at(k).modulus(), self.from_summands_ordered.at(*i).modulus())).count();
+                if cfg!(feature = "force_rns_conv_reduction") {
+                    for j in 0..col_count {
+                        *output.at_mut(k, j) = <_ as ComputeInnerProduct>::inner_product_ref_fst(self.output_rings().at(k).get_ring(), (0..in_len).map(|i| {
+                            (self.Q_over_q.at(i + in_len * k), int_to_homs[k].map(lifts[i + j * in_len] as i128))
+                        }));
+                    }
+                } else if no_red_steps == in_len {
+                    for j in 0..col_count {
+                        *output.at_mut(k, j) = <_ as ComputeInnerProduct>::inner_product_ref_fst(self.output_rings().at(k).get_ring(), (0..no_red_steps).map(|i| {
+                            (self.Q_over_q.at(i + in_len * k), self.output_rings().at(k).get_ring().from_int_promise_reduced(ZZ.clone_el(&lifts[i + j * in_len])))
+                        }));
+                    }
+                } else {
+                    for j in 0..col_count {
+                        *output.at_mut(k, j) = <_ as ComputeInnerProduct>::inner_product_ref_fst(self.output_rings().at(k).get_ring(), (0..no_red_steps).map(|i| {
+                            (self.Q_over_q.at(i + in_len * k), self.output_rings().at(k).get_ring().from_int_promise_reduced(ZZ.clone_el(&lifts[i + j * in_len])))
+                        }).chain((no_red_steps..in_len).map(|i| {
+                            (self.Q_over_q.at(i + in_len * k), int_to_homs[k].map(lifts[i + j * in_len] as i128))
+                        })));
+                    }
+                }
+            }
+
             for j in 0..col_count {
-                lifts[self.from_summands_permutation[i] + j * in_len] = self.from_summands[i].smallest_positive_lift(self.from_summands[i].mul_ref(input.at(i, j), self.q_over_Q.at(i)))
-            }
-        }
-
-        for k in 0..output.row_count() {
-            let no_red_steps = (0..in_len).take_while(|i| ZZ.is_gt(self.output_rings().at(k).modulus(), self.from_summands_ordered.at(*i).modulus())).count();
-            if cfg!(feature = "force_rns_conv_reduction") {
-                for j in 0..col_count {
-                    *output.at_mut(k, j) = <_ as ComputeInnerProduct>::inner_product_ref_fst(self.output_rings().at(k).get_ring(), (0..in_len).map(|i| {
-                        (self.Q_over_q.at(i + in_len * k), int_to_homs[k].map(lifts[i + j * in_len] as i128))
-                    }));
-                }
-            } else if no_red_steps == in_len {
-                for j in 0..col_count {
-                    *output.at_mut(k, j) = <_ as ComputeInnerProduct>::inner_product_ref_fst(self.output_rings().at(k).get_ring(), (0..no_red_steps).map(|i| {
-                        (self.Q_over_q.at(i + in_len * k), self.output_rings().at(k).get_ring().from_int_promise_reduced(ZZ.clone_el(&lifts[i + j * in_len])))
-                    }));
-                }
-            } else {
-                for j in 0..col_count {
-                    *output.at_mut(k, j) = <_ as ComputeInnerProduct>::inner_product_ref_fst(self.output_rings().at(k).get_ring(), (0..no_red_steps).map(|i| {
-                        (self.Q_over_q.at(i + in_len * k), self.output_rings().at(k).get_ring().from_int_promise_reduced(ZZ.clone_el(&lifts[i + j * in_len])))
-                    }).chain((no_red_steps..in_len).map(|i| {
-                        (self.Q_over_q.at(i + in_len * k), int_to_homs[k].map(lifts[i + j * in_len] as i128))
-                    })));
+                let correction = ZZi128.rounded_div(<_ as ComputeInnerProduct>::inner_product(ZZi128.get_ring(), 
+                    (0..input.row_count()).map(|i| (lifts[i + input.row_count() * j] as i128, self.Q_over_q_int[i]))
+                ), &self.Q_downscaled);
+                for i in 0..output.row_count() {
+                    self.output_rings().at(i).sub_assign(output.at_mut(i, j), self.to_summands[i].mul_ref_snd(int_to_homs[i].map_ref(&correction), &self.Q_mod_q[i]));
                 }
             }
-        }
-
-        for j in 0..col_count {
-            let correction = ZZi128.rounded_div(<_ as ComputeInnerProduct>::inner_product(ZZi128.get_ring(), 
-                (0..input.row_count()).map(|i| (lifts[i + input.row_count() * j] as i128, self.Q_over_q_int[i]))
-            ), &self.Q_downscaled);
-            for i in 0..output.row_count() {
-                self.output_rings().at(i).sub_assign(output.at_mut(i, j), self.to_summands[i].mul_ref_snd(int_to_homs[i].map_ref(&correction), &self.Q_mod_q[i]));
-            }
-        }
+        })
     }
 }
 
