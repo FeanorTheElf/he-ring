@@ -47,7 +47,7 @@ use feanor_math::integer::IntegerRingStore;
 use sparse::SparseMapVector;
 
 use crate::cyclotomic::*;
-use crate::profiling::timed_step;
+use crate::profiling::log_time;
 use crate::StdZn;
 use crate::euler_phi;
 use super::decomposition::*;
@@ -335,7 +335,7 @@ impl<'a, NumberRing, FpTy, A> HypercubeIsomorphism<'a, NumberRing, FpTy, A>
         let t = int_cast(ring.base_ring().integer_ring().clone_el(ring.base_ring().modulus()), ZZ, ring.base_ring().integer_ring());
         let (p, e) = is_prime_power(&ZZ, &t).unwrap();
 
-        let (dims, dim_lengths, galois_group_ring) = timed_step::<_, _, LOG, _>("Computing hypercube structure", |[]| {
+        let (dims, dim_lengths, galois_group_ring) = log_time::<_, _, LOG, _>("Computing hypercube structure", |[]| {
             let (dims, galois_group_ring) = compute_hypercube_structure(ring.n() as i64, p);
             let (dims, dim_lengths) = order_hypercube_dimensions(dims);
             (dims, dim_lengths, galois_group_ring)
@@ -346,17 +346,17 @@ impl<'a, NumberRing, FpTy, A> HypercubeIsomorphism<'a, NumberRing, FpTy, A>
         let d = ring.rank() / slot_count;
         let max_log2_len = ZZ.abs_log2_ceil(&(d as i64)).unwrap() + 1;
     
-        let tmp_slot_ring = timed_step::<_, _, LOG, _>("Computing representation of slot ring", |[]| {
+        let tmp_slot_ring = log_time::<_, _, LOG, _>("Computing representation of slot ring", |[]| {
             let convolution = FFTRNSBasedConvolutionZn::from(FFTRNSBasedConvolution::<FpTy::Type>::new_with(max_log2_len, BigIntRing::RING, Global));
             GaloisField::new(p, d).get_ring().galois_ring_with(AsLocalPIR::from_zn(RingRef::new(ring.base_ring().get_ring())).unwrap(), Global, convolution)
         });
 
-        let root_of_unity = timed_step::<_, _, LOG, _>("Computing root of unity in slot ring", |[]| 
+        let root_of_unity = log_time::<_, _, LOG, _>("Computing root of unity in slot ring", |[]| 
             get_prim_root_of_unity(&tmp_slot_ring, ring.n() as usize)
         );
         
         let poly_ring = DensePolyRing::new(&tmp_slot_ring, "X");
-        let slot_generating_poly = timed_step::<_, _, LOG, _>("Computing minimal polynomial of root of unity", |[]| {
+        let slot_generating_poly = log_time::<_, _, LOG, _>("Computing minimal polynomial of root of unity", |[]| {
             let mut result = poly_ring.prod((0..d).scan(tmp_slot_ring.clone_el(&root_of_unity), |current_root_of_unity, _| {
                 let result = poly_ring.sub(poly_ring.indeterminate(), poly_ring.inclusion().map_ref(current_root_of_unity));
                 *current_root_of_unity = tmp_slot_ring.pow(tmp_slot_ring.clone_el(current_root_of_unity), galois_group_ring.smallest_positive_lift(frobenius) as usize);
@@ -402,7 +402,7 @@ impl<'a, NumberRing, FpTy, A> HypercubeIsomorphism<'a, NumberRing, FpTy, A>
             slot_unit_vec: ring.zero()
         };
 
-        let slot_unit_vector = timed_step::<_, _, LOG, _>("Computing slot unit vector representation", |[]| {
+        let slot_unit_vector = log_time::<_, _, LOG, _>("Computing slot unit vector representation", |[]| {
             let unormalized_result = ring.prod(result.slot_iter(|idxs| if idxs.iter().all(|x| *x == 0) {
                     None
                 } else {

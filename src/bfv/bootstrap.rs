@@ -78,7 +78,7 @@ impl ThinBootstrapParams<Pow2BFVParams> {
             println!("Choosing e = r + v = {} + {}", r, v);
         }
 
-        let digit_extraction_circuits = timed_step::<_, _, LOG, _>("Computing digit extraction polynomials", |[]| {
+        let digit_extraction_circuits = log_time::<_, _, LOG, _>("Computing digit extraction polynomials", |[]| {
             (1..=v).rev().map(|remaining_v| {
                 let poly_ring = DensePolyRing::new(PlaintextZn::new(ZZ.pow(p, remaining_v + r) as u64), "X");
                 poly_to_circuit(&poly_ring, &(2..=remaining_v).chain([r + remaining_v].into_iter()).map(|j| digit_retain_poly(&poly_ring, j)).collect::<Vec<_>>())
@@ -90,12 +90,12 @@ impl ThinBootstrapParams<Pow2BFVParams> {
 
         let H = HypercubeIsomorphism::new::<LOG>(plaintext_ring.get_ring());
         let original_H = H.reduce_modulus(original_plaintext_ring.get_ring());
-        let slots_to_coeffs = timed_step::<_, _, LOG, _>("Creating Slots-to-Coeffs transform", |[]| pow2::slots_to_coeffs_thin(&original_H));
-        let (coeffs_to_slots, trace) = timed_step::<_, _, LOG, _>("Creating Coeffs-to-Slots transform", |[]| {
+        let slots_to_coeffs = log_time::<_, _, LOG, _>("Creating Slots-to-Coeffs transform", |[]| pow2::slots_to_coeffs_thin(&original_H));
+        let (coeffs_to_slots, trace) = log_time::<_, _, LOG, _>("Creating Coeffs-to-Slots transform", |[]| {
             let (transforms, trace) = pow2::coeffs_to_slots_thin(&H);
             (transforms, Some(trace))
         });
-        let (compiled_coeffs_to_slots_thin, compiled_slots_to_coeffs_thin): (Vec<_>, Vec<_>) = timed_step::<_, _, LOG, _>("Compiling transforms", |[]| (
+        let (compiled_coeffs_to_slots_thin, compiled_slots_to_coeffs_thin): (Vec<_>, Vec<_>) = log_time::<_, _, LOG, _>("Compiling transforms", |[]| (
             coeffs_to_slots.into_iter().map(|T| CompiledLinearTransform::compile(&H, T)).collect::<Vec<_>>(),
             slots_to_coeffs.into_iter().map(|T| CompiledLinearTransform::compile(&original_H, T)).collect::<Vec<_>>()
         ));
@@ -126,7 +126,7 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
             println!("Choosing e = r + v = {} + {}", r, v);
         }
 
-        let digit_extraction_circuits = timed_step::<_, _, LOG, _>("Computing digit extraction polynomials", |[]| {
+        let digit_extraction_circuits = log_time::<_, _, LOG, _>("Computing digit extraction polynomials", |[]| {
             (1..=v).rev().map(|remaining_v| {
                 let poly_ring = DensePolyRing::new(PlaintextZn::new(ZZ.pow(p, remaining_v + r) as u64), "X");
                 poly_to_circuit(&poly_ring, &(2..=remaining_v).chain([r + remaining_v].into_iter()).map(|j| digit_retain_poly(&poly_ring, j)).collect::<Vec<_>>())
@@ -138,10 +138,10 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
 
         let H = HypercubeIsomorphism::new::<LOG>(plaintext_ring.get_ring());
         let original_H = H.reduce_modulus(original_plaintext_ring.get_ring());
-        let slots_to_coeffs = timed_step::<_, _, LOG, _>("Creating Slots-to-Coeffs transform", |[]| composite::slots_to_powcoeffs_thin(&original_H));
-        let coeffs_to_slots = timed_step::<_, _, LOG, _>("Creating Coeffs-to-Slots transform", |[]| composite::powcoeffs_to_slots_thin(&H));
+        let slots_to_coeffs = log_time::<_, _, LOG, _>("Creating Slots-to-Coeffs transform", |[]| composite::slots_to_powcoeffs_thin(&original_H));
+        let coeffs_to_slots = log_time::<_, _, LOG, _>("Creating Coeffs-to-Slots transform", |[]| composite::powcoeffs_to_slots_thin(&H));
 
-        let (compiled_coeffs_to_slots_thin, compiled_slots_to_coeffs_thin): (Vec<_>, Vec<_>) = timed_step::<_, _, LOG, _>("Compiling transforms", |[]| (
+        let (compiled_coeffs_to_slots_thin, compiled_slots_to_coeffs_thin): (Vec<_>, Vec<_>) = log_time::<_, _, LOG, _>("Compiling transforms", |[]| (
             coeffs_to_slots.into_iter().map(|T| CompiledLinearTransform::compile(&H, T)).collect::<Vec<_>>(),
             slots_to_coeffs.into_iter().map(|T| CompiledLinearTransform::compile(&original_H, T)).collect::<Vec<_>>()
         ));
@@ -260,14 +260,14 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
         ));
         let rounding_divisor_half = P_main.base_ring().coerce(&ZZbig, ZZbig.rounded_div(ZZbig.pow(int_cast(self.p, ZZbig, ZZ), self.e - self.r), &ZZbig.int_hom().map(2)));
 
-        let values_in_coefficients = timed_step::<_, _, LOG, _>("1. Computing Slots-to-Coeffs transform", |[key_switches]| {
+        let values_in_coefficients = log_time::<_, _, LOG, _>("1. Computing Slots-to-Coeffs transform", |[key_switches]| {
             return hom_compute_linear_transform(P_base, C, ct, &self.slots_to_coeffs_thin, gk, key_switches);
         });
         if let Some(sk) = debug_sk {
             dec_println(P_base, C, &values_in_coefficients, sk);
         }
 
-        let noisy_decryption = timed_step::<_, _, LOG, _>("2. Computing noisy decryption c0 + c1 * s", |[key_switches]| {
+        let noisy_decryption = log_time::<_, _, LOG, _>("2. Computing noisy decryption c0 + c1 * s", |[key_switches]| {
             let (c0, c1) = mod_switch_to_plaintext(P_main, C, values_in_coefficients, mod_switch);
             let enc_sk = (CoeffOrNTTRingEl::zero(), CoeffOrNTTRingEl::from_coeff(C.get_ring().non_fft_from(delta_bootstrap)));
             *key_switches += 1;
@@ -277,7 +277,7 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
             dec_println(P_main, C, &noisy_decryption, sk);
         }
 
-        let noisy_decryption_in_slots = timed_step::<_, _, LOG, _>("3. Computing Coeffs-to-Slots transform", |[key_switches]| {
+        let noisy_decryption_in_slots = log_time::<_, _, LOG, _>("3. Computing Coeffs-to-Slots transform", |[key_switches]| {
             let moved_to_slots = hom_compute_linear_transform(P_main, C, noisy_decryption, &self.coeffs_to_slots_thin.0, gk, key_switches);
             if let Some(trace) = &self.coeffs_to_slots_thin.1 {
                 return hom_compute_trace(P_main, C, moved_to_slots, trace, gk, key_switches);
@@ -299,7 +299,7 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
         for (i, k) in ((self.r + 1)..(self.e + 1)).rev().enumerate() {
             let P_current =  &P_bootstrap[i];
             let current_mul_rescale = &mul_rescale_bootstrap[i];
-            timed_step::<_, _, LOG, _>(format!("Extracting {}-th digit", i).as_str(), |[key_switches]| {
+            log_time::<_, _, LOG, _>(format!("Extracting {}-th digit", i).as_str(), |[key_switches]| {
                 let mut current_ct = clone_ct(C, &digit_extraction_input);
                 assert_eq!(i, digit_extracted.len());
                 for j in 0..i {

@@ -177,7 +177,7 @@ impl<A> RNSOperation for AlmostExactMatrixBaseConversion<A>
         let mut memory = Vec::with_capacity_in(mem_size, self.allocator.clone());
         memory.resize(mem_size, 0);
 
-        timed!("AlmostExactMatrixBaseConversion::apply::matmul", || {
+        record_time!("AlmostExactMatrixBaseConversion::apply::matmul", || {
             for i in 0..(pad_to_block(out_len + 1) / (1 << BLOCK_SIZE_LOG2)) {
                 for k in 0..(pad_to_block(in_len) / (1 << BLOCK_SIZE_LOG2)) {
                     for j in 0..(pad_to_block(col_count) / (1 << BLOCK_SIZE_LOG2)) {

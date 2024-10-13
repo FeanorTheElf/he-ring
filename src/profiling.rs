@@ -3,14 +3,19 @@
 use std::sync::Mutex;
 use std::time::Instant;
 
+pub trait TimeTracker {
+    fn reset(&mut self);
+    fn print(&self);
+}
+
 #[cfg(feature = "record_timings")]
-pub static PRINT_TIMINGS: Mutex<Vec<(&'static std::sync::atomic::AtomicBool, Box<dyn 'static + Send + Fn()>)>> = Mutex::new(Vec::new());
+pub static PRINT_TIMINGS: Mutex<Vec<Box<dyn 'static + Send + TimeTracker>>> = Mutex::new(Vec::new());
 
 #[cfg(feature = "record_timings")]
 pub fn print_all_timings() {
     let locked = PRINT_TIMINGS.lock().unwrap();
-    for (_, f) in locked.iter() {
-        f();
+    for tracker in locked.iter() {
+        tracker.print();
     }
 }
 
@@ -20,27 +25,39 @@ pub fn print_all_timings() {}
 #[cfg(feature = "record_timings")]
 pub fn clear_all_timings() {
     let mut locked = PRINT_TIMINGS.lock().unwrap();
-    locked.drain(..).for_each(|(registered, _)| registered.store(false, std::sync::atomic::Ordering::SeqCst));
+    locked.iter_mut().for_each(|tracker| tracker.reset());
 }
 
 #[cfg(not(feature = "record_timings"))]
 pub fn clear_all_timings() {}
 
-macro_rules! timed {
+macro_rules! record_time {
     ($name:literal, $fn:expr) => {
         {
             #[cfg(feature = "record_timings")] {
                 use std::sync::atomic::{AtomicBool, Ordering, AtomicU64};
                 use std::time::Instant;
-                use crate::profiling::PRINT_TIMINGS;
+                use $crate::profiling::*;
 
                 static COUNTER: AtomicU64 = AtomicU64::new(0);
                 static REGISTERED: AtomicBool = AtomicBool::new(false);
+
+                struct LocalTimeTracker;
+
+                impl TimeTracker for LocalTimeTracker {
+                    
+                    fn reset(&mut self) {
+                        COUNTER.store(0, Ordering::SeqCst);
+                    }
+
+                    fn print(&self) {
+                        println!("{}: {} ms", $name, COUNTER.load(Ordering::SeqCst) / 1000000);
+                    }
+                }
+
                 if !REGISTERED.swap(true, Ordering::SeqCst) {
                     let mut locked = PRINT_TIMINGS.lock().unwrap();
-                    locked.push((&REGISTERED, Box::new(|| {
-                        println!("{}: {} ms", $name, COUNTER.load(Ordering::SeqCst) / 1000000);
-                    })));
+                    locked.push(Box::new(LocalTimeTracker) as Box<dyn 'static + Send + TimeTracker>);
                 }
 
                 #[inline(never)]
@@ -61,7 +78,7 @@ macro_rules! timed {
     };
 }
 
-pub fn timed_step<F, T, const LOG: bool, const COUNTER_VAR_COUNT: usize>(description: &str, step_fn: F) -> T
+pub fn log_time<F, T, const LOG: bool, const COUNTER_VAR_COUNT: usize>(description: &str, step_fn: F) -> T
     where F: FnOnce(&mut [usize; COUNTER_VAR_COUNT]) -> T
 {
     if LOG {

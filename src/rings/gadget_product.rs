@@ -212,7 +212,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, Zn, A>
     /// For more details, see [`DoubleRNSRingBase::gadget_product()`].
     /// 
     pub fn to_gadget_product_lhs<'a>(&'a self, el: CoeffEl<NumberRing, Zn, A>) -> GadgetProductLhsOperand<'a, NumberRing, A> {
-        timed!("to_gadget_product_lhs", || {
+        record_time!("DoubleRNSRing::to_gadget_product_lhs", || {
             let output_moduli_count = self.get_gadget_product_modulo_count();
             if self.use_lkss_gadget_product() {
                 GadgetProductLhsOperand::LKSSStyle(LKSSGadgetProductLhsOperand {
@@ -362,22 +362,26 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, Zn, A>
     pub fn gadget_product_ntt(&self, lhs: &GadgetProductLhsOperand<NumberRing, A>, rhs: &GadgetProductRhsOperand<NumberRing, A>) -> DoubleRNSEl<NumberRing, Zn, A> {
         match (lhs, rhs) {
             (GadgetProductLhsOperand::LKSSStyle(lhs), GadgetProductRhsOperand::LKSSStyle(rhs)) => self.do_fft(self.gadget_product_lkss(lhs, rhs)),
-            (GadgetProductLhsOperand::Naive(lhs), GadgetProductRhsOperand::Naive(_, rhs)) => timed!("gadget_product_base::naive", || {
-                <_ as RingBase>::sum(self, lhs.iter().zip(rhs.iter()).map(|(l, r)| self.mul_ref(l, r)))
-            }),
+            (GadgetProductLhsOperand::Naive(lhs), GadgetProductRhsOperand::Naive(_, rhs)) => self.gadget_product_naive(lhs, rhs),
             _ => panic!("Illegal combination of GadgetProductOperands; Maybe they were created by different rings?")
         }
     }
 
+    fn gadget_product_naive(&self, lhs: &[El<DoubleRNSRing<NumberRing, Zn, A>>], rhs: &[El<DoubleRNSRing<NumberRing, Zn, A>>]) -> El<DoubleRNSRing<NumberRing, Zn, A>> {
+        record_time!("DoubleRNSRing::gadget_product_ntt::naive", || {
+            <_ as RingBase>::sum(self, lhs.iter().zip(rhs.iter()).map(|(l, r)| self.mul_ref(l, r)))
+        })
+    }
+
     fn gadget_product_lkss(&self, lhs: &LKSSGadgetProductLhsOperand<NumberRing, A>, rhs: &LKSSGadgetProductRhsOperand<NumberRing, A>) -> CoeffEl<NumberRing, Zn, A> {
-        timed!("gadget_product_lkss", || {
+        record_time!("DoubleRNSRing::gadget_product_lkss", || {
             assert_eq!(lhs.output_moduli_count, rhs.shortened_rns_base.get_ring().len());
             let output_moduli_count = lhs.output_moduli_count;
             let shortened_rns_base = rhs.shortened_rns_base.get_ring();
 
             let mut result = self.non_fft_zero();
             for j in 0..self.rns_base().len() {
-                let mut summand = timed!("gadget_product_lkss::sum", || {
+                let mut summand = record_time!("DoubleRNSRing::gadget_product_lkss::sum", || {
                     let mut summand = Vec::with_capacity_in(shortened_rns_base.len() * self.rank(), self.allocator().clone());
                     for k in 0..shortened_rns_base.len() {
                         for l in 0..self.rank() {
@@ -387,12 +391,12 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, Zn, A>
                     }
                     summand
                 });
-                timed!("gadget_product_lkss::ffts", || {
+                record_time!("DoubleRNSRing::gadget_product_lkss::ffts", || {
                     for k in 0..output_moduli_count {
                         self.ring_decompositions()[self.rns_base().len() - output_moduli_count + k].fft_backward(&mut summand[(k * self.rank())..((k + 1) * self.rank())]);
                     }
                 });
-                timed!("gadget_product_lkss::lifting", || {
+                record_time!("DoubleRNSRing::gadget_product_lkss::lifting", || {
                     rhs.conversions[j].apply(
                         Submatrix::from_1d(&summand, shortened_rns_base.len(), self.rank()),
                         self.as_matrix_mut(&mut result).restrict_rows(j..(j + 1))
@@ -419,9 +423,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, Zn, A>
     pub fn gadget_product_coeff(&self, lhs: &GadgetProductLhsOperand<NumberRing, A>, rhs: &GadgetProductRhsOperand<NumberRing, A>) -> CoeffEl<NumberRing, Zn, A> {
         match (lhs, rhs) {
             (GadgetProductLhsOperand::LKSSStyle(lhs), GadgetProductRhsOperand::LKSSStyle(rhs)) => self.gadget_product_lkss(lhs, rhs),
-            (GadgetProductLhsOperand::Naive(lhs), GadgetProductRhsOperand::Naive(_, rhs)) => timed!("gadget_product_base::naive", || {
-                self.undo_fft(<_ as RingBase>::sum(self, lhs.iter().zip(rhs.iter()).map(|(l, r)| self.mul_ref(l, r))))
-            }),
+            (GadgetProductLhsOperand::Naive(lhs), GadgetProductRhsOperand::Naive(_, rhs)) => self.undo_fft(self.gadget_product_naive(lhs, rhs)),
             _ => panic!("Illegal combination of GadgetProductOperands; Maybe they were created by different rings?")
         }
     }

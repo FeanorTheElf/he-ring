@@ -163,7 +163,7 @@ impl<NumberRing, FpTy, A> DoubleRNSRingBase<NumberRing, FpTy, A>
 
     pub fn undo_fft(&self, mut element: DoubleRNSEl<NumberRing, FpTy, A>) -> CoeffEl<NumberRing, FpTy, A> {
         assert_eq!(element.data.len(), self.element_len());
-        timed!("undo_fft", || {
+        record_time!("DoubleRNSRing::undo_fft", || {
             for i in 0..self.rns_base().len() {
                 self.ring_decompositions[i].fft_backward(&mut element.data[(i * self.rank())..((i + 1) * self.rank())]);
             }
@@ -205,7 +205,7 @@ impl<NumberRing, FpTy, A> DoubleRNSRingBase<NumberRing, FpTy, A>
 
     pub fn do_fft(&self, mut element: CoeffEl<NumberRing, FpTy, A>) -> DoubleRNSEl<NumberRing, FpTy, A> {
         assert_eq!(element.data.len(), self.element_len());
-        timed!("do_fft", || {
+        record_time!("DoubleRNSRing::do_fft", || {
             for i in 0..self.rns_base().len() {
                 self.ring_decompositions[i].fft_forward(&mut element.data[(i * self.rank())..((i + 1) * self.rank())]);
             }
@@ -331,7 +331,7 @@ impl<NumberRing, FpTy, A> DoubleRNSRingBase<NumberRing, FpTy, A>
         for i in 0..self.rns_base().len() {
             assert!(self.rns_base().at(i).get_ring() == op.output_rings().at(i).get_ring());
         }
-        timed!("perform_rns_op_from", || {
+        record_time!("DoubleRNSRing::perform_rns_op_from", || {
             let mut result = self.non_fft_zero();
             op.apply(from.as_matrix(el), self.as_matrix_mut(&mut result));
             return result;
@@ -374,7 +374,7 @@ impl<NumberRing, FpTy, A> DoubleRNSRingBase<NumberRing, FpTy, A>
         assert_eq!(self.rns_base().len(), op.input_rings().len());
         assert_eq!(1, op.output_rings().len());
 
-        timed!("perform_rns_op_to_cfft", || {
+        record_time!("DoubleRNSRing::perform_rns_op_to_cfft", || {
             for i in 0..self.rns_base().len() {
                 assert!(self.rns_base().at(i).get_ring() == op.input_rings().at(i).get_ring());
             }
