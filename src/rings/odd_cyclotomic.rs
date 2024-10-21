@@ -119,14 +119,6 @@ impl OddCyclotomicDecomposableNumberRing {
         let rank = euler_phi_squarefree(&self.n_factorization_squarefree);
         return rank as f64;
     }
-    
-    fn generating_poly<P>(&self, poly_ring: P) -> El<P>
-        where P: RingStore,
-            P::Type: PolyRing,
-            <<P::Type as RingExtension>::BaseRing as RingStore>::Type: IntegerRing
-    {
-        unimplemented!()
-    }
 }
 
 impl Clone for OddCyclotomicDecomposableNumberRing {

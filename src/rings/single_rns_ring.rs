@@ -1,8 +1,9 @@
 use std::alloc::{Allocator, Global};
 use std::marker::PhantomData;
 
-use feanor_math::algorithms::convolution::fft::FFTBasedConvolutionZn;
+use feanor_math::algorithms::convolution::fft::{FFTBasedConvolutionZn, FFTRNSBasedConvolution, FFTRNSBasedConvolutionZn};
 use feanor_math::algorithms::convolution::{ConvolutionAlgorithm, KaratsubaAlgorithm, STANDARD_CONVOLUTION};
+use feanor_math::primitive_int::{StaticRing, StaticRingBase};
 use feanor_math::ring::*;
 use feanor_math::homomorphism::*;
 use feanor_math::integer::*;
@@ -19,7 +20,7 @@ use crate::rings::decomposition::*;
 
 use super::double_rns_ring::DoubleRNSRingBase;
 
-pub struct SingleRNSRingBase<NumberRing, FpTy, A = Global, C = KaratsubaAlgorithm> 
+pub struct SingleRNSRingBase<NumberRing, FpTy, A = Global, C = FFTRNSBasedConvolutionZn> 
     where NumberRing: DecomposableNumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
@@ -33,7 +34,7 @@ pub struct SingleRNSRingBase<NumberRing, FpTy, A = Global, C = KaratsubaAlgorith
     allocator: A
 }
 
-pub type SingleRNSRing<NumberRing, FpTy, A = Global, C = KaratsubaAlgorithm> = RingValue<SingleRNSRingBase<NumberRing, FpTy, A, C>>;
+pub type SingleRNSRing<NumberRing, FpTy, A = Global, C = FFTRNSBasedConvolutionZn> = RingValue<SingleRNSRingBase<NumberRing, FpTy, A, C>>;
 
 pub struct SingleRNSRingEl<NumberRing, FpTy, A = Global, C = KaratsubaAlgorithm>
     where NumberRing: DecomposableNumberRing<FpTy>,
@@ -51,10 +52,11 @@ pub struct SingleRNSRingEl<NumberRing, FpTy, A = Global, C = KaratsubaAlgorithm>
 impl<NumberRing, FpTy> SingleRNSRingBase<NumberRing, FpTy> 
     where NumberRing: DecomposableNumberRing<FpTy>,
         FpTy: RingStore + Clone,
-        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>
+        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase> + CanHomFrom<StaticRingBase<i128>>
 {
     pub fn new(number_ring: NumberRing, rns_base: zn_rns::Zn<FpTy, BigIntRing>) -> RingValue<Self> {
-        let convolutions = rns_base.as_iter().map(|_| STANDARD_CONVOLUTION).collect();
+        let max_len_log2 = StaticRing::<i64>::RING.abs_log2_ceil(&(2 * number_ring.rank() as i64)).unwrap();
+        let convolutions = rns_base.as_iter().map(|_| FFTRNSBasedConvolutionZn::from(FFTRNSBasedConvolution::new_with(max_len_log2, BigIntRing::RING, Global))).collect();
         Self::new_with(number_ring, rns_base, Global, convolutions)
     }
 }

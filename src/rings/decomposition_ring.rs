@@ -630,7 +630,6 @@ pub fn test_with_number_ring<NumberRing: DecomposableNumberRing<zn_64::Zn>>(numb
     let rank = number_ring.rank();
     let ring = DecompositionRingBase::new(number_ring, base_ring);
 
-    let base_ring = ring.base_ring();
     let elements = vec![
         ring.zero(),
         ring.one(),
