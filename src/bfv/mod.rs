@@ -30,7 +30,7 @@ use crate::cyclotomic::CyclotomicRing;
 use crate::euler_phi;
 use crate::extend_sampled_primes;
 use crate::rings::decomposition::*;
-use crate::rings::number_ring_quo::*;
+use crate::rings::decomposition_ring::*;
 use crate::rings::odd_cyclotomic::*;
 use crate::rings::pow2_cyclotomic::*;
 use crate::rings::gadget_product::*;
@@ -50,7 +50,7 @@ pub type PlaintextAllocator = Global;
 pub type CiphertextAllocator = Global;
 
 pub type CiphertextRing<Params: BFVParams> = DoubleRNSRing<Params::NumberRing, Zn, CiphertextAllocator>;
-pub type PlaintextRing<Params: BFVParams> = NumberRingQuo<Params::NumberRing, Zn, PlaintextAllocator>;
+pub type PlaintextRing<Params: BFVParams> = DecompositionRing<Params::NumberRing, Zn, PlaintextAllocator>;
 pub type SecretKey<Params: BFVParams> = El<CiphertextRing<Params>>;
 pub type Ciphertext<Params: BFVParams> = (CoeffOrNTTRingEl<Params>, CoeffOrNTTRingEl<Params>);
 pub type GadgetProductOperand<'a, Params: BFVParams> = GadgetProductRhsOperand<'a, Params::NumberRing, CiphertextAllocator>;
@@ -75,7 +75,7 @@ pub trait BFVParams {
     fn t(&self) -> i64;
 
     fn create_plaintext_ring(&self, modulus: i64) -> PlaintextRing<Self> {
-        NumberRingQuoBase::new(self.number_ring(), Zn::new(modulus as u64))
+        DecompositionRingBase::new(self.number_ring(), Zn::new(modulus as u64))
     }
 
     fn create_ciphertext_rings(&self) -> (CiphertextRing<Self>, CiphertextRing<Self>) {
@@ -574,4 +574,48 @@ fn test_composite_bfv_mul() {
     let m_sqr = dec(&P, &C, ct_sqr, &sk);
 
     assert_el_eq!(&P, &P.int_hom().map(4), &m_sqr);
+}
+
+#[test]
+#[ignore]
+fn print_timings_pow2_bfv_mul() {
+    let mut rng = thread_rng();
+    
+    let params = Pow2BFVParams {
+        t: 257,
+        log2_q_min: 790,
+        log2_q_max: 800,
+        log2_N: 15
+    };
+    
+    let P = params.create_plaintext_ring(params.t());
+    let (C, C_mul) = params.create_ciphertext_rings();
+
+    let sk = gen_sk::<_, Pow2BFVParams>(&C, &mut rng);
+    let mul_rescale_data = create_multiplication_rescale::<Pow2BFVParams>(&P, &C, &C_mul);
+    let rk = gen_rk::<_, Pow2BFVParams>(&C, &mut rng, &sk);
+
+    let m = P.int_hom().map(2);
+    let ct = enc_sym(&P, &C, &mut rng, &m, &sk);
+
+    let res = log_time::<_, _, true, _>("HomAddPlain", |[]| {
+        hom_add_plain(&P, &C, &m, clone_ct(&C, &ct))
+    });
+    assert_el_eq!(&P, &P.int_hom().map(4), &dec::<Pow2BFVParams>(&P, &C, res, &sk));
+
+    let res = log_time::<_, _, true, _>("HomAdd", |[]| {
+        hom_add(&C, clone_ct(&C, &ct), &ct)
+    });
+    assert_el_eq!(&P, &P.int_hom().map(4), &dec::<Pow2BFVParams>(&P, &C, res, &sk));
+
+    let res = log_time::<_, _, true, _>("HomMulPlain", |[]| {
+        hom_mul_plain(&P, &C, &m, clone_ct(&C, &ct))
+    });
+    assert_el_eq!(&P, &P.int_hom().map(4), &dec::<Pow2BFVParams>(&P, &C, res, &sk));
+
+    let res = log_time::<_, _, true, _>("HomMul", |[]| {
+        hom_mul(&C, &C_mul, clone_ct(&C, &ct), clone_ct(&C, &ct), &rk, &mul_rescale_data)
+    });
+    assert_el_eq!(&P, &P.int_hom().map(4), &dec::<Pow2BFVParams>(&P, &C, res, &sk));
+
 }

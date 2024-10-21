@@ -24,7 +24,7 @@ use crate::sample_primes;
 use crate::IsEq;
 use crate::rings::decomposition::*;
 
-pub struct NumberRingQuoBase<NumberRing, FpTy, A = Global> 
+pub struct DecompositionRingBase<NumberRing, FpTy, A = Global> 
     where NumberRing: DecomposableNumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
@@ -37,9 +37,9 @@ pub struct NumberRingQuoBase<NumberRing, FpTy, A = Global>
     allocator: A
 }
 
-pub type NumberRingQuo<NumberRing, FpTy, A = Global> = RingValue<NumberRingQuoBase<NumberRing, FpTy, A>>;
+pub type DecompositionRing<NumberRing, FpTy, A = Global> = RingValue<DecompositionRingBase<NumberRing, FpTy, A>>;
 
-pub struct NumberRingQuoEl<NumberRing, FpTy, A = Global> 
+pub struct DecompositionRingEl<NumberRing, FpTy, A = Global> 
     where NumberRing: DecomposableNumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
@@ -50,7 +50,7 @@ pub struct NumberRingQuoEl<NumberRing, FpTy, A = Global>
     pub(super) data: Vec<El<FpTy>, A>
 }
 
-impl<NumberRing, FpTy> NumberRingQuoBase<NumberRing, RingValue<FpTy>>
+impl<NumberRing, FpTy> DecompositionRingBase<NumberRing, RingValue<FpTy>>
     where NumberRing: DecomposableNumberRing<RingValue<FpTy>>,
         FpTy: Clone + ZnRing + CanHomFrom<BigIntRingBase> + FromModulusCreateableZnRing
 {
@@ -65,7 +65,7 @@ impl<NumberRing, FpTy> NumberRingQuoBase<NumberRing, RingValue<FpTy>>
     }
 }
 
-impl<NumberRing, FpTy, A> NumberRingQuoBase<NumberRing, FpTy, A>
+impl<NumberRing, FpTy, A> DecompositionRingBase<NumberRing, FpTy, A>
     where NumberRing: DecomposableNumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
@@ -156,7 +156,7 @@ impl<NumberRing, FpTy, A> NumberRingQuoBase<NumberRing, FpTy, A>
                 self.rns_base.from_congruence((0..self.rns_base.len()).map(|i| self.rns_base.at(i).clone_el(&unreduced_result[i * self.rank() + j])))
             )));
         }
-        return NumberRingQuoEl {
+        return DecompositionRingEl {
             data: result,
             number_ring: PhantomData,
             allocator: PhantomData
@@ -164,7 +164,7 @@ impl<NumberRing, FpTy, A> NumberRingQuoBase<NumberRing, FpTy, A>
     }
 }
 
-impl<NumberRing, FpTy, A> CyclotomicRing for NumberRingQuoBase<NumberRing, FpTy, A>
+impl<NumberRing, FpTy, A> CyclotomicRing for DecompositionRingBase<NumberRing, FpTy, A>
     where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
@@ -201,7 +201,7 @@ impl<NumberRing, FpTy, A> CyclotomicRing for NumberRingQuoBase<NumberRing, FpTy,
                 self.rns_base.from_congruence((0..self.rns_base.len()).map(|i| self.rns_base.at(i).clone_el(&unreduced_result[i * self.rank() + j])))
             )));
         }
-        return NumberRingQuoEl {
+        return DecompositionRingEl {
             data: result,
             number_ring: PhantomData,
             allocator: PhantomData
@@ -209,7 +209,7 @@ impl<NumberRing, FpTy, A> CyclotomicRing for NumberRingQuoBase<NumberRing, FpTy,
     }
 }
 
-impl<NumberRing, FpTy, A> PartialEq for NumberRingQuoBase<NumberRing, FpTy, A>
+impl<NumberRing, FpTy, A> PartialEq for DecompositionRingBase<NumberRing, FpTy, A>
     where NumberRing: DecomposableNumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
@@ -220,18 +220,18 @@ impl<NumberRing, FpTy, A> PartialEq for NumberRingQuoBase<NumberRing, FpTy, A>
     }
 }
 
-impl<NumberRing, FpTy, A> RingBase for NumberRingQuoBase<NumberRing, FpTy, A>
+impl<NumberRing, FpTy, A> RingBase for DecompositionRingBase<NumberRing, FpTy, A>
     where NumberRing: DecomposableNumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
 {
-    type Element = NumberRingQuoEl<NumberRing, FpTy, A>;
+    type Element = DecompositionRingEl<NumberRing, FpTy, A>;
 
     fn clone_el(&self, val: &Self::Element) -> Self::Element {
         let mut result = Vec::with_capacity_in(self.rank(), self.allocator.clone());
         result.extend(val.data.iter().map(|x| self.base_ring().clone_el(x)));
-        return NumberRingQuoEl {
+        return DecompositionRingEl {
             data: result,
             number_ring: PhantomData,
             allocator: PhantomData
@@ -310,7 +310,7 @@ impl<NumberRing, FpTy, A> RingBase for NumberRingQuoBase<NumberRing, FpTy, A>
                 self.rns_base.from_congruence((0..self.rns_base.len()).map(|i| self.rns_base.at(i).clone_el(&unreduced_result[i * self.rank() + j])))
             )));
         }
-        return NumberRingQuoEl {
+        return DecompositionRingEl {
             data: result,
             number_ring: PhantomData,
             allocator: PhantomData
@@ -335,7 +335,7 @@ impl<NumberRing, FpTy, A> RingBase for NumberRingQuoBase<NumberRing, FpTy, A>
     fn zero(&self) -> Self::Element {
         let mut result = Vec::with_capacity_in(self.rank(), self.allocator.clone());
         result.extend((0..self.rank()).map(|_| self.base_ring().zero()));
-        return NumberRingQuoEl {
+        return DecompositionRingEl {
             data: result,
             number_ring: PhantomData,
             allocator: PhantomData
@@ -377,7 +377,7 @@ impl<NumberRing, FpTy, A> RingBase for NumberRingQuoBase<NumberRing, FpTy, A>
     }
 }
 
-impl<NumberRing, FpTy, A> RingExtension for NumberRingQuoBase<NumberRing, FpTy, A>
+impl<NumberRing, FpTy, A> RingExtension for DecompositionRingBase<NumberRing, FpTy, A>
     where NumberRing: DecomposableNumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
@@ -396,7 +396,7 @@ impl<NumberRing, FpTy, A> RingExtension for NumberRingQuoBase<NumberRing, FpTy, 
     }
 }
 
-impl<NumberRing, FpTy, A> FreeAlgebra for NumberRingQuoBase<NumberRing, FpTy, A>
+impl<NumberRing, FpTy, A> FreeAlgebra for DecompositionRingBase<NumberRing, FpTy, A>
     where NumberRing: DecomposableNumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
@@ -411,7 +411,7 @@ impl<NumberRing, FpTy, A> FreeAlgebra for NumberRingQuoBase<NumberRing, FpTy, A>
         let mut result = Vec::with_capacity_in(self.rank(), self.allocator.clone());
         result.extend(vec);
         assert_eq!(result.len(), self.rank());
-        return NumberRingQuoEl {
+        return DecompositionRingEl {
             data: result,
             number_ring: PhantomData,
             allocator: PhantomData
@@ -439,7 +439,7 @@ pub struct WRTCanonicalBasisElementCreator<'a, NumberRing, FpTy, A>
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
 {
-    ring: &'a NumberRingQuoBase<NumberRing, FpTy, A>,
+    ring: &'a DecompositionRingBase<NumberRing, FpTy, A>,
 }
 
 impl<'a, NumberRing, FpTy, A> Copy for WRTCanonicalBasisElementCreator<'a, NumberRing, FpTy, A>
@@ -466,7 +466,7 @@ impl<'a, 'b, NumberRing, FpTy, A> FnOnce<(&'b [El<FpTy>],)> for WRTCanonicalBasi
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
 {
-    type Output = El<NumberRingQuo<NumberRing, FpTy, A>>;
+    type Output = El<DecompositionRing<NumberRing, FpTy, A>>;
 
     extern "rust-call" fn call_once(self, args: (&'b [El<FpTy>],)) -> Self::Output {
         self.call(args)
@@ -495,7 +495,7 @@ impl<'a, 'b, NumberRing, FpTy, A> Fn<(&'b [El<FpTy>],)> for WRTCanonicalBasisEle
     }
 }
 
-impl<NumberRing, FpTy, A> FiniteRing for NumberRingQuoBase<NumberRing, FpTy, A>
+impl<NumberRing, FpTy, A> FiniteRing for DecompositionRingBase<NumberRing, FpTy, A>
     where NumberRing: DecomposableNumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
@@ -511,7 +511,7 @@ impl<NumberRing, FpTy, A> FiniteRing for NumberRingQuoBase<NumberRing, FpTy, A>
     fn random_element<G: FnMut() -> u64>(&self, mut rng: G) -> Self::Element {
         let mut result = Vec::with_capacity_in(self.rank(), self.allocator.clone());
         result.extend((0..self.rank()).map(|_| self.base_ring().random_element(&mut rng)));
-        return NumberRingQuoEl {
+        return DecompositionRingEl {
             data: result,
             allocator: PhantomData,
             number_ring: PhantomData
@@ -530,7 +530,7 @@ impl<NumberRing, FpTy, A> FiniteRing for NumberRingQuoBase<NumberRing, FpTy, A>
     }
 }
 
-impl<NumberRing, FpTy, A> SerializableElementRing for NumberRingQuoBase<NumberRing, FpTy, A>
+impl<NumberRing, FpTy, A> SerializableElementRing for DecompositionRingBase<NumberRing, FpTy, A>
     where NumberRing: DecomposableNumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase> + SerializableElementRing,
@@ -552,7 +552,7 @@ impl<NumberRing, FpTy, A> SerializableElementRing for NumberRingQuoBase<NumberRi
         if result.len() != self.rank() {
             return Err(de::Error::custom(format!("expected {} elements, got {}", self.rank(), result.len())));
         }
-        return Ok(NumberRingQuoEl {
+        return Ok(DecompositionRingEl {
             data: result,
             number_ring: PhantomData,
             allocator: PhantomData
@@ -560,7 +560,7 @@ impl<NumberRing, FpTy, A> SerializableElementRing for NumberRingQuoBase<NumberRi
     }
 }
 
-impl<NumberRing, FpTy1, FpTy2, A1, A2> CanHomFrom<NumberRingQuoBase<NumberRing, FpTy2, A2>> for NumberRingQuoBase<NumberRing, FpTy1, A1>
+impl<NumberRing, FpTy1, FpTy2, A1, A2> CanHomFrom<DecompositionRingBase<NumberRing, FpTy2, A2>> for DecompositionRingBase<NumberRing, FpTy1, A1>
     where NumberRing: DecomposableNumberRing<FpTy1> + DecomposableNumberRing<FpTy2>,
         FpTy1: RingStore + Clone,
         FpTy1::Type: ZnRing + CanHomFrom<BigIntRingBase>,
@@ -572,7 +572,7 @@ impl<NumberRing, FpTy1, FpTy2, A1, A2> CanHomFrom<NumberRingQuoBase<NumberRing, 
 {
     type Homomorphism = <FpTy1::Type as CanHomFrom<FpTy2::Type>>::Homomorphism;
 
-    fn has_canonical_hom(&self, from: &NumberRingQuoBase<NumberRing, FpTy2, A2>) -> Option<Self::Homomorphism> {
+    fn has_canonical_hom(&self, from: &DecompositionRingBase<NumberRing, FpTy2, A2>) -> Option<Self::Homomorphism> {
         if self.number_ring == from.number_ring {
             self.base_ring().get_ring().has_canonical_hom(from.base_ring().get_ring())
         } else {
@@ -580,11 +580,11 @@ impl<NumberRing, FpTy1, FpTy2, A1, A2> CanHomFrom<NumberRingQuoBase<NumberRing, 
         }
     }
 
-    fn map_in(&self, from: &NumberRingQuoBase<NumberRing, FpTy2, A2>, el: <NumberRingQuoBase<NumberRing, FpTy2, A2> as RingBase>::Element, hom: &Self::Homomorphism) -> Self::Element {
+    fn map_in(&self, from: &DecompositionRingBase<NumberRing, FpTy2, A2>, el: <DecompositionRingBase<NumberRing, FpTy2, A2> as RingBase>::Element, hom: &Self::Homomorphism) -> Self::Element {
         assert_eq!(el.data.len(), self.rank());
         let mut result = Vec::with_capacity_in(self.rank(), self.allocator.clone());
         result.extend((0..self.rank()).map(|i| self.base_ring().get_ring().map_in(from.base_ring().get_ring(), from.base_ring().clone_el(&el.data[i]), hom)));
-        return NumberRingQuoEl {
+        return DecompositionRingEl {
             data: result,
             allocator: PhantomData,
             number_ring: PhantomData
@@ -592,7 +592,7 @@ impl<NumberRing, FpTy1, FpTy2, A1, A2> CanHomFrom<NumberRingQuoBase<NumberRing, 
     }
 }
 
-impl<NumberRing, FpTy1, FpTy2, A1, A2> CanIsoFromTo<NumberRingQuoBase<NumberRing, FpTy2, A2>> for NumberRingQuoBase<NumberRing, FpTy1, A1>
+impl<NumberRing, FpTy1, FpTy2, A1, A2> CanIsoFromTo<DecompositionRingBase<NumberRing, FpTy2, A2>> for DecompositionRingBase<NumberRing, FpTy1, A1>
     where NumberRing: DecomposableNumberRing<FpTy1> + DecomposableNumberRing<FpTy2>,
         FpTy1: RingStore + Clone,
         FpTy1::Type: ZnRing + CanHomFrom<BigIntRingBase>,
@@ -604,7 +604,7 @@ impl<NumberRing, FpTy1, FpTy2, A1, A2> CanIsoFromTo<NumberRingQuoBase<NumberRing
 {
     type Isomorphism = <FpTy1::Type as CanIsoFromTo<FpTy2::Type>>::Isomorphism;
 
-    fn has_canonical_iso(&self, from: &NumberRingQuoBase<NumberRing, FpTy2, A2>) -> Option<Self::Isomorphism> {
+    fn has_canonical_iso(&self, from: &DecompositionRingBase<NumberRing, FpTy2, A2>) -> Option<Self::Isomorphism> {
         if self.number_ring == from.number_ring {
             self.base_ring().get_ring().has_canonical_iso(from.base_ring().get_ring())
         } else {
@@ -612,11 +612,11 @@ impl<NumberRing, FpTy1, FpTy2, A1, A2> CanIsoFromTo<NumberRingQuoBase<NumberRing
         }
     }
 
-    fn map_out(&self, from: &NumberRingQuoBase<NumberRing, FpTy2, A2>, el: Self::Element, iso: &Self::Isomorphism) -> <NumberRingQuoBase<NumberRing, FpTy2, A2> as RingBase>::Element {
+    fn map_out(&self, from: &DecompositionRingBase<NumberRing, FpTy2, A2>, el: Self::Element, iso: &Self::Isomorphism) -> <DecompositionRingBase<NumberRing, FpTy2, A2> as RingBase>::Element {
         assert_eq!(el.data.len(), self.rank());
         let mut result = Vec::with_capacity_in(self.rank(), from.allocator.clone());
         result.extend((0..self.rank()).map(|i| self.base_ring().get_ring().map_out(from.base_ring().get_ring(), self.base_ring().clone_el(&el.data[i]), iso)));
-        return NumberRingQuoEl {
+        return DecompositionRingEl {
             data: result,
             allocator: PhantomData,
             number_ring: PhantomData
@@ -625,56 +625,25 @@ impl<NumberRing, FpTy1, FpTy2, A1, A2> CanIsoFromTo<NumberRingQuoBase<NumberRing
 }
 
 #[cfg(test)]
-use super::pow2_cyclotomic::Pow2CyclotomicDecomposableNumberRing;
-#[cfg(test)]
-use feanor_math::algorithms::fft::cooley_tuckey::CooleyTuckeyFFT;
-#[cfg(test)]
-use feanor_math::algorithms::unity_root::get_prim_root_of_unity_pow2;
+pub fn test_with_number_ring<NumberRing: DecomposableNumberRing<zn_64::Zn>>(number_ring: NumberRing) {
+    let base_ring = zn_64::Zn::new(5);
+    let rank = number_ring.rank();
+    let ring = DecompositionRingBase::new(number_ring, base_ring);
 
-#[cfg(test)]
-fn test_ring_and_elements() -> (
-    NumberRingQuo<Pow2CyclotomicDecomposableNumberRing, zn_64::Zn>,
-    Vec<NumberRingQuoEl<Pow2CyclotomicDecomposableNumberRing, zn_64::Zn>>
-) {
-    let rns_base = zn_rns::Zn::new([113, 193, 241, 257, 337].into_iter().map(zn_64::Zn::new).collect(), BigIntRing::RING);
-    let test_ring = NumberRingQuoBase::new_with(
-        Pow2CyclotomicDecomposableNumberRing::new(16),
-        zn_64::Zn::new(65536),
-        rns_base,
-        Global
-    );
-    assert_eq!(8, test_ring.rank());
+    let base_ring = ring.base_ring();
+    let elements = vec![
+        ring.zero(),
+        ring.one(),
+        ring.neg_one(),
+        ring.int_hom().map(2),
+        ring.canonical_gen(),
+        ring.pow(ring.canonical_gen(), 2),
+        ring.pow(ring.canonical_gen(), rank - 1),
+        ring.int_hom().mul_map(ring.canonical_gen(), 2),
+        ring.int_hom().mul_map(ring.pow(ring.canonical_gen(), rank - 1), 2)
+    ];
 
-    let mut test_elements = Vec::new();
-    for i in [0, 1, 2, 4, 7] {
-        for j in [0, 1] {
-            for a in [-1, 1, 32768] {
-                test_elements.push(test_ring.from_canonical_basis((0..8).map(|k| if k == i { test_ring.base_ring().int_hom().map(a) } else if k == j { test_ring.base_ring().one() } else { test_ring.base_ring().zero() })));
-            }
-        }
-    }
-
-    return (test_ring, test_elements);
-}
-
-#[test]
-fn test_ring_axioms() {
-    let (ring, els) = test_ring_and_elements();
-    feanor_math::ring::generic_tests::test_ring_axioms(ring, els.into_iter());
-}
-
-#[test]
-fn test_nilpotent() {
-    let (ring, _els) = test_ring_and_elements();
-    let two_x = ring.int_hom().mul_map(ring.canonical_gen(), 2);
-    for i in 0..15 {
-        assert!(!ring.is_zero(&ring.pow(ring.clone_el(&two_x), i)));
-    }
-    assert!(ring.is_zero(&ring.pow(ring.clone_el(&two_x), 16)));
-}
-
-#[test]
-fn test_free_algebra_axioms() {
-    let (ring, _els) = test_ring_and_elements();
-    feanor_math::rings::extension::generic_tests::test_free_algebra_axioms(ring);
+    feanor_math::ring::generic_tests::test_ring_axioms(&ring, elements.iter().map(|x| ring.clone_el(x)));
+    feanor_math::ring::generic_tests::test_self_iso(&ring, elements.iter().map(|x| ring.clone_el(x)));
+    feanor_math::rings::extension::generic_tests::test_free_algebra_axioms(&ring);
 }

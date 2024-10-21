@@ -3,15 +3,40 @@
 Building on [feanor-math](https://crates.io/crates/feanor-math), this library provides efficient implementations of rings that are commonly used in homomorphic encryption (HE).
 Our focus lies on providing the building blocks for second-generation HE schemes like BGV or BFV, however most building blocks are also used in other schemes like FHEW/TFHE.
 In particular, the core component are cyclotomic rings modulo an integer `R_q = Z[X]/(Phi_n(X), q)`.
-For both `q`, there are two settings of relevance.
- - `q` is a relatively small integer, used as "plaintext modulus" in schemes and often denoted by `t`. For large `n`, the fastest way to implement arithmetic in these rings is by using a discrete Fourier transform (DFT) over the complex numbers (using floating-point numbers).
- - `q` is a product of moderately large primes that split completely in `R = Z[X]/(Phi_n(X))`. This means that `R_q` has a decomposition into prime fields, where arithmetic operations are performed component-wise, thus very efficiently (this is called "double-RNS-representation"). In this setting, ring elements are usually stored in double-RNS-representation, and only converted back to standard-resp. coefficient-representation when necessary. Such conversions require a number-theoretic transform (NTT) and a implementation of the Chinese Remainder theorem.
 
-Both of these settings are implemented in this library, a general implementation and a specialized one for the case `n = 2^k` is a power-of-two.
-In the latter case, the DFTs/NTTs are cheaper, which makes power-of-two cyclotomic rings the most common choice for applications.
+## Features
 
-Finally, the library also contains an implementation of various fast RNS-conversions.
-This refers to algorithms that perform non-arithmetic operations (usually variants of rounding) on the double-RNS-representation, thus avoiding conversions.
+### Provided rings
+
+For the ring `R_q`, there are four different ways how we might want to represent it.
+Three of them are implemented in this library, while one is already present in `feanor-math`.
+
+| Representation of `q` | Computation of convolution       |                                      |
+|-----------------------|----------------------------------|--------------------------------------|
+| Single integer        | Convolution & explicit reduction | `FreeAlgebraImpl` from `feanor_math` |
+| Single integer        | Ring factorization               | `DecompositionRing`                  |
+| RNS basis             | Convolution & explicit reduction | `SingleRNSRing`                      |
+| RNS basis             | Ring factorization               | `DoubleRNSRing`                      |
+
+ - "Convolution & explicit reduction" means that two elements of `R_q` are multiplied by first multiplying them as polynomials over `Z_q[X]` and then explicitly performing reduction modulo `Phi_n(X)`
+     - elements are stored coefficient-wise, which allows running non-arithmetic operations without requiring prior conversion
+     - convolutions can usually be implemented to be quite fast
+     - Galois operations are usually quite expensive
+ - "Ring factorization" means that two elements of `R_q` are multiplied by computing their image under the isomorphism `R_q -> Z_q x ... x Z_q`, after which multiplication can be performed pointwise.
+   However, for this isomorphism to exist, it is usually required to impose additional constraints on `q` resp. its factors (or switch to a different `q` before the multiplication, and switch back afterwards).
+     - if `q` resp. its factors satisfy the constraints for the isomorphism to exist, then elements can be kept in decomposed form, leading to very fast arithmetic operations
+     - mapping elements to their decomposed form and back is usually slower than computing a convolution, with the notable exception of power-of-two cyclotomics `R = Z[X]/(X^n + 1)`, for which this always beats standard convolutions
+     - non-arithmetic operations usually require mapping elements back into coefficient form
+     - Galois operations can usually be computed in linear time in decomposed form
+
+### Provided RNS operations
+
+In order to perform non-arithmetic operations (e.g. rounding, reduction modulo `t`, ...) on `R_q` when `q = p1 ... pr` is represented as an RNS basis, one has to use algorithms specifically designed for this setting.
+Such algorithms are provided in `rnsconv` as implementations of the trait `RNSOperation`.
+
+### Bootstrapping operations
+
+TODO
 
 ## Disclaimer
 

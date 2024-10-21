@@ -14,7 +14,7 @@ use std::alloc::Allocator;
 use std::alloc::Global;
 use std::marker::PhantomData;
 
-use super::double_rns_ring::*;
+use crate::rings::double_rns_ring::*;
 use crate::cyclotomic::CyclotomicRing;
 use crate::rnsconv::*;
 use crate::rings::decomposition::*;

@@ -205,7 +205,7 @@ pub fn powcoeffs_to_slots_thin<NumberRing, A>(H: &HypercubeIsomorphism<NumberRin
 #[test]
 fn test_slots_to_powcoeffs_thin() {
     // F11[X]/Phi_35(X) ~ F_(11^3)^8
-    let ring = NumberRingQuoBase::new(CompositeCyclotomicDecomposableNumberRing::new(5, 7), Zn::new(11));
+    let ring = DecompositionRingBase::new(CompositeCyclotomicDecomposableNumberRing::new(5, 7), Zn::new(11));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
 
     // first test very simple case
@@ -230,7 +230,7 @@ fn test_slots_to_powcoeffs_thin() {
     assert_el_eq!(ring, expected, current);
 
     // F71[X]/Phi_35(X) ~ F71^24
-    let ring = NumberRingQuoBase::new(CompositeCyclotomicDecomposableNumberRing::new(5, 7), Zn::new(71));
+    let ring = DecompositionRingBase::new(CompositeCyclotomicDecomposableNumberRing::new(5, 7), Zn::new(71));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
 
     let mut current = H.from_slot_vec((1..25).map(|n| H.slot_ring().int_hom().map(n)));
@@ -242,7 +242,7 @@ fn test_slots_to_powcoeffs_thin() {
     assert_el_eq!(ring, expected, current);
 
     // Z/8Z[X]/Phi_341 ~ GR(2, 3, 10)^30
-    let ring = NumberRingQuoBase::new(CompositeCyclotomicDecomposableNumberRing::new(11, 31), Zn::new(8));
+    let ring = DecompositionRingBase::new(CompositeCyclotomicDecomposableNumberRing::new(11, 31), Zn::new(8));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
 
     let mut current = H.from_slot_vec((1..=30).map(|n| H.slot_ring().int_hom().map(n)));
@@ -256,7 +256,7 @@ fn test_slots_to_powcoeffs_thin() {
 #[test]
 fn test_powcoeffs_to_slots_thin() {
     // F11[X]/Phi_35(X) ~ F_(11^3)^8
-    let ring = NumberRingQuoBase::new(CompositeCyclotomicDecomposableNumberRing::new(5, 7), Zn::new(11));
+    let ring = DecompositionRingBase::new(CompositeCyclotomicDecomposableNumberRing::new(5, 7), Zn::new(11));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
 
     assert_eq!(7, H.corresponding_factor_n(0));
@@ -283,7 +283,7 @@ fn test_powcoeffs_to_slots_thin() {
     assert_el_eq!(ring, expected, current);
 
     // F71[X]/Phi_35(X) ~ F71^24
-    let ring = NumberRingQuoBase::new(CompositeCyclotomicDecomposableNumberRing::new(5, 7), Zn::new(71));
+    let ring = DecompositionRingBase::new(CompositeCyclotomicDecomposableNumberRing::new(5, 7), Zn::new(71));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
 
     let ring_ref = &ring;
@@ -298,7 +298,7 @@ fn test_powcoeffs_to_slots_thin() {
 #[test]
 fn test_slots_to_powcoeffs_fat() {
     // F11[X]/Phi_35(X) ~ F_(11^3)^8
-    let ring = NumberRingQuoBase::new(CompositeCyclotomicDecomposableNumberRing::new(5, 7), Zn::new(11));
+    let ring = DecompositionRingBase::new(CompositeCyclotomicDecomposableNumberRing::new(5, 7), Zn::new(11));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
 
     // first test very simple case
@@ -334,7 +334,7 @@ fn test_slots_to_powcoeffs_fat() {
     assert_el_eq!(ring, expected, current);
 
     // F71[X]/Phi_35(X) ~ F71^24
-    let ring = NumberRingQuoBase::new(CompositeCyclotomicDecomposableNumberRing::new(5, 7), Zn::new(71));
+    let ring = DecompositionRingBase::new(CompositeCyclotomicDecomposableNumberRing::new(5, 7), Zn::new(71));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
 
     assert_eq!(5, H.corresponding_factor_n(0));
@@ -353,7 +353,7 @@ fn test_slots_to_powcoeffs_fat() {
 #[test]
 fn test_powcoeffs_to_slots_fat() {
     // F11[X]/Phi_35(X) ~ F_(11^3)^8
-    let ring = NumberRingQuoBase::new(CompositeCyclotomicDecomposableNumberRing::new(5, 7), Zn::new(11));
+    let ring = DecompositionRingBase::new(CompositeCyclotomicDecomposableNumberRing::new(5, 7), Zn::new(11));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
 
     assert_eq!(7, H.corresponding_factor_n(0));

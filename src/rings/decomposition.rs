@@ -1,7 +1,9 @@
+use feanor_math::divisibility::DivisibilityRing;
 use feanor_math::integer::IntegerRing;
 use feanor_math::ring::*;
 use feanor_math::rings::extension::FreeAlgebra;
 use feanor_math::rings::float_complex::Complex64;
+use feanor_math::rings::poly::PolyRing;
 use feanor_math::rings::zn::zn_64::{self, Zn, ZnEl};
 use feanor_math::rings::zn::ZnRing;
 
@@ -64,6 +66,13 @@ pub trait DecomposableNumberRing<R>: PartialEq
     fn product_expansion_factor(&self) -> f64 {
         self.inf_to_can_norm_expansion_factor().powi(2) * self.can_to_inf_norm_expansion_factor()
     }
+
+    fn generating_poly<P>(&self, poly_ring: P) -> El<P>
+        where P: RingStore,
+            P::Type: PolyRing + DivisibilityRing,
+            <<P::Type as RingExtension>::BaseRing as RingStore>::Type: IntegerRing;
+
+    fn rank(&self) -> usize;
 }
 
 pub trait DecomposableCyclotomicNumberRing<R>: DecomposableNumberRing<R>

@@ -7,7 +7,9 @@ pub mod decomposition;
 ///  
 pub mod double_rns_ring;
 
-pub mod number_ring_quo;
+pub mod single_rns_ring;
+
+pub mod decomposition_ring;
 
 pub mod pow2_cyclotomic;
 

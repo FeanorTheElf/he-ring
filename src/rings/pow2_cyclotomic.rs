@@ -12,6 +12,7 @@ use feanor_math::homomorphism::*;
 use feanor_math::integer::*;
 use feanor_math::rings::extension::FreeAlgebra;
 use feanor_math::rings::extension::FreeAlgebraStore;
+use feanor_math::rings::poly::*;
 use feanor_math::rings::zn::zn_64;
 use feanor_math::rings::zn::zn_64::ZnEl;
 use feanor_math::rings::zn::FromModulusCreateableZnRing;
@@ -21,14 +22,17 @@ use feanor_math::rings::zn::zn_64::Zn;
 use std::alloc::Allocator;
 use std::alloc::Global;
 
+use super::decomposition_ring;
+use super::double_rns_ring;
 use super::double_rns_ring::*;
-use super::number_ring_quo::*;
+use super::decomposition_ring::*;
+use super::single_rns_ring;
 use crate::rings::decomposition::*;
 use crate::sample_primes;
 use crate::StdZn;
 use crate::cyclotomic::CyclotomicRing;
 
-
+#[derive(Clone)]
 pub struct Pow2CyclotomicDecomposableNumberRing {
     log2_n: usize
 }
@@ -106,6 +110,18 @@ impl<FpTy> DecomposableNumberRing<FpTy> for Pow2CyclotomicDecomposableNumberRing
             assert!(current <= leq_than);
             return Some(current);
         }
+    }
+    
+    fn generating_poly<P>(&self, poly_ring: P) -> El<P>
+        where P: RingStore,
+            P::Type: PolyRing,
+            <<P::Type as RingExtension>::BaseRing as RingStore>::Type: IntegerRing
+    {
+        poly_ring.add(poly_ring.pow(poly_ring.indeterminate(), 1 << (self.log2_n - 1)), poly_ring.one())
+    }
+
+    fn rank(&self) -> usize {
+        1 << (self.log2_n - 1)
     }
 }
 
@@ -198,57 +214,22 @@ impl<R, F> DecomposedNumberRing<R::Type> for Pow2CyclotomicDecomposedNumberRing<
     }
 }
 
-#[cfg(test)]
-fn edge_case_elements<'a, NumberRing, FpTy, A>(R: &'a DoubleRNSRing<NumberRing, FpTy, A>) -> impl 'a + Iterator<Item = El<DoubleRNSRing<NumberRing, FpTy, A>>>
-    where NumberRing: DecomposableNumberRing<FpTy>,
-        FpTy: RingStore + Clone,
-        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
-        A: Allocator + Clone
-{
-    assert_eq!(2, R.get_ring().rns_base().len());
-    assert_eq!(17, int_cast(R.get_ring().rns_base().at(0).integer_ring().clone_el(R.get_ring().rns_base().at(0).modulus()), StaticRing::<i64>::RING, R.get_ring().rns_base().at(0).integer_ring()));
-    assert_eq!(8, R.rank());
-    [
-        ring_literal!(&R, [0, 0, 0, 0, 0, 0, 0, 0]),
-        ring_literal!(&R, [1, 0, 0, 0, 0, 0, 0, 0]),
-        ring_literal!(&R, [-1, 0, 0, 0, 0, 0, 0, 0]),
-        ring_literal!(&R, [0, 0, 0, 0, 0, 0, 0, 1]),
-        ring_literal!(&R, [0, 0, 0, 0, 0, 0, 0, -1]),
-        ring_literal!(&R, [1, 1, 1, 1, 1, 1, 1, 1]),
-        ring_literal!(&R, [1, -1, 0, 0, 0, 0, 0, 0]),
-        // these elements are non-invertible, but in the same prime ideal `(X + 3)`
-        ring_literal!(&R, [15, 8, 1, 0, 0, 0, 0, 0]),
-        ring_literal!(&R, [3, 1, 0, 0, 0, 0, 0, 0]),
-        ring_literal!(&R, [0, 15, 8, 1, 0, 0, 0, 0])
-    ].into_iter()
+#[test]
+fn test_odd_cyclotomic_double_rns_ring() {
+    double_rns_ring::test_with_number_ring(Pow2CyclotomicDecomposableNumberRing::new(8));
+    double_rns_ring::test_with_number_ring(Pow2CyclotomicDecomposableNumberRing::new(16));
 }
 
 #[test]
-fn test_ring_axioms() {
-    let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
-    let R = DoubleRNSRingBase::new_with(Pow2CyclotomicDecomposableNumberRing::new(16), rns_base, Global);
-    feanor_math::ring::generic_tests::test_ring_axioms(&R, edge_case_elements(&R));
+fn test_odd_cyclotomic_decomposition_ring() {
+    decomposition_ring::test_with_number_ring(Pow2CyclotomicDecomposableNumberRing::new(8));
+    decomposition_ring::test_with_number_ring(Pow2CyclotomicDecomposableNumberRing::new(16));
 }
 
 #[test]
-fn test_divisibility_axioms() {
-    let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
-    let R = DoubleRNSRingBase::new_with(Pow2CyclotomicDecomposableNumberRing::new(16), rns_base, Global);
-    feanor_math::divisibility::generic_tests::test_divisibility_axioms(&R, edge_case_elements(&R));
-}
-
-#[test]
-fn test_free_algebra_axioms() {
-    let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
-    let R = DoubleRNSRingBase::new_with(Pow2CyclotomicDecomposableNumberRing::new(16), rns_base, Global);
-    feanor_math::rings::extension::generic_tests::test_free_algebra_axioms(R);
-}
-
-#[test]
-fn test_cyclotomic_ring_axioms() {
-    let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
-    let R = DoubleRNSRingBase::new_with(Pow2CyclotomicDecomposableNumberRing::new(16), rns_base, Global);
-    feanor_math::rings::extension::generic_tests::test_free_algebra_axioms(R);
+fn test_odd_cyclotomic_single_rns_ring() {
+    single_rns_ring::test_with_number_ring(Pow2CyclotomicDecomposableNumberRing::new(8));
+    single_rns_ring::test_with_number_ring(Pow2CyclotomicDecomposableNumberRing::new(16));
 }
 
 #[test]

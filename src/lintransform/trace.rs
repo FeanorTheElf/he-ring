@@ -131,7 +131,7 @@ impl Trace {
     }
 }
 
-impl<NumberRing, FpTy, A> NumberRingQuoBase<NumberRing, FpTy, A> 
+impl<NumberRing, FpTy, A> DecompositionRingBase<NumberRing, FpTy, A> 
     where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
@@ -157,8 +157,8 @@ use feanor_math::integer::BigIntRing;
 #[cfg(test)]
 use feanor_math::rings::extension::extension_impl::FreeAlgebraImpl;
 
-use super::NumberRingQuo;
-use super::NumberRingQuoBase;
+use super::DecompositionRing;
+use super::DecompositionRingBase;
 use super::SlotRing;
 use super::{CyclotomicRing, DecomposableCyclotomicNumberRing};
 
