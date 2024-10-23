@@ -334,10 +334,8 @@ fn hom_compute_linear_transform<'a, Params: BFVParams>(
     gk: &[(ZnEl, KeySwitchKey<'a, Params>)], 
     key_switches: &mut usize
 ) -> Ciphertext<Params> {
-    fn get_gk<'a, 'b, 'c, 'd, Params: BFVParams>(P: &'d PlaintextRing<Params>, gk: &'c [(ZnEl, KeySwitchKey<'a, Params>)], g: &'b ZnEl) -> &'c KeySwitchKey<'a, Params> {
-        let Gal = P.get_ring().cyclotomic_index_ring();
-        &gk.into_iter().filter(|(s, _)| Gal.eq_el(g, s)).next().unwrap().1
-    }
+    let Gal = P.get_ring().cyclotomic_index_ring();
+    let get_gk = |g: &ZnEl| &gk.iter().filter(|(s, _)| Gal.eq_el(g, s)).next().unwrap().1;
 
     return transform.iter().fold(input, |current, T| T.evaluate_generic(
         current,
@@ -346,7 +344,7 @@ fn hom_compute_linear_transform<'a, Params: BFVParams>(
         }, 
         |value, gs| {
             *key_switches += gs.len();
-            Params::hom_galois_many(C, value, gs, gs.map(|g| get_gk::<Params>(P, gk, g) as &KeySwitchKey<'a, Params>))
+            Params::hom_galois_many(C, value, gs, gs.as_fn().map_fn(|g| get_gk(g)))
         },
         || Params::transparent_zero(C)
     ));

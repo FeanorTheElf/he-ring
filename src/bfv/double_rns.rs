@@ -306,8 +306,10 @@ impl<P: DoubleRNSBFVParams> BFVParams for P {
         ), gk)
     }
     
-    fn hom_galois_many<'a, V>(C: &CiphertextRing<Self>, ct: Ciphertext<Self>, gs: &[ZnEl], gks: V) -> Vec<Ciphertext<Self>>
-        where V: VectorView<KeySwitchKey<'a, Self>>,
+    fn hom_galois_many<'a, 'b, V>(C: &CiphertextRing<Self>, ct: Ciphertext<Self>, gs: &[ZnEl], gks: V) -> Vec<Ciphertext<Self>>
+        where V: VectorFn<&'b KeySwitchKey<'a, Self>>,
+            KeySwitchKey<'a, Self>: 'b,
+            'a: 'b,
             Self: 'a
     {
         let (c0, c1) = ct;

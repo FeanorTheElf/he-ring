@@ -139,8 +139,10 @@ pub trait BFVParams: Sized {
     fn hom_galois<'a>(C: &CiphertextRing<Self>, ct: Ciphertext<Self>, g: ZnEl, gk: &KeySwitchKey<'a, Self>) -> Ciphertext<Self>
         where Self: 'a;
     
-    fn hom_galois_many<'a, V>(C: &CiphertextRing<Self>, ct: Ciphertext<Self>, gs: &[ZnEl], gks: V) -> Vec<Ciphertext<Self>>
-        where V: VectorView<KeySwitchKey<'a, Self>>,
+    fn hom_galois_many<'a, 'b, V>(C: &CiphertextRing<Self>, ct: Ciphertext<Self>, gs: &[ZnEl], gks: V) -> Vec<Ciphertext<Self>>
+        where V: VectorFn<&'b KeySwitchKey<'a, Self>>,
+            KeySwitchKey<'a, Self>: 'b,
+            'a: 'b,
             Self: 'a;
 
     fn create_multiplication_rescale(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, Cmul: &CiphertextRing<Self>) -> MulConversionData;
