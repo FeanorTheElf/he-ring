@@ -551,7 +551,7 @@ impl<'a, NumberRing, A> HypercubeIsomorphism<'a, NumberRing, A>
     /// Calls the given function for each slot with the index tuple of the slot, and
     /// returns an iterator over all return values obtained this way.
     /// 
-    pub fn slot_iter<'b, G, T>(&'b self, for_slot: G) -> impl 'b + ExactSizeIterator<Item = T>
+    pub fn slot_iter<'b, G, T>(&'b self, for_slot: G) -> impl ExactSizeIterator<Item = T> + 'b
         where G: 'b + Clone + FnMut(&[usize]) -> T,
             T: 'b
     {
@@ -607,7 +607,7 @@ impl<'a, NumberRing, A> HypercubeIsomorphism<'a, NumberRing, A>
     /// This flattening is done according to the lexicographic order of index tuples, in particular slots
     /// that differ only in the last entry of the index tuple are contiguous in the 1d-representation. 
     /// 
-    pub fn get_slot_values<'b>(&'b self, el: &'b El<DecompositionRing<NumberRing, Zn, A>>) -> impl 'b + ExactSizeIterator<Item = El<SlotRing<'a, A>>> {
+    pub fn get_slot_values<'b>(&'b self, el: &'b El<DecompositionRing<NumberRing, Zn, A>>) -> impl ExactSizeIterator<Item = El<SlotRing<'a, A>>> + 'b {
         // again we use only a "slow" O(n^2) algorithm, but we only have to run it during preprocessing;
         // maybe use an FFT later?
         let mut move_to_slot_gens = self.slot_iter(|idxs| self.cyclotomic_index_ring().prod(idxs.iter().enumerate().map(|(j, e)| self.shift_galois_element(j, -(*e as i64)))));

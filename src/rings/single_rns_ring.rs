@@ -8,17 +8,20 @@ use feanor_math::ring::*;
 use feanor_math::homomorphism::*;
 use feanor_math::integer::*;
 use feanor_math::rings::extension::*;
-use feanor_math::rings::poly::sparse_poly::SparsePolyRing;
+use feanor_math::rings::finite::FiniteRingStore;
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
+use feanor_math::rings::poly::sparse_poly::SparsePolyRing;
 use feanor_math::rings::poly::*;
 use feanor_math::rings::zn::*;
 use feanor_math::seq::sparse::SparseMapVector;
 use feanor_math::seq::*;
 use feanor_math::matrix::*;
 
+use crate::cyclotomic::*;
 use crate::rings::decomposition::*;
+use crate::rings::double_rns_ring::DoubleRNSRing;
 
-use super::double_rns_ring::DoubleRNSRingBase;
+use super::double_rns_ring::{CoeffEl, DoubleRNSRingBase};
 
 pub struct SingleRNSRingBase<NumberRing, FpTy, A = Global, C = FFTRNSBasedConvolutionZn> 
     where NumberRing: DecomposableNumberRing<FpTy>,
@@ -27,11 +30,12 @@ pub struct SingleRNSRingBase<NumberRing, FpTy, A = Global, C = FFTRNSBasedConvol
         A: Allocator + Clone,
         C: ConvolutionAlgorithm<FpTy::Type>
 {
-    number_ring: NumberRing,
-    rns_base: zn_rns::Zn<FpTy, BigIntRing>,
+    // we have to store the double-RNS ring as well, since we need double-RNS representation
+    // for computing Galois operations. This is because I don't think there is any good way
+    // of efficiently computing the galois action image using only coefficient representation
+    base: DoubleRNSRing<NumberRing, FpTy, A>,
     convolutions: Vec<C>,
-    modulus: SparseMapVector<zn_rns::Zn<FpTy, BigIntRing>>,
-    allocator: A
+    modulus: SparseMapVector<zn_rns::Zn<FpTy, BigIntRing>>
 }
 
 pub type SingleRNSRing<NumberRing, FpTy, A = Global, C = FFTRNSBasedConvolutionZn> = RingValue<SingleRNSRingBase<NumberRing, FpTy, A, C>>;
@@ -43,10 +47,8 @@ pub struct SingleRNSRingEl<NumberRing, FpTy, A = Global, C = KaratsubaAlgorithm>
         A: Allocator + Clone,
         C: ConvolutionAlgorithm<FpTy::Type>
 {
-    pub(super) number_ring: PhantomData<NumberRing>,
-    pub(super) allocator: PhantomData<A>,
-    pub(super) convolutions: PhantomData<C>,
-    pub(super) data: Vec<El<FpTy>, A>
+    data: CoeffEl<NumberRing, FpTy, A>,
+    convolutions: PhantomData<C>
 }
 
 impl<NumberRing, FpTy> SingleRNSRingBase<NumberRing, FpTy> 
@@ -71,6 +73,10 @@ impl<NumberRing, FpTy, A, C> SingleRNSRingBase<NumberRing, FpTy, A, C>
     pub fn new_with(number_ring: NumberRing, rns_base: zn_rns::Zn<FpTy, BigIntRing>, allocator: A, convolutions: Vec<C>) -> RingValue<Self> {
         assert!(rns_base.len() > 0);
         assert_eq!(rns_base.len(), convolutions.len());
+
+        let base = DoubleRNSRingBase::new_with(number_ring, rns_base, allocator);
+        let number_ring = base.get_ring().number_ring();
+        let rns_base = base.get_ring().rns_base();
         
         let mut modulus = SparseMapVector::new(number_ring.rank(), rns_base.clone());
         let sparse_poly_ring = SparsePolyRing::new(BigIntRing::RING, "X");
@@ -82,16 +88,14 @@ impl<NumberRing, FpTy, A, C> SingleRNSRingBase<NumberRing, FpTy, A, C>
         }
         modulus.at_mut(0);
         RingValue::from(Self {
-            number_ring: number_ring,
+            base: base,
             modulus: modulus,
             convolutions: convolutions,
-            rns_base: rns_base,
-            allocator: allocator
         })
     }
 
     pub fn rns_base(&self) -> &zn_rns::Zn<FpTy, BigIntRing> {
-        &self.rns_base
+        self.base.get_ring().rns_base()
     }
 
     pub fn element_len(&self) -> usize {
@@ -99,15 +103,19 @@ impl<NumberRing, FpTy, A, C> SingleRNSRingBase<NumberRing, FpTy, A, C>
     }
 
     pub fn as_matrix<'a>(&self, element: &'a SingleRNSRingEl<NumberRing, FpTy, A, C>) -> Submatrix<'a, AsFirstElement<El<FpTy>>, El<FpTy>> {
-        Submatrix::from_1d(&element.data, self.rns_base().len(), self.rank())
+        self.base.get_ring().as_matrix(&element.data)
     }
 
     pub fn as_matrix_mut<'a>(&self, element: &'a mut SingleRNSRingEl<NumberRing, FpTy, A, C>) -> SubmatrixMut<'a, AsFirstElement<El<FpTy>>, El<FpTy>> {
-        SubmatrixMut::from_1d(&mut element.data, self.rns_base().len(), self.rank())
+        self.base.get_ring().as_matrix_mut(&mut element.data)
     }
 
     pub fn number_ring(&self) -> &NumberRing {
-        &self.number_ring
+        self.base.get_ring().number_ring()
+    }
+
+    pub fn allocator(&self) -> &A {
+        self.base.get_ring().allocator()
     }
 
     ///
@@ -117,7 +125,7 @@ impl<NumberRing, FpTy, A, C> SingleRNSRingBase<NumberRing, FpTy, A, C>
     /// [`zn_rns::ZnBase`]).
     /// 
     pub fn at<'a>(&self, i: usize, j: usize, el: &'a SingleRNSRingEl<NumberRing, FpTy, A, C>) -> &'a El<FpTy> {
-        &el.data[i * self.rank() + j]
+        self.base.get_ring().at(i, j, &el.data)
     }
 
     /// 
@@ -126,8 +134,27 @@ impl<NumberRing, FpTy, A, C> SingleRNSRingBase<NumberRing, FpTy, A, C>
     /// See [`Self::at()`] for details.
     /// 
     pub fn at_mut<'a>(&self, i: usize, j: usize, el: &'a mut SingleRNSRingEl<NumberRing, FpTy, A, C>) -> &'a mut El<FpTy> {
-        &mut el.data[i * self.rank() + j]
+        self.base.get_ring().at_mut(i, j, &mut el.data)
     }
+    
+    pub fn sample_from_coefficient_distribution<G: FnMut() -> i32>(&self, distribution: G) -> SingleRNSRingEl<NumberRing, FpTy, A, C> {
+        SingleRNSRingEl {
+            data: self.base.get_ring().sample_from_coefficient_distribution(distribution),
+            convolutions: PhantomData
+        }
+    }
+
+    pub fn sample_uniform<G: FnMut() -> u64>(&self, mut rng: G) -> SingleRNSRingEl<NumberRing, FpTy, A, C> {
+        let mut result = self.zero();
+        let mut result_matrix = self.as_matrix_mut(&mut result);
+        for j in 0..self.rank() {
+            for i in 0..self.rns_base().len() {
+                *result_matrix.at_mut(i, j) = self.rns_base().at(i).random_element(&mut rng);
+            }
+        }
+        return result;
+    }
+
 }
 
 pub struct SingleRNSRingBaseElVectorRepresentation<'a, NumberRing, FpTy, A, C> 
@@ -153,7 +180,7 @@ impl<'a, NumberRing, FpTy, A, C> VectorFn<El<zn_rns::Zn<FpTy, BigIntRing>>> for 
     }
 
     fn at(&self, i: usize) -> El<zn_rns::Zn<FpTy, BigIntRing>> {
-        self.ring.rns_base().from_congruence(self.element.data[i..].iter().step_by(self.ring.rank()).enumerate().map(|(i, x)| self.ring.rns_base().at(i).clone_el(x)))
+        self.ring.rns_base().from_congruence(self.ring.as_matrix(self.element).col_at(i).as_iter().enumerate().map(|(i, x)| self.ring.rns_base().at(i).clone_el(x)))
     }
 }
 
@@ -165,7 +192,7 @@ impl<NumberRing, FpTy, A, C> PartialEq for SingleRNSRingBase<NumberRing, FpTy, A
         C: ConvolutionAlgorithm<FpTy::Type>
 {
     fn eq(&self, other: &Self) -> bool {
-        self.number_ring == other.number_ring && self.rns_base.get_ring() == other.rns_base.get_ring()
+        self.number_ring() == other.number_ring() && self.rns_base().get_ring() == other.rns_base().get_ring()
     }
 }
 
@@ -179,25 +206,14 @@ impl<NumberRing, FpTy, A, C> RingBase for SingleRNSRingBase<NumberRing, FpTy, A,
     type Element = SingleRNSRingEl<NumberRing, FpTy, A, C>;
 
     fn clone_el(&self, val: &Self::Element) -> Self::Element {
-        assert_eq!(self.element_len(), val.data.len());
-        let mut result = Vec::with_capacity_in(self.element_len(), self.allocator.clone());
-        result.extend((0..self.element_len()).map(|i| self.rns_base().at(i / self.rank()).clone_el(&val.data[i])));
         SingleRNSRingEl {
-            data: result,
-            number_ring: PhantomData,
-            allocator: PhantomData,
-            convolutions: PhantomData,
+            data: self.base.get_ring().clone_el_non_fft(&val.data),
+            convolutions: PhantomData
         }
     }
 
     fn add_assign_ref(&self, lhs: &mut Self::Element, rhs: &Self::Element) {
-        assert_eq!(self.element_len(), lhs.data.len());
-        assert_eq!(self.element_len(), rhs.data.len());
-        for i in 0..self.rns_base().len() {
-            for j in 0..self.rank() {
-                self.rns_base().at(i).add_assign_ref(&mut lhs.data[i * self.rank() + j], &rhs.data[i * self.rank() + j]);
-            }
-        }
+        self.base.get_ring().add_assign_non_fft(&mut lhs.data, &rhs.data);
     }
 
     fn add_assign(&self, lhs: &mut Self::Element, rhs: Self::Element) {
@@ -205,22 +221,11 @@ impl<NumberRing, FpTy, A, C> RingBase for SingleRNSRingBase<NumberRing, FpTy, A,
     }
 
     fn sub_assign_ref(&self, lhs: &mut Self::Element, rhs: &Self::Element) {
-        assert_eq!(self.element_len(), lhs.data.len());
-        assert_eq!(self.element_len(), rhs.data.len());
-        for i in 0..self.rns_base().len() {
-            for j in 0..self.rank() {
-                self.rns_base().at(i).sub_assign_ref(&mut lhs.data[i * self.rank() + j], &rhs.data[i * self.rank() + j]);
-            }
-        }
+        self.base.get_ring().sub_assign_non_fft(&mut lhs.data, &rhs.data);
     }
 
     fn negate_inplace(&self, lhs: &mut Self::Element) {
-        assert_eq!(self.element_len(), lhs.data.len());
-        for i in 0..self.rns_base().len() {
-            for j in 0..self.rank() {
-                self.rns_base().at(i).negate_inplace(&mut lhs.data[i * self.rank() + j]);
-            }
-        }
+        self.base.get_ring().negate_inplace_non_fft(&mut lhs.data);
     }
 
     fn mul_assign(&self, lhs: &mut Self::Element, rhs: Self::Element) {
@@ -228,59 +233,58 @@ impl<NumberRing, FpTy, A, C> RingBase for SingleRNSRingBase<NumberRing, FpTy, A,
     }
 
     fn mul_assign_ref(&self, lhs: &mut Self::Element, rhs: &Self::Element) {
-        assert_eq!(self.element_len(), lhs.data.len());
-        assert_eq!(self.element_len(), rhs.data.len());
+        let mut lhs = self.as_matrix_mut(lhs);
+        let rhs = self.as_matrix(rhs);
         
-        let mut unreduced_result = Vec::with_capacity_in(2 * self.rank() * self.rns_base.len(), &self.allocator);
-        unreduced_result.extend(self.rns_base.as_iter().flat_map(|Zp| (0..(2 * self.rank())).map(|_| Zp.zero())));
-        for k in 0..self.rns_base.len() {
-            let Zp = self.rns_base.at(k);
+        let mut unreduced_result = Vec::with_capacity_in(2 * self.rank() * self.rns_base().len(), self.allocator());
+        unreduced_result.extend(self.rns_base().as_iter().flat_map(|Zp| (0..(2 * self.rank())).map(|_| Zp.zero())));
+        for k in 0..self.rns_base().len() {
+            let Zp = self.rns_base().at(k);
             self.convolutions[k].compute_convolution(
-                &lhs.data[(k * self.rank())..((k + 1) * self.rank())],
-                &rhs.data[(k * self.rank())..((k + 1) * self.rank())],
+                lhs.row_at(k),
+                rhs.row_at(k),
                 &mut unreduced_result[(2 * k * self.rank())..(2 * (k + 1) * self.rank())],
                 Zp
             );
         }
         for i in (self.rank()..(2 * self.rank())).rev() {
             for (j, c) in self.modulus.nontrivial_entries() {
-                let congruence = self.rns_base.get_congruence(c);
-                for k in 0..self.rns_base.len() {
-                    let Zp = self.rns_base.at(k);
+                let congruence = self.rns_base().get_congruence(c);
+                for k in 0..self.rns_base().len() {
+                    let Zp = self.rns_base().at(k);
                     let subtract = Zp.mul_ref(&unreduced_result[2 * k * self.rank() + i], congruence.at(k));
                     Zp.add_assign(&mut unreduced_result[2 * k * self.rank() + i - self.rank() + j], subtract);
                 }
             }
         }
-        for k in 0..self.rns_base.len() {
-            let Zp = self.rns_base.at(k);
+        for k in 0..self.rns_base().len() {
+            let Zp = self.rns_base().at(k);
             for i in 0..self.rank() {
-                lhs.data[k * self.rank() + i] = Zp.clone_el(&unreduced_result[k * 2 * self.rank() + i]);
+                *lhs.at_mut(k, i) = Zp.clone_el(&unreduced_result[k * 2 * self.rank() + i]);
             }
         }
     }
     
     fn from_int(&self, value: i32) -> Self::Element {
-        self.from(self.base_ring().get_ring().from_int(value))
+        SingleRNSRingEl {
+            data: self.base.get_ring().non_fft_from(self.base_ring().get_ring().from_int(value)),
+            convolutions: PhantomData,
+        }
     }
 
     fn zero(&self) -> Self::Element {
-        let mut result = Vec::with_capacity_in(self.element_len(), self.allocator.clone());
-        result.extend(self.rns_base().as_iter().flat_map(|Zp| (0..self.rank()).map(|_| Zp.zero())));
-        return SingleRNSRingEl {
-            data: result,
-            number_ring: PhantomData,
+        SingleRNSRingEl {
+            data: self.base.get_ring().non_fft_zero(),
             convolutions: PhantomData,
-            allocator: PhantomData
-        };
+        }
     }
 
     fn eq_el(&self, lhs: &Self::Element, rhs: &Self::Element) -> bool {
-        assert_eq!(self.element_len(), lhs.data.len());
-        assert_eq!(self.element_len(), rhs.data.len());
+        let lhs = self.as_matrix(lhs);
+        let rhs = self.as_matrix(rhs);
         for i in 0..self.rns_base().len() {
             for j in 0..self.rank() {
-                if !self.rns_base().at(i).eq_el(&lhs.data[i * self.rank() + j], &rhs.data[i * self.rank() + j]) {
+                if !self.rns_base().at(i).eq_el(lhs.at(i, j), rhs.at(i, j)) {
                     return false;
                 }
             }
@@ -314,16 +318,14 @@ impl<NumberRing, FpTy, A, C> RingExtension for SingleRNSRingBase<NumberRing, FpT
     type BaseRing = zn_rns::Zn<FpTy, BigIntRing>;
 
     fn base_ring<'a>(&'a self) -> &'a Self::BaseRing {
-        &self.rns_base
+        self.rns_base()
     }
 
     fn from(&self, x: El<Self::BaseRing>) -> Self::Element {
-        let x_congruence = self.rns_base.get_congruence(&x);
-        let mut result = self.zero();
-        for (i, Zp) in self.rns_base().as_iter().enumerate() {
-            result.data[i * self.rank()] = Zp.clone_el(x_congruence.at(i));
+        SingleRNSRingEl {
+            data: self.base.get_ring().non_fft_from(x),
+            convolutions: PhantomData
         }
-        return result;
     }
 }
 
@@ -339,14 +341,15 @@ impl<NumberRing, FpTy, A, C> FreeAlgebra for SingleRNSRingBase<NumberRing, FpTy,
 
     fn canonical_gen(&self) -> SingleRNSRingEl<NumberRing, FpTy, A, C> {
         let mut result = self.zero();
+        let mut result_matrix = self.as_matrix_mut(&mut result);
         for (i, Zp) in self.rns_base().as_iter().enumerate() {
-            result.data[i * self.rank() + 1] = Zp.one();
+            *result_matrix.at_mut(i, 1) = Zp.one();
         }
         return result;
     }
 
     fn rank(&self) -> usize {
-        self.number_ring.rank()
+        self.number_ring().rank()
     }
 
     fn wrt_canonical_basis<'a>(&'a self, el: &'a SingleRNSRingEl<NumberRing, FpTy, A, C>) -> Self::VectorRepresentation<'a> {
@@ -359,14 +362,43 @@ impl<NumberRing, FpTy, A, C> FreeAlgebra for SingleRNSRingBase<NumberRing, FpTy,
     fn from_canonical_basis<V>(&self, vec: V) -> SingleRNSRingEl<NumberRing, FpTy, A, C>
         where V: IntoIterator<Item = El<Self::BaseRing>>
     {
-        let mut result = self.zero();
-        for (j, x) in vec.into_iter().enumerate() {
-            let congruence = self.base_ring().get_ring().get_congruence(&x);
-            for i in 0..self.rns_base().len() {
-                result.data[i * self.rank() + j] = self.rns_base().at(i).clone_el(congruence.at(i));
-            }
+        SingleRNSRingEl {
+            data: self.base.get_ring().from_canonical_basis_non_fft(vec),
+            convolutions: PhantomData
         }
-        return result;
+    }
+}
+
+impl<NumberRing, FpTy, A, C> CyclotomicRing for SingleRNSRingBase<NumberRing, FpTy, A, C> 
+    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        A: Allocator + Clone,
+        C: ConvolutionAlgorithm<FpTy::Type>
+{
+    fn n(&self) -> u64 {
+        self.base.n()
+    }
+
+    fn cyclotomic_index_ring(&self) -> zn_64::Zn {
+        self.base.cyclotomic_index_ring()
+    }
+
+    fn apply_galois_action(&self, el: &Self::Element, s: zn_64::ZnEl) -> Self::Element {
+        let el_fft = self.base.get_ring().do_fft(self.base.get_ring().clone_el_non_fft(&el.data));
+        let result_fft = self.base.apply_galois_action(&el_fft, s);
+        return SingleRNSRingEl {
+            data: self.base.get_ring().undo_fft(result_fft),
+            convolutions: PhantomData
+        };
+    }
+    
+    fn apply_galois_action_many<'a>(&'a self, x: &'a Self::Element, gs: &'a [zn_64::ZnEl]) -> impl 'a + ExactSizeIterator<Item = Self::Element> {
+        let el_fft = self.base.get_ring().do_fft(self.base.get_ring().clone_el_non_fft(&x.data));
+        gs.into_iter().map(move |g| SingleRNSRingEl {
+            data: self.base.get_ring().undo_fft(self.base.apply_galois_action(&el_fft, *g)),
+            convolutions: PhantomData
+        })
     }
 }
 
@@ -397,18 +429,15 @@ impl<NumberRing, FpTy1, FpTy2, A1, A2, C1, C2> CanHomFrom<SingleRNSRingBase<Numb
     }
 
     fn map_in_ref(&self, from: &SingleRNSRingBase<NumberRing, FpTy2, A2, C2>, el: &<SingleRNSRingBase<NumberRing, FpTy2, A2, C2> as RingBase>::Element, hom: &Self::Homomorphism) -> Self::Element {
-        let mut result = Vec::with_capacity_in(self.element_len(), self.allocator.clone());
+        let el_as_matrix = from.as_matrix(&el);
+        let mut result = self.zero();
+        let mut result_matrix = self.as_matrix_mut(&mut result);
         for (i, Zp) in self.rns_base().as_iter().enumerate() {
             for j in 0..self.rank() {
-                result.push(Zp.get_ring().map_in_ref(from.rns_base().at(i).get_ring(), &el.data[i * self.rank() + j], &hom[i]));
+                *result_matrix.at_mut(i, j) = Zp.get_ring().map_in_ref(from.rns_base().at(i).get_ring(), el_as_matrix.at(i, j), &hom[i]);
             }
         }
-        SingleRNSRingEl {
-            data: result,
-            number_ring: PhantomData,
-            convolutions: PhantomData,
-            allocator: PhantomData
-        }
+        return result;
     }
 }
 
@@ -434,20 +463,16 @@ impl<NumberRing, FpTy1, FpTy2, A1, A2, C1> CanHomFrom<DoubleRNSRingBase<NumberRi
     }
 
     fn map_in(&self, from: &DoubleRNSRingBase<NumberRing, FpTy2, A2>, el: <DoubleRNSRingBase<NumberRing, FpTy2, A2> as RingBase>::Element, hom: &Self::Homomorphism) -> Self::Element {
-        let mut result = Vec::with_capacity_in(self.element_len(), self.allocator.clone());
         let non_fft_el = from.undo_fft(el);
         let el_as_matrix = from.as_matrix(&non_fft_el);
+        let mut result = self.zero();
+        let mut result_matrix = self.as_matrix_mut(&mut result);
         for (i, Zp) in self.rns_base().as_iter().enumerate() {
             for j in 0..self.rank() {
-                result.push(Zp.get_ring().map_in_ref(from.rns_base().at(i).get_ring(), el_as_matrix.at(i, j), &hom[i]));
+                *result_matrix.at_mut(i, j) = Zp.get_ring().map_in_ref(from.rns_base().at(i).get_ring(), el_as_matrix.at(i, j), &hom[i]);
             }
         }
-        SingleRNSRingEl {
-            data: result,
-            number_ring: PhantomData,
-            convolutions: PhantomData,
-            allocator: PhantomData
-        }
+        return result;
     }
 }
 
@@ -474,18 +499,15 @@ impl<NumberRing, FpTy1, FpTy2, A1, A2, C1, C2> CanIsoFromTo<SingleRNSRingBase<Nu
     }
 
     fn map_out(&self, from: &SingleRNSRingBase<NumberRing, FpTy2, A2, C2>, el: Self::Element, iso: &Self::Isomorphism) -> <SingleRNSRingBase<NumberRing, FpTy2, A2, C2> as RingBase>::Element {
-        let mut result = Vec::with_capacity_in(from.element_len(), from.allocator.clone());
+        let el_as_matrix = self.as_matrix(&el);
+        let mut result = from.zero();
+        let mut result_matrix = from.as_matrix_mut(&mut result);
         for (i, Zp) in self.rns_base().as_iter().enumerate() {
             for j in 0..self.rank() {
-                result.push(Zp.get_ring().map_out(from.rns_base().at(i).get_ring(), Zp.clone_el(&el.data[i * self.rank() + j]), &iso[i]));
+                *result_matrix.at_mut(i, j) = Zp.get_ring().map_out(from.rns_base().at(i).get_ring(), Zp.clone_el(el_as_matrix.at(i, j)), &iso[i]);
             }
         }
-        SingleRNSRingEl {
-            data: result,
-            number_ring: PhantomData,
-            convolutions: PhantomData,
-            allocator: PhantomData
-        }
+        return result;
     }
 }
 

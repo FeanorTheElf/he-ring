@@ -46,6 +46,7 @@ use rand_distr::StandardNormal;
 
 pub mod bootstrap;
 pub mod double_rns;
+pub mod single_rns;
 
 pub type PlaintextAllocator = Global;
 pub type CiphertextAllocator = Global;

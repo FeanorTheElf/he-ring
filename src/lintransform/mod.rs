@@ -619,7 +619,7 @@ impl<NumberRing, A> CompiledLinearTransform<NumberRing, A>
         }, || ring.zero())
     }
     
-    pub fn required_galois_keys<'a>(&'a self) -> impl 'a + Iterator<Item = &'a ZnEl> {
+    pub fn required_galois_keys<'a>(&'a self) -> impl Iterator<Item = &'a ZnEl> + 'a {
         self.baby_step_galois_elements.iter().chain(self.giant_step_galois_elements.iter().filter_map(|x| x.as_ref()))
     }
 

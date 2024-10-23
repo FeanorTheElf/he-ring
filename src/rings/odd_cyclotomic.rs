@@ -388,7 +388,7 @@ impl<R, F, A> OddCyclotomicDecomposedNumberRing<R, F, A>
     /// is an index into the vector of evaluations, and `j` is an index into the output of the base 
     /// FFT.
     /// 
-    fn fft_output_indices<'a>(&'a self) -> impl 'a + Iterator<Item = (usize, usize)> {
+    fn fft_output_indices<'a>(&'a self) -> impl Iterator<Item = (usize, usize)> + 'a {
         self.fft_output_indices_to_indices.iter().enumerate().filter_map(|(i, j)| if *j == usize::MAX { None } else { Some((*j, i)) })
     }
 }

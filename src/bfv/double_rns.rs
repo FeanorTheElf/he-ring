@@ -174,7 +174,7 @@ impl<P: DoubleRNSBFVParams> BFVParams for P {
     }
     
     fn clone_ct(C: &CiphertextRing<Self>, ct: &Ciphertext<Self>) -> Ciphertext<Self> {
-        return (ct.0.clone(C), ct.1.clone(C));
+        (ct.0.clone(C), ct.1.clone(C))
     }
     
     fn hom_add_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
@@ -294,7 +294,7 @@ impl<P: DoubleRNSBFVParams> BFVParams for P {
     fn gen_gk<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing<Self>, rng: R, sk: &SecretKey<Self>, g: ZnEl) -> KeySwitchKey<'a, Self>
         where Self: 'a
     {
-        Self::gen_switch_key::<R>(C, rng, &C.get_ring().apply_galois_action(sk, g), sk)
+        Self::gen_switch_key(C, rng, &C.get_ring().apply_galois_action(sk, g), sk)
     }
     
     fn hom_galois<'a>(C: &CiphertextRing<Self>, ct: Ciphertext<Self>, g: ZnEl, gk: &KeySwitchKey<'a, Self>) -> Ciphertext<Self>
@@ -480,7 +480,7 @@ impl DoubleRNSBFVParams for Pow2BFVParams {
 }
 
 #[derive(Clone, Debug)]
-pub struct CompositeBFVParams {
+pub struct CompositeDoubleRNSBFVParams {
     pub t: i64,
     pub log2_q_min: usize,
     pub log2_q_max: usize,
@@ -488,7 +488,7 @@ pub struct CompositeBFVParams {
     pub n2: usize
 }
 
-impl DoubleRNSBFVParams for CompositeBFVParams {
+impl DoubleRNSBFVParams for CompositeDoubleRNSBFVParams {
 
     type NumberRing = CompositeCyclotomicDecomposableNumberRing;
 
@@ -563,7 +563,7 @@ fn test_pow2_bfv_mul() {
 fn test_composite_bfv_mul() {
     let mut rng = thread_rng();
     
-    let params = CompositeBFVParams {
+    let params = CompositeDoubleRNSBFVParams {
         t: 8,
         log2_q_min: 700,
         log2_q_max: 800,
@@ -574,18 +574,18 @@ fn test_composite_bfv_mul() {
     let P = params.create_plaintext_ring(params.plaintext_modulus());
     let (C, C_mul) = params.create_ciphertext_rings();
 
-    let sk = CompositeBFVParams::gen_sk(&C, &mut rng);
-    let mul_rescale_data = CompositeBFVParams::create_multiplication_rescale(&P, &C, &C_mul);
-    let rk = CompositeBFVParams::gen_rk(&C, &mut rng, &sk);
+    let sk = CompositeDoubleRNSBFVParams::gen_sk(&C, &mut rng);
+    let mul_rescale_data = CompositeDoubleRNSBFVParams::create_multiplication_rescale(&P, &C, &C_mul);
+    let rk = CompositeDoubleRNSBFVParams::gen_rk(&C, &mut rng, &sk);
 
     let m = P.int_hom().map(2);
-    let ct = CompositeBFVParams::enc_sym(&P, &C, &mut rng, &m, &sk);
+    let ct = CompositeDoubleRNSBFVParams::enc_sym(&P, &C, &mut rng, &m, &sk);
 
-    let m = CompositeBFVParams::dec(&P, &C, CompositeBFVParams::clone_ct(&C, &ct), &sk);
+    let m = CompositeDoubleRNSBFVParams::dec(&P, &C, CompositeDoubleRNSBFVParams::clone_ct(&C, &ct), &sk);
     assert_el_eq!(&P, &P.int_hom().map(2), &m);
     
-    let ct_sqr = CompositeBFVParams::hom_mul(&C, &C_mul, CompositeBFVParams::clone_ct(&C, &ct), CompositeBFVParams::clone_ct(&C, &ct), &rk, &mul_rescale_data);
-    let m_sqr = CompositeBFVParams::dec(&P, &C, ct_sqr, &sk);
+    let ct_sqr = CompositeDoubleRNSBFVParams::hom_mul(&C, &C_mul, CompositeDoubleRNSBFVParams::clone_ct(&C, &ct), CompositeDoubleRNSBFVParams::clone_ct(&C, &ct), &rk, &mul_rescale_data);
+    let m_sqr = CompositeDoubleRNSBFVParams::dec(&P, &C, ct_sqr, &sk);
 
     assert_el_eq!(&P, &P.int_hom().map(4), &m_sqr);
 }

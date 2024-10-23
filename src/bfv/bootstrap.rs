@@ -23,7 +23,7 @@ use crate::lintransform::CompiledLinearTransform;
 use crate::rings::slots::*;
 
 use super::*;
-use super::double_rns::{CompositeBFVParams, DoubleRNSBFVParams, Pow2BFVParams};
+use super::double_rns::{CompositeDoubleRNSBFVParams, DoubleRNSBFVParams, Pow2BFVParams};
 
 pub struct ThinBootstrapParams<Params: BFVParams> {
     params: Params,
@@ -372,9 +372,7 @@ fn hom_evaluate_circuit<'a, 'b, Params: BFVParams>(
     rk: &'a RelinKey<'b, Params>, 
     mul_rescale: &'a MulConversionData, 
     key_switches: &'a mut usize
-) -> impl 'a + ExactSizeIterator<Item = Ciphertext<Params>>
-    where 'b: 'a
-{
+) -> impl ExactSizeIterator<Item = Ciphertext<Params>> + use<'a, 'b, Params> {
     return circuit.evaluate_generic(
         std::slice::from_ref(input), 
         |lhs, rhs, factor| {
@@ -476,7 +474,7 @@ fn test_pow2_bfv_thin_bootstrapping_23() {
 fn test_composite_bfv_thin_bootstrapping_2() {
     let mut rng = thread_rng();
     
-    let params = CompositeBFVParams {
+    let params = CompositeDoubleRNSBFVParams {
         t: 8,
         log2_q_min: 750,
         log2_q_max: 800,
@@ -490,12 +488,12 @@ fn test_composite_bfv_thin_bootstrapping_2() {
 
     let bootstrapping_data = bootstrapper.create_all_bootstrapping_data(&C, &C_mul);
     
-    let sk = CompositeBFVParams::gen_sk(&C, &mut rng);
-    let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, CompositeBFVParams::gen_gk(&C, &mut rng, &sk, g))).collect::<Vec<_>>();
-    let rk = CompositeBFVParams::gen_rk(&C, &mut rng, &sk);
+    let sk = CompositeDoubleRNSBFVParams::gen_sk(&C, &mut rng);
+    let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, CompositeDoubleRNSBFVParams::gen_gk(&C, &mut rng, &sk, g))).collect::<Vec<_>>();
+    let rk = CompositeDoubleRNSBFVParams::gen_rk(&C, &mut rng, &sk);
     
     let m = P.int_hom().map(2);
-    let ct = CompositeBFVParams::enc_sym(&P, &C, &mut rng, &m, &sk);
+    let ct = CompositeDoubleRNSBFVParams::enc_sym(&P, &C, &mut rng, &m, &sk);
     let res_ct = bootstrapper.bootstrap_thin::<true>(
         &C, 
         &C_mul, 
@@ -509,5 +507,5 @@ fn test_composite_bfv_thin_bootstrapping_2() {
         None
     );
 
-    assert_el_eq!(P, P.int_hom().map(2), CompositeBFVParams::dec(&P, &C, res_ct, &sk));
+    assert_el_eq!(P, P.int_hom().map(2), CompositeDoubleRNSBFVParams::dec(&P, &C, res_ct, &sk));
 }

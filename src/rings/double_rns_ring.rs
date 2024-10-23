@@ -260,13 +260,17 @@ impl<NumberRing, FpTy, A> DoubleRNSRingBase<NumberRing, FpTy, A>
         }
     }
 
-    pub fn negate_non_fft(&self, mut val: CoeffEl<NumberRing, FpTy, A>) -> CoeffEl<NumberRing, FpTy, A> {
+    pub fn negate_inplace_non_fft(&self, val: &mut CoeffEl<NumberRing, FpTy, A>) {
         assert_eq!(self.element_len(), val.data.len());
         for i in 0..self.rns_base().len() {
             for j in 0..self.rank() {
                 self.rns_base().at(i).negate_inplace(&mut val.data[i * self.rank() + j]);
             }
         }
+    }
+
+    pub fn negate_non_fft(&self, mut val: CoeffEl<NumberRing, FpTy, A>) -> CoeffEl<NumberRing, FpTy, A> {
+        self.negate_inplace_non_fft(&mut val);
         return val;
     }
 

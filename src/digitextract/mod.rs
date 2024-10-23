@@ -273,7 +273,7 @@ impl ArithCircuit {
         self.output_transforms.len()
     }
 
-    pub fn evaluate<'a, R>(&'a self, inputs: &'a [El<R>], ring: R) -> impl 'a + ExactSizeIterator<Item = El<R>>
+    pub fn evaluate<'a, R>(&'a self, inputs: &'a [El<R>], ring: R) -> impl ExactSizeIterator<Item = El<R>> + 'a
         where R: 'a + RingStore + Clone,
             R::Type: CanHomFrom<StaticRingBase<i64>>
     {
@@ -290,7 +290,7 @@ impl ArithCircuit {
         return self.output_transforms.iter().map(move |t| t.evaluate(inputs, &current, &ring, &hom));
     }
 
-    pub fn evaluate_generic<'a, T, AddScaled, Mul, FromI64>(&'a self, inputs: &'a [T], mut add_scaled_fn: AddScaled, mut mul_fn: Mul, mut from_fn: FromI64) -> impl 'a + ExactSizeIterator<Item = T>
+    pub fn evaluate_generic<'a, T, AddScaled, Mul, FromI64>(&'a self, inputs: &'a [T], mut add_scaled_fn: AddScaled, mut mul_fn: Mul, mut from_fn: FromI64) -> impl ExactSizeIterator<Item = T> + 'a
         where AddScaled: 'a + FnMut(T, &T, i64) -> T,
             Mul: 'a + FnMut(T, T) -> T,
             FromI64: 'a + FnMut(i64) -> T

@@ -36,7 +36,11 @@ pub trait CyclotomicRing: FreeAlgebra {
         zn_64::Zn::new(self.n())
     }
 
-    fn apply_galois_action(&self, el: &Self::Element, s: zn_64::ZnEl) -> Self::Element;
+    fn apply_galois_action(&self, x: &Self::Element, g: zn_64::ZnEl) -> Self::Element;
+
+    fn apply_galois_action_many<'a>(&'a self, x: &'a Self::Element, gs: &'a [zn_64::ZnEl]) -> impl 'a + ExactSizeIterator<Item = Self::Element> {
+        gs.into_iter().map(move |g| self.apply_galois_action(x, *g))
+    }
 }
 
 ///
