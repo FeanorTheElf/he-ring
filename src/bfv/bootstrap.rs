@@ -1,3 +1,5 @@
+
+use double_rns::CoeffOrDoubleRNSEl;
 use feanor_math::algorithms::int_factor::is_prime_power;
 use feanor_math::homomorphism::Homomorphism;
 use feanor_math::integer::{int_cast, IntegerRingStore};
@@ -21,6 +23,7 @@ use crate::lintransform::CompiledLinearTransform;
 use crate::rings::slots::*;
 
 use super::*;
+use super::double_rns::{CompositeBFVParams, DoubleRNSBFVParams, Pow2BFVParams};
 
 pub struct ThinBootstrapParams<Params: BFVParams> {
     params: Params,
@@ -69,12 +72,12 @@ pub struct BootstrappingDataBundle<Params: BFVParams> {
 impl ThinBootstrapParams<Pow2BFVParams> {
 
     pub fn build_pow2<const LOG: bool>(params: Pow2BFVParams, config: BootstrapperConfig) -> Self {
-        let (p, r) = is_prime_power(&ZZ, &params.t()).unwrap();
+        let (p, r) = is_prime_power(&ZZ, &params.plaintext_modulus()).unwrap();
         let s_can_norm = <_ as DecomposableNumberRing<Zn>>::inf_to_can_norm_expansion_factor(&params.number_ring());
         let v = config.set_v.unwrap_or(((s_can_norm + 1.).log2() / (p as f64).log2()).ceil() as usize);
         let e = r + v;
         if LOG {
-            println!("Setting up bootstrapping for plaintext modulus p^r = {}^{} = {} within the cyclotomic ring Q[X]/(Phi_{})", p, r, params.t(), <_ as DecomposableCyclotomicNumberRing<Zn>>::n(&params.number_ring()));
+            println!("Setting up bootstrapping for plaintext modulus p^r = {}^{} = {} within the cyclotomic ring Q[X]/(Phi_{})", p, r, params.plaintext_modulus(), <_ as DecomposableCyclotomicNumberRing<Zn>>::n(&params.number_ring()));
             println!("Choosing e = r + v = {} + {}", r, v);
         }
 
@@ -117,12 +120,12 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
     pub fn build_odd<const LOG: bool>(params: Params, config: BootstrapperConfig) -> Self {
         assert!(params.number_ring().n() % 2 != 0);
 
-        let (p, r) = is_prime_power(&ZZ, &params.t()).unwrap();
+        let (p, r) = is_prime_power(&ZZ, &params.plaintext_modulus()).unwrap();
         let s_can_norm = params.number_ring().inf_to_can_norm_expansion_factor();
         let v = config.set_v.unwrap_or(((s_can_norm + 1.).log2() / (p as f64).log2()).ceil() as usize);
         let e = r + v;
         if LOG {
-            println!("Setting up bootstrapping for plaintext modulus p^r = {}^{} = {} within the cyclotomic ring Q[X]/(Phi_{})", p, r, params.t(), params.number_ring().n());
+            println!("Setting up bootstrapping for plaintext modulus p^r = {}^{} = {} within the cyclotomic ring Q[X]/(Phi_{})", p, r, params.plaintext_modulus(), params.number_ring().n());
             println!("Choosing e = r + v = {} + {}", r, v);
         }
 
@@ -166,10 +169,10 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
         e: usize,
         p: i64,
         digit_extract_circuits: Vec<ArithCircuit>,
-        slots_to_coeffs_thin: Vec<CompiledLinearTransform<Params::NumberRing>>,
-        coeffs_to_slots_thin: (Vec<CompiledLinearTransform<Params::NumberRing>>, Option<Trace>)
+        slots_to_coeffs_thin: Vec<CompiledLinearTransform<<Params as BFVParams>::NumberRing>>,
+        coeffs_to_slots_thin: (Vec<CompiledLinearTransform<<Params as BFVParams>::NumberRing>>, Option<Trace>)
     ) -> Self {
-        assert_eq!(params.t(), ZZ.pow(p, r));
+        assert_eq!(params.plaintext_modulus(), ZZ.pow(p, r));
         let v = e - r;
         assert_eq!(v, digit_extract_circuits.len());
         for k in 0..v {
@@ -192,24 +195,28 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
         unimplemented!()
     }
 
+}
+
+impl<Params: BFVParams> ThinBootstrapParams<Params> {
+
     pub fn create_bootstrapping_plaintext_ring_hierarchy(&self) -> Vec<PlaintextRing<Params>> {
         ((self.r + 1)..=self.e).rev().map(|k| self.params.create_plaintext_ring(ZZ.pow(self.p, k))).collect()
     }
 
     pub fn create_modulus_switch(&self, P_bootstrap: &[PlaintextRing<Params>], C: &CiphertextRing<Params>) -> ModSwitchData {
-        let allocator = C.get_ring().allocator().clone();
+        let allocator = Global;
         ModSwitchData {
             scale: rnsconv::bfv_rescale::AlmostExactRescaling::new_with(
-                C.get_ring().rns_base().as_iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
+                C.base_ring().as_iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
                 vec![ Zn::new(*P_bootstrap[0].base_ring().modulus() as u64) ], 
-                C.get_ring().rns_base().len(), 
+                C.base_ring().len(), 
                 allocator.clone()
             )
         }
     }
 
     pub fn create_multiplication_rescale_hierarchy(&self, P_bootstrap: &[PlaintextRing<Params>], C: &CiphertextRing<Params>, C_mul: &CiphertextRing<Params>) -> Vec<MulConversionData> {
-        ((self.r + 1)..=self.e).rev().enumerate().map(|(i, _k)| create_multiplication_rescale::<Params>(&P_bootstrap[i], C, C_mul)).collect()
+        ((self.r + 1)..=self.e).rev().enumerate().map(|(i, _k)| Params::create_multiplication_rescale(&P_bootstrap[i], C, C_mul)).collect()
     }
 
     pub fn create_all_bootstrapping_data(&self, C: &CiphertextRing<Params>, C_mul: &CiphertextRing<Params>) -> BootstrappingDataBundle<Params> {
@@ -250,72 +257,68 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
             println!("Starting Bootstrapping")
         }
         if let Some(sk) = debug_sk {
-            dec_println_slots(P_base, C, &ct, sk);
+            Params::dec_println_slots(P_base, C, &ct, sk);
         }
 
         let P_main = &P_bootstrap[0];
-        let delta_bootstrap = C.base_ring().coerce(&ZZbig, ZZbig.rounded_div(
-            ZZbig.clone_el(C.base_ring().modulus()), 
-            &int_cast(*P_main.base_ring().modulus() as i32, &ZZbig, &StaticRing::<i32>::RING)
-        ));
         let rounding_divisor_half = P_main.base_ring().coerce(&ZZbig, ZZbig.rounded_div(ZZbig.pow(int_cast(self.p, ZZbig, ZZ), self.e - self.r), &ZZbig.int_hom().map(2)));
 
         let values_in_coefficients = log_time::<_, _, LOG, _>("1. Computing Slots-to-Coeffs transform", |[key_switches]| {
-            return hom_compute_linear_transform(P_base, C, ct, &self.slots_to_coeffs_thin, gk, key_switches);
+            return hom_compute_linear_transform::<Params>(P_base, C, ct, &self.slots_to_coeffs_thin, gk, key_switches);
         });
         if let Some(sk) = debug_sk {
-            dec_println(P_base, C, &values_in_coefficients, sk);
+            Params::dec_println(P_base, C, &values_in_coefficients, sk);
         }
 
         let noisy_decryption = log_time::<_, _, LOG, _>("2. Computing noisy decryption c0 + c1 * s", |[key_switches]| {
-            let (c0, c1) = mod_switch_to_plaintext(P_main, C, values_in_coefficients, mod_switch);
-            let enc_sk = (CoeffOrNTTRingEl::zero(), CoeffOrNTTRingEl::from_coeff(C.get_ring().non_fft_from(delta_bootstrap)));
+            let (c0, c1) = Params::mod_switch_to_plaintext(P_main, C, values_in_coefficients, mod_switch);
+            let enc_sk = Params::enc_sk(P_main, C);
             *key_switches += 1;
-            return hom_add_plain(P_main, C, &c0, hom_mul_plain(P_main, C, &c1, enc_sk));
+            return Params::hom_add_plain(P_main, C, &c0, Params::hom_mul_plain(P_main, C, &c1, enc_sk));
         });
         if let Some(sk) = debug_sk {
-            dec_println(P_main, C, &noisy_decryption, sk);
+            Params::dec_println(P_main, C, &noisy_decryption, sk);
         }
 
         let noisy_decryption_in_slots = log_time::<_, _, LOG, _>("3. Computing Coeffs-to-Slots transform", |[key_switches]| {
-            let moved_to_slots = hom_compute_linear_transform(P_main, C, noisy_decryption, &self.coeffs_to_slots_thin.0, gk, key_switches);
+            let moved_to_slots = hom_compute_linear_transform::<Params>(P_main, C, noisy_decryption, &self.coeffs_to_slots_thin.0, gk, key_switches);
             if let Some(trace) = &self.coeffs_to_slots_thin.1 {
-                return hom_compute_trace(P_main, C, moved_to_slots, trace, gk, key_switches);
+                return hom_compute_trace::<Params>(P_main, C, moved_to_slots, trace, gk, key_switches);
             } else {
                 return moved_to_slots;
             };
         });
         if let Some(sk) = debug_sk {
-            dec_println_slots(P_main, C, &noisy_decryption_in_slots, sk);
+            Params::dec_println_slots(P_main, C, &noisy_decryption_in_slots, sk);
         }
 
         if LOG {
             println!("4. Performing digit extraction");
         }
-        let digit_extraction_input = hom_add_plain(P_main, C, &P_main.inclusion().map(rounding_divisor_half), noisy_decryption_in_slots);
-        let mut result = clone_ct(C, &digit_extraction_input);
+        let digit_extraction_input = Params::hom_add_plain(P_main, C, &P_main.inclusion().map(rounding_divisor_half), noisy_decryption_in_slots);
+        let mut result = Params::clone_ct(C, &digit_extraction_input);
         let result_ref = &mut result;
         let mut digit_extracted: Vec<Vec<Ciphertext<Params>>> = Vec::new();
         for (i, k) in ((self.r + 1)..(self.e + 1)).rev().enumerate() {
             let P_current =  &P_bootstrap[i];
             let current_mul_rescale = &mul_rescale_bootstrap[i];
             log_time::<_, _, LOG, _>(format!("Extracting {}-th digit", i).as_str(), |[key_switches]| {
-                let mut current_ct = clone_ct(C, &digit_extraction_input);
+                let mut current_ct = Params::clone_ct(C, &digit_extraction_input);
                 assert_eq!(i, digit_extracted.len());
                 for j in 0..i {
-                    current_ct = hom_sub(C, current_ct, &digit_extracted[j][i - j - 1]);
+                    current_ct = Params::hom_sub(C, current_ct, &digit_extracted[j][i - j - 1]);
                 }
     
-                let lowest_digit = hom_evaluate_circuit(P_current, C, C_mul, &current_ct, &self.digit_extract_circuits[i], rk, current_mul_rescale, key_switches);
+                let lowest_digit = hom_evaluate_circuit::<Params>(P_current, C, C_mul, &current_ct, &self.digit_extract_circuits[i], rk, current_mul_rescale, key_switches);
                 let mut lowest_digit = lowest_digit.collect::<Vec<_>>();
                 assert_eq!(k - self.r, lowest_digit.len());
     
-                *result_ref = hom_sub(C, clone_ct(C, result_ref), &lowest_digit.pop().unwrap());
+                *result_ref = Params::hom_sub(C, Params::clone_ct(C, result_ref), &lowest_digit.pop().unwrap());
                 digit_extracted.push(lowest_digit);
     
             });
             if let Some(sk) = debug_sk {
-                dec_println_slots(P_current, C, result_ref, sk);
+                Params::dec_println_slots(P_current, C, result_ref, sk);
             }
         }
 
@@ -323,56 +326,70 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
     }
 }
 
-fn hom_compute_linear_transform<Params: BFVParams>(P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, input: Ciphertext<Params>, transform: &[CompiledLinearTransform<Params::NumberRing>], gk: &[(ZnEl, KeySwitchKey<Params>)], key_switches: &mut usize) -> Ciphertext<Params> {
-    let Gal = P.get_ring().cyclotomic_index_ring();
-    let get_gk = |g: &ZnEl| &gk.iter().filter(|(s, _)| Gal.eq_el(g, s)).next().unwrap().1;
+fn hom_compute_linear_transform<'a, Params: BFVParams>(
+    P: &PlaintextRing<Params>, 
+    C: &CiphertextRing<Params>, 
+    input: Ciphertext<Params>, 
+    transform: &[CompiledLinearTransform<<Params as BFVParams>::NumberRing>], 
+    gk: &[(ZnEl, KeySwitchKey<'a, Params>)], 
+    key_switches: &mut usize
+) -> Ciphertext<Params> {
+    fn get_gk<'a, 'b, 'c, 'd, Params: BFVParams>(P: &'d PlaintextRing<Params>, gk: &'c [(ZnEl, KeySwitchKey<'a, Params>)], g: &'b ZnEl) -> &'c KeySwitchKey<'a, Params> {
+        let Gal = P.get_ring().cyclotomic_index_ring();
+        &gk.into_iter().filter(|(s, _)| Gal.eq_el(g, s)).next().unwrap().1
+    }
+
     return transform.iter().fold(input, |current, T| T.evaluate_generic(
         current,
         |lhs, rhs, factor| {
-            *lhs = hom_add(C, hom_mul_plain(P, C, factor, clone_ct(C, rhs)), lhs)
+            *lhs = Params::hom_add(C, Params::hom_mul_plain(P, C, factor, Params::clone_ct(C, rhs)), lhs)
         }, 
         |value, gs| {
             *key_switches += gs.len();
-            hom_galois_many(C, value, gs, gs.map(|g| get_gk(g))).into_iter()
-                // enforce ntt repr, as otherwise we might clone els in coeff repr and perform ntt many times on the same element during summation
-                .map(|(c0, c1)| (c0.ntt_repr(C), c1.ntt_repr(C)))
-                .collect::<Vec<_>>()
+            Params::hom_galois_many(C, value, gs, gs.map(|g| get_gk::<Params>(P, gk, g) as &KeySwitchKey<'a, Params>))
         },
-        || (CoeffOrNTTRingEl::zero(), CoeffOrNTTRingEl::zero())
+        || Params::transparent_zero(C)
     ));
 }
 
 fn hom_compute_trace<Params: BFVParams>(P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, input: Ciphertext<Params>, trace: &Trace, gk: &[(ZnEl, KeySwitchKey<Params>)], key_switches: &mut usize) -> Ciphertext<Params> {
     let Gal = P.get_ring().cyclotomic_index_ring();
     let get_gk = |g: &ZnEl| &gk.iter().filter(|(s, _)| Gal.eq_el(g, s)).next().unwrap().1;
-    return trace.evaluate_generic(input, |x, y| hom_add(C, x, y), |x, g| {
+    return trace.evaluate_generic(input, |x, y| Params::hom_add(C, x, y), |x, g| {
         if !Gal.is_one(&g) {
             *key_switches += 1;
-            hom_galois(C, clone_ct(C, x), g, get_gk(&g))
+            Params::hom_galois(C, Params::clone_ct(C, x), g, get_gk(&g))
         } else {
-            clone_ct(C, x)
+            Params::clone_ct(C, x)
         }
-    }, |x| clone_ct(C, x));
+    }, |x| Params::clone_ct(C, x));
 }
 
-fn hom_evaluate_circuit<'a, Params: BFVParams>(P: &'a PlaintextRing<Params>, C: &'a CiphertextRing<Params>, C_mul: &'a CiphertextRing<Params>, input: &'a Ciphertext<Params>, circuit: &'a ArithCircuit, rk: &'a RelinKey<Params>, mul_rescale: &'a MulConversionData, key_switches: &'a mut usize) -> impl 'a + ExactSizeIterator<Item = Ciphertext<Params>> {
-    let delta = C.base_ring().coerce(&ZZbig, ZZbig.rounded_div(
-        ZZbig.clone_el(C.base_ring().modulus()), 
-        &int_cast(*P.base_ring().modulus() as i32, &ZZbig, &StaticRing::<i32>::RING)
-    ));
+fn hom_evaluate_circuit<'a, 'b, Params: BFVParams>(
+    P: &'a PlaintextRing<Params>, 
+    C: &'a CiphertextRing<Params>, 
+    C_mul: &'a CiphertextRing<Params>, 
+    input: &'a Ciphertext<Params>, 
+    circuit: &'a ArithCircuit, 
+    rk: &'a RelinKey<'b, Params>, 
+    mul_rescale: &'a MulConversionData, 
+    key_switches: &'a mut usize
+) -> impl 'a + ExactSizeIterator<Item = Ciphertext<Params>>
+    where 'b: 'a
+{
     return circuit.evaluate_generic(
         std::slice::from_ref(input), 
         |lhs, rhs, factor| {
-            let result = hom_add(C, hom_mul_plain_i64(P, C, factor, clone_ct(C, rhs)), &lhs);
+            let result = Params::hom_add(C, Params::hom_mul_plain_i64(P, C, factor, Params::clone_ct(C, rhs)), &lhs);
             return result;
         }, 
         |lhs, rhs| {
             *key_switches += 1;
-            let result =  hom_mul(C, C_mul, lhs, rhs, rk, mul_rescale);
+            let result =  Params::hom_mul(C, C_mul, lhs, rhs, rk, mul_rescale);
             return result;
         }, 
         move |x| {
-            (CoeffOrNTTRingEl::from_coeff(C.get_ring().non_fft_from(C.base_ring().mul_ref_fst(&delta, C.base_ring().coerce(&ZZ, x)))), CoeffOrNTTRingEl::zero())
+            Params::hom_add_plain(P, C, &P.inclusion().compose(P.base_ring().can_hom(&ZZ).unwrap()).map(x), Params::transparent_zero(C))
         }
     );
 }
@@ -390,17 +407,17 @@ fn test_pow2_bfv_thin_bootstrapping_17() {
     };
     let bootstrapper = ThinBootstrapParams::build_pow2::<true>(params.clone(), DEFAULT_CONFIG);
     
-    let P = params.create_plaintext_ring(params.t());
+    let P = params.create_plaintext_ring(params.plaintext_modulus());
     let (C, C_mul) = params.create_ciphertext_rings();
 
     let bootstrapping_data = bootstrapper.create_all_bootstrapping_data(&C, &C_mul);
     
-    let sk = gen_sk::<_, Pow2BFVParams>(&C, &mut rng);
-    let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, gen_gk::<_, Pow2BFVParams>(&C, &mut rng, &sk, g))).collect::<Vec<_>>();
-    let rk = gen_rk::<_, Pow2BFVParams>(&C, &mut rng, &sk);
+    let sk = Pow2BFVParams::gen_sk(&C, &mut rng);
+    let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, Pow2BFVParams::gen_gk(&C, &mut rng, &sk, g))).collect::<Vec<_>>();
+    let rk = Pow2BFVParams::gen_rk(&C, &mut rng, &sk);
     
     let m = P.int_hom().map(2);
-    let ct = enc_sym(&P, &C, &mut rng, &m, &sk);
+    let ct = Pow2BFVParams::enc_sym(&P, &C, &mut rng, &m, &sk);
     let res_ct = bootstrapper.bootstrap_thin::<true>(
         &C, 
         &C_mul, 
@@ -414,7 +431,7 @@ fn test_pow2_bfv_thin_bootstrapping_17() {
         None
     );
 
-    assert_el_eq!(P, P.int_hom().map(2), dec(&P, &C, res_ct, &sk));
+    assert_el_eq!(P, P.int_hom().map(2), Pow2BFVParams::dec(&P, &C, res_ct, &sk));
 }
 
 #[test]
@@ -430,17 +447,17 @@ fn test_pow2_bfv_thin_bootstrapping_23() {
     };
     let bootstrapper = ThinBootstrapParams::build_pow2::<true>(params.clone(), DEFAULT_CONFIG);
     
-    let P = params.create_plaintext_ring(params.t());
+    let P = params.create_plaintext_ring(params.plaintext_modulus());
     let (C, C_mul) = params.create_ciphertext_rings();
 
     let bootstrapping_data = bootstrapper.create_all_bootstrapping_data(&C, &C_mul);
     
-    let sk = gen_sk::<_, Pow2BFVParams>(&C, &mut rng);
-    let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, gen_gk::<_, Pow2BFVParams>(&C, &mut rng, &sk, g))).collect::<Vec<_>>();
-    let rk = gen_rk::<_, Pow2BFVParams>(&C, &mut rng, &sk);
+    let sk = Pow2BFVParams::gen_sk(&C, &mut rng);
+    let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, Pow2BFVParams::gen_gk(&C, &mut rng, &sk, g))).collect::<Vec<_>>();
+    let rk = Pow2BFVParams::gen_rk(&C, &mut rng, &sk);
     
     let m = P.int_hom().map(2);
-    let ct = enc_sym(&P, &C, &mut rng, &m, &sk);
+    let ct = Pow2BFVParams::enc_sym(&P, &C, &mut rng, &m, &sk);
     let res_ct = bootstrapper.bootstrap_thin::<true>(
         &C, 
         &C_mul, 
@@ -454,7 +471,7 @@ fn test_pow2_bfv_thin_bootstrapping_23() {
         None
     );
 
-    assert_el_eq!(P, P.int_hom().map(2), dec(&P, &C, res_ct, &sk));
+    assert_el_eq!(P, P.int_hom().map(2), Pow2BFVParams::dec(&P, &C, res_ct, &sk));
 }
 
 #[test]
@@ -470,17 +487,17 @@ fn test_composite_bfv_thin_bootstrapping_2() {
     };
     let bootstrapper = ThinBootstrapParams::build_odd::<true>(params.clone(), DEFAULT_CONFIG.set_v(11));
     
-    let P = params.create_plaintext_ring(params.t());
+    let P = params.create_plaintext_ring(params.plaintext_modulus());
     let (C, C_mul) = params.create_ciphertext_rings();
 
     let bootstrapping_data = bootstrapper.create_all_bootstrapping_data(&C, &C_mul);
     
-    let sk = gen_sk::<_, CompositeBFVParams>(&C, &mut rng);
-    let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, gen_gk::<_, CompositeBFVParams>(&C, &mut rng, &sk, g))).collect::<Vec<_>>();
-    let rk = gen_rk::<_, CompositeBFVParams>(&C, &mut rng, &sk);
+    let sk = CompositeBFVParams::gen_sk(&C, &mut rng);
+    let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, CompositeBFVParams::gen_gk(&C, &mut rng, &sk, g))).collect::<Vec<_>>();
+    let rk = CompositeBFVParams::gen_rk(&C, &mut rng, &sk);
     
     let m = P.int_hom().map(2);
-    let ct = enc_sym(&P, &C, &mut rng, &m, &sk);
+    let ct = CompositeBFVParams::enc_sym(&P, &C, &mut rng, &m, &sk);
     let res_ct = bootstrapper.bootstrap_thin::<true>(
         &C, 
         &C_mul, 
@@ -494,5 +511,5 @@ fn test_composite_bfv_thin_bootstrapping_2() {
         None
     );
 
-    assert_el_eq!(P, P.int_hom().map(2), dec(&P, &C, res_ct, &sk));
+    assert_el_eq!(P, P.int_hom().map(2), CompositeBFVParams::dec(&P, &C, res_ct, &sk));
 }

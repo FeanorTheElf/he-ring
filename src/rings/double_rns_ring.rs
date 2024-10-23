@@ -382,13 +382,13 @@ impl<NumberRing, FpTy, A> DoubleRNSRingBase<NumberRing, FpTy, A>
         assert!(&self.number_ring == to.get_ring().number_ring());
         assert_eq!(self.rns_base().len(), op.input_rings().len());
         assert_eq!(1, op.output_rings().len());
+        
+        for i in 0..self.rns_base().len() {
+            assert!(self.rns_base().at(i).get_ring() == op.input_rings().at(i).get_ring());
+        }
+        assert!(to.base_ring().get_ring() == op.output_rings().at(0).get_ring());
 
         record_time!("DoubleRNSRing::perform_rns_op_to_cfft", || {
-            for i in 0..self.rns_base().len() {
-                assert!(self.rns_base().at(i).get_ring() == op.input_rings().at(i).get_ring());
-            }
-            assert!(to.base_ring().get_ring() == op.output_rings().at(0).get_ring());
-         
             let mut result = to.zero();
             let result_matrix = SubmatrixMut::from_1d(&mut result.data, 1, to.rank());
             op.apply(self.as_matrix(element), result_matrix);
