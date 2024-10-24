@@ -32,7 +32,7 @@ use crate::rings::decomposition::*;
 use crate::rings::decomposition_ring::*;
 use crate::rings::odd_cyclotomic::*;
 use crate::rings::pow2_cyclotomic::*;
-use crate::rings::gadget_product::*;
+use crate::rings::gadget_product::double_rns::*;
 use crate::rings::double_rns_ring::*;
 use crate::profiling::*;
 use crate::rings::slots::HypercubeIsomorphism;

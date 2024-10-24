@@ -370,7 +370,7 @@ impl<NumberRing, FpTy, A> RingBase for DecompositionRingBase<NumberRing, FpTy, A
         poly_ring.get_ring().dbg(&RingRef::new(self).poly_repr(&poly_ring, value, self.base_ring().identity()), out)
     }
 
-    fn characteristic<I: IntegerRingStore>(&self, ZZ: &I) -> Option<El<I>>
+    fn characteristic<I: IntegerRingStore + Copy>(&self, ZZ: I) -> Option<El<I>>
         where I::Type: IntegerRing
     {
         self.base_ring.characteristic(ZZ)
@@ -518,7 +518,7 @@ impl<NumberRing, FpTy, A> FiniteRing for DecompositionRingBase<NumberRing, FpTy,
         };
     }
 
-    fn size<I: IntegerRingStore>(&self, ZZ: &I) -> Option<El<I>>
+    fn size<I: IntegerRingStore + Copy>(&self, ZZ: I) -> Option<El<I>>
         where I::Type: IntegerRing
     {
         let characteristic = self.base_ring().size(ZZ)?;

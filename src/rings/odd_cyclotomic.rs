@@ -4,7 +4,7 @@ use std::cmp::max;
 
 use bluestein::BluesteinFFT;
 use factor_fft::CoprimeCooleyTuckeyFFT;
-use feanor_math::algorithms::eea::{poly, signed_gcd};
+use feanor_math::algorithms::eea::signed_gcd;
 use feanor_math::algorithms::int_factor::factor;
 use feanor_math::algorithms::miller_rabin::is_prime;
 use feanor_math::algorithms::cyclotomic::cyclotomic_polynomial;
@@ -284,10 +284,7 @@ impl<FpTy> DecomposableNumberRing<FpTy> for CompositeCyclotomicDecomposableNumbe
 
     fn largest_suitable_prime(&self, leq_than: i64) -> Option<i64> {
         let n = self.base.n_factorization_squarefree.iter().copied().product::<i64>();
-        let log2_m = max(
-            StaticRing::<i64>::RING.abs_log2_ceil(&self.n1).unwrap() + 1,
-            StaticRing::<i64>::RING.abs_log2_ceil(&self.n2).unwrap() + 1
-        );
+        let log2_m = StaticRing::<i64>::RING.abs_log2_ceil(&n).unwrap() + 1;
         let modulus = n << log2_m;
         let mut current = (leq_than - 1) - ((leq_than - 1) % modulus) + 1;
         while current > 0 && !is_prime(StaticRing::<i64>::RING, &current, 10) {

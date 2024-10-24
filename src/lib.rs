@@ -13,6 +13,7 @@
 #![allow(unused_imports)]
 #![allow(non_camel_case_types)]
 #![allow(non_upper_case_globals)]
+#![allow(unused_variables)]
 
 #![doc = include_str!("../Readme.md")]
 

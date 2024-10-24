@@ -24,8 +24,7 @@ use crate::rings::decomposition::*;
 use crate::rnsconv::*;
 use crate::IsEq;
 
-use super::decomposition_ring::DecompositionRing;
-use super::decomposition_ring::DecompositionRingBase;
+use super::decomposition_ring::*;
 use super::single_rns_ring::SingleRNSRingBase;
 
 ///
@@ -56,6 +55,7 @@ pub struct DoubleRNSEl<NumberRing, FpTy, A = Global>
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
 {
+    // should also be visible in gadget_product::double_rns
     pub(super) number_ring: PhantomData<NumberRing>,
     pub(super) allocator: PhantomData<A>,
     pub(super) data: Vec<El<FpTy>, A>
@@ -67,6 +67,7 @@ pub struct CoeffEl<NumberRing, FpTy, A = Global>
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
 {
+    // should also be visible in gadget_product::double_rns
     pub(super) number_ring: PhantomData<NumberRing>,
     pub(super) allocator: PhantomData<A>,
     pub(super) data: Vec<El<FpTy>, A>
@@ -524,7 +525,7 @@ impl<NumberRing, FpTy, A> RingBase for DoubleRNSRingBase<NumberRing, FpTy, A>
         }
     }
 
-    fn characteristic<I: IntegerRingStore>(&self, ZZ: &I) -> Option<El<I>>
+    fn characteristic<I: IntegerRingStore + Copy>(&self, ZZ: I) -> Option<El<I>>
         where I::Type: IntegerRing
     {
         self.base_ring().characteristic(ZZ)     
@@ -736,7 +737,7 @@ impl<NumberRing, FpTy, A> FiniteRing for DoubleRNSRingBase<NumberRing, FpTy, A>
         multi_cartesian_product((0..self.rank()).map(|_| self.base_ring().elements()), WRTCanonicalBasisElementCreator { ring: self }, CloneRingEl(self.base_ring()))
     }
 
-    fn size<I: IntegerRingStore>(&self, ZZ: &I) -> Option<El<I>>
+    fn size<I: IntegerRingStore + Copy>(&self, ZZ: I) -> Option<El<I>>
         where I::Type: IntegerRing
     {
         let modulus = self.base_ring().size(ZZ)?;
@@ -873,8 +874,8 @@ impl<NumberRing, FpTy1, FpTy2, A1, A2> CanIsoFromTo<DoubleRNSRingBase<NumberRing
 
 #[cfg(test)]
 pub fn test_with_number_ring<NumberRing: Clone + DecomposableNumberRing<zn_64::Zn>>(number_ring: NumberRing) {
-    let p1 = number_ring.largest_suitable_prime(1000).unwrap();
-    let p2 = number_ring.largest_suitable_prime(2000).unwrap();
+    let p1 = number_ring.largest_suitable_prime(10000).unwrap();
+    let p2 = number_ring.largest_suitable_prime(20000).unwrap();
     assert!(p1 != p2);
     let rank = number_ring.rank();
     let base_ring = zn_rns::Zn::new(vec![zn_64::Zn::new(p1 as u64), zn_64::Zn::new(p2 as u64)], BigIntRing::RING);

@@ -39,6 +39,10 @@ pub enum GadgetProductRhsOperand<'a, NumberRing, A = Global>
     Naive(&'a DoubleRNSRingBase<NumberRing, Zn, A>, Vec<El<DoubleRNSRing<NumberRing, Zn, A>>>)
 }
 
+///
+/// LKSS-style lhs gadget product operand; 
+/// Stores the noisy approximations to `lift((q / pi)^-1 mod pi) * q / pi * x`
+/// 
 pub struct LKSSGadgetProductRhsOperand<'a, NumberRing, A = Global> 
     where NumberRing: DecomposableNumberRing<Zn>,
         A: Allocator + Clone
@@ -110,7 +114,7 @@ impl<'a, NumberRing, A> GadgetProductLhsOperand<'a, NumberRing, A>
 }
 
 ///
-/// LKSS-style gadget product operand; 
+/// LKSS-style lhs gadget product operand; 
 /// Stores the RNS-decomposition components of the element in NTT form, however not w.r.t. the whole RNS base
 /// but only w.r.t. `output_moduli_count` of its RNS factors. Currently we use the last `output_moduli_count`
 /// RNS factors.
@@ -157,14 +161,16 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, Zn, A>
         A: Allocator + Clone
 {
     ///
-    /// `gadget_decompose()[decomposed_component][rns_base_index][coefficient_index]` contains the 
-    /// `coefficient_index`-th fourier coefficient modulo `rns_base.at(rns_base_index)` of the 
-    /// `decomposed_component`-th element of the gadget decomposition vector.
+    /// `gadget_decompose()[decomposed_component][rns_base_index * self.rank() + coefficient_index]` contains the 
+    /// `coefficient_index`-th fourier coefficient modulo `shortened_rns_base.at(rns_base_index)` of the 
+    /// `decomposed_component`-th element of the gadget decomposition vector. Here `shortened_rns_base` is formed
+    /// by the last `output_moduli_count` rns components of the main rns base.
     /// 
     /// The order of the fourier coefficients is the same as specified by the corresponding [`GeneralizedFFT`].
     /// 
     fn gadget_decompose(&self, el: CoeffEl<NumberRing, Zn, A>, output_moduli_count: usize) -> Vec<Vec<ZnEl, A>, A> {
         let mut result = Vec::new_in(self.allocator().clone());
+        let el_as_matrix = self.as_matrix(&el);
 
         let homs = (0..output_moduli_count).map(|k| self.rns_base().at(self.rns_base().len() - output_moduli_count + k).can_hom::<StaticRing<i64>>(&StaticRing::<i64>::RING).unwrap()).collect::<Vec<_>>();
         for i in 0..self.rns_base().len() {
@@ -172,7 +178,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, Zn, A>
             part.extend((0..(output_moduli_count * self.rank())).map(|idx| {
                 let k = idx / self.rank();
                 let j = idx % self.rank();
-                homs[k].map(self.rns_base().at(i).smallest_lift(self.rns_base().at(i).clone_el(self.at(i, j, &el))))
+                homs[k].map(self.rns_base().at(i).smallest_lift(self.rns_base().at(i).clone_el(el_as_matrix.at(i, j))))
             }));
             result.push(part);
             for k in 0..output_moduli_count {

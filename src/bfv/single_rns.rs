@@ -7,8 +7,6 @@ use crate::rings::single_rns_ring::{SingleRNSRing, SingleRNSRingBase};
 
 use super::*;
 
-pub type CiphertextRingConvolution = FFTRNSBasedConvolutionZn;
-
 #[derive(Clone, Debug)]
 pub struct CompositeSingleRNSBFVParams {
     pub t: i64,
@@ -21,8 +19,8 @@ pub struct CompositeSingleRNSBFVParams {
 impl BFVParams for CompositeSingleRNSBFVParams {
 
     type NumberRing = CompositeCyclotomicDecomposableNumberRing;
-    type CiphertextRing = SingleRNSRing<Self::NumberRing, Zn, CiphertextAllocator, CiphertextRingConvolution>;
-    type CiphertextRingBase = SingleRNSRingBase<Self::NumberRing, Zn, CiphertextAllocator, CiphertextRingConvolution>;
+    type CiphertextRing = SingleRNSRing<Self::NumberRing, Zn, CiphertextAllocator>;
+    type CiphertextRingBase = SingleRNSRingBase<Self::NumberRing, Zn, CiphertextAllocator>;
     type Ciphertext = (El<Self::CiphertextRing>, El<Self::CiphertextRing>);
     type KeySwitchKey<'a> = ()
         where Self: 'a;
