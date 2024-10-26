@@ -872,7 +872,7 @@ impl<NumberRing, FpTy1, FpTy2, A1, A2> CanIsoFromTo<DoubleRNSRingBase<NumberRing
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "generic_tests"))]
 pub fn test_with_number_ring<NumberRing: Clone + DecomposableNumberRing<zn_64::Zn>>(number_ring: NumberRing) {
     use crate::profiling::{clear_all_timings, print_all_timings};
 

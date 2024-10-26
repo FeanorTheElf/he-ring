@@ -636,7 +636,7 @@ impl<NumberRing, FpTy1, FpTy2, A1, A2, C1, C2> CanIsoFromTo<SingleRNSRingBase<Nu
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "generic_tests"))]
 pub fn test_with_number_ring<NumberRing: Clone + DecomposableNumberRing<zn_64::Zn>>(number_ring: NumberRing) {
     let p1 = number_ring.largest_suitable_prime(20000).unwrap();
     let p2 = number_ring.largest_suitable_prime(p1 - 1).unwrap();
