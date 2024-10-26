@@ -874,8 +874,10 @@ impl<NumberRing, FpTy1, FpTy2, A1, A2> CanIsoFromTo<DoubleRNSRingBase<NumberRing
 
 #[cfg(test)]
 pub fn test_with_number_ring<NumberRing: Clone + DecomposableNumberRing<zn_64::Zn>>(number_ring: NumberRing) {
-    let p1 = number_ring.largest_suitable_prime(10000).unwrap();
-    let p2 = number_ring.largest_suitable_prime(20000).unwrap();
+    use crate::profiling::{clear_all_timings, print_all_timings};
+
+    let p1 = number_ring.largest_suitable_prime(20000).unwrap();
+    let p2 = number_ring.largest_suitable_prime(p1 - 1).unwrap();
     assert!(p1 != p2);
     let rank = number_ring.rank();
     let base_ring = zn_rns::Zn::new(vec![zn_64::Zn::new(p1 as u64), zn_64::Zn::new(p2 as u64)], BigIntRing::RING);
@@ -893,7 +895,13 @@ pub fn test_with_number_ring<NumberRing: Clone + DecomposableNumberRing<zn_64::Z
         ring.int_hom().mul_map(ring.canonical_gen(), p1 as i32)
     ];
 
+    print_all_timings();
+    clear_all_timings();
+
     feanor_math::ring::generic_tests::test_ring_axioms(&ring, elements.iter().map(|x| ring.clone_el(x)));
+    
+    print_all_timings();
+    
     feanor_math::ring::generic_tests::test_self_iso(&ring, elements.iter().map(|x| ring.clone_el(x)));
     feanor_math::rings::extension::generic_tests::test_free_algebra_axioms(&ring);
 

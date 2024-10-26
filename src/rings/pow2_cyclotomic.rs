@@ -215,13 +215,13 @@ impl<R, F> DecomposedNumberRing<R::Type> for Pow2CyclotomicDecomposedNumberRing<
 }
 
 #[test]
-fn test_odd_cyclotomic_double_rns_ring() {
+fn test_pow2_cyclotomic_double_rns_ring() {
     double_rns_ring::test_with_number_ring(Pow2CyclotomicDecomposableNumberRing::new(8));
     double_rns_ring::test_with_number_ring(Pow2CyclotomicDecomposableNumberRing::new(16));
 }
 
 #[test]
-fn test_odd_cyclotomic_decomposition_ring() {
+fn test_pow2_cyclotomic_decomposition_ring() {
     decomposition_ring::test_with_number_ring(Pow2CyclotomicDecomposableNumberRing::new(8));
     decomposition_ring::test_with_number_ring(Pow2CyclotomicDecomposableNumberRing::new(16));
 }

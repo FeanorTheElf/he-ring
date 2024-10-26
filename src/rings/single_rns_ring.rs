@@ -638,8 +638,8 @@ impl<NumberRing, FpTy1, FpTy2, A1, A2, C1, C2> CanIsoFromTo<SingleRNSRingBase<Nu
 
 #[cfg(test)]
 pub fn test_with_number_ring<NumberRing: Clone + DecomposableNumberRing<zn_64::Zn>>(number_ring: NumberRing) {
-    let p1 = number_ring.largest_suitable_prime(10000).unwrap();
-    let p2 = number_ring.largest_suitable_prime(20000).unwrap();
+    let p1 = number_ring.largest_suitable_prime(20000).unwrap();
+    let p2 = number_ring.largest_suitable_prime(p1 - 1).unwrap();
     assert!(p1 != p2);
     let rank = number_ring.rank();
     let base_ring = zn_rns::Zn::new(vec![zn_64::Zn::new(p1 as u64), zn_64::Zn::new(p2 as u64)], BigIntRing::RING);

@@ -3,7 +3,9 @@ use feanor_math::rings::zn::*;
 use feanor_math::ring::*;
 use feanor_math::rings::zn::zn_64::Zn;
 
-use crate::rings::single_rns_ring::{SingleRNSRing, SingleRNSRingBase};
+use crate::cyclotomic::CyclotomicRingStore;
+use crate::rings::gadget_product::single_rns::*;
+use crate::rings::single_rns_ring::*;
 
 use super::*;
 
@@ -22,7 +24,7 @@ impl BFVParams for CompositeSingleRNSBFVParams {
     type CiphertextRing = SingleRNSRing<Self::NumberRing, Zn, CiphertextAllocator>;
     type CiphertextRingBase = SingleRNSRingBase<Self::NumberRing, Zn, CiphertextAllocator>;
     type Ciphertext = (El<Self::CiphertextRing>, El<Self::CiphertextRing>);
-    type KeySwitchKey<'a> = ()
+    type KeySwitchKey<'a> = (GadgetProductRhsOperand<'a, Self::NumberRing, CiphertextAllocator>, GadgetProductRhsOperand<'a, Self::NumberRing, CiphertextAllocator>)
         where Self: 'a;
 
     fn ciphertext_modulus_bits(&self) -> Range<usize> {
@@ -139,11 +141,19 @@ impl BFVParams for CompositeSingleRNSBFVParams {
     }
     
     fn hom_add_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
-        unimplemented!()
+        let mut m = C.get_ring().exact_convert_from_nttring(P, m);
+        let Delta = C.base_ring().coerce(&ZZbig, ZZbig.rounded_div(
+            ZZbig.clone_el(C.base_ring().modulus()), 
+            &int_cast(*P.base_ring().modulus() as i32, &ZZbig, &StaticRing::<i32>::RING)
+        ));
+        C.inclusion().mul_assign_map(&mut m, Delta);
+        return (C.add(ct.0, m), ct.1);
     }
     
     fn hom_mul_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
-        unimplemented!()
+        let m = C.get_ring().exact_convert_from_nttring(P, m);
+        let (c0, c1) = ct;
+        return (C.mul_ref_snd(c0, &m), C.mul(c1, m));
     }
     
     fn hom_mul_plain_i64(_P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: i64, ct: Ciphertext<Self>) -> Ciphertext<Self> {
@@ -175,23 +185,71 @@ impl BFVParams for CompositeSingleRNSBFVParams {
     fn hom_mul<'a>(C: &CiphertextRing<Self>, C_mul: &CiphertextRing<Self>, lhs: Ciphertext<Self>, rhs: Ciphertext<Self>, rk: &RelinKey<'a, Self>, conv_data: &MulConversionData) -> Ciphertext<Self>
         where Self: 'a
     {
-        unimplemented!()
+        let (c00, c01) = lhs;
+        let (c10, c11) = rhs;
+        let lift = |c: SingleRNSRingEl<Self::NumberRing, Zn, CiphertextAllocator>| 
+            C_mul.get_ring().perform_rns_op_from(C.get_ring(), &c, &conv_data.lift_to_C_mul);
+    
+        let c00_lifted = lift(c00);
+        let c01_lifted = lift(c01);
+        let c10_lifted = lift(c10);
+        let c11_lifted = lift(c11);
+    
+        let lifted0 = C_mul.mul_ref(&c00_lifted, &c10_lifted);
+        let lifted1 = C_mul.add(C_mul.mul_ref_snd(c00_lifted, &c11_lifted), C_mul.mul_ref_fst(&c01_lifted, c10_lifted));
+        let lifted2 = C_mul.mul(c01_lifted, c11_lifted);
+    
+        let scale_down = |c: El<CiphertextRing<Self>>| 
+            C.get_ring().perform_rns_op_from(C_mul.get_ring(), &c, &conv_data.scale_down_to_C);
+    
+        let res0 = scale_down(lifted0);
+        let res1 = scale_down(lifted1);
+        let res2 = scale_down(lifted2);
+    
+        let op = C.get_ring().to_gadget_product_lhs(res2);
+        let (s0, s1) = rk;
+    
+        return (C.add(res0, C.get_ring().gadget_product(&op, s0)), C.add(res1, C.get_ring().gadget_product(&op, s1)));
     }
     
-    fn gen_switch_key<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing<Self>, rng: R, old_sk: &SecretKey<Self>, new_sk: &SecretKey<Self>) -> KeySwitchKey<'a, Self>
+    fn gen_switch_key<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing<Self>, mut rng: R, old_sk: &SecretKey<Self>, new_sk: &SecretKey<Self>) -> KeySwitchKey<'a, Self>
         where Self: 'a
     {
-        unimplemented!()
+        let mut res_0 = C.get_ring().gadget_product_rhs_empty();
+        let mut res_1 = C.get_ring().gadget_product_rhs_empty();
+        for i in 0..C.get_ring().rns_base().len() {
+            let (c0, c1) = Self::enc_sym_zero(C, &mut rng, new_sk);
+            let factor = C.base_ring().get_ring().from_congruence((0..C.get_ring().rns_base().len()).map(|i2| {
+                let Fp = C.get_ring().rns_base().at(i2);
+                if i2 == i { Fp.one() } else { Fp.zero() } 
+            }));
+            let mut payload = C.clone_el(old_sk);
+            C.inclusion().mul_assign_map(&mut payload, factor);
+            C.add_assign(&mut payload, c0);
+            res_0.set_rns_factor(i, payload);
+            res_1.set_rns_factor(i, c1);
+        }
+        return (res_0, res_1);
     }
     
     fn key_switch<'a>(C: &CiphertextRing<Self>, ct: Ciphertext<Self>, switch_key: &KeySwitchKey<'a, Self>) -> Ciphertext<Self>
         where Self: 'a
     {
-        unimplemented!()
+        let (c0, c1) = ct;
+        let (s0, s1) = switch_key;
+        let op = C.get_ring().to_gadget_product_lhs(c1);
+        return (
+            C.add(c0, C.get_ring().gadget_product(&op, s0)),
+            C.get_ring().gadget_product(&op, s1)
+        );
     }
     
     fn mod_switch_to_plaintext(target: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: Ciphertext<Self>, switch_data: &ModSwitchData) -> (El<PlaintextRing<Self>>, El<PlaintextRing<Self>>) {
-        unimplemented!()
+        let (c0, c1) = ct;
+        return (
+            C.get_ring().perform_rns_op_to_nttring(target, &c0, &switch_data.scale),
+            C.get_ring().perform_rns_op_to_nttring(target, &c1, &switch_data.scale)
+        );
     }
     
     fn gen_gk<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing<Self>, rng: R, sk: &SecretKey<Self>, g: ZnEl) -> KeySwitchKey<'a, Self>
@@ -215,7 +273,11 @@ impl BFVParams for CompositeSingleRNSBFVParams {
             'a: 'b,
             Self: 'a
     {
-        unimplemented!()
+        let mut result = Vec::new();
+        for ((ct0, ct1), gk) in C.apply_galois_action_many(&ct.0, gs).zip(C.apply_galois_action_many(&ct.1, gs)).zip(gks.iter()) {
+            result.push(Self::key_switch(C, (ct0, ct1), gk));
+        }
+        return result;
     }
 
     fn create_multiplication_rescale(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, Cmul: &CiphertextRing<Self>) -> MulConversionData {

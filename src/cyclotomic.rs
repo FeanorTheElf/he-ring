@@ -52,6 +52,10 @@ pub trait CyclotomicRingStore: RingStore
     delegate!{ CyclotomicRing, fn n(&self) -> u64 }
     delegate!{ CyclotomicRing, fn cyclotomic_index_ring(&self) -> zn_64::Zn }
     delegate!{ CyclotomicRing, fn apply_galois_action(&self, el: &El<Self>, s: zn_64::ZnEl) -> El<Self> }
+    
+    fn apply_galois_action_many<'a>(&'a self, x: &'a El<Self>, gs: &'a [zn_64::ZnEl]) -> impl 'a + ExactSizeIterator<Item = El<Self>> {
+        self.get_ring().apply_galois_action_many(x, gs)
+    }
 }
 
 impl<R: RingStore> CyclotomicRingStore for R

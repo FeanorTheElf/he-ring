@@ -15,13 +15,14 @@ use std::alloc::Allocator;
 use std::alloc::Global;
 use std::marker::PhantomData;
 
+use crate::rings::ntt_convolution::NTTConvolution;
 use crate::rings::single_rns_ring::*;
 use crate::cyclotomic::CyclotomicRing;
 use crate::rnsconv::*;
 use crate::rings::decomposition::*;
 use crate::IsEq;
 
-pub struct GadgetProductRhsOperand<'a, NumberRing, A, C> 
+pub struct GadgetProductRhsOperand<'a, NumberRing, A, C = NTTConvolution<Zn>> 
     where NumberRing: DecomposableNumberRing<Zn>,
         A: Allocator + Clone,
         C: PreparedConvolutionAlgorithm<ZnBase>
