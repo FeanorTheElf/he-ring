@@ -506,13 +506,13 @@ impl DoubleRNSBFVParams for CompositeDoubleRNSBFVParams {
 }
 
 #[test]
-fn test_pow2_hom_galois() {
+fn test_pow2_bfv_hom_galois() {
     let mut rng = thread_rng();
     
     let params = Pow2BFVParams {
         t: 3,
-        log2_q_min: 100,
-        log2_q_max: 120,
+        log2_q_min: 500,
+        log2_q_max: 520,
         log2_N: 7
     };
     
@@ -535,8 +535,8 @@ fn test_pow2_bfv_mul() {
     
     let params = Pow2BFVParams {
         t: 257,
-        log2_q_min: 1090,
-        log2_q_max: 1100,
+        log2_q_min: 500,
+        log2_q_max: 520,
         log2_N: 10
     };
     
@@ -565,8 +565,8 @@ fn test_composite_bfv_mul() {
     
     let params = CompositeDoubleRNSBFVParams {
         t: 8,
-        log2_q_min: 700,
-        log2_q_max: 800,
+        log2_q_min: 500,
+        log2_q_max: 520,
         n1: 17,
         n2: 97
     };
@@ -602,34 +602,105 @@ fn print_timings_pow2_bfv_mul() {
         log2_N: 15
     };
     
-    let P = params.create_plaintext_ring(params.plaintext_modulus());
-    let (C, C_mul) = params.create_ciphertext_rings();
+    let P = log_time::<_, _, true, _>("CreatePtxtRing", |[]|
+        params.create_plaintext_ring(params.plaintext_modulus())
+    );
+    let (C, C_mul) = log_time::<_, _, true, _>("CreateCtxtRing", |[]|
+        params.create_ciphertext_rings()
+    );
 
-    let sk = Pow2BFVParams::gen_sk(&C, &mut rng);
-    let mul_rescale_data = Pow2BFVParams::create_multiplication_rescale(&P, &C, &C_mul);
-    let rk = Pow2BFVParams::gen_rk(&C, &mut rng, &sk);
+    let sk = log_time::<_, _, true, _>("GenSK", |[]| 
+        Pow2BFVParams::gen_sk(&C, &mut rng)
+    );
+    let mul_rescale_data = log_time::<_, _, true, _>("CreateMulRescale", |[]|
+        Pow2BFVParams::create_multiplication_rescale(&P, &C, &C_mul)
+    );
 
     let m = P.int_hom().map(2);
-    let ct = Pow2BFVParams::enc_sym(&P, &C, &mut rng, &m, &sk);
+    let ct = log_time::<_, _, true, _>("EncSym", |[]|
+        Pow2BFVParams::enc_sym(&P, &C, &mut rng, &m, &sk)
+    );
 
-    let res = log_time::<_, _, true, _>("HomAddPlain", |[]| {
+    let res = log_time::<_, _, true, _>("HomAddPlain", |[]| 
         Pow2BFVParams::hom_add_plain(&P, &C, &m, Pow2BFVParams::clone_ct(&C, &ct))
-    });
+    );
     assert_el_eq!(&P, &P.int_hom().map(4), &Pow2BFVParams::dec(&P, &C, res, &sk));
 
-    let res = log_time::<_, _, true, _>("HomAdd", |[]| {
+    let res = log_time::<_, _, true, _>("HomAdd", |[]| 
         Pow2BFVParams::hom_add(&C, Pow2BFVParams::clone_ct(&C, &ct), &ct)
-    });
+    );
     assert_el_eq!(&P, &P.int_hom().map(4), &Pow2BFVParams::dec(&P, &C, res, &sk));
 
-    let res = log_time::<_, _, true, _>("HomMulPlain", |[]| {
+    let res = log_time::<_, _, true, _>("HomMulPlain", |[]| 
         Pow2BFVParams::hom_mul_plain(&P, &C, &m, Pow2BFVParams::clone_ct(&C, &ct))
-    });
+    );
     assert_el_eq!(&P, &P.int_hom().map(4), &Pow2BFVParams::dec(&P, &C, res, &sk));
 
-    let res = log_time::<_, _, true, _>("HomMul", |[]| {
+    let rk = log_time::<_, _, true, _>("GenRK", |[]| 
+        Pow2BFVParams::gen_rk(&C, &mut rng, &sk)
+    );
+    let res = log_time::<_, _, true, _>("HomMul", |[]| 
         Pow2BFVParams::hom_mul(&C, &C_mul, Pow2BFVParams::clone_ct(&C, &ct), Pow2BFVParams::clone_ct(&C, &ct), &rk, &mul_rescale_data)
-    });
+    );
     assert_el_eq!(&P, &P.int_hom().map(4), &Pow2BFVParams::dec(&P, &C, res, &sk));
 
+    print_all_timings();
+}
+
+#[test]
+#[ignore]
+fn print_timings_double_rns_composite_bfv_mul() {
+    let mut rng = thread_rng();
+    
+    let params = CompositeDoubleRNSBFVParams {
+        t: 257,
+        log2_q_min: 790,
+        log2_q_max: 800,
+        n1: 5 * 17,
+        n2: 257
+    };
+    
+    let P = log_time::<_, _, true, _>("CreatePtxtRing", |[]|
+        params.create_plaintext_ring(params.plaintext_modulus())
+    );
+    let (C, C_mul) = log_time::<_, _, true, _>("CreateCtxtRing", |[]|
+        params.create_ciphertext_rings()
+    );
+
+    let sk = log_time::<_, _, true, _>("GenSK", |[]| 
+        CompositeDoubleRNSBFVParams::gen_sk(&C, &mut rng)
+    );
+    let mul_rescale_data = log_time::<_, _, true, _>("CreateMulRescale", |[]|
+        CompositeDoubleRNSBFVParams::create_multiplication_rescale(&P, &C, &C_mul)
+    );
+
+    let m = P.int_hom().map(2);
+    let ct = log_time::<_, _, true, _>("EncSym", |[]|
+        CompositeDoubleRNSBFVParams::enc_sym(&P, &C, &mut rng, &m, &sk)
+    );
+
+    let res = log_time::<_, _, true, _>("HomAddPlain", |[]| 
+        CompositeDoubleRNSBFVParams::hom_add_plain(&P, &C, &m, CompositeDoubleRNSBFVParams::clone_ct(&C, &ct))
+    );
+    assert_el_eq!(&P, &P.int_hom().map(4), &CompositeDoubleRNSBFVParams::dec(&P, &C, res, &sk));
+
+    let res = log_time::<_, _, true, _>("HomAdd", |[]| 
+        CompositeDoubleRNSBFVParams::hom_add(&C, CompositeDoubleRNSBFVParams::clone_ct(&C, &ct), &ct)
+    );
+    assert_el_eq!(&P, &P.int_hom().map(4), &CompositeDoubleRNSBFVParams::dec(&P, &C, res, &sk));
+
+    let res = log_time::<_, _, true, _>("HomMulPlain", |[]| 
+        CompositeDoubleRNSBFVParams::hom_mul_plain(&P, &C, &m, CompositeDoubleRNSBFVParams::clone_ct(&C, &ct))
+    );
+    assert_el_eq!(&P, &P.int_hom().map(4), &CompositeDoubleRNSBFVParams::dec(&P, &C, res, &sk));
+
+    let rk = log_time::<_, _, true, _>("GenRK", |[]| 
+        CompositeDoubleRNSBFVParams::gen_rk(&C, &mut rng, &sk)
+    );
+    let res = log_time::<_, _, true, _>("HomMul", |[]| 
+        CompositeDoubleRNSBFVParams::hom_mul(&C, &C_mul, CompositeDoubleRNSBFVParams::clone_ct(&C, &ct), CompositeDoubleRNSBFVParams::clone_ct(&C, &ct), &rk, &mul_rescale_data)
+    );
+    assert_el_eq!(&P, &P.int_hom().map(4), &CompositeDoubleRNSBFVParams::dec(&P, &C, res, &sk));
+
+    print_all_timings();
 }

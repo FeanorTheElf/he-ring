@@ -76,7 +76,7 @@ use feanor_math::rings::zn::zn_64;
 #[cfg(test)]
 use feanor_math::seq::*;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "generic_tests"))]
 pub fn generic_test_cyclotomic_ring_axioms<R: CyclotomicRingStore>(ring: R)
     where R::Type: CyclotomicRing
 {

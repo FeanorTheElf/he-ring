@@ -663,6 +663,15 @@ impl<NumberRing, FpTy, A> RingExtension for DoubleRNSRingBase<NumberRing, FpTy, 
             allocator: PhantomData
         };
     }
+
+    fn mul_assign_base(&self, lhs: &mut Self::Element, rhs: &El<Self::BaseRing>) {
+        let x_congruence = self.rns_base().get_congruence(rhs);
+        for (i, Zp) in self.rns_base().as_iter().enumerate() {
+            for j in 0..self.rank() {
+                Zp.mul_assign_ref(self.doublerns_coeff_at_mut(i, j, lhs), x_congruence.at(i));
+            }
+        }
+    }
 }
 
 pub struct WRTCanonicalBasisElementCreator<'a, NumberRing, FpTy, A>
@@ -892,16 +901,12 @@ pub fn test_with_number_ring<NumberRing: Clone + DecomposableNumberRing<zn_64::Z
         ring.int_hom().map(p2 as i32),
         ring.canonical_gen(),
         ring.pow(ring.canonical_gen(), rank - 1),
-        ring.int_hom().mul_map(ring.canonical_gen(), p1 as i32)
+        ring.int_hom().mul_map(ring.canonical_gen(), p1 as i32),
+        ring.int_hom().mul_map(ring.pow(ring.canonical_gen(), rank - 1), p1 as i32),
+        ring.add(ring.canonical_gen(), ring.one())
     ];
 
-    print_all_timings();
-    clear_all_timings();
-
     feanor_math::ring::generic_tests::test_ring_axioms(&ring, elements.iter().map(|x| ring.clone_el(x)));
-    
-    print_all_timings();
-    
     feanor_math::ring::generic_tests::test_self_iso(&ring, elements.iter().map(|x| ring.clone_el(x)));
     feanor_math::rings::extension::generic_tests::test_free_algebra_axioms(&ring);
 

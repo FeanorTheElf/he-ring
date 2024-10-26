@@ -298,3 +298,117 @@ impl BFVParams for CompositeSingleRNSBFVParams {
         }
     }
 }
+
+#[test]
+fn test_bfv_hom_galois() {
+    let mut rng = thread_rng();
+    
+    let params = CompositeSingleRNSBFVParams {
+        t: 3,
+        log2_q_min: 500,
+        log2_q_max: 520,
+        n1: 7,
+        n2: 11
+    };
+    
+    let P = params.create_plaintext_ring(params.plaintext_modulus());
+    let (C, _C_mul) = params.create_ciphertext_rings();    
+    let sk = CompositeSingleRNSBFVParams::gen_sk(&C, &mut rng);
+    let gk = CompositeSingleRNSBFVParams::gen_gk(&C, &mut rng, &sk, P.get_ring().cyclotomic_index_ring().int_hom().map(3));
+    
+    let m = P.canonical_gen();
+    let ct = CompositeSingleRNSBFVParams::enc_sym(&P, &C, &mut rng, &m, &sk);
+    let ct_res = CompositeSingleRNSBFVParams::hom_galois(&C, ct, P.get_ring().cyclotomic_index_ring().int_hom().map(3), &gk);
+    let res = CompositeSingleRNSBFVParams::dec(&P, &C, ct_res, &sk);
+
+    assert_el_eq!(&P, &P.pow(P.canonical_gen(), 3), &res);
+}
+
+#[test]
+fn test_bfv_mul() {
+    let mut rng = thread_rng();
+    
+    let params = CompositeSingleRNSBFVParams {
+        t: 3,
+        log2_q_min: 500,
+        log2_q_max: 520,
+        n1: 7,
+        n2: 11
+    };
+
+    let P = params.create_plaintext_ring(params.plaintext_modulus());
+    let (C, C_mul) = params.create_ciphertext_rings();
+
+    let sk = CompositeSingleRNSBFVParams::gen_sk(&C, &mut rng);
+    let mul_rescale_data = CompositeSingleRNSBFVParams::create_multiplication_rescale(&P, &C, &C_mul);
+    let rk = CompositeSingleRNSBFVParams::gen_rk(&C, &mut rng, &sk);
+
+    let m = P.int_hom().map(2);
+    let ct = CompositeSingleRNSBFVParams::enc_sym(&P, &C, &mut rng, &m, &sk);
+
+    let m = CompositeSingleRNSBFVParams::dec(&P, &C, CompositeSingleRNSBFVParams::clone_ct(&C, &ct), &sk);
+    assert_el_eq!(&P, &P.int_hom().map(2), &m);
+
+    let ct_sqr = CompositeSingleRNSBFVParams::hom_mul(&C, &C_mul, CompositeSingleRNSBFVParams::clone_ct(&C, &ct), CompositeSingleRNSBFVParams::clone_ct(&C, &ct), &rk, &mul_rescale_data);
+    let m_sqr = CompositeSingleRNSBFVParams::dec(&P, &C, ct_sqr, &sk);
+
+    assert_el_eq!(&P, &P.int_hom().map(4), &m_sqr);
+}
+
+#[test]
+#[ignore]
+fn print_timings_single_rns_composite_bfv_mul() {
+    let mut rng = thread_rng();
+    
+    let params = CompositeSingleRNSBFVParams {
+        t: 257,
+        log2_q_min: 790,
+        log2_q_max: 800,
+        n1: 5 * 17,
+        n2: 257
+    };
+    
+    let P = log_time::<_, _, true, _>("CreatePtxtRing", |[]|
+        params.create_plaintext_ring(params.plaintext_modulus())
+    );
+    let (C, C_mul) = log_time::<_, _, true, _>("CreateCtxtRing", |[]|
+        params.create_ciphertext_rings()
+    );
+
+    let sk = log_time::<_, _, true, _>("GenSK", |[]| 
+        CompositeSingleRNSBFVParams::gen_sk(&C, &mut rng)
+    );
+    let mul_rescale_data = log_time::<_, _, true, _>("CreateMulRescale", |[]|
+        CompositeSingleRNSBFVParams::create_multiplication_rescale(&P, &C, &C_mul)
+    );
+
+    let m = P.int_hom().map(2);
+    let ct = log_time::<_, _, true, _>("EncSym", |[]|
+        CompositeSingleRNSBFVParams::enc_sym(&P, &C, &mut rng, &m, &sk)
+    );
+
+    let res = log_time::<_, _, true, _>("HomAddPlain", |[]| 
+        CompositeSingleRNSBFVParams::hom_add_plain(&P, &C, &m, CompositeSingleRNSBFVParams::clone_ct(&C, &ct))
+    );
+    assert_el_eq!(&P, &P.int_hom().map(4), &CompositeSingleRNSBFVParams::dec(&P, &C, res, &sk));
+
+    let res = log_time::<_, _, true, _>("HomAdd", |[]| 
+        CompositeSingleRNSBFVParams::hom_add(&C, CompositeSingleRNSBFVParams::clone_ct(&C, &ct), &ct)
+    );
+    assert_el_eq!(&P, &P.int_hom().map(4), &CompositeSingleRNSBFVParams::dec(&P, &C, res, &sk));
+
+    let res = log_time::<_, _, true, _>("HomMulPlain", |[]| 
+        CompositeSingleRNSBFVParams::hom_mul_plain(&P, &C, &m, CompositeSingleRNSBFVParams::clone_ct(&C, &ct))
+    );
+    assert_el_eq!(&P, &P.int_hom().map(4), &CompositeSingleRNSBFVParams::dec(&P, &C, res, &sk));
+
+    let rk = log_time::<_, _, true, _>("GenRK", |[]| 
+        CompositeSingleRNSBFVParams::gen_rk(&C, &mut rng, &sk)
+    );
+    let res = log_time::<_, _, true, _>("HomMul", |[]| 
+        CompositeSingleRNSBFVParams::hom_mul(&C, &C_mul, CompositeSingleRNSBFVParams::clone_ct(&C, &ct), CompositeSingleRNSBFVParams::clone_ct(&C, &ct), &rk, &mul_rescale_data)
+    );
+    assert_el_eq!(&P, &P.int_hom().map(4), &CompositeSingleRNSBFVParams::dec(&P, &C, res, &sk));
+
+    print_all_timings();
+}

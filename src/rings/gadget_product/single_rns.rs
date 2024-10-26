@@ -79,7 +79,7 @@ impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, Zn, A, C>
                 }
                 self.convolutions().at(self.rns_base().len() - output_moduli_count + k).prepare_convolution_operand(
                     &current_row[..],
-                    homs[i].codomain()
+                    homs[k].codomain()
                 )
             }));
             result.push(part);

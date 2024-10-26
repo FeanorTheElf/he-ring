@@ -29,6 +29,8 @@ Three of them are implemented in this library, while one is already present in `
      - non-arithmetic operations usually require mapping elements back into coefficient form
      - Galois operations can usually be computed in linear time in decomposed form
 
+Note that in most HE-related situations, you will want the "Ring factorization"-based methods, i.e. use `DoubleRNSRing` for the ciphertext ring and `DecompositionRing` for the plaintext ring.
+
 ### Provided RNS operations
 
 In order to perform non-arithmetic operations (e.g. rounding, reduction modulo `t`, ...) on `R_q` when `q = p1 ... pr` is represented as an RNS basis, one has to use algorithms specifically designed for this setting.
