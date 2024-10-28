@@ -14,7 +14,7 @@ pub mod gadget_product;
 ///  
 pub mod double_rns_ring;
 
-pub mod single_rns_ring;
+// pub mod single_rns_ring;
 
 pub mod decomposition_ring;
 

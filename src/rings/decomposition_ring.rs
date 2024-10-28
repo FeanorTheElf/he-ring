@@ -45,9 +45,9 @@ pub struct DecompositionRingEl<NumberRing, FpTy, A = Global>
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
 {
-    pub(super) number_ring: PhantomData<NumberRing>,
-    pub(super) allocator: PhantomData<A>,
-    pub(super) data: Vec<El<FpTy>, A>
+    number_ring: PhantomData<NumberRing>,
+    allocator: PhantomData<A>,
+    data: Vec<El<FpTy>, A>
 }
 
 impl<NumberRing, FpTy> DecompositionRingBase<NumberRing, RingValue<FpTy>>
@@ -95,6 +95,10 @@ impl<NumberRing, FpTy, A> DecompositionRingBase<NumberRing, FpTy, A>
         &self.ring_decompositions
     }
 
+    pub fn wrt_canonical_basis_mut<'a>(&self, el: &'a mut DecompositionRingEl<NumberRing, FpTy, A>) -> &'a mut [El<FpTy>] {
+        &mut el.data
+    }
+
     pub fn rns_base(&self) -> &zn_rns::Zn<FpTy, BigIntRing> {
         &self.rns_base
     }
@@ -131,7 +135,8 @@ impl<NumberRing, FpTy, A> DecompositionRingBase<NumberRing, FpTy, A>
                 for j in 0..self.rank() {
                     tmp[j] = from_lifted.map(self.base_ring().smallest_lift(self.base_ring().clone_el(&x.data[j])));
                 }
-                self.ring_decompositions[i].fft_forward(&mut tmp[..]);
+                self.ring_decompositions[i].coeff_basis_to_small_basis(&mut tmp[..]);
+                self.ring_decompositions[i].small_basis_to_mult_basis(&mut tmp[..]);
                 <_ as DecomposedCyclotomicNumberRing<_>>::permute_galois_action(<NumberRing::DecomposedAsCyclotomic>::from_ref(&self.ring_decompositions[i]), &tmp, &mut tmp_perm, g);
                 for j in 0..self.rank() {
                     Zp.add_assign_ref(&mut unreduced_result[i * self.rank() + j], &tmp_perm[j]);
@@ -146,7 +151,8 @@ impl<NumberRing, FpTy, A> DecompositionRingBase<NumberRing, FpTy, A>
         let max_size_increase = len as f64  * self.number_ring.inf_to_can_norm_expansion_factor() * self.number_ring.can_to_inf_norm_expansion_factor();
         assert!(max_size_increase < toleratable_size_increase);
         for i in 0..self.rns_base.len() {
-            self.ring_decompositions[i].fft_backward(&mut unreduced_result[(i * self.rank())..((i + 1) * self.rank())]);
+            self.ring_decompositions[i].mult_basis_to_small_basis(&mut unreduced_result[(i * self.rank())..((i + 1) * self.rank())]);
+            self.ring_decompositions[i].small_basis_to_coeff_basis(&mut unreduced_result[(i * self.rank())..((i + 1) * self.rank())]);
         }
 
         let hom = self.base_ring().can_hom(&BigIntRing::RING).unwrap();
@@ -188,9 +194,11 @@ impl<NumberRing, FpTy, A> CyclotomicRing for DecompositionRingBase<NumberRing, F
             for j in 0..self.rank() {
                 tmp[j] = from_lifted.map(self.base_ring().smallest_lift(self.base_ring().clone_el(&el.data[j])));
             }
-            self.ring_decompositions[i].fft_forward(&mut tmp[..]);
+            self.ring_decompositions[i].coeff_basis_to_small_basis(&mut tmp[..]);
+            self.ring_decompositions[i].small_basis_to_mult_basis(&mut tmp[..]);
             <NumberRing::DecomposedAsCyclotomic>::from_ref(&self.ring_decompositions()[i]).permute_galois_action(&tmp, &mut unreduced_result[(i * self.rank())..((i + 1) * self.rank())], g);
-            self.ring_decompositions[i].fft_backward(&mut unreduced_result[(i * self.rank())..((i + 1) * self.rank())]);
+            self.ring_decompositions[i].mult_basis_to_small_basis(&mut unreduced_result[(i * self.rank())..((i + 1) * self.rank())]);
+            self.ring_decompositions[i].small_basis_to_coeff_basis(&mut unreduced_result[(i * self.rank())..((i + 1) * self.rank())]);
         }
         drop(tmp);
 
@@ -294,11 +302,14 @@ impl<NumberRing, FpTy, A> RingBase for DecompositionRingBase<NumberRing, FpTy, A
                 lhs_tmp[j] = from_lifted.map(self.base_ring().smallest_lift(self.base_ring().clone_el(&lhs.data[j])));
                 rhs_tmp[j] = from_lifted.map(self.base_ring().smallest_lift(self.base_ring().clone_el(&rhs.data[j])));
             }
-            self.ring_decompositions[i].fft_forward(&mut lhs_tmp[..]);
-            self.ring_decompositions[i].fft_forward(&mut rhs_tmp[..]);
+            self.ring_decompositions[i].coeff_basis_to_small_basis(&mut lhs_tmp[..]);
+            self.ring_decompositions[i].small_basis_to_mult_basis(&mut lhs_tmp[..]);
+            self.ring_decompositions[i].coeff_basis_to_small_basis(&mut rhs_tmp[..]);
+            self.ring_decompositions[i].small_basis_to_mult_basis(&mut rhs_tmp[..]);
             let end_index = unreduced_result.len();
             unreduced_result.extend((0..self.rank()).map(|j| Zp.mul_ref(&lhs_tmp[j], &rhs_tmp[j])));
-            self.ring_decompositions[i].fft_backward(&mut unreduced_result[end_index..]);
+            self.ring_decompositions[i].mult_basis_to_small_basis(&mut unreduced_result[end_index..]);
+            self.ring_decompositions[i].small_basis_to_coeff_basis(&mut unreduced_result[end_index..]);
         }
         drop(lhs_tmp);
         drop(rhs_tmp);

@@ -170,7 +170,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, Zn, A>
     /// 
     fn gadget_decompose(&self, el: CoeffEl<NumberRing, Zn, A>, output_moduli_count: usize) -> Vec<Vec<ZnEl, A>, A> {
         let mut result = Vec::new_in(self.allocator().clone());
-        let el_as_matrix = self.as_matrix(&el);
+        let el_as_matrix = self.as_matrix_wrt_small_basis(&el);
 
         let homs = (0..output_moduli_count).map(|k| self.rns_base().at(self.rns_base().len() - output_moduli_count + k).can_hom::<StaticRing<i64>>(&StaticRing::<i64>::RING).unwrap()).collect::<Vec<_>>();
         for i in 0..self.rns_base().len() {
@@ -183,7 +183,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, Zn, A>
             result.push(part);
             for k in 0..output_moduli_count {
                 let ring_i = self.rns_base().len() - output_moduli_count + k;
-                self.ring_decompositions().at(ring_i).fft_forward(&mut result.last_mut().unwrap()[(k * self.rank())..((k + 1) * self.rank())]);
+                self.ring_decompositions().at(ring_i).small_basis_to_mult_basis(&mut result.last_mut().unwrap()[(k * self.rank())..((k + 1) * self.rank())]);
             }
         }
         return result;
@@ -232,7 +232,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, Zn, A>
                     data.push(DoubleRNSEl {
                         number_ring: PhantomData,
                         allocator: PhantomData,
-                        data: part
+                        el_wrt_mult_basis: part
                     })
                 }
                 GadgetProductLhsOperand::Naive(data)
@@ -399,13 +399,13 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, Zn, A>
                 });
                 record_time!("DoubleRNSRing::gadget_product_lkss::ffts", || {
                     for k in 0..output_moduli_count {
-                        self.ring_decompositions()[self.rns_base().len() - output_moduli_count + k].fft_backward(&mut summand[(k * self.rank())..((k + 1) * self.rank())]);
+                        self.ring_decompositions()[self.rns_base().len() - output_moduli_count + k].mult_basis_to_small_basis(&mut summand[(k * self.rank())..((k + 1) * self.rank())]);
                     }
                 });
                 record_time!("DoubleRNSRing::gadget_product_lkss::lifting", || {
                     rhs.conversions[j].apply(
                         Submatrix::from_1d(&summand, shortened_rns_base.len(), self.rank()),
-                        self.as_matrix_mut(&mut result).restrict_rows(j..(j + 1))
+                        self.as_matrix_wrt_small_basis_mut(&mut result).restrict_rows(j..(j + 1))
                     );
                 });
             }

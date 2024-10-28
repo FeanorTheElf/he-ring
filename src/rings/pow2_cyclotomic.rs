@@ -26,7 +26,7 @@ use super::decomposition_ring;
 use super::double_rns_ring;
 use super::double_rns_ring::*;
 use super::decomposition_ring::*;
-use super::single_rns_ring;
+// use super::single_rns_ring;
 use crate::rings::decomposition::*;
 use crate::sample_primes;
 use crate::StdZn;
@@ -191,18 +191,26 @@ impl<R, F> DecomposedNumberRing<R::Type> for Pow2CyclotomicDecomposedNumberRing<
         R::Type: ZnRing,
         F: FFTAlgorithm<R::Type> + PartialEq
 {
-    fn fft_backward(&self, data: &mut [El<R>]) {
+    fn mult_basis_to_small_basis(&self, data: &mut [El<R>]) {
         self.fft_table.unordered_inv_fft(&mut data[..], &self.ring);
         for i in 0..self.rank() {
             self.ring.mul_assign_ref(&mut data[i], &self.twiddles[i]);
         }
     }
 
-    fn fft_forward(&self, data: &mut [El<R>]) {
+    fn small_basis_to_mult_basis(&self, data: &mut [El<R>]) {
         for i in 0..self.rank() {
             self.ring.mul_assign_ref(&mut data[i], &self.inv_twiddles[i]);
         }
         self.fft_table.unordered_fft(&mut data[..], &self.ring);
+    }
+
+    fn coeff_basis_to_small_basis(&self, data: &mut [El<R>]) {
+        
+    }
+
+    fn small_basis_to_coeff_basis(&self, data: &mut [El<R>]) {
+        
     }
 
     fn rank(&self) -> usize {
@@ -226,11 +234,11 @@ fn test_pow2_cyclotomic_decomposition_ring() {
     decomposition_ring::test_with_number_ring(Pow2CyclotomicDecomposableNumberRing::new(16));
 }
 
-#[test]
-fn test_odd_cyclotomic_single_rns_ring() {
-    single_rns_ring::test_with_number_ring(Pow2CyclotomicDecomposableNumberRing::new(8));
-    single_rns_ring::test_with_number_ring(Pow2CyclotomicDecomposableNumberRing::new(16));
-}
+// #[test]
+// fn test_odd_cyclotomic_single_rns_ring() {
+//     single_rns_ring::test_with_number_ring(Pow2CyclotomicDecomposableNumberRing::new(8));
+//     single_rns_ring::test_with_number_ring(Pow2CyclotomicDecomposableNumberRing::new(16));
+// }
 
 #[test]
 fn test_permute_galois_automorphism() {

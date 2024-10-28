@@ -24,7 +24,7 @@ use feanor_math::seq::*;
 
 use crate::rings::double_rns_ring::*;
 use crate::rings::decomposition::*;
-use super::single_rns_ring;
+// use super::single_rns_ring;
 use super::{decomposition_ring::{self, *}, double_rns_ring};
 use crate::{euler_phi, euler_phi_squarefree, sample_primes, StdZn};
 use crate::cyclotomic::CyclotomicRing;
@@ -396,7 +396,7 @@ impl<R, F, A> DecomposedNumberRing<R::Type> for OddCyclotomicDecomposedNumberRin
         F: FFTAlgorithm<R::Type> + PartialEq,
         A: Allocator + Clone
 {
-    fn fft_backward(&self, data: &mut [El<R>]) {
+    fn mult_basis_to_small_basis(&self, data: &mut [El<R>]) {
         let ring = self.base_ring();
         let mut tmp = Vec::with_capacity_in(self.fft_table.len(), self.allocator.clone());
         tmp.extend((0..self.fft_table.len()).map(|_| ring.zero()));
@@ -419,7 +419,7 @@ impl<R, F, A> DecomposedNumberRing<R::Type> for OddCyclotomicDecomposedNumberRin
         }
     }
 
-    fn fft_forward(&self, data: &mut [El<R>]) {
+    fn small_basis_to_mult_basis(&self, data: &mut [El<R>]) {
         let ring = self.base_ring();
         let mut tmp = Vec::with_capacity_in(self.fft_table.len(), self.allocator.clone());
         tmp.extend((0..self.fft_table.len()).map(|_| ring.zero()));
@@ -431,6 +431,14 @@ impl<R, F, A> DecomposedNumberRing<R::Type> for OddCyclotomicDecomposedNumberRin
         for (i, j) in self.fft_output_indices() {
             data[i] = ring.clone_el(&tmp[j]); 
         }
+    }
+
+    fn coeff_basis_to_small_basis(&self, data: &mut [El<R>]) {
+        
+    }
+
+    fn small_basis_to_coeff_basis(&self, data: &mut [El<R>]) {
+        
     }
 
     fn rank(&self) -> usize {
@@ -486,13 +494,13 @@ fn test_odd_cyclotomic_decomposition_ring() {
     decomposition_ring::test_with_number_ring(CompositeCyclotomicDecomposableNumberRing::new(3, 7));
 }
 
-#[test]
-fn test_odd_cyclotomic_single_rns_ring() {
-    single_rns_ring::test_with_number_ring(OddCyclotomicDecomposableNumberRing::new(5));
-    single_rns_ring::test_with_number_ring(OddCyclotomicDecomposableNumberRing::new(7));
-    single_rns_ring::test_with_number_ring(CompositeCyclotomicDecomposableNumberRing::new(3, 5));
-    single_rns_ring::test_with_number_ring(CompositeCyclotomicDecomposableNumberRing::new(3, 7));
-}
+// #[test]
+// fn test_odd_cyclotomic_single_rns_ring() {
+//     single_rns_ring::test_with_number_ring(OddCyclotomicDecomposableNumberRing::new(5));
+//     single_rns_ring::test_with_number_ring(OddCyclotomicDecomposableNumberRing::new(7));
+//     single_rns_ring::test_with_number_ring(CompositeCyclotomicDecomposableNumberRing::new(3, 5));
+//     single_rns_ring::test_with_number_ring(CompositeCyclotomicDecomposableNumberRing::new(3, 7));
+// }
 
 #[test]
 fn test_permute_galois_automorphism() {

@@ -178,7 +178,7 @@ impl<P: DoubleRNSBFVParams> BFVParams for P {
     }
     
     fn hom_add_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
-        let mut m = C.get_ring().exact_convert_from_nttring(P, m);
+        let mut m = C.get_ring().exact_convert_from_decompring(P, m);
         let Delta = C.base_ring().coerce(&ZZbig, ZZbig.rounded_div(
             ZZbig.clone_el(C.base_ring().modulus()), 
             &int_cast(*P.base_ring().modulus() as i32, &ZZbig, &StaticRing::<i32>::RING)
@@ -188,7 +188,7 @@ impl<P: DoubleRNSBFVParams> BFVParams for P {
     }
     
     fn hom_mul_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
-        let m = C.get_ring().do_fft(C.get_ring().exact_convert_from_nttring(P, m));
+        let m = C.get_ring().do_fft(C.get_ring().exact_convert_from_decompring(P, m));
         let c0 = ct.0.to_ntt(C);
         let c1 = ct.1.to_ntt(C);
         return (CoeffOrDoubleRNSEl::from_ntt(C.mul_ref_snd(c0, &m)), CoeffOrDoubleRNSEl::from_ntt(C.mul(c1, m)));
@@ -286,8 +286,8 @@ impl<P: DoubleRNSBFVParams> BFVParams for P {
     fn mod_switch_to_plaintext(target: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: Ciphertext<Self>, switch_data: &ModSwitchData) -> (El<PlaintextRing<Self>>, El<PlaintextRing<Self>>) {
         let (c0, c1) = ct;
         return (
-            C.get_ring().perform_rns_op_to_nttring(target, &c0.to_coeff(C), &switch_data.scale),
-            C.get_ring().perform_rns_op_to_nttring(target, &c1.to_coeff(C), &switch_data.scale)
+            C.get_ring().perform_rns_op_to_decompring(target, &c0.to_coeff(C), &switch_data.scale),
+            C.get_ring().perform_rns_op_to_decompring(target, &c1.to_coeff(C), &switch_data.scale)
         );
     }
     
