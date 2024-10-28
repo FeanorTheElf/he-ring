@@ -432,16 +432,21 @@ impl<R, F, A> DecomposedNumberRing<R::Type> for OddCyclotomicDecomposedNumberRin
         for (i, j) in self.fft_output_indices() {
             tmp[j] = ring.clone_el(data.at(i));
         }
-        self.fft_table.unordered_inv_fft(&mut tmp[..], ring);
 
-        for i in (self.rank()..self.fft_table.len()).rev() {
-            let factor = ring.clone_el(&tmp[i]);
-            for (j, c) in self.zeta_pow_rank.iter() {
-                let mut add = ring.clone_el(&factor);
-                ring.mul_assign_ref(&mut add, c);
-                ring.add_assign(&mut tmp[i - self.rank() + *j], add);
+        record_time!("OddCyclotomicDecomposedNumberRing::mult_basis_to_small_basis::fft", || {
+            self.fft_table.unordered_inv_fft(&mut tmp[..], ring);
+        });
+
+        record_time!("OddCyclotomicDecomposedNumberRing::mult_basis_to_small_basis::reduction", || {
+            for i in (self.rank()..self.fft_table.len()).rev() {
+                let factor = ring.clone_el(&tmp[i]);
+                for (j, c) in self.zeta_pow_rank.iter() {
+                    let mut add = ring.clone_el(&factor);
+                    ring.mul_assign_ref(&mut add, c);
+                    ring.add_assign(&mut tmp[i - self.rank() + *j], add);
+                }
             }
-        }
+        });
 
         for i in 0..self.rank() {
             *data.at_mut(i) = ring.clone_el(&tmp[i]);
@@ -458,7 +463,9 @@ impl<R, F, A> DecomposedNumberRing<R::Type> for OddCyclotomicDecomposedNumberRin
             tmp[i] = ring.clone_el(data.at(i));
         }
 
-        self.fft_table.unordered_fft(&mut tmp[..], ring);
+        record_time!("OddCyclotomicDecomposedNumberRing::small_basis_to_mult_basis::fft", || {
+            self.fft_table.unordered_fft(&mut tmp[..], ring);
+        });
         for (i, j) in self.fft_output_indices() {
             *data.at_mut(i) = ring.clone_el(&tmp[j]); 
         }
