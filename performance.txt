@@ -1,0 +1,64 @@
+CreatePtxtRing
+done in 4118 ms, []
+CreateCtxtRing
+test bfv::double_rns::print_timings_double_rns_composite_bfv_mul has been running for over 60 seconds
+done in 109478 ms, []
+GenSK
+done in 117 ms, []
+CreateMulRescale
+done in 0 ms, []
+EncSym
+done in 248 ms, []
+HomAddPlain
+done in 19 ms, []
+HomAdd
+done in 7 ms, []
+HomMulPlain
+done in 498 ms, []
+GenRK
+done in 13229 ms, []
+HomMul
+done in 2858 ms, []
+DoubleRNSRing::do_fft: 1900 ms
+OddCyclotomicDecomposedNumberRing::small_basis_to_mult_basis::fft: 10475 ms
+DoubleRNSRing::undo_fft: 4506 ms
+OddCyclotomicDecomposedNumberRing::mult_basis_to_small_basis::fft: 4837 ms
+OddCyclotomicDecomposedNumberRing::mult_basis_to_small_basis::reduction: 116 ms
+DoubleRNSRing::perform_rns_op_from: 345 ms
+AlmostExactBaseConversion::apply: 371 ms
+DoubleRNSRing::to_gadget_product_lhs: 297 ms
+DoubleRNSRing::gadget_product_lkss: 841 ms
+DoubleRNSRing::gadget_product_lkss::sum: 169 ms
+DoubleRNSRing::gadget_product_lkss::ffts: 605 ms
+DoubleRNSRing::gadget_product_lkss::lifting: 60 ms
+
+CreatePtxtRing
+done in 8 ms, []
+CreateCtxtRing
+done in 350 ms, []
+GenSK
+done in 17 ms, []
+CreateMulRescale
+done in 0 ms, []
+EncSym
+done in 39 ms, []
+HomAddPlain
+done in 4 ms, []
+HomAdd
+done in 3 ms, []
+HomMulPlain
+done in 74 ms, []
+GenRK
+done in 2197 ms, []
+HomMul
+done in 777 ms, []
+DoubleRNSRing::do_fft: 290 ms
+DoubleRNSRing::undo_fft: 575 ms
+DoubleRNSRing::perform_rns_op_from: 274 ms
+AlmostExactBaseConversion::apply: 293 ms
+DoubleRNSRing::to_gadget_product_lhs: 53 ms
+DoubleRNSRing::gadget_product_lkss: 241 ms
+DoubleRNSRing::gadget_product_lkss::sum: 120 ms
+DoubleRNSRing::gadget_product_lkss::ffts: 75 ms
+DoubleRNSRing::gadget_product_lkss::lifting: 43 ms
+test bfv::double_rns::print_timings_pow2_bfv_mul ... ok

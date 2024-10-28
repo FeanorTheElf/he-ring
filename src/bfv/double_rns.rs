@@ -505,6 +505,19 @@ impl DoubleRNSBFVParams for CompositeDoubleRNSBFVParams {
     }
 }
 
+///
+/// Puts the components of `ct` into coefficient representation.
+/// 
+/// This is seldomly sensible in an application, as the components are automatically
+/// mapped from and to coefficient representation as deemed most efficient. However, this
+/// makes getting reliable benchmarks difficult, since one never knows if a certain time
+/// included representation-switching or not. Thus, in such benchmarks, every
+/// operation should be followed by `coeff_repr()`.
+/// 
+pub fn coeff_repr<Params: DoubleRNSBFVParams>(C: &CiphertextRing<Params>, ct: Ciphertext<Params>) -> Ciphertext<Params> {
+    (ct.0.coeff_repr(C), ct.1.coeff_repr(C))
+}
+
 #[test]
 fn test_pow2_bfv_hom_galois() {
     let mut rng = thread_rng();
@@ -619,21 +632,21 @@ fn print_timings_pow2_bfv_mul() {
 
     let m = P.int_hom().map(2);
     let ct = log_time::<_, _, true, _>("EncSym", |[]|
-        Pow2BFVParams::enc_sym(&P, &C, &mut rng, &m, &sk)
+        coeff_repr::<Pow2BFVParams>(&C, Pow2BFVParams::enc_sym(&P, &C, &mut rng, &m, &sk))
     );
 
     let res = log_time::<_, _, true, _>("HomAddPlain", |[]| 
-        Pow2BFVParams::hom_add_plain(&P, &C, &m, Pow2BFVParams::clone_ct(&C, &ct))
+        coeff_repr::<Pow2BFVParams>(&C, Pow2BFVParams::hom_add_plain(&P, &C, &m, Pow2BFVParams::clone_ct(&C, &ct)))
     );
     assert_el_eq!(&P, &P.int_hom().map(4), &Pow2BFVParams::dec(&P, &C, res, &sk));
 
     let res = log_time::<_, _, true, _>("HomAdd", |[]| 
-        Pow2BFVParams::hom_add(&C, Pow2BFVParams::clone_ct(&C, &ct), &ct)
+        coeff_repr::<Pow2BFVParams>(&C, Pow2BFVParams::hom_add(&C, Pow2BFVParams::clone_ct(&C, &ct), &ct))
     );
     assert_el_eq!(&P, &P.int_hom().map(4), &Pow2BFVParams::dec(&P, &C, res, &sk));
 
     let res = log_time::<_, _, true, _>("HomMulPlain", |[]| 
-        Pow2BFVParams::hom_mul_plain(&P, &C, &m, Pow2BFVParams::clone_ct(&C, &ct))
+        coeff_repr::<Pow2BFVParams>(&C, Pow2BFVParams::hom_mul_plain(&P, &C, &m, Pow2BFVParams::clone_ct(&C, &ct)))
     );
     assert_el_eq!(&P, &P.int_hom().map(4), &Pow2BFVParams::dec(&P, &C, res, &sk));
 
@@ -641,7 +654,7 @@ fn print_timings_pow2_bfv_mul() {
         Pow2BFVParams::gen_rk(&C, &mut rng, &sk)
     );
     let res = log_time::<_, _, true, _>("HomMul", |[]| 
-        Pow2BFVParams::hom_mul(&C, &C_mul, Pow2BFVParams::clone_ct(&C, &ct), Pow2BFVParams::clone_ct(&C, &ct), &rk, &mul_rescale_data)
+        coeff_repr::<Pow2BFVParams>(&C, Pow2BFVParams::hom_mul(&C, &C_mul, Pow2BFVParams::clone_ct(&C, &ct), Pow2BFVParams::clone_ct(&C, &ct), &rk, &mul_rescale_data))
     );
     assert_el_eq!(&P, &P.int_hom().map(4), &Pow2BFVParams::dec(&P, &C, res, &sk));
 
@@ -654,11 +667,11 @@ fn print_timings_double_rns_composite_bfv_mul() {
     let mut rng = thread_rng();
     
     let params = CompositeDoubleRNSBFVParams {
-        t: 257,
+        t: 2,
         log2_q_min: 790,
         log2_q_max: 800,
-        n1: 5 * 17,
-        n2: 257
+        n1: 127,
+        n2: 337
     };
     
     let P = log_time::<_, _, true, _>("CreatePtxtRing", |[]|
@@ -677,21 +690,21 @@ fn print_timings_double_rns_composite_bfv_mul() {
 
     let m = P.int_hom().map(2);
     let ct = log_time::<_, _, true, _>("EncSym", |[]|
-        CompositeDoubleRNSBFVParams::enc_sym(&P, &C, &mut rng, &m, &sk)
+        coeff_repr::<CompositeDoubleRNSBFVParams>(&C, CompositeDoubleRNSBFVParams::enc_sym(&P, &C, &mut rng, &m, &sk))
     );
 
     let res = log_time::<_, _, true, _>("HomAddPlain", |[]| 
-        CompositeDoubleRNSBFVParams::hom_add_plain(&P, &C, &m, CompositeDoubleRNSBFVParams::clone_ct(&C, &ct))
+        coeff_repr::<CompositeDoubleRNSBFVParams>(&C, CompositeDoubleRNSBFVParams::hom_add_plain(&P, &C, &m, CompositeDoubleRNSBFVParams::clone_ct(&C, &ct)))
     );
     assert_el_eq!(&P, &P.int_hom().map(4), &CompositeDoubleRNSBFVParams::dec(&P, &C, res, &sk));
 
     let res = log_time::<_, _, true, _>("HomAdd", |[]| 
-        CompositeDoubleRNSBFVParams::hom_add(&C, CompositeDoubleRNSBFVParams::clone_ct(&C, &ct), &ct)
+        coeff_repr::<CompositeDoubleRNSBFVParams>(&C, CompositeDoubleRNSBFVParams::hom_add(&C, CompositeDoubleRNSBFVParams::clone_ct(&C, &ct), &ct))
     );
     assert_el_eq!(&P, &P.int_hom().map(4), &CompositeDoubleRNSBFVParams::dec(&P, &C, res, &sk));
 
     let res = log_time::<_, _, true, _>("HomMulPlain", |[]| 
-        CompositeDoubleRNSBFVParams::hom_mul_plain(&P, &C, &m, CompositeDoubleRNSBFVParams::clone_ct(&C, &ct))
+        coeff_repr::<CompositeDoubleRNSBFVParams>(&C, CompositeDoubleRNSBFVParams::hom_mul_plain(&P, &C, &m, CompositeDoubleRNSBFVParams::clone_ct(&C, &ct)))
     );
     assert_el_eq!(&P, &P.int_hom().map(4), &CompositeDoubleRNSBFVParams::dec(&P, &C, res, &sk));
 
@@ -699,7 +712,7 @@ fn print_timings_double_rns_composite_bfv_mul() {
         CompositeDoubleRNSBFVParams::gen_rk(&C, &mut rng, &sk)
     );
     let res = log_time::<_, _, true, _>("HomMul", |[]| 
-        CompositeDoubleRNSBFVParams::hom_mul(&C, &C_mul, CompositeDoubleRNSBFVParams::clone_ct(&C, &ct), CompositeDoubleRNSBFVParams::clone_ct(&C, &ct), &rk, &mul_rescale_data)
+        coeff_repr::<CompositeDoubleRNSBFVParams>(&C, CompositeDoubleRNSBFVParams::hom_mul(&C, &C_mul, CompositeDoubleRNSBFVParams::clone_ct(&C, &ct), CompositeDoubleRNSBFVParams::clone_ct(&C, &ct), &rk, &mul_rescale_data))
     );
     assert_el_eq!(&P, &P.int_hom().map(4), &CompositeDoubleRNSBFVParams::dec(&P, &C, res, &sk));
 
