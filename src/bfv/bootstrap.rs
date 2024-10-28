@@ -92,7 +92,7 @@ impl ThinBootstrapParams<Pow2BFVParams> {
         let original_plaintext_ring = params.create_plaintext_ring(ZZ.pow(p, r));
 
         let H = HypercubeIsomorphism::new::<LOG>(plaintext_ring.get_ring());
-        let original_H = H.reduce_modulus(original_plaintext_ring.get_ring());
+        let original_H = H.change_modulus(original_plaintext_ring.get_ring());
         let slots_to_coeffs = log_time::<_, _, LOG, _>("Creating Slots-to-Coeffs transform", |[]| pow2::slots_to_coeffs_thin(&original_H));
         let (coeffs_to_slots, trace) = log_time::<_, _, LOG, _>("Creating Coeffs-to-Slots transform", |[]| {
             let (transforms, trace) = pow2::coeffs_to_slots_thin(&H);
@@ -140,7 +140,7 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
         let original_plaintext_ring = params.create_plaintext_ring(ZZ.pow(p, r));
 
         let H = HypercubeIsomorphism::new::<LOG>(plaintext_ring.get_ring());
-        let original_H = H.reduce_modulus(original_plaintext_ring.get_ring());
+        let original_H = H.change_modulus(original_plaintext_ring.get_ring());
         let slots_to_coeffs = log_time::<_, _, LOG, _>("Creating Slots-to-Coeffs transform", |[]| composite::slots_to_powcoeffs_thin(&original_H));
         let coeffs_to_slots = log_time::<_, _, LOG, _>("Creating Coeffs-to-Slots transform", |[]| composite::powcoeffs_to_slots_thin(&H));
 

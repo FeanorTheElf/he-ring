@@ -145,7 +145,10 @@ impl<R, F> DecomposedCyclotomicNumberRing<R::Type> for Pow2CyclotomicDecomposedN
         2 * self.fft_table.len() as u64
     }
 
-    fn permute_galois_action(&self, src: &[<R::Type as RingBase>::Element], dst: &mut [<R::Type as RingBase>::Element], galois_element: zn_64::ZnEl) {
+    fn permute_galois_action<V1, V2>(&self, src: V1, mut dst: V2, galois_element: zn_64::ZnEl)
+        where V1: VectorView<El<R>>,
+            V2: SwappableVectorViewMut<El<R>>
+    {
         assert_eq!(self.rank(), src.len());
         assert_eq!(self.rank(), dst.len());
 
@@ -160,7 +163,7 @@ impl<R, F> DecomposedCyclotomicNumberRing<R::Type> for Pow2CyclotomicDecomposedN
         let galois_el_to_index = |s: ZnEl| bitreverse((index_ring.smallest_positive_lift(s) as usize - 1) / 2, bitlength);
 
         for i in 0..self.rank() {
-            dst[i] = ring.clone_el(&src[galois_el_to_index(index_ring.mul(galois_element, index_to_galois_el(i)))]);
+            *dst.at_mut(i) = ring.clone_el(src.at(galois_el_to_index(index_ring.mul(galois_element, index_to_galois_el(i)))));
         }
     }
 }
@@ -191,27 +194,27 @@ impl<R, F> DecomposedNumberRing<R::Type> for Pow2CyclotomicDecomposedNumberRing<
         R::Type: ZnRing,
         F: FFTAlgorithm<R::Type> + PartialEq
 {
-    fn mult_basis_to_small_basis(&self, data: &mut [El<R>]) {
-        self.fft_table.unordered_inv_fft(&mut data[..], &self.ring);
+    fn mult_basis_to_small_basis<V>(&self, mut data: V)
+        where V: SwappableVectorViewMut<El<R>>
+    {
+        self.fft_table.unordered_inv_fft(&mut data, &self.ring);
         for i in 0..self.rank() {
-            self.ring.mul_assign_ref(&mut data[i], &self.twiddles[i]);
+            self.ring.mul_assign_ref(data.at_mut(i), &self.twiddles[i]);
         }
     }
 
-    fn small_basis_to_mult_basis(&self, data: &mut [El<R>]) {
+    fn small_basis_to_mult_basis<V>(&self, mut data: V)
+        where V: SwappableVectorViewMut<El<R>>
+    {
         for i in 0..self.rank() {
-            self.ring.mul_assign_ref(&mut data[i], &self.inv_twiddles[i]);
+            self.ring.mul_assign_ref(data.at_mut(i), &self.inv_twiddles[i]);
         }
-        self.fft_table.unordered_fft(&mut data[..], &self.ring);
+        self.fft_table.unordered_fft(&mut data, &self.ring);
     }
 
-    fn coeff_basis_to_small_basis(&self, data: &mut [El<R>]) {
-        
-    }
+    fn coeff_basis_to_small_basis<V>(&self, data: V) {}
 
-    fn small_basis_to_coeff_basis(&self, data: &mut [El<R>]) {
-        
-    }
+    fn small_basis_to_coeff_basis<V>(&self, data: V) {}
 
     fn rank(&self) -> usize {
         self.fft_table.len()

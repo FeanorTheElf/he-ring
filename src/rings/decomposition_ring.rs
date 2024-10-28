@@ -137,7 +137,7 @@ impl<NumberRing, FpTy, A> DecompositionRingBase<NumberRing, FpTy, A>
                 }
                 self.ring_decompositions[i].coeff_basis_to_small_basis(&mut tmp[..]);
                 self.ring_decompositions[i].small_basis_to_mult_basis(&mut tmp[..]);
-                <_ as DecomposedCyclotomicNumberRing<_>>::permute_galois_action(<NumberRing::DecomposedAsCyclotomic>::from_ref(&self.ring_decompositions[i]), &tmp, &mut tmp_perm, g);
+                <_ as DecomposedCyclotomicNumberRing<_>>::permute_galois_action(<NumberRing::DecomposedAsCyclotomic>::from_ref(&self.ring_decompositions[i]), &tmp[..], &mut tmp_perm[..], g);
                 for j in 0..self.rank() {
                     Zp.add_assign_ref(&mut unreduced_result[i * self.rank() + j], &tmp_perm[j]);
                 }
@@ -196,7 +196,7 @@ impl<NumberRing, FpTy, A> CyclotomicRing for DecompositionRingBase<NumberRing, F
             }
             self.ring_decompositions[i].coeff_basis_to_small_basis(&mut tmp[..]);
             self.ring_decompositions[i].small_basis_to_mult_basis(&mut tmp[..]);
-            <NumberRing::DecomposedAsCyclotomic>::from_ref(&self.ring_decompositions()[i]).permute_galois_action(&tmp, &mut unreduced_result[(i * self.rank())..((i + 1) * self.rank())], g);
+            <NumberRing::DecomposedAsCyclotomic>::from_ref(&self.ring_decompositions()[i]).permute_galois_action(&tmp[..], &mut unreduced_result[(i * self.rank())..((i + 1) * self.rank())], g);
             self.ring_decompositions[i].mult_basis_to_small_basis(&mut unreduced_result[(i * self.rank())..((i + 1) * self.rank())]);
             self.ring_decompositions[i].small_basis_to_coeff_basis(&mut unreduced_result[(i * self.rank())..((i + 1) * self.rank())]);
         }

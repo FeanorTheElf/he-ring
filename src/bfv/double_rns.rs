@@ -572,6 +572,7 @@ fn test_composite_bfv_mul() {
     };
     
     let P = params.create_plaintext_ring(params.plaintext_modulus());
+    println!("created plaintext ring");
     let (C, C_mul) = params.create_ciphertext_rings();
 
     let sk = CompositeDoubleRNSBFVParams::gen_sk(&C, &mut rng);

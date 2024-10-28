@@ -419,7 +419,7 @@ impl<'a, NumberRing, A> HypercubeIsomorphism<'a, NumberRing, A>
         return result;
     }
 
-    pub fn reduce_modulus<'b>(&self, new_ring: &'b DecompositionRingBase<NumberRing, Zn, A>) -> HypercubeIsomorphism<'b, NumberRing, A> {
+    pub fn change_modulus<'b>(&self, new_ring: &'b DecompositionRingBase<NumberRing, Zn, A>) -> HypercubeIsomorphism<'b, NumberRing, A> {
         assert_eq!(new_ring.n(), self.ring().n());
         let t = int_cast(self.ring.base_ring().integer_ring().clone_el(self.ring.base_ring().modulus()), ZZ, self.ring.base_ring().integer_ring());
         let (p, e) = is_prime_power(&ZZ, &t).unwrap();
