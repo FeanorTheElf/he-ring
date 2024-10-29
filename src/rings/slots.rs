@@ -310,7 +310,7 @@ pub type SlotRing<'a, A = Global> = AsLocalPIR<FreeAlgebraImpl<&'a Zn, SparseMap
 /// of `Gal(K / Q)` resp. `Gal(K / Q) / <p>` are conceivable.
 /// 
 pub struct HypercubeIsomorphism<'a, NumberRing, A>
-    where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+    where NumberRing: HECyclotomicNumberRing<Zn>,
         A: Allocator + Clone,
 {
     ring: &'a DecompositionRingBase<NumberRing, Zn, A>,
@@ -323,7 +323,7 @@ pub struct HypercubeIsomorphism<'a, NumberRing, A>
 }
 
 impl<'a, NumberRing, A> HypercubeIsomorphism<'a, NumberRing, A>
-    where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+    where NumberRing: HECyclotomicNumberRing<Zn>,
         A: Allocator + Clone,
 {
     pub fn new<const LOG: bool>(ring: &'a DecompositionRingBase<NumberRing, Zn, A>) -> Self {
@@ -469,7 +469,7 @@ impl<'a, NumberRing, A> HypercubeIsomorphism<'a, NumberRing, A>
 }
 
 impl<'a, NumberRing, A> HypercubeIsomorphism<'a, NumberRing, A>
-    where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+    where NumberRing: HECyclotomicNumberRing<Zn>,
         A: Allocator + Clone,
         
 {
@@ -670,7 +670,7 @@ pub mod serialization {
     }
     
     pub struct HypercubeIsomorphismSerializable<'a, NumberRing, A>
-        where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+        where NumberRing: HECyclotomicNumberRing<Zn>,
             A: Allocator + Clone,
     {
         t: i64,
@@ -684,7 +684,7 @@ pub mod serialization {
     }
 
     impl<'a, NumberRing, A> Serialize for HypercubeIsomorphismSerializable<'a, NumberRing, A>
-        where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+        where NumberRing: HECyclotomicNumberRing<Zn>,
             A: Allocator + Clone,
     {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -704,7 +704,7 @@ pub mod serialization {
     }
 
     pub struct DeserializeHypercubeIsomorphismSeed<'a, NumberRing, A>
-        where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+        where NumberRing: HECyclotomicNumberRing<Zn>,
             A: Allocator + Clone,
             
     {
@@ -712,7 +712,7 @@ pub mod serialization {
     }
 
     pub struct HypercubeIsomorphismDeserializable<'a, NumberRing, A>
-        where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+        where NumberRing: HECyclotomicNumberRing<Zn>,
             A: Allocator + Clone,
             
     {
@@ -729,7 +729,7 @@ pub mod serialization {
     }
 
     impl<'a, 'de, NumberRing, A> DeserializeSeed<'de> for DeserializeHypercubeIsomorphismSeed<'a, NumberRing, A>
-        where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+        where NumberRing: HECyclotomicNumberRing<Zn>,
             A: Allocator + Clone,
             
     {
@@ -739,7 +739,7 @@ pub mod serialization {
             where D: Deserializer<'de>
         {
             struct FieldsVisitor<'a, NumberRing, A>
-                where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+                where NumberRing: HECyclotomicNumberRing<Zn>,
                     A: Allocator + Clone,
             {
                 poly_ring: DensePolyRing<&'a Zn>,
@@ -747,7 +747,7 @@ pub mod serialization {
             }
 
             impl<'a, 'de, NumberRing, A> Visitor<'de> for FieldsVisitor<'a, NumberRing, A>
-                where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+                where NumberRing: HECyclotomicNumberRing<Zn>,
                     A: Allocator + Clone,
             {
                 type Value = HypercubeIsomorphismDeserializable<'a, NumberRing, A>;
@@ -872,7 +872,7 @@ pub mod serialization {
     }
 
     impl<'a, NumberRing, A> From<HypercubeIsomorphismDeserializable<'a, NumberRing, A>> for HypercubeIsomorphism<'a, NumberRing, A>
-        where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+        where NumberRing: HECyclotomicNumberRing<Zn>,
             A: Allocator + Clone,
             
     {
@@ -916,7 +916,7 @@ pub mod serialization {
     }
 
     impl<'a, NumberRing, A> HypercubeIsomorphism<'a, NumberRing, A>
-        where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+        where NumberRing: HECyclotomicNumberRing<Zn>,
             A: Allocator + Clone,
             
     {
@@ -1040,14 +1040,14 @@ fn test_compute_hypercube_structure_composite() {
 
 #[test]
 fn test_create_hypercube() {
-    let ring = DecompositionRingBase::new(OddCyclotomicDecomposableNumberRing::new(31 * 11), Zn::new(8));
+    let ring = DecompositionRingBase::new(OddCyclotomicNumberRing::new(31 * 11), Zn::new(8));
     let hypercube = HypercubeIsomorphism::new::<false>(ring.get_ring());
 
     assert_eq!(2, hypercube.dim_count());
     assert_eq!(1, hypercube.len(0));
     assert_eq!(30, hypercube.len(1));
 
-    let ring = DecompositionRingBase::new(OddCyclotomicDecomposableNumberRing::new(31 * 11), Zn::new(23 * 23));
+    let ring = DecompositionRingBase::new(OddCyclotomicNumberRing::new(31 * 11), Zn::new(23 * 23));
     let hypercube = HypercubeIsomorphism::new::<false>(ring.get_ring());
 
     assert_eq!(2, hypercube.dim_count());

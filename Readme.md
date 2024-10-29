@@ -8,14 +8,15 @@ In particular, the core component are cyclotomic rings modulo an integer `R_q = 
 
 ### Provided rings
 
-For the ring `R_q`, there are four different ways how we might want to represent it.
+The number ring `R` is abstractly represented via the trait `HENumberRing`.
+However, there are multiple ways of, based on the abstract specification, implement the ring arithmetic.
 Three of them are implemented in this library, while one is already present in `feanor-math`.
 
 | Representation of `q` | Computation of convolution       |                                      |
 |-----------------------|----------------------------------|--------------------------------------|
 | Single integer        | Convolution & explicit reduction | `FreeAlgebraImpl` from `feanor_math` |
 | Single integer        | Ring factorization               | `DecompositionRing`                  |
-| RNS basis             | Convolution & explicit reduction | `SingleRNSRing`                      |
+| RNS basis             | Convolution & explicit reduction | `SingleRNSRing` *                    |
 | RNS basis             | Ring factorization               | `DoubleRNSRing`                      |
 
  - "Convolution & explicit reduction" means that two elements of `R_q` are multiplied by first multiplying them as polynomials over `Z_q[X]` and then explicitly performing reduction modulo `Phi_n(X)`
@@ -30,6 +31,8 @@ Three of them are implemented in this library, while one is already present in `
      - Galois operations can usually be computed in linear time in decomposed form
 
 Note that in most HE-related situations, you will want the "Ring factorization"-based methods, i.e. use `DoubleRNSRing` for the ciphertext ring and `DecompositionRing` for the plaintext ring.
+
+* I am considering removing this implementation again, since it does not seem to never have any performance benefits over `DoubleRNSRing`...
 
 ### Provided RNS operations
 

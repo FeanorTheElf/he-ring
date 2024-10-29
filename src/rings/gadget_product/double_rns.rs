@@ -32,7 +32,7 @@ type UsedBaseConversion<A> = lift::AlmostExactBaseConversion<A>;
 /// For more details, see [`DoubleRNSRingBase::gadget_product()`].
 /// 
 pub enum GadgetProductRhsOperand<'a, NumberRing, A = Global> 
-    where NumberRing: DecomposableNumberRing<Zn>,
+    where NumberRing: HENumberRing<Zn>,
         A: Allocator + Clone
 {
     LKSSStyle(LKSSGadgetProductRhsOperand<'a, NumberRing, A>),
@@ -44,7 +44,7 @@ pub enum GadgetProductRhsOperand<'a, NumberRing, A = Global>
 /// Stores the noisy approximations to `lift((q / pi)^-1 mod pi) * q / pi * x`
 /// 
 pub struct LKSSGadgetProductRhsOperand<'a, NumberRing, A = Global> 
-    where NumberRing: DecomposableNumberRing<Zn>,
+    where NumberRing: HENumberRing<Zn>,
         A: Allocator + Clone
 {
     shortened_rns_base: zn_rns::Zn<Zn, BigIntRing>,
@@ -54,7 +54,7 @@ pub struct LKSSGadgetProductRhsOperand<'a, NumberRing, A = Global>
 }
 
 impl<'a, NumberRing, A> LKSSGadgetProductRhsOperand<'a, NumberRing, A> 
-    where NumberRing: DecomposableNumberRing<Zn>,
+    where NumberRing: HENumberRing<Zn>,
         A: Allocator + Clone
 {
     fn at(&self, i: usize, j: usize, k: usize, l: usize) -> &ZnEl {
@@ -71,7 +71,7 @@ impl<'a, NumberRing, A> LKSSGadgetProductRhsOperand<'a, NumberRing, A>
 }
 
 impl<'a, NumberRing, A> GadgetProductRhsOperand<'a, NumberRing, A> 
-    where NumberRing: DecomposableNumberRing<Zn>,
+    where NumberRing: HENumberRing<Zn>,
         A: Allocator + Clone
 {
     pub fn set_rns_factor(&mut self, i: usize, el: CoeffEl<NumberRing, Zn, A>) {
@@ -89,7 +89,7 @@ impl<'a, NumberRing, A> GadgetProductRhsOperand<'a, NumberRing, A>
 /// For more details, see [`DoubleRNSRingBase::gadget_product()`].
 /// 
 pub enum GadgetProductLhsOperand<'a, NumberRing, A = Global> 
-    where NumberRing: DecomposableNumberRing<Zn>,
+    where NumberRing: HENumberRing<Zn>,
         A: Allocator + Clone
 {
     LKSSStyle(LKSSGadgetProductLhsOperand<'a, NumberRing, A>),
@@ -97,7 +97,7 @@ pub enum GadgetProductLhsOperand<'a, NumberRing, A = Global>
 }
 
 impl<'a, NumberRing, A> GadgetProductLhsOperand<'a, NumberRing, A>
-    where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+    where NumberRing: HECyclotomicNumberRing<Zn>,
         DoubleRNSRingBase<NumberRing, Zn, A>: CyclotomicRing,
         A: Allocator + Clone
 {
@@ -120,7 +120,7 @@ impl<'a, NumberRing, A> GadgetProductLhsOperand<'a, NumberRing, A>
 /// RNS factors.
 /// 
 pub struct LKSSGadgetProductLhsOperand<'a, NumberRing, A> 
-    where NumberRing: DecomposableNumberRing<Zn>,
+    where NumberRing: HENumberRing<Zn>,
         A: Allocator + Clone
 {
     output_moduli_count: usize,
@@ -129,7 +129,7 @@ pub struct LKSSGadgetProductLhsOperand<'a, NumberRing, A>
 }
 
 impl<'a, NumberRing, A> LKSSGadgetProductLhsOperand<'a, NumberRing, A>
-    where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+    where NumberRing: HECyclotomicNumberRing<Zn>,
         DoubleRNSRingBase<NumberRing, Zn, A>: CyclotomicRing,
         A: Allocator + Clone
 {
@@ -140,7 +140,7 @@ impl<'a, NumberRing, A> LKSSGadgetProductLhsOperand<'a, NumberRing, A>
             result_op.resize_with(operand.len(), || ring.rns_base().at(0).zero());
             for k in 0..self.output_moduli_count {
                 let ring_i = ring.rns_base().len() - self.output_moduli_count + k;
-                <_ as DecomposedCyclotomicNumberRing<_>>::permute_galois_action(<NumberRing::DecomposedAsCyclotomic>::from_ref(ring.ring_decompositions().at(ring_i)), &operand[(k * ring.rank())..((k + 1) * ring.rank())], &mut result_op[(k * ring.rank())..((k + 1) * ring.rank())], g);
+                <_ as HECyclotomicNumberRingMod<_>>::permute_galois_action(<NumberRing::DecomposedAsCyclotomic>::from_ref(ring.ring_decompositions().at(ring_i)), &operand[(k * ring.rank())..((k + 1) * ring.rank())], &mut result_op[(k * ring.rank())..((k + 1) * ring.rank())], g);
             }
             result_operands.push(result_op);
         }
@@ -157,7 +157,7 @@ pub enum ElRepr {
 }
 
 impl<NumberRing, A> DoubleRNSRingBase<NumberRing, Zn, A> 
-    where NumberRing: DecomposableNumberRing<Zn>,
+    where NumberRing: HENumberRing<Zn>,
         A: Allocator + Clone
 {
     ///

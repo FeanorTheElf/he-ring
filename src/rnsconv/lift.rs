@@ -149,6 +149,7 @@ impl<A> RNSOperation for AlmostExactBaseConversion<A>
 
             let int_to_homs = (0..self.output_rings().len()).map(|k| self.output_rings().at(k).can_hom(&ZZi128).unwrap()).collect::<Vec<_>>();
 
+            // lifts contains `lift(x * q/Q mod q)` for every input element `x` and input rns base component `q`
             let mut lifts = Vec::with_capacity_in(col_count * in_len, self.allocator.clone());
             lifts.extend((0..(in_len * col_count)).map(|_| 0));
             for i in 0..in_len {
@@ -157,9 +158,12 @@ impl<A> RNSOperation for AlmostExactBaseConversion<A>
                 }
             }
 
+            // the main computational task is now to compute the matrix multiplication `sum_q lift(x * q/Q mod q) Q/q mod q'`
+            // for every input element `x` and output rns base component `q'`
             for k in 0..output.row_count() {
                 let no_red_steps = (0..in_len).take_while(|i| ZZ.is_gt(self.output_rings().at(k).modulus(), self.from_summands_ordered.at(*i).modulus())).count();
-                if cfg!(feature = "force_rns_conv_reduction") {
+                // will we make use of the fact that for `q' >= q`, we don't have to explicitly reduce `lift(x * q/Q mod q)` modulo `q'`?
+                if cfg!(feature = "force_rns_conversion_full_reduction") {
                     for j in 0..col_count {
                         *output.at_mut(k, j) = <_ as ComputeInnerProduct>::inner_product_ref_fst(self.output_rings().at(k).get_ring(), (0..in_len).map(|i| {
                             (self.Q_over_q.at(i + in_len * k), int_to_homs[k].map(lifts[i + j * in_len] as i128))
@@ -182,6 +186,8 @@ impl<A> RNSOperation for AlmostExactBaseConversion<A>
                 }
             }
 
+            // finally, estimate `round((sum_q lift(x * q/Q mod q) Q/q) / Q)` by using fixed point arithmetic (which we just perform using `i128`s),
+            // and write the result to output
             for j in 0..col_count {
                 let correction = ZZi128.rounded_div(<_ as ComputeInnerProduct>::inner_product(ZZi128.get_ring(), 
                     (0..input.row_count()).map(|i| (lifts[i + input.row_count() * j] as i128, self.Q_over_q_int[i]))

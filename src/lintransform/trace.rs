@@ -132,7 +132,7 @@ impl Trace {
 }
 
 impl<NumberRing, FpTy, A> DecompositionRingBase<NumberRing, FpTy, A> 
-    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+    where NumberRing: HECyclotomicNumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
@@ -160,7 +160,7 @@ use feanor_math::rings::extension::extension_impl::FreeAlgebraImpl;
 use super::DecompositionRing;
 use super::DecompositionRingBase;
 use super::SlotRing;
-use super::{CyclotomicRing, DecomposableCyclotomicNumberRing};
+use super::{CyclotomicRing, HECyclotomicNumberRing};
 
 #[test]
 fn test_extract_coefficient_map() {

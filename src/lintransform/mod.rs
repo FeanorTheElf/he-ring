@@ -84,7 +84,7 @@ impl GaloisElementIndex {
     }
 
     fn galois_element<NumberRing, A>(&self, H: &HypercubeIsomorphism<NumberRing, A>) -> ZnEl
-        where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+        where NumberRing: HECyclotomicNumberRing<Zn>,
             A: Allocator + Clone
     {
         H.cyclotomic_index_ring().prod(self.shift_steps.iter().enumerate().map(|(i, s)| H.shift_galois_element(i, *s)).chain([H.frobenius_element(self.frobenius_count)].into_iter()))
@@ -103,7 +103,7 @@ impl GaloisElementIndex {
     }
 
     fn canonicalize<NumberRing, A>(&mut self, H: &HypercubeIsomorphism<NumberRing, A>)
-        where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+        where NumberRing: HECyclotomicNumberRing<Zn>,
             A: Allocator + Clone
     {
         let canonicalize_mod = |a: i64, n: i64| (((a % n) + n) % n);
@@ -117,14 +117,14 @@ impl GaloisElementIndex {
 }
 
 pub struct LinearTransform<NumberRing, A = Global>
-    where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+    where NumberRing: HECyclotomicNumberRing<Zn>,
         A: Allocator + Clone
 {
     data: Vec<(GaloisElementIndex, El<DecompositionRing<NumberRing, Zn, A>>)>
 }
 
 impl<NumberRing, A> LinearTransform<NumberRing, A>
-    where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+    where NumberRing: HECyclotomicNumberRing<Zn>,
         A: Allocator + Clone
 {
     pub fn eq(&self, other: &Self, H: &HypercubeIsomorphism<NumberRing, A>) -> bool {
@@ -404,7 +404,7 @@ impl<NumberRing, A> LinearTransform<NumberRing, A>
 }
 
 impl<NumberRing, A> DecompositionRingBase<NumberRing, Zn, A> 
-    where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+    where NumberRing: HECyclotomicNumberRing<Zn>,
         A: Allocator + Clone
 {
     pub fn compute_linear_transform(&self, H: &HypercubeIsomorphism<NumberRing, A>, el: &<Self as RingBase>::Element, transform: &LinearTransform<NumberRing, A>) -> <Self as RingBase>::Element {
@@ -414,7 +414,7 @@ impl<NumberRing, A> DecompositionRingBase<NumberRing, Zn, A>
 }
 
 pub struct CompiledLinearTransform<NumberRing, A = Global>
-    where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+    where NumberRing: HECyclotomicNumberRing<Zn>,
         A: Allocator + Clone
 {
     baby_step_galois_elements: Vec<ZnEl>,
@@ -434,7 +434,7 @@ pub struct BabyStepGiantStepParams {
 }
 
 impl<NumberRing, A> CompiledLinearTransform<NumberRing, A>
-    where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+    where NumberRing: HECyclotomicNumberRing<Zn>,
         A: Allocator + Clone
 {
     pub fn save(&self, filename: &str, ring: &DecompositionRing<NumberRing, Zn, A>, cyclotomic_index_ring: &Zn) {
@@ -660,7 +660,7 @@ mod serialization {
     use super::*;
 
     pub struct CompiledLinearTransformSerializable<'a, NumberRing, A>
-        where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+        where NumberRing: HECyclotomicNumberRing<Zn>,
             A: Allocator + Clone
     {
         baby_step_galois_elements: Vec<SerializeWithRing<'a, &'a Zn>>,
@@ -669,7 +669,7 @@ mod serialization {
     }
 
     impl<'a, NumberRing, A> Serialize for CompiledLinearTransformSerializable<'a, NumberRing, A>
-        where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+        where NumberRing: HECyclotomicNumberRing<Zn>,
             A: Allocator + Clone
     {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -684,7 +684,7 @@ mod serialization {
     }
 
     impl<'a, NumberRing, A> CompiledLinearTransformSerializable<'a, NumberRing, A>
-        where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+        where NumberRing: HECyclotomicNumberRing<Zn>,
             A: Allocator + Clone
     {
         pub fn from(ring: &'a DecompositionRing<NumberRing, Zn, A>, galois_group_ring: &'a Zn, transform: &'a CompiledLinearTransform<NumberRing, A>) -> Self {
@@ -787,7 +787,7 @@ mod serialization {
     }
 
     pub struct DeserializeLinearTransformSeed<'a, NumberRing, A>
-        where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+        where NumberRing: HECyclotomicNumberRing<Zn>,
             A: Allocator + Clone
     {
         pub cyclotomic_index_ring: &'a Zn,
@@ -795,7 +795,7 @@ mod serialization {
     }
     
     impl<'a, NumberRing, A> Clone for DeserializeLinearTransformSeed<'a, NumberRing, A>
-        where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+        where NumberRing: HECyclotomicNumberRing<Zn>,
             A: Allocator + Clone
     {
         fn clone(&self) -> Self {
@@ -804,12 +804,12 @@ mod serialization {
     }
 
     impl<'a, NumberRing, A> Copy for DeserializeLinearTransformSeed<'a, NumberRing, A>
-        where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+        where NumberRing: HECyclotomicNumberRing<Zn>,
             A: Allocator + Clone
     {}
 
     impl<'a, 'de, NumberRing, A> DeserializeSeed<'de> for DeserializeLinearTransformSeed<'a, NumberRing, A>
-        where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+        where NumberRing: HECyclotomicNumberRing<Zn>,
             A: Allocator + Clone
     {
         type Value = CompiledLinearTransform<NumberRing, A>;
@@ -818,7 +818,7 @@ mod serialization {
             where D: serde::Deserializer<'de>
         {
             struct FieldsVisitor<'a, NumberRing, A>
-                where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+                where NumberRing: HECyclotomicNumberRing<Zn>,
                     A: Allocator + Clone
             {
                 cyclotomic_index_ring: &'a Zn,
@@ -826,7 +826,7 @@ mod serialization {
             }
             
             impl<'a, 'de, NumberRing, A> Visitor<'de> for FieldsVisitor<'a, NumberRing, A>
-                where NumberRing: DecomposableCyclotomicNumberRing<Zn>,
+                where NumberRing: HECyclotomicNumberRing<Zn>,
                     A: Allocator + Clone
             {
                 type Value = CompiledLinearTransform<NumberRing, A>;
@@ -972,7 +972,7 @@ fn test_compile() {
 
 #[test]
 fn test_compile_odd_case() {
-    let ring = DecompositionRingBase::new(CompositeCyclotomicDecomposableNumberRing::new(3, 19), Zn::new(7));
+    let ring = DecompositionRingBase::new(CompositeCyclotomicNumberRing::new(3, 19), Zn::new(7));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
 
     let mut current = H.from_slot_vec((1..=12).map(|n| H.slot_ring().int_hom().map(n)));
@@ -985,7 +985,7 @@ fn test_compile_odd_case() {
     }
     println!();
     
-    let ring = DecompositionRingBase::new(CompositeCyclotomicDecomposableNumberRing::new(11, 31), Zn::new(2));
+    let ring = DecompositionRingBase::new(CompositeCyclotomicNumberRing::new(11, 31), Zn::new(2));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
 
     let mut current = H.from_slot_vec((1..=30).map(|n| H.slot_ring().int_hom().map(n)));
@@ -1050,7 +1050,7 @@ fn test_invert() {
 #[test]
 fn test_blockmatmul1d() {
     // F23[X]/(Phi_5) ~ F_(23^4)
-    let ring = DecompositionRingBase::new(OddCyclotomicDecomposableNumberRing::new(5), Zn::new(23));
+    let ring = DecompositionRingBase::new(OddCyclotomicNumberRing::new(5), Zn::new(23));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
     let matrix = [
         [1, 0, 1, 0],
@@ -1074,7 +1074,7 @@ fn test_blockmatmul1d() {
 
 
     // F23[X]/(Phi_7) ~ F_(23^3)^2
-    let ring = DecompositionRingBase::new(OddCyclotomicDecomposableNumberRing::new(7), Zn::new(23));
+    let ring = DecompositionRingBase::new(OddCyclotomicNumberRing::new(7), Zn::new(23));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
     let matrix = [
         [1, 0, 0],

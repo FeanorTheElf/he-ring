@@ -71,7 +71,7 @@ pub struct ModSwitchData {
 
 pub trait BFVParams: Sized {
 
-    type NumberRing: DecomposableCyclotomicNumberRing<Zn>;
+    type NumberRing: HECyclotomicNumberRing<Zn>;
     type CiphertextRing: RingStore<Type = Self::CiphertextRingBase>;
     type CiphertextRingBase: CyclotomicRing + RingExtension<BaseRing = zn_rns::Zn<Zn, BigIntRing>>;
     type Ciphertext;

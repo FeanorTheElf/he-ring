@@ -56,11 +56,11 @@ impl PartialEq for Pow2CyclotomicDecomposableNumberRing {
     }
 }
 
-impl<FpTy> DecomposableNumberRing<FpTy> for Pow2CyclotomicDecomposableNumberRing
+impl<FpTy> HENumberRing<FpTy> for Pow2CyclotomicDecomposableNumberRing
     where FpTy: RingStore + Clone,
         FpTy::Type: ZnRing
 {
-    type Decomposed = Pow2CyclotomicDecomposedNumberRing<FpTy, CooleyTuckeyFFT<FpTy::Type, FpTy::Type, Identity<FpTy>>>;
+    type Decomposed = Pow2CyclotomicNumberRing<FpTy, CooleyTuckeyFFT<FpTy::Type, FpTy::Type, Identity<FpTy>>>;
 
     fn product_expansion_factor(&self) -> f64 {
         (1 << (self.log2_n - 1)) as f64
@@ -95,7 +95,7 @@ impl<FpTy> DecomposableNumberRing<FpTy> for Pow2CyclotomicDecomposableNumberRing
             Fp.mul_assign_ref(&mut current, &zeta);
             Fp.mul_assign_ref(&mut current_inv, &zeta_inv);
         }
-        return Pow2CyclotomicDecomposedNumberRing { ring: Fp, fft_table, twiddles, inv_twiddles };
+        return Pow2CyclotomicNumberRing { ring: Fp, fft_table, twiddles, inv_twiddles };
     }
 
     fn largest_suitable_prime(&self, leq_than: i64) -> Option<i64> {
@@ -125,18 +125,18 @@ impl<FpTy> DecomposableNumberRing<FpTy> for Pow2CyclotomicDecomposableNumberRing
     }
 }
 
-impl<FpTy> DecomposableCyclotomicNumberRing<FpTy> for Pow2CyclotomicDecomposableNumberRing
+impl<FpTy> HECyclotomicNumberRing<FpTy> for Pow2CyclotomicDecomposableNumberRing
     where FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>
 {
-    type DecomposedAsCyclotomic = Pow2CyclotomicDecomposedNumberRing<FpTy, CooleyTuckeyFFT<FpTy::Type, FpTy::Type, Identity<FpTy>>>;
+    type DecomposedAsCyclotomic = Pow2CyclotomicNumberRing<FpTy, CooleyTuckeyFFT<FpTy::Type, FpTy::Type, Identity<FpTy>>>;
 
     fn n(&self) -> u64 {
         1 << self.log2_n
     }
 }
 
-impl<R, F> DecomposedCyclotomicNumberRing<R::Type> for Pow2CyclotomicDecomposedNumberRing<R, F> 
+impl<R, F> HECyclotomicNumberRingMod<R::Type> for Pow2CyclotomicNumberRing<R, F> 
     where R: RingStore,
         R::Type: ZnRing + CanHomFrom<BigIntRingBase> + DivisibilityRing,
         F: FFTAlgorithm<R::Type> + PartialEq
@@ -168,7 +168,7 @@ impl<R, F> DecomposedCyclotomicNumberRing<R::Type> for Pow2CyclotomicDecomposedN
     }
 }
 
-pub struct Pow2CyclotomicDecomposedNumberRing<R, F> 
+pub struct Pow2CyclotomicNumberRing<R, F> 
     where R: RingStore,
         R::Type: ZnRing,
         F: FFTAlgorithm<R::Type> + PartialEq
@@ -179,7 +179,7 @@ pub struct Pow2CyclotomicDecomposedNumberRing<R, F>
     inv_twiddles: Vec<El<R>>,
 }
 
-impl<R, F> PartialEq for Pow2CyclotomicDecomposedNumberRing<R, F> 
+impl<R, F> PartialEq for Pow2CyclotomicNumberRing<R, F> 
     where R: RingStore,
         R::Type: ZnRing,
         F: FFTAlgorithm<R::Type> + PartialEq
@@ -189,7 +189,7 @@ impl<R, F> PartialEq for Pow2CyclotomicDecomposedNumberRing<R, F>
     }
 }
 
-impl<R, F> DecomposedNumberRing<R::Type> for Pow2CyclotomicDecomposedNumberRing<R, F> 
+impl<R, F> HENumberRingMod<R::Type> for Pow2CyclotomicNumberRing<R, F> 
     where R: RingStore,
         R::Type: ZnRing,
         F: FFTAlgorithm<R::Type> + PartialEq

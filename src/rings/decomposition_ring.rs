@@ -25,14 +25,14 @@ use crate::IsEq;
 use crate::rings::decomposition::*;
 
 pub struct DecompositionRingBase<NumberRing, FpTy, A = Global> 
-    where NumberRing: DecomposableNumberRing<FpTy>,
+    where NumberRing: HENumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
 {
     number_ring: NumberRing,
     base_ring: FpTy,
-    ring_decompositions: Vec<<NumberRing as DecomposableNumberRing<FpTy>>::Decomposed>,
+    ring_decompositions: Vec<<NumberRing as HENumberRing<FpTy>>::Decomposed>,
     rns_base: zn_rns::Zn<FpTy, BigIntRing>,
     allocator: A
 }
@@ -40,7 +40,7 @@ pub struct DecompositionRingBase<NumberRing, FpTy, A = Global>
 pub type DecompositionRing<NumberRing, FpTy, A = Global> = RingValue<DecompositionRingBase<NumberRing, FpTy, A>>;
 
 pub struct DecompositionRingEl<NumberRing, FpTy, A = Global> 
-    where NumberRing: DecomposableNumberRing<FpTy>,
+    where NumberRing: HENumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
@@ -51,7 +51,7 @@ pub struct DecompositionRingEl<NumberRing, FpTy, A = Global>
 }
 
 impl<NumberRing, FpTy> DecompositionRingBase<NumberRing, RingValue<FpTy>>
-    where NumberRing: DecomposableNumberRing<RingValue<FpTy>>,
+    where NumberRing: HENumberRing<RingValue<FpTy>>,
         FpTy: Clone + ZnRing + CanHomFrom<BigIntRingBase> + FromModulusCreateableZnRing
 {
     pub fn new(number_ring: NumberRing, base_ring: RingValue<FpTy>) -> RingValue<Self> {
@@ -66,7 +66,7 @@ impl<NumberRing, FpTy> DecompositionRingBase<NumberRing, RingValue<FpTy>>
 }
 
 impl<NumberRing, FpTy, A> DecompositionRingBase<NumberRing, FpTy, A>
-    where NumberRing: DecomposableNumberRing<FpTy>,
+    where NumberRing: HENumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
@@ -91,7 +91,7 @@ impl<NumberRing, FpTy, A> DecompositionRingBase<NumberRing, FpTy, A>
         &self.allocator
     }
 
-    pub fn ring_decompositions(&self) -> &[<NumberRing as DecomposableNumberRing<FpTy>>::Decomposed] {
+    pub fn ring_decompositions(&self) -> &[<NumberRing as HENumberRing<FpTy>>::Decomposed] {
         &self.ring_decompositions
     }
 
@@ -116,7 +116,7 @@ impl<NumberRing, FpTy, A> DecompositionRingBase<NumberRing, FpTy, A>
     /// slowly, as opposed to multiplications.
     /// 
     pub fn sum_galois_transforms<I>(&self, els: I) -> <Self as RingBase>::Element
-        where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+        where NumberRing: HECyclotomicNumberRing<FpTy>,
             I: Iterator<Item = (<Self as RingBase>::Element, zn_64::ZnEl)>
     {
         let mut unreduced_result = Vec::with_capacity_in(self.rank() * self.rns_base.len(), &self.allocator);
@@ -137,7 +137,7 @@ impl<NumberRing, FpTy, A> DecompositionRingBase<NumberRing, FpTy, A>
                 }
                 self.ring_decompositions[i].coeff_basis_to_small_basis(&mut tmp[..]);
                 self.ring_decompositions[i].small_basis_to_mult_basis(&mut tmp[..]);
-                <_ as DecomposedCyclotomicNumberRing<_>>::permute_galois_action(<NumberRing::DecomposedAsCyclotomic>::from_ref(&self.ring_decompositions[i]), &tmp[..], &mut tmp_perm[..], g);
+                <_ as HECyclotomicNumberRingMod<_>>::permute_galois_action(<NumberRing::DecomposedAsCyclotomic>::from_ref(&self.ring_decompositions[i]), &tmp[..], &mut tmp_perm[..], g);
                 for j in 0..self.rank() {
                     Zp.add_assign_ref(&mut unreduced_result[i * self.rank() + j], &tmp_perm[j]);
                 }
@@ -171,7 +171,7 @@ impl<NumberRing, FpTy, A> DecompositionRingBase<NumberRing, FpTy, A>
 }
 
 impl<NumberRing, FpTy, A> CyclotomicRing for DecompositionRingBase<NumberRing, FpTy, A>
-    where NumberRing: DecomposableCyclotomicNumberRing<FpTy>,
+    where NumberRing: HECyclotomicNumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
@@ -218,7 +218,7 @@ impl<NumberRing, FpTy, A> CyclotomicRing for DecompositionRingBase<NumberRing, F
 }
 
 impl<NumberRing, FpTy, A> PartialEq for DecompositionRingBase<NumberRing, FpTy, A>
-    where NumberRing: DecomposableNumberRing<FpTy>,
+    where NumberRing: HENumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
@@ -229,7 +229,7 @@ impl<NumberRing, FpTy, A> PartialEq for DecompositionRingBase<NumberRing, FpTy, 
 }
 
 impl<NumberRing, FpTy, A> RingBase for DecompositionRingBase<NumberRing, FpTy, A>
-    where NumberRing: DecomposableNumberRing<FpTy>,
+    where NumberRing: HENumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
@@ -389,7 +389,7 @@ impl<NumberRing, FpTy, A> RingBase for DecompositionRingBase<NumberRing, FpTy, A
 }
 
 impl<NumberRing, FpTy, A> RingExtension for DecompositionRingBase<NumberRing, FpTy, A>
-    where NumberRing: DecomposableNumberRing<FpTy>,
+    where NumberRing: HENumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
@@ -408,7 +408,7 @@ impl<NumberRing, FpTy, A> RingExtension for DecompositionRingBase<NumberRing, Fp
 }
 
 impl<NumberRing, FpTy, A> FreeAlgebra for DecompositionRingBase<NumberRing, FpTy, A>
-    where NumberRing: DecomposableNumberRing<FpTy>,
+    where NumberRing: HENumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
@@ -445,7 +445,7 @@ impl<NumberRing, FpTy, A> FreeAlgebra for DecompositionRingBase<NumberRing, FpTy
 }
 
 pub struct WRTCanonicalBasisElementCreator<'a, NumberRing, FpTy, A>
-    where NumberRing: DecomposableNumberRing<FpTy>,
+    where NumberRing: HENumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
@@ -454,14 +454,14 @@ pub struct WRTCanonicalBasisElementCreator<'a, NumberRing, FpTy, A>
 }
 
 impl<'a, NumberRing, FpTy, A> Copy for WRTCanonicalBasisElementCreator<'a, NumberRing, FpTy, A>
-    where NumberRing: DecomposableNumberRing<FpTy>,
+    where NumberRing: HENumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
 {}
 
 impl<'a, NumberRing, FpTy, A> Clone for WRTCanonicalBasisElementCreator<'a, NumberRing, FpTy, A>
-    where NumberRing: DecomposableNumberRing<FpTy>,
+    where NumberRing: HENumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
@@ -472,7 +472,7 @@ impl<'a, NumberRing, FpTy, A> Clone for WRTCanonicalBasisElementCreator<'a, Numb
 }
 
 impl<'a, 'b, NumberRing, FpTy, A> FnOnce<(&'b [El<FpTy>],)> for WRTCanonicalBasisElementCreator<'a, NumberRing, FpTy, A>
-    where NumberRing: DecomposableNumberRing<FpTy>,
+    where NumberRing: HENumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
@@ -485,7 +485,7 @@ impl<'a, 'b, NumberRing, FpTy, A> FnOnce<(&'b [El<FpTy>],)> for WRTCanonicalBasi
 }
 
 impl<'a, 'b, NumberRing, FpTy, A> FnMut<(&'b [El<FpTy>],)> for WRTCanonicalBasisElementCreator<'a, NumberRing, FpTy, A>
-    where NumberRing: DecomposableNumberRing<FpTy>,
+    where NumberRing: HENumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
@@ -496,7 +496,7 @@ impl<'a, 'b, NumberRing, FpTy, A> FnMut<(&'b [El<FpTy>],)> for WRTCanonicalBasis
 }
 
 impl<'a, 'b, NumberRing, FpTy, A> Fn<(&'b [El<FpTy>],)> for WRTCanonicalBasisElementCreator<'a, NumberRing, FpTy, A>
-    where NumberRing: DecomposableNumberRing<FpTy>,
+    where NumberRing: HENumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
@@ -507,7 +507,7 @@ impl<'a, 'b, NumberRing, FpTy, A> Fn<(&'b [El<FpTy>],)> for WRTCanonicalBasisEle
 }
 
 impl<NumberRing, FpTy, A> FiniteRing for DecompositionRingBase<NumberRing, FpTy, A>
-    where NumberRing: DecomposableNumberRing<FpTy>,
+    where NumberRing: HENumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
@@ -542,7 +542,7 @@ impl<NumberRing, FpTy, A> FiniteRing for DecompositionRingBase<NumberRing, FpTy,
 }
 
 impl<NumberRing, FpTy, A> SerializableElementRing for DecompositionRingBase<NumberRing, FpTy, A>
-    where NumberRing: DecomposableNumberRing<FpTy>,
+    where NumberRing: HENumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase> + SerializableElementRing,
         A: Allocator + Clone
@@ -572,7 +572,7 @@ impl<NumberRing, FpTy, A> SerializableElementRing for DecompositionRingBase<Numb
 }
 
 impl<NumberRing, FpTy1, FpTy2, A1, A2> CanHomFrom<DecompositionRingBase<NumberRing, FpTy2, A2>> for DecompositionRingBase<NumberRing, FpTy1, A1>
-    where NumberRing: DecomposableNumberRing<FpTy1> + DecomposableNumberRing<FpTy2>,
+    where NumberRing: HENumberRing<FpTy1> + HENumberRing<FpTy2>,
         FpTy1: RingStore + Clone,
         FpTy1::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A1: Allocator + Clone,
@@ -604,7 +604,7 @@ impl<NumberRing, FpTy1, FpTy2, A1, A2> CanHomFrom<DecompositionRingBase<NumberRi
 }
 
 impl<NumberRing, FpTy1, FpTy2, A1, A2> CanIsoFromTo<DecompositionRingBase<NumberRing, FpTy2, A2>> for DecompositionRingBase<NumberRing, FpTy1, A1>
-    where NumberRing: DecomposableNumberRing<FpTy1> + DecomposableNumberRing<FpTy2>,
+    where NumberRing: HENumberRing<FpTy1> + HENumberRing<FpTy2>,
         FpTy1: RingStore + Clone,
         FpTy1::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A1: Allocator + Clone,
@@ -636,7 +636,7 @@ impl<NumberRing, FpTy1, FpTy2, A1, A2> CanIsoFromTo<DecompositionRingBase<Number
 }
 
 #[cfg(test)]
-pub fn test_with_number_ring<NumberRing: DecomposableNumberRing<zn_64::Zn>>(number_ring: NumberRing) {
+pub fn test_with_number_ring<NumberRing: HENumberRing<zn_64::Zn>>(number_ring: NumberRing) {
     let base_ring = zn_64::Zn::new(5);
     let rank = number_ring.rank();
     let ring = DecompositionRingBase::new(number_ring, base_ring);

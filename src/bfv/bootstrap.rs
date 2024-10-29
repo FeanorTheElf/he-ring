@@ -73,11 +73,11 @@ impl ThinBootstrapParams<Pow2BFVParams> {
 
     pub fn build_pow2<const LOG: bool>(params: Pow2BFVParams, config: BootstrapperConfig) -> Self {
         let (p, r) = is_prime_power(&ZZ, &params.plaintext_modulus()).unwrap();
-        let s_can_norm = <_ as DecomposableNumberRing<Zn>>::inf_to_can_norm_expansion_factor(&params.number_ring());
+        let s_can_norm = <_ as HENumberRing<Zn>>::inf_to_can_norm_expansion_factor(&params.number_ring());
         let v = config.set_v.unwrap_or(((s_can_norm + 1.).log2() / (p as f64).log2()).ceil() as usize);
         let e = r + v;
         if LOG {
-            println!("Setting up bootstrapping for plaintext modulus p^r = {}^{} = {} within the cyclotomic ring Q[X]/(Phi_{})", p, r, params.plaintext_modulus(), <_ as DecomposableCyclotomicNumberRing<Zn>>::n(&params.number_ring()));
+            println!("Setting up bootstrapping for plaintext modulus p^r = {}^{} = {} within the cyclotomic ring Q[X]/(Phi_{})", p, r, params.plaintext_modulus(), <_ as HECyclotomicNumberRing<Zn>>::n(&params.number_ring()));
             println!("Choosing e = r + v = {} + {}", r, v);
         }
 

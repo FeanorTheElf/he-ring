@@ -45,7 +45,7 @@ pub type GadgetProductOperand<'a, Params: DoubleRNSBFVParams> = GadgetProductRhs
 
 pub trait DoubleRNSBFVParams {
     
-    type NumberRing: DecomposableCyclotomicNumberRing<Zn>;
+    type NumberRing: HECyclotomicNumberRing<Zn>;
 
     fn ciphertext_modulus_bits_(&self) -> Range<usize>;
     fn number_ring_(&self) -> Self::NumberRing;
@@ -344,12 +344,12 @@ impl<P: DoubleRNSBFVParams> BFVParams for P {
     }
 }
 
-pub struct CoeffOrDoubleRNSEl<NumberRing: DecomposableNumberRing<Zn>> {
+pub struct CoeffOrDoubleRNSEl<NumberRing: HENumberRing<Zn>> {
     ntt_part: Option<DoubleRNSEl<NumberRing, Zn, CiphertextAllocator>>,
     coeff_part: Option<CoeffEl<NumberRing, Zn, CiphertextAllocator>>
 }
 
-impl<NumberRing: DecomposableNumberRing<Zn>> CoeffOrDoubleRNSEl<NumberRing> {
+impl<NumberRing: HENumberRing<Zn>> CoeffOrDoubleRNSEl<NumberRing> {
 
     pub fn ntt_repr(self, C: &DoubleRNSRing<NumberRing, Zn, CiphertextAllocator>) -> Self {
         CoeffOrDoubleRNSEl::from_ntt(self.to_ntt(C))
@@ -490,7 +490,7 @@ pub struct CompositeDoubleRNSBFVParams {
 
 impl DoubleRNSBFVParams for CompositeDoubleRNSBFVParams {
 
-    type NumberRing = CompositeCyclotomicDecomposableNumberRing;
+    type NumberRing = CompositeCyclotomicNumberRing;
 
     fn plaintext_modulus_(&self) -> i64 {
         self.t
@@ -501,7 +501,7 @@ impl DoubleRNSBFVParams for CompositeDoubleRNSBFVParams {
     }
 
     fn number_ring_(&self) -> Self::NumberRing {
-        CompositeCyclotomicDecomposableNumberRing::new(self.n1, self.n2)
+        CompositeCyclotomicNumberRing::new(self.n1, self.n2)
     }
 }
 
