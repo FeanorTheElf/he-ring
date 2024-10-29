@@ -49,6 +49,10 @@ pub struct DoubleRNSRingBase<NumberRing, FpTy, A = Global>
 
 pub type DoubleRNSRing<NumberRing, FpTy, A = Global> = RingValue<DoubleRNSRingBase<NumberRing, FpTy, A>>;
 
+///
+/// A [`DoubleRNSRing`] element, stored by its coefficients w.r.t. the "mult basis".
+/// In particular, this is the only representation that allows for multiplications.
+/// 
 pub struct DoubleRNSEl<NumberRing, FpTy, A = Global>
     where NumberRing: HENumberRing<FpTy>,
         FpTy: RingStore + Clone,
@@ -60,6 +64,9 @@ pub struct DoubleRNSEl<NumberRing, FpTy, A = Global>
     pub(super) el_wrt_mult_basis: Vec<El<FpTy>, A>
 }
 
+///
+/// A [`DoubleRNSRing`] element, stored by its coefficients w.r.t. the "small basis".
+/// 
 pub struct CoeffEl<NumberRing, FpTy, A = Global>
     where NumberRing: HENumberRing<FpTy>,
         FpTy: RingStore + Clone,

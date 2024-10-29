@@ -398,16 +398,18 @@ fn test_pow2_bfv_thin_bootstrapping_17() {
         log2_q_max: 800,
         log2_N: 7
     };
-    let bootstrapper = ThinBootstrapParams::build_pow2::<true>(params.clone(), 17, DEFAULT_CONFIG);
+    let t = 17;
+    let digits = 3;
+    let bootstrapper = ThinBootstrapParams::build_pow2::<true>(params.clone(), t, DEFAULT_CONFIG);
     
-    let P = params.create_plaintext_ring(17);
+    let P = params.create_plaintext_ring(t);
     let (C, C_mul) = params.create_ciphertext_rings();
 
     let bootstrapping_data = bootstrapper.create_all_bootstrapping_data(&C, &C_mul);
     
     let sk = Pow2BFVParams::gen_sk(&C, &mut rng);
-    let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, Pow2BFVParams::gen_gk(&C, &mut rng, &sk, g))).collect::<Vec<_>>();
-    let rk = Pow2BFVParams::gen_rk(&C, &mut rng, &sk);
+    let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, Pow2BFVParams::gen_gk::<_, false>(&C, &mut rng, &sk, g, digits))).collect::<Vec<_>>();
+    let rk = Pow2BFVParams::gen_rk::<_, false>(&C, &mut rng, &sk, digits);
     
     let m = P.int_hom().map(2);
     let ct = Pow2BFVParams::enc_sym(&P, &C, &mut rng, &m, &sk);
@@ -437,16 +439,18 @@ fn test_pow2_bfv_thin_bootstrapping_23() {
         log2_q_max: 800,
         log2_N: 7
     };
-    let bootstrapper = ThinBootstrapParams::build_pow2::<true>(params.clone(), 23, DEFAULT_CONFIG);
+    let t = 23;
+    let digits = 3;
+    let bootstrapper = ThinBootstrapParams::build_pow2::<true>(params.clone(), t, DEFAULT_CONFIG);
     
-    let P = params.create_plaintext_ring(23);
+    let P = params.create_plaintext_ring(t);
     let (C, C_mul) = params.create_ciphertext_rings();
 
     let bootstrapping_data = bootstrapper.create_all_bootstrapping_data(&C, &C_mul);
     
     let sk = Pow2BFVParams::gen_sk(&C, &mut rng);
-    let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, Pow2BFVParams::gen_gk(&C, &mut rng, &sk, g))).collect::<Vec<_>>();
-    let rk = Pow2BFVParams::gen_rk(&C, &mut rng, &sk);
+    let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, Pow2BFVParams::gen_gk::<_, false>(&C, &mut rng, &sk, g, digits))).collect::<Vec<_>>();
+    let rk = Pow2BFVParams::gen_rk::<_, false>(&C, &mut rng, &sk, digits);
     
     let m = P.int_hom().map(2);
     let ct = Pow2BFVParams::enc_sym(&P, &C, &mut rng, &m, &sk);
@@ -476,16 +480,18 @@ fn test_composite_bfv_thin_bootstrapping_2() {
         n1: 31,
         n2: 11
     };
-    let bootstrapper = ThinBootstrapParams::build_odd::<true>(params.clone(), 8, DEFAULT_CONFIG.set_v(11));
+    let t = 8;
+    let digits = 3;
+    let bootstrapper = ThinBootstrapParams::build_odd::<true>(params.clone(), t, DEFAULT_CONFIG.set_v(11));
     
-    let P = params.create_plaintext_ring(8);
+    let P = params.create_plaintext_ring(t);
     let (C, C_mul) = params.create_ciphertext_rings();
 
     let bootstrapping_data = bootstrapper.create_all_bootstrapping_data(&C, &C_mul);
     
     let sk = CompositeBFVParams::gen_sk(&C, &mut rng);
-    let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, CompositeBFVParams::gen_gk(&C, &mut rng, &sk, g))).collect::<Vec<_>>();
-    let rk = CompositeBFVParams::gen_rk(&C, &mut rng, &sk);
+    let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, CompositeBFVParams::gen_gk::<_, false>(&C, &mut rng, &sk, g, digits))).collect::<Vec<_>>();
+    let rk = CompositeBFVParams::gen_rk::<_, false>(&C, &mut rng, &sk, digits);
     
     let m = P.int_hom().map(2);
     let ct = CompositeBFVParams::enc_sym(&P, &C, &mut rng, &m, &sk);
