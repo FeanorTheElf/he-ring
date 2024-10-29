@@ -55,6 +55,10 @@ pub fn precomputed_p_2(e: usize) -> ArithCircuit {
     };
 }
 
+///
+/// Heuristically chooses a low-depth, low-complexity circuit that
+/// evaluates all the given univariate polynomials.
+/// 
 pub fn poly_to_circuit<P>(poly_ring: P, polys: &[El<P>]) -> ArithCircuit
     where P: RingStore,
         P::Type: PolyRing,
