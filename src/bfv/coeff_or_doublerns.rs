@@ -17,6 +17,13 @@ pub fn coeff_repr<Params: BFVParams>(C: &CiphertextRing<Params>, ct: Ciphertext<
     (ct.0.coeff_repr(C), ct.1.coeff_repr(C))
 }
 
+///
+/// Counterpart to [`coeff_repr()`]
+/// 
+pub fn ntt_repr<Params: BFVParams>(C: &CiphertextRing<Params>, ct: Ciphertext<Params>) -> Ciphertext<Params> {
+    (ct.0.ntt_repr(C), ct.1.ntt_repr(C))
+}
+
 pub struct CoeffOrDoubleRNSEl<NumberRing: HENumberRing<Zn>> {
     ntt_part: Option<DoubleRNSEl<NumberRing, Zn, CiphertextAllocator>>,
     coeff_part: Option<CoeffEl<NumberRing, Zn, CiphertextAllocator>>

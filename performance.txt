@@ -22,14 +22,14 @@ done in 1325 ms, []
 HomMul
 done in 2219 ms, []
 DoubleRNSRing::do_fft: 923 ms
-OddCyclotomicDecomposedNumberRing::small_basis_to_mult_basis::fft: 1167 ms
 DoubleRNSRing::undo_fft: 874 ms
-OddCyclotomicDecomposedNumberRing::mult_basis_to_small_basis::fft: 826 ms
-OddCyclotomicDecomposedNumberRing::mult_basis_to_small_basis::reduction: 20 ms
 DoubleRNSRing::perform_rns_op_from: 337 ms
-AlmostExactBaseConversion::apply: 338 ms
 DoubleRNSRing::to_gadget_product_lhs: 313 ms
 DoubleRNSRing::gadget_product_ntt::naive: 24 ms
+AlmostExactBaseConversion::apply: 338 ms
+OddCyclotomicDecomposedNumberRing::small_basis_to_mult_basis::fft: 1167 ms
+OddCyclotomicDecomposedNumberRing::mult_basis_to_small_basis::fft: 826 ms
+OddCyclotomicDecomposedNumberRing::mult_basis_to_small_basis::reduction: 20 ms
 test bfv::print_timings_double_rns_composite_bfv_mul ... ok
 
 CreatePtxtRing

@@ -1,7 +1,7 @@
 
 pub mod ntt_convolution;
 
-pub mod decomposition;
+pub mod number_ring;
 
 ///
 /// Contains an implementation of "gadget products". For details, see [`double_rns_ring::DoubleRNSRingBase::gadget_product()`].
@@ -13,8 +13,6 @@ pub mod gadget_product;
 /// for any ring that supports conversion from and to double-RNS-representation.
 ///  
 pub mod double_rns_ring;
-
-// pub mod single_rns_ring;
 
 pub mod decomposition_ring;
 

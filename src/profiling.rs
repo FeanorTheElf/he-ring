@@ -39,6 +39,7 @@ macro_rules! record_time {
                 use std::time::Instant;
                 use $crate::profiling::*;
 
+                static TIME: AtomicU64 = AtomicU64::new(0);
                 static COUNTER: AtomicU64 = AtomicU64::new(0);
                 static REGISTERED: AtomicBool = AtomicBool::new(false);
 
@@ -48,10 +49,13 @@ macro_rules! record_time {
                     
                     fn reset(&mut self) {
                         COUNTER.store(0, Ordering::SeqCst);
+                        TIME.store(0, Ordering::SeqCst);
                     }
 
                     fn print(&self) {
-                        println!("{}: {} ms", $name, COUNTER.load(Ordering::SeqCst) / 1000000);
+                        if COUNTER.load(Ordering::SeqCst) > 0 {
+                            println!("{}: {} calls, {} ms", $name, COUNTER.load(Ordering::SeqCst), TIME.load(Ordering::SeqCst) / 1000000);
+                        }
                     }
                 }
 
@@ -68,7 +72,8 @@ macro_rules! record_time {
                 let start = Instant::now();
                 let result = prevent_inline($fn);
                 let end = Instant::now();
-                COUNTER.fetch_add((end - start).as_nanos() as u64 + 1, Ordering::SeqCst);
+                COUNTER.fetch_add(1, Ordering::SeqCst);
+                TIME.fetch_add((end - start).as_nanos() as u64 + 1, Ordering::SeqCst);
                 result
             }
             #[cfg(not(feature = "record_timings"))] {

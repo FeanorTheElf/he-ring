@@ -20,7 +20,7 @@ use feanor_math::seq::*;
 use serde_json::Number;
 
 use crate::cyclotomic::CyclotomicRing;
-use crate::rings::decomposition::*;
+use crate::rings::number_ring::*;
 use crate::rnsconv::*;
 use crate::IsEq;
 

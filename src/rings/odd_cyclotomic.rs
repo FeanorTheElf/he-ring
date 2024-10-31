@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::cmp::max;
 
 use bluestein::BluesteinFFT;
+use dense_poly::DensePolyRing;
 use factor_fft::CoprimeCooleyTuckeyFFT;
 use feanor_math::algorithms::eea::{signed_eea, signed_gcd};
 use feanor_math::algorithms::int_factor::factor;
@@ -25,7 +26,7 @@ use crate::feanor_math::rings::extension::*;
 use feanor_math::seq::*;
 
 use crate::rings::double_rns_ring::*;
-use crate::rings::decomposition::*;
+use crate::rings::number_ring::*;
 // use super::single_rns_ring;
 use super::{decomposition_ring::{self, *}, double_rns_ring};
 use crate::{euler_phi, euler_phi_squarefree, sample_primes, StdZn};
@@ -159,18 +160,20 @@ impl<FpTy> HENumberRing<FpTy> for OddCyclotomicNumberRing
     }
 
     fn mod_p(&self, Fp: FpTy) -> Self::Decomposed {
-        let n_factorization = &self.n_factorization_squarefree;
-        let n = n_factorization.iter().copied().product::<i64>();
+        record_time!("OddCyclotomicDecomposedNumberRing::mod_p", || {
+            let n_factorization = &self.n_factorization_squarefree;
+            let n = n_factorization.iter().copied().product::<i64>();
 
-        let Fp_as_field = (&Fp).as_field().ok().unwrap();
-        let zeta = get_prim_root_of_unity(&Fp_as_field, 2 * n as usize).unwrap();
-        let zeta = Fp_as_field.get_ring().unwrap_element(zeta);
-        let log2_m = StaticRing::<i64>::RING.abs_log2_ceil(&n).unwrap() + 1;
-        let zeta_m = get_prim_root_of_unity_pow2(&Fp_as_field, log2_m).unwrap();
-        let zeta_m = Fp_as_field.get_ring().unwrap_element(zeta_m);
-        let fft_table = BluesteinFFT::new(Fp.clone(), zeta, zeta_m, n as usize, log2_m, Global);
+            let Fp_as_field = (&Fp).as_field().ok().unwrap();
+            let zeta = get_prim_root_of_unity(&Fp_as_field, 2 * n as usize).unwrap();
+            let zeta = Fp_as_field.get_ring().unwrap_element(zeta);
+            let log2_m = StaticRing::<i64>::RING.abs_log2_ceil(&n).unwrap() + 1;
+            let zeta_m = get_prim_root_of_unity_pow2(&Fp_as_field, log2_m).unwrap();
+            let zeta_m = Fp_as_field.get_ring().unwrap_element(zeta_m);
+            let fft_table = BluesteinFFT::new(Fp.clone(), zeta, zeta_m, n as usize, log2_m, Global);
 
-        return OddCyclotomicDecomposedNumberRing::create_squarefree(fft_table, Fp, &self.n_factorization_squarefree, Global);
+            return OddCyclotomicDecomposedNumberRing::create_squarefree(fft_table, Fp, &self.n_factorization_squarefree, Global);
+        })
     }
 
     fn largest_suitable_prime(&self, leq_than: i64) -> Option<i64> {
@@ -258,52 +261,58 @@ impl<FpTy> HENumberRing<FpTy> for CompositeCyclotomicNumberRing
     type Decomposed = CompositeCyclotomicDecomposedNumberRing<FpTy, BluesteinFFT<FpTy::Type, FpTy::Type, Identity<FpTy>>>;
 
     fn mod_p(&self, Fp: FpTy) -> Self::Decomposed {
-        let n1 = <_ as HECyclotomicNumberRing<FpTy>>::n(&self.tensor_factor1) as i64;
-        let n2 = <_ as HECyclotomicNumberRing<FpTy>>::n(&self.tensor_factor2) as i64;
-        let n = n1 * n2;
-        let r1 = <_ as HENumberRing<FpTy>>::rank(&self.tensor_factor1) as i64;
-        let r2 = <_ as HENumberRing<FpTy>>::rank(&self.tensor_factor2) as i64;
+        record_time!("CompositeCyclotomicNumberRing::mod_p", || {
+            let n1 = <_ as HECyclotomicNumberRing<FpTy>>::n(&self.tensor_factor1) as i64;
+            let n2 = <_ as HECyclotomicNumberRing<FpTy>>::n(&self.tensor_factor2) as i64;
+            let n = n1 * n2;
+            let r1 = <_ as HENumberRing<FpTy>>::rank(&self.tensor_factor1) as i64;
+            let r2 = <_ as HENumberRing<FpTy>>::rank(&self.tensor_factor2) as i64;
 
-        let poly_ring = &self.tensor_factor1.sparse_poly_ring;
-        let Phi_n = cyclotomic_polynomial(&poly_ring, n as usize);
-        let hom = Fp.can_hom(Fp.integer_ring()).unwrap().compose(Fp.integer_ring().can_hom(poly_ring.base_ring()).unwrap());
-        let hom_ref = &hom;
+            let poly_ring = &self.tensor_factor1.sparse_poly_ring;
+            let Phi_n1 = poly_ring.coerce(&self.tensor_factor1.sparse_poly_ring, self.tensor_factor1.sparse_poly_ring.clone_el(&self.tensor_factor1.cyclotomic_poly));
+            let Phi_n2 = poly_ring.coerce(&self.tensor_factor2.sparse_poly_ring, self.tensor_factor2.sparse_poly_ring.clone_el(&self.tensor_factor2.cyclotomic_poly));
+            let Phi_n = cyclotomic_polynomial(&poly_ring, n as usize);
+            let hom = Fp.can_hom(Fp.integer_ring()).unwrap().compose(Fp.integer_ring().can_hom(poly_ring.base_ring()).unwrap());
+            let hom_ref = &hom;
 
-        let (s, t, d) = signed_eea(n1, n2, StaticRing::<i64>::RING);
-        assert_eq!(1, d);
+            let (s, t, d) = signed_eea(n1, n2, StaticRing::<i64>::RING);
+            assert_eq!(1, d);
 
-        let mut small_to_coeff_conversion_matrix = (0..(r1 * r2)).map(|_| Vec::new()).collect::<Vec<_>>();
-        let mut coeff_to_small_conversion_matrix = (0..(r1 * r2)).map(|_| Vec::new()).collect::<Vec<_>>();
+            let mut small_to_coeff_conversion_matrix = (0..(r1 * r2)).map(|_| Vec::new()).collect::<Vec<_>>();
+            let mut coeff_to_small_conversion_matrix = (0..(r1 * r2)).map(|_| Vec::new()).collect::<Vec<_>>();
 
-        let mut X_pow_i = poly_ring.one();
-        for i in 0..(n1 * n2) {
-            let i1 = ((t * i % n1) + n1) % n1;
-            let i2 = ((s * i % n2) + n2) % n2;
-            debug_assert_eq!(i, (i1 * n / n1 + i2 * n / n2) % n);
+            let mut X_pow_i = poly_ring.one();
+            for i in 0..(n1 * n2) {
+                let i1 = ((t * i % n1) + n1) % n1;
+                let i2 = ((s * i % n2) + n2) % n2;
+                debug_assert_eq!(i, (i1 * n / n1 + i2 * n / n2) % n);
 
-            if i < r1 * r2 {
-                let X1_power_reduced = poly_ring.div_rem_monic(poly_ring.pow(poly_ring.indeterminate(), i1 as usize), &self.tensor_factor1.cyclotomic_poly).1;
-                let X2_power_reduced = poly_ring.div_rem_monic(poly_ring.pow(poly_ring.indeterminate(), i2 as usize), &self.tensor_factor2.cyclotomic_poly).1;
+                if i < r1 * r2 {
+                    let X1_power_reduced = poly_ring.div_rem_monic(poly_ring.pow(poly_ring.indeterminate(), i1 as usize), &Phi_n1).1;
+                    let X2_power_reduced = poly_ring.div_rem_monic(poly_ring.pow(poly_ring.indeterminate(), i2 as usize), &Phi_n2).1;
+                    
+                    coeff_to_small_conversion_matrix[i as usize] = poly_ring.terms(&X1_power_reduced).flat_map(|(c1, j1)| poly_ring.terms(&X2_power_reduced).map(move |(c2, j2)| 
+                        (j1 + j2 * r1 as usize, hom_ref.map(poly_ring.base_ring().mul_ref(c1, c2))
+                    ))).collect::<Vec<_>>();
+                }
                 
-                coeff_to_small_conversion_matrix[i as usize] = poly_ring.terms(&X1_power_reduced).flat_map(|(c1, j1)| poly_ring.terms(&X2_power_reduced).map(move |(c2, j2)| 
-                    (j1 + j2 * r1 as usize, hom_ref.map(poly_ring.base_ring().mul_ref(c1, c2))
-                ))).collect::<Vec<_>>();
-            }
-            
-            if i1 < r1 && i2 < r2 {
-                small_to_coeff_conversion_matrix[(i2 * r1 + i1) as usize] = poly_ring.terms(&X_pow_i).map(|(c, i)| (i, hom_ref.map_ref(c))).collect::<Vec<_>>();
+                if i1 < r1 && i2 < r2 {
+                    small_to_coeff_conversion_matrix[(i2 * r1 + i1) as usize] = poly_ring.terms(&X_pow_i).map(|(c, i)| (i, hom_ref.map_ref(c))).collect::<Vec<_>>();
+                }
+
+                record_time!("CompositeCyclotomicNumberRing::mod_p::mul_mod", || {
+                    poly_ring.mul_assign(&mut X_pow_i, poly_ring.indeterminate());
+                    X_pow_i = poly_ring.div_rem_monic(std::mem::replace(&mut X_pow_i, poly_ring.zero()), &Phi_n).1;
+                });
             }
 
-            poly_ring.mul_assign(&mut X_pow_i, poly_ring.indeterminate());
-            X_pow_i = poly_ring.div_rem_monic(X_pow_i, &Phi_n).1;
-        }
-
-        CompositeCyclotomicDecomposedNumberRing {
-            small_to_coeff_conversion_matrix: small_to_coeff_conversion_matrix,
-            coeff_to_small_conversion_matrix: coeff_to_small_conversion_matrix,
-            tensor_factor1: self.tensor_factor1.mod_p(Fp.clone()),
-            tensor_factor2: self.tensor_factor2.mod_p(Fp)
-        }
+            CompositeCyclotomicDecomposedNumberRing {
+                small_to_coeff_conversion_matrix: small_to_coeff_conversion_matrix,
+                coeff_to_small_conversion_matrix: coeff_to_small_conversion_matrix,
+                tensor_factor1: self.tensor_factor1.mod_p(Fp.clone()),
+                tensor_factor2: self.tensor_factor2.mod_p(Fp)
+            }
+        })
     }
 
     fn largest_suitable_prime(&self, leq_than: i64) -> Option<i64> {

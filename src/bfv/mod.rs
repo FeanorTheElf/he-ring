@@ -32,7 +32,7 @@ use feanor_math::pid::EuclideanRingStore;
 use crate::cyclotomic::CyclotomicRing;
 use crate::euler_phi;
 use crate::extend_sampled_primes;
-use crate::rings::decomposition::*;
+use crate::rings::number_ring::*;
 use crate::rings::decomposition_ring::*;
 use crate::rings::odd_cyclotomic::*;
 use crate::rings::pow2_cyclotomic::*;
@@ -501,6 +501,7 @@ fn print_timings_pow2_bfv_mul() {
     let (C, C_mul) = log_time::<_, _, true, _>("CreateCtxtRing", |[]|
         params.create_ciphertext_rings()
     );
+    print_all_timings();
 
     let sk = log_time::<_, _, true, _>("GenSK", |[]| 
         Pow2BFVParams::gen_sk(&C, &mut rng)
@@ -591,7 +592,6 @@ fn print_timings_double_rns_composite_bfv_mul() {
     let rk = log_time::<_, _, true, _>("GenRK", |[]| 
         CompositeBFVParams::gen_rk::<_, true>(&C, &mut rng, &sk, digits)
     );
-
     clear_all_timings();
     let res = log_time::<_, _, true, _>("HomMul", |[]| 
         coeff_repr::<CompositeBFVParams>(&C, CompositeBFVParams::hom_mul(&C, &C_mul, CompositeBFVParams::clone_ct(&C, &ct), CompositeBFVParams::clone_ct(&C, &ct), &rk, &mul_rescale_data))

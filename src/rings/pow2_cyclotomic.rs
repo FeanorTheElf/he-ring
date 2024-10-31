@@ -27,7 +27,7 @@ use super::double_rns_ring;
 use super::double_rns_ring::*;
 use super::decomposition_ring::*;
 // use super::single_rns_ring;
-use crate::rings::decomposition::*;
+use crate::rings::number_ring::*;
 use crate::sample_primes;
 use crate::StdZn;
 use crate::cyclotomic::CyclotomicRing;

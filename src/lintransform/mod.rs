@@ -25,7 +25,7 @@ use serde::de::DeserializeSeed;
 use trace::Trace;
 
 use crate::cyclotomic::*;
-use crate::rings::decomposition::*;
+use crate::rings::number_ring::*;
 use crate::rings::decomposition_ring::*;
 use crate::rings::odd_cyclotomic::*;
 use crate::rings::slots::*;

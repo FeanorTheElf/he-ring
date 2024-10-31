@@ -50,7 +50,7 @@ use crate::cyclotomic::*;
 use crate::profiling::log_time;
 use crate::StdZn;
 use crate::euler_phi;
-use super::decomposition::*;
+use super::number_ring::*;
 use super::decomposition_ring::*;
 use oorandom;
 

@@ -22,7 +22,7 @@ use serde_json::Number;
 use crate::cyclotomic::CyclotomicRing;
 use crate::sample_primes;
 use crate::IsEq;
-use crate::rings::decomposition::*;
+use crate::rings::number_ring::*;
 
 pub struct DecompositionRingBase<NumberRing, FpTy, A = Global> 
     where NumberRing: HENumberRing<FpTy>,

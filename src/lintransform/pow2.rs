@@ -11,7 +11,7 @@ use feanor_math::rings::zn::*;
 use feanor_math::assert_el_eq;
 
 use crate::cyclotomic::*;
-use crate::rings::decomposition::*;
+use crate::rings::number_ring::*;
 use crate::rings::decomposition_ring::*;
 use crate::rings::pow2_cyclotomic::*;
 use crate::StdZn;

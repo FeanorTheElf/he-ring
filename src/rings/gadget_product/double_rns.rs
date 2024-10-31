@@ -22,7 +22,7 @@ use crate::cyclotomic::CyclotomicRing;
 use crate::rings::pow2_cyclotomic::Pow2CyclotomicDecomposableNumberRing;
 use crate::rings::pow2_cyclotomic::Pow2CyclotomicNumberRing;
 use crate::rnsconv::*;
-use crate::rings::decomposition::*;
+use crate::rings::number_ring::*;
 use crate::IsEq;
 
 // don't use the matrix one here, as in our case, one dimension is very small (e.g. 3), and the matrix
