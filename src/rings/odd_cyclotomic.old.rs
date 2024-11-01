@@ -27,15 +27,15 @@ use feanor_math::seq::*;
 
 use crate::rings::double_rns_ring::*;
 use crate::rings::number_ring::*;
-use super::single_rns_ring;
+use crate::rings::single_rns_ring;
 use super::{decomposition_ring::{self, *}, double_rns_ring};
 use crate::{euler_phi, euler_phi_squarefree, sample_primes, StdZn};
 use crate::cyclotomic::CyclotomicRing;
 
 pub struct OddCyclotomicNumberRing {
     n_factorization_squarefree: Vec<i64>,
-    sparse_poly_ring: SparsePolyRing<StaticRing<i64>>,
-    cyclotomic_poly: El<SparsePolyRing<StaticRing<i64>>>
+    sparse_poly_ring: SparsePolyRing<BigIntRing>,
+    cyclotomic_poly: El<SparsePolyRing<BigIntRing>>
 }
 
 impl OddCyclotomicNumberRing {
@@ -50,7 +50,7 @@ impl OddCyclotomicNumberRing {
         for (_, e) in &factorization {
             assert!(*e == 1, "n = {} is not squarefree", n);
         }
-        let poly_ring = SparsePolyRing::new(StaticRing::<i64>::RING, "X");
+        let poly_ring = SparsePolyRing::new(BigIntRing::RING, "X");
         let cyclotomic_poly = cyclotomic_polynomial(&poly_ring, n);
         Self {
             n_factorization_squarefree: factorization.iter().map(|(p, _)| *p).collect(),
@@ -271,6 +271,7 @@ impl<FpTy> HENumberRing<FpTy> for CompositeCyclotomicNumberRing
             let poly_ring = &self.tensor_factor1.sparse_poly_ring;
             let Phi_n1 = poly_ring.coerce(&self.tensor_factor1.sparse_poly_ring, self.tensor_factor1.sparse_poly_ring.clone_el(&self.tensor_factor1.cyclotomic_poly));
             let Phi_n2 = poly_ring.coerce(&self.tensor_factor2.sparse_poly_ring, self.tensor_factor2.sparse_poly_ring.clone_el(&self.tensor_factor2.cyclotomic_poly));
+            let Phi_n = cyclotomic_polynomial(&poly_ring, n as usize);
             let hom = Fp.can_hom(Fp.integer_ring()).unwrap().compose(Fp.integer_ring().can_hom(poly_ring.base_ring()).unwrap());
             let hom_ref = &hom;
 
@@ -280,55 +281,28 @@ impl<FpTy> HENumberRing<FpTy> for CompositeCyclotomicNumberRing
             let mut small_to_coeff_conversion_matrix = (0..(r1 * r2)).map(|_| Vec::new()).collect::<Vec<_>>();
             let mut coeff_to_small_conversion_matrix = (0..(r1 * r2)).map(|_| Vec::new()).collect::<Vec<_>>();
 
-            let dense_poly_ring = DensePolyRing::new(poly_ring.base_ring(), "X");
-            let Phi_n_sparse = cyclotomic_polynomial(&poly_ring, n as usize);
-            let Phi_n = dense_poly_ring.can_hom(&poly_ring).unwrap().map_ref(&Phi_n_sparse);
-            let mut X_pow_i = None;
+            let mut X_pow_i = poly_ring.one();
             for i in 0..(n1 * n2) {
-
                 let i1 = ((t * i % n1) + n1) % n1;
                 let i2 = ((s * i % n2) + n2) % n2;
                 debug_assert_eq!(i, (i1 * n / n1 + i2 * n / n2) % n);
 
                 if i < r1 * r2 {
-                    record_time!("CompositeCyclotomicNumberRing::mod_p::set_coeff_to_small", || {
-                        let X1_power_reduced = poly_ring.div_rem_monic(poly_ring.pow(poly_ring.indeterminate(), i1 as usize), &Phi_n1).1;
-                        let X2_power_reduced = poly_ring.div_rem_monic(poly_ring.pow(poly_ring.indeterminate(), i2 as usize), &Phi_n2).1;
-                        
-                        coeff_to_small_conversion_matrix[i as usize] = poly_ring.terms(&X1_power_reduced).flat_map(|(c1, j1)| poly_ring.terms(&X2_power_reduced).map(move |(c2, j2)| 
-                            (j1 + j2 * r1 as usize, hom_ref.map(poly_ring.base_ring().mul_ref(c1, c2))
-                        ))).collect::<Vec<_>>();
-                    });
+                    let X1_power_reduced = poly_ring.div_rem_monic(poly_ring.pow(poly_ring.indeterminate(), i1 as usize), &Phi_n1).1;
+                    let X2_power_reduced = poly_ring.div_rem_monic(poly_ring.pow(poly_ring.indeterminate(), i2 as usize), &Phi_n2).1;
+                    
+                    coeff_to_small_conversion_matrix[i as usize] = poly_ring.terms(&X1_power_reduced).flat_map(|(c1, j1)| poly_ring.terms(&X2_power_reduced).map(move |(c2, j2)| 
+                        (j1 + j2 * r1 as usize, hom_ref.map(poly_ring.base_ring().mul_ref(c1, c2))
+                    ))).collect::<Vec<_>>();
                 }
                 
                 if i1 < r1 && i2 < r2 {
-                    record_time!("CompositeCyclotomicNumberRing::mod_p::set_small_to_coeff", || if let Some(X_pow_i) = &X_pow_i {
-                        small_to_coeff_conversion_matrix[(i2 * r1 + i1) as usize] = dense_poly_ring.terms(X_pow_i).map(|(c, i)| {
-                            assert!(i < (r1 * r2) as usize);
-                            (i, hom_ref.map_ref(c))
-                        }).collect::<Vec<_>>();
-                    } else {
-                        small_to_coeff_conversion_matrix[(i2 * r1 + i1) as usize] = vec![(i as usize, hom_ref.codomain().one())];
-                    });
+                    small_to_coeff_conversion_matrix[(i2 * r1 + i1) as usize] = poly_ring.terms(&X_pow_i).map(|(c, i)| (i, hom_ref.map_ref(c))).collect::<Vec<_>>();
                 }
 
-                if i == (r1 * r2) - 1 {
-                    X_pow_i = Some(dense_poly_ring.from_terms([(dense_poly_ring.base_ring().one(), (r1 * r2 - 1) as usize)]));
-                }
-                record_time!("CompositeCyclotomicNumberRing::mod_p::mul_mod_Phi_n", || if let Some(X_pow_i) = &mut X_pow_i {
-                    dense_poly_ring.mul_assign_monomial(X_pow_i, 1);
-                    let lc = dense_poly_ring.coefficient_at(X_pow_i, (r1 * r2) as usize);
-                    // *X_pow_i = dense_poly_ring.div_rem_monic(std::mem::replace(X_pow_i, dense_poly_ring.zero()), &Phi_n).1;
-                    if dense_poly_ring.base_ring().is_zero(&lc) {
-                        // do nothing
-                    } else if dense_poly_ring.base_ring().is_one(&lc) {
-                        dense_poly_ring.get_ring().add_assign_from_terms(X_pow_i, dense_poly_ring.terms(&Phi_n).map(|(c, i)| (dense_poly_ring.base_ring().negate(dense_poly_ring.base_ring().clone_el(c)), i)));
-                    } else if dense_poly_ring.base_ring().is_neg_one(&lc) {
-                        dense_poly_ring.get_ring().add_assign_from_terms(X_pow_i, dense_poly_ring.terms(&Phi_n).map(|(c, i)| (dense_poly_ring.base_ring().clone_el(c), i)));
-                    } else {
-                        let lc = dense_poly_ring.base_ring().clone_el(lc);
-                        dense_poly_ring.get_ring().add_assign_from_terms(X_pow_i, dense_poly_ring.terms(&Phi_n).map(|(c, i)| (dense_poly_ring.base_ring().negate(dense_poly_ring.base_ring().mul_ref(c, &lc)), i)));
-                    }
+                record_time!("CompositeCyclotomicNumberRing::mod_p::mul_mod", || {
+                    poly_ring.mul_assign(&mut X_pow_i, poly_ring.indeterminate());
+                    X_pow_i = poly_ring.div_rem_monic(std::mem::replace(&mut X_pow_i, poly_ring.zero()), &Phi_n).1;
                 });
             }
 
@@ -701,14 +675,6 @@ fn test_odd_cyclotomic_double_rns_ring() {
 }
 
 #[test]
-fn test_odd_cyclotomic_single_rns_ring() {
-    single_rns_ring::test_with_number_ring(OddCyclotomicNumberRing::new(5));
-    single_rns_ring::test_with_number_ring(OddCyclotomicNumberRing::new(7));
-    single_rns_ring::test_with_number_ring(CompositeCyclotomicNumberRing::new(3, 5));
-    single_rns_ring::test_with_number_ring(CompositeCyclotomicNumberRing::new(3, 7));
-}
-
-#[test]
 fn test_odd_cyclotomic_decomposition_ring() {
     decomposition_ring::test_with_number_ring(OddCyclotomicNumberRing::new(5));
     decomposition_ring::test_with_number_ring(OddCyclotomicNumberRing::new(7));
@@ -765,13 +731,13 @@ fn test_small_coeff_basis_conversion() {
     assert_eq!(original, actual);
 }
 
-// #[test]
-// fn test_odd_cyclotomic_single_rns_ring() {
-//     single_rns_ring::test_with_number_ring(OddCyclotomicDecomposableNumberRing::new(5));
-//     single_rns_ring::test_with_number_ring(OddCyclotomicDecomposableNumberRing::new(7));
-//     single_rns_ring::test_with_number_ring(CompositeCyclotomicDecomposableNumberRing::new(3, 5));
-//     single_rns_ring::test_with_number_ring(CompositeCyclotomicDecomposableNumberRing::new(3, 7));
-// }
+#[test]
+fn test_odd_cyclotomic_single_rns_ring() {
+    single_rns_ring::test_with_number_ring(OddCyclotomicNumberRing::new(5));
+    single_rns_ring::test_with_number_ring(OddCyclotomicNumberRing::new(7));
+    single_rns_ring::test_with_number_ring(CompositeCyclotomicNumberRing::new(3, 5));
+    single_rns_ring::test_with_number_ring(CompositeCyclotomicNumberRing::new(3, 7));
+}
 
 #[test]
 fn test_permute_galois_automorphism() {

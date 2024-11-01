@@ -72,7 +72,7 @@ struct NaiveGadgetProductRhsOperand<'a, NumberRing, A = Global>
         A: Allocator + Clone
 {
     ring: &'a DoubleRNSRingBase<NumberRing, Zn, A>,
-    operands: Vec<El<DoubleRNSRing<NumberRing, Zn, A>>, A>,
+    operands: Vec<El<DoubleRNSRing<NumberRing, Zn, A>>>,
     digits: Vec<Range<usize>>
 }
 
@@ -81,7 +81,7 @@ impl<'a, NumberRing, A> NaiveGadgetProductRhsOperand<'a, NumberRing, A>
         A: Allocator + Clone
 {
     fn create_empty(ring: &'a DoubleRNSRingBase<NumberRing, Zn, A>, digits: usize) -> Self {
-        let mut operands = Vec::with_capacity_in(digits, ring.allocator().clone());
+        let mut operands = Vec::with_capacity(digits);
         operands.extend((0..digits).map(|_| ring.zero()));
         return NaiveGadgetProductRhsOperand {
             ring: ring,
@@ -198,7 +198,7 @@ struct NaiveGadgetProductLhsOperand<'a, NumberRing, A>
         A: Allocator + Clone
 {
     ring: PhantomData<&'a DoubleRNSRingBase<NumberRing, Zn, A>>,
-    operands: Vec<El<DoubleRNSRing<NumberRing, Zn, A>>, A>
+    operands: Vec<El<DoubleRNSRing<NumberRing, Zn, A>>>
 }
 
 impl<'a, NumberRing, A> NaiveGadgetProductLhsOperand<'a, NumberRing, A>
@@ -222,7 +222,7 @@ impl<'a, NumberRing, A> NaiveGadgetProductLhsOperand<'a, NumberRing, A>
 {
     fn new_from_element(ring: &DoubleRNSRingBase<NumberRing, Zn, A>, el: CoeffEl<NumberRing, Zn, A>, digits: usize) -> Self {
         let digits = prime_factor_groups(ring.rns_base().len(), digits).iter().collect::<Vec<_>>();
-        let mut data = Vec::with_capacity_in(ring.rns_base().len(), ring.allocator().clone());
+        let mut data = Vec::with_capacity(ring.rns_base().len());
         for part in ring.gadget_decompose(el, &digits, ring.rns_base().len()).into_iter() {
             data.push(DoubleRNSEl {
                 number_ring: PhantomData,
@@ -275,7 +275,7 @@ impl<'a, NumberRing, A> LKSSGadgetProductLhsOperand<'a, NumberRing, A>
         A: Allocator + Clone
 {
     fn apply_galois_action(&self, ring: &DoubleRNSRingBase<NumberRing, Zn, A>, g: ZnEl) -> Self {
-        let mut result_operands = Vec::with_capacity_in(self.operands.len(), self.operands.allocator().clone());
+        let mut result_operands = Vec::with_capacity(self.operands.len());
         for operand in self.operands.iter() {
             let mut result_op = Vec::with_capacity_in(operand.len(), operand.allocator().clone());
             result_op.resize_with(operand.len(), || ring.rns_base().at(0).zero());
@@ -301,7 +301,7 @@ pub enum ElRepr {
     Coeff, NTT
 }
 
-fn prime_factor_groups<'a>(rns_base_len: usize, digits: usize) -> impl 'a + VectorFn<Range<usize>> {
+pub(super) fn prime_factor_groups<'a>(rns_base_len: usize, digits: usize) -> impl 'a + VectorFn<Range<usize>> {
     assert!(digits <= rns_base_len);
     assert!(digits >= 2);
     let primes_per_digit = rns_base_len / digits;
@@ -545,7 +545,9 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, Zn, A>
 
     fn gadget_product_naive(&self, lhs: &NaiveGadgetProductLhsOperand<NumberRing, A>, rhs: &NaiveGadgetProductRhsOperand<NumberRing, A>) -> El<DoubleRNSRing<NumberRing, Zn, A>> {
         record_time!("DoubleRNSRing::gadget_product_ntt::naive", || {
-            assert_eq!(lhs.operands.len(), rhs.operands.len());
+            let digits = &rhs.digits;
+            assert_eq!(lhs.operands.len(), digits.len());
+            assert_eq!(rhs.operands.len(), digits.len());
             <_ as RingBase>::sum(self, lhs.operands.iter().zip(rhs.operands.iter()).map(|(l, r)| {
                 let result = self.mul_ref(l, r);
                 return result;
@@ -556,12 +558,13 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, Zn, A>
     fn gadget_product_lkss(&self, lhs: &LKSSGadgetProductLhsOperand<NumberRing, A>, rhs: &LKSSGadgetProductRhsOperand<NumberRing, A>) -> CoeffEl<NumberRing, Zn, A> {
         record_time!("DoubleRNSRing::gadget_product_lkss", || {
             assert_eq!(lhs.output_moduli_count, rhs.shortened_rns_base.get_ring().len());
-            assert_eq!(lhs.operands.len(), rhs.operands.len());
             let digits = &rhs.digits;
+            assert_eq!(lhs.operands.len(), digits.len());
+            assert_eq!(rhs.operands.len(), digits.len());
             let output_moduli_count = lhs.output_moduli_count;
             let shortened_rns_base = rhs.shortened_rns_base.get_ring();
 
-            let mut result = self.non_fft_zero();
+            let mut result = self.zero_non_fft();
             for j in 0..digits.len() {
                 let mut summand = record_time!("DoubleRNSRing::gadget_product_lkss::sum", || {
                     let mut summand = Vec::with_capacity_in(shortened_rns_base.len() * self.rank(), self.allocator().clone());
@@ -625,10 +628,10 @@ fn test_naive_gadget_decomposition() {
     let hom_i32 = ring.base_ring().can_hom(&StaticRing::<i32>::RING).unwrap();
 
     let mut rhs = NaiveGadgetProductRhsOperand::create_empty(ring.get_ring(), 2);
-    rhs.set_rns_factor(0, ring.get_ring().non_fft_from(from_congruence(&[1, 1, 0])));
-    rhs.set_rns_factor(1, ring.get_ring().non_fft_from(from_congruence(&[0, 0, 1])));
+    rhs.set_rns_factor(0, ring.get_ring().from_non_fft(from_congruence(&[1, 1, 0])));
+    rhs.set_rns_factor(1, ring.get_ring().from_non_fft(from_congruence(&[0, 0, 1])));
 
-    let lhs = NaiveGadgetProductLhsOperand::new_from_element(ring.get_ring(), ring.get_ring().non_fft_from(hom_i32.map(1000)), 2);
+    let lhs = NaiveGadgetProductLhsOperand::new_from_element(ring.get_ring(), ring.get_ring().from_non_fft(hom_i32.map(1000)), 2);
 
     assert_el_eq!(ring, ring.inclusion().map(hom_i32.map(1000)), ring.get_ring().gadget_product_naive(&lhs, &rhs));
 }
@@ -642,10 +645,10 @@ fn test_lkss_gadget_decomposition() {
     let hom_i32 = ring.base_ring().can_hom(&StaticRing::<i32>::RING).unwrap();
 
     let mut rhs = LKSSGadgetProductRhsOperand::create_empty(ring.get_ring(), 2, 2);
-    rhs.set_rns_factor(0, ring.get_ring().non_fft_from(from_congruence(&[1, 1, 0])));
-    rhs.set_rns_factor(1, ring.get_ring().non_fft_from(from_congruence(&[0, 0, 1])));
+    rhs.set_rns_factor(0, ring.get_ring().from_non_fft(from_congruence(&[1, 1, 0])));
+    rhs.set_rns_factor(1, ring.get_ring().from_non_fft(from_congruence(&[0, 0, 1])));
 
-    let lhs = LKSSGadgetProductLhsOperand::new_from_element(ring.get_ring(), ring.get_ring().non_fft_from(hom_i32.map(1000)), 2, 2);
+    let lhs = LKSSGadgetProductLhsOperand::new_from_element(ring.get_ring(), ring.get_ring().from_non_fft(hom_i32.map(1000)), 2, 2);
 
     assert_el_eq!(ring, ring.inclusion().map(hom_i32.map(1000)), ring.get_ring().do_fft(ring.get_ring().gadget_product_lkss(&lhs, &rhs)));
 }

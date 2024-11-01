@@ -26,6 +26,7 @@ use super::decomposition_ring;
 use super::double_rns_ring;
 use super::double_rns_ring::*;
 use super::decomposition_ring::*;
+use super::single_rns_ring;
 // use super::single_rns_ring;
 use crate::rings::number_ring::*;
 use crate::sample_primes;
@@ -232,16 +233,16 @@ fn test_pow2_cyclotomic_double_rns_ring() {
 }
 
 #[test]
+fn test_pow2_cyclotomic_single_rns_ring() {
+    single_rns_ring::test_with_number_ring(Pow2CyclotomicDecomposableNumberRing::new(8));
+    single_rns_ring::test_with_number_ring(Pow2CyclotomicDecomposableNumberRing::new(16));
+}
+
+#[test]
 fn test_pow2_cyclotomic_decomposition_ring() {
     decomposition_ring::test_with_number_ring(Pow2CyclotomicDecomposableNumberRing::new(8));
     decomposition_ring::test_with_number_ring(Pow2CyclotomicDecomposableNumberRing::new(16));
 }
-
-// #[test]
-// fn test_odd_cyclotomic_single_rns_ring() {
-//     single_rns_ring::test_with_number_ring(Pow2CyclotomicDecomposableNumberRing::new(8));
-//     single_rns_ring::test_with_number_ring(Pow2CyclotomicDecomposableNumberRing::new(16));
-// }
 
 #[test]
 fn test_permute_galois_automorphism() {

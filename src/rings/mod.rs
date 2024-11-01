@@ -14,6 +14,8 @@ pub mod gadget_product;
 ///  
 pub mod double_rns_ring;
 
+pub mod single_rns_ring;
+
 pub mod decomposition_ring;
 
 pub mod pow2_cyclotomic;
@@ -21,3 +23,5 @@ pub mod pow2_cyclotomic;
 pub mod odd_cyclotomic;
 
 pub mod slots;
+
+pub mod double_rns_managed;

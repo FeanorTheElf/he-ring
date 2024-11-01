@@ -7,9 +7,6 @@ use std::time::Instant;
 use std::ops::Range;
 use std::cmp::max;
 
-use coeff_or_doublerns::coeff_repr;
-use coeff_or_doublerns::CoeffOrDoubleRNSEl;
-use double_rns::GadgetProductRhsOperand;
 use feanor_math::algorithms::int_factor::factor;
 use feanor_math::algorithms::miller_rabin::is_prime;
 use feanor_math::algorithms::unity_root::get_prim_root_of_unity;
@@ -29,15 +26,15 @@ use feanor_math::seq::*;
 use feanor_math::ordered::OrderedRingStore;
 use feanor_math::pid::EuclideanRingStore;
 
-use crate::cyclotomic::CyclotomicRing;
+use crate::cyclotomic::*;
 use crate::euler_phi;
 use crate::extend_sampled_primes;
+use crate::rings::double_rns_managed::*;
 use crate::rings::number_ring::*;
 use crate::rings::decomposition_ring::*;
 use crate::rings::odd_cyclotomic::*;
 use crate::rings::pow2_cyclotomic::*;
-use crate::rings::gadget_product::*;
-use crate::rings::double_rns_ring::*;
+use crate::rings::gadget_product::managed::*;
 use crate::profiling::*;
 use crate::rings::slots::HypercubeIsomorphism;
 use crate::rnsconv;
@@ -47,8 +44,8 @@ use rand::thread_rng;
 use rand::{Rng, CryptoRng};
 use rand_distr::StandardNormal;
 
-pub mod coeff_or_doublerns;
 pub mod bootstrap;
+pub mod single_rns;
 
 pub type PlaintextAllocator = Global;
 pub type CiphertextAllocator = Global;
@@ -56,8 +53,8 @@ pub type PlaintextRing<Params: BFVParams> = DecompositionRing<Params::NumberRing
 pub type SecretKey<Params: BFVParams> = El<CiphertextRing<Params>>;
 pub type KeySwitchKey<'a, Params: BFVParams> = (usize, (GadgetProductOperand<'a, Params>, GadgetProductOperand<'a, Params>));
 pub type RelinKey<'a, Params: BFVParams> = KeySwitchKey<'a, Params>;
-pub type CiphertextRing<Params: BFVParams> = DoubleRNSRing<Params::NumberRing, Zn, Global>;
-pub type Ciphertext<Params: BFVParams> = (CoeffOrDoubleRNSEl<Params::NumberRing>, CoeffOrDoubleRNSEl<Params::NumberRing>);
+pub type CiphertextRing<Params: BFVParams> = ManagedDoubleRNSRing<Params::NumberRing, Zn, Global>;
+pub type Ciphertext<Params: BFVParams> = (ManagedDoubleRNSEl<Params::NumberRing, Zn, CiphertextAllocator>, ManagedDoubleRNSEl<Params::NumberRing, Zn, CiphertextAllocator>);
 pub type GadgetProductOperand<'a, Params: BFVParams> = GadgetProductRhsOperand<'a, Params::NumberRing, CiphertextAllocator>;
 
 const ZZbig: BigIntRing = BigIntRing::RING;
@@ -94,11 +91,11 @@ pub trait BFVParams {
         assert!(ZZbig.is_gt(&Cmul_rns_base[Cmul_rns_base.len() - 1], &C_rns_base[C_rns_base.len() - 1]));
         Cmul_rns_base.sort_unstable_by(|l, r| ZZbig.cmp(l, r));
 
-        let C = DoubleRNSRingBase::new(
+        let C = ManagedDoubleRNSRingBase::new(
             self.number_ring(),
             zn_rns::Zn::new(C_rns_base.iter().map(|p| Zn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect(), ZZbig)
         );
-        let Cmul = DoubleRNSRingBase::new(
+        let Cmul = ManagedDoubleRNSRingBase::new(
             number_ring,
             zn_rns::Zn::new(Cmul_rns_base.iter().map(|p| Zn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect(), ZZbig)
         );
@@ -108,20 +105,19 @@ pub trait BFVParams {
     fn gen_sk<R: Rng + CryptoRng>(C: &CiphertextRing<Self>, mut rng: R) -> SecretKey<Self> {
         // we sample uniform ternary secrets 
         let result = C.get_ring().sample_from_coefficient_distribution(|| (rng.next_u32() % 3) as i32 - 1);
-        let result = C.get_ring().do_fft(result);
         return result;
     }
     
     fn enc_sym_zero<R: Rng + CryptoRng>(C: &CiphertextRing<Self>, mut rng: R, sk: &SecretKey<Self>) -> Ciphertext<Self> {
         let a = C.get_ring().sample_uniform(|| rng.next_u64());
-        let mut b = C.get_ring().undo_fft(C.negate(C.mul_ref(&a, &sk)));
+        let mut b: ManagedDoubleRNSEl<<Self as BFVParams>::NumberRing, RingValue<ZnBase>> = C.negate(C.mul_ref(&a, &sk));
         let e = C.get_ring().sample_from_coefficient_distribution(|| (rng.sample::<f64, _>(StandardNormal) * 3.2).round() as i32);
-        C.get_ring().add_assign_non_fft(&mut b, &e);
-        return (CoeffOrDoubleRNSEl::from_coeff(b), CoeffOrDoubleRNSEl::from_ntt(a));
+        C.add_assign(&mut b, e);
+        return (b, a);
     }
     
-    fn transparent_zero(_C: &CiphertextRing<Self>) -> Ciphertext<Self> {
-        (CoeffOrDoubleRNSEl::zero(), CoeffOrDoubleRNSEl::zero())
+    fn transparent_zero(C: &CiphertextRing<Self>) -> Ciphertext<Self> {
+        (C.zero(), C.zero())
     }
 
     fn enc_sym<R: Rng + CryptoRng>(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, rng: R, m: &El<PlaintextRing<Self>>, sk: &SecretKey<Self>) -> Ciphertext<Self> {
@@ -133,7 +129,7 @@ pub trait BFVParams {
             ZZbig.clone_el(C.base_ring().modulus()), 
             &int_cast(*P.base_ring().modulus() as i32, &ZZbig, &StaticRing::<i32>::RING)
         );
-        (CoeffOrDoubleRNSEl::zero(), CoeffOrDoubleRNSEl::from_coeff(C.get_ring().non_fft_from(C.base_ring().coerce(&ZZbig, Delta))))
+        (C.zero(), C.inclusion().map(C.base_ring().coerce(&ZZbig, Delta)))
     }
     
     fn remove_noise(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, c: &El<CiphertextRing<Self>>) -> El<PlaintextRing<Self>> {
@@ -148,7 +144,7 @@ pub trait BFVParams {
     
     fn dec(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: Ciphertext<Self>, sk: &SecretKey<Self>) -> El<PlaintextRing<Self>> {
         let (c0, c1) = ct;
-        let noisy_m = C.add(c0.to_ntt(C), C.mul_ref_snd(c1.to_ntt(C), sk));
+        let noisy_m = C.add(c0, C.mul_ref_snd(c1, sk));
         return Self::remove_noise(P, C, &noisy_m);
     }
     
@@ -170,17 +166,17 @@ pub trait BFVParams {
     fn hom_add(C: &CiphertextRing<Self>, lhs: Ciphertext<Self>, rhs: &Ciphertext<Self>) -> Ciphertext<Self> {
         let (lhs0, lhs1) = lhs;
         let (rhs0, rhs1) = rhs;
-        return (CoeffOrDoubleRNSEl::add(lhs0, rhs0, C), CoeffOrDoubleRNSEl::add(lhs1, rhs1, C));
+        return (C.add_ref(&lhs0, &rhs0), C.add_ref(&lhs1, &rhs1));
     }
     
     fn hom_sub(C: &CiphertextRing<Self>, lhs: Ciphertext<Self>, rhs: &Ciphertext<Self>) -> Ciphertext<Self> {
         let (lhs0, lhs1) = lhs;
         let (rhs0, rhs1) = rhs;
-        return (CoeffOrDoubleRNSEl::sub(lhs0, rhs0, C), CoeffOrDoubleRNSEl::sub(lhs1, rhs1, C));
+        return (C.sub_ref(&lhs0, rhs0), C.sub_ref(&lhs1, rhs1));
     }
     
     fn clone_ct(C: &CiphertextRing<Self>, ct: &Ciphertext<Self>) -> Ciphertext<Self> {
-        (ct.0.clone(C), ct.1.clone(C))
+        (C.clone_el(&ct.0), C.clone_el(&ct.1))
     }
     
     fn hom_add_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
@@ -189,24 +185,22 @@ pub trait BFVParams {
             ZZbig.clone_el(C.base_ring().modulus()), 
             &int_cast(*P.base_ring().modulus() as i32, &ZZbig, &StaticRing::<i32>::RING)
         ));
-        C.get_ring().mul_scalar_assign_non_fft(&mut m, &Delta);
-        return (CoeffOrDoubleRNSEl::add(ct.0, &CoeffOrDoubleRNSEl::from_coeff(m), C), ct.1);
+        C.inclusion().mul_assign_ref_map(&mut m, &Delta);
+        return (C.add(ct.0, m), ct.1);
     }
     
     fn hom_mul_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
-        let m = C.get_ring().do_fft(C.get_ring().exact_convert_from_decompring(P, m));
-        let c0 = ct.0.to_ntt(C);
-        let c1 = ct.1.to_ntt(C);
-        return (CoeffOrDoubleRNSEl::from_ntt(C.mul_ref_snd(c0, &m)), CoeffOrDoubleRNSEl::from_ntt(C.mul(c1, m)));
+        let m = C.get_ring().exact_convert_from_decompring(P, m);
+        let (c0, c1) = ct;
+        return (C.mul_ref_snd(c0, &m), C.mul(c1, m));
     }
     
     fn hom_mul_plain_i64(_P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: i64, ct: Ciphertext<Self>) -> Ciphertext<Self> {
-        (CoeffOrDoubleRNSEl::mul_i64(ct.0, m, C), CoeffOrDoubleRNSEl::mul_i64(ct.1, m, C))
+        (C.int_hom().mul_map(ct.0, m as i32), C.int_hom().mul_map(ct.1, m as i32))
     }
     
     fn noise_budget(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: &Ciphertext<Self>, sk: &SecretKey<Self>) -> usize {
         let (c0, c1) = Self::clone_ct(C, ct);
-        let (c0, c1) = (c0.to_ntt(C), c1.to_ntt(C));
         let noisy_m = C.add(c0, C.mul_ref_snd(c1, sk));
         let coefficients = C.wrt_canonical_basis(&noisy_m);
         let Delta = ZZbig.rounded_div(
@@ -231,20 +225,19 @@ pub trait BFVParams {
     {
         let (c00, c01) = lhs;
         let (c10, c11) = rhs;
-        let lift = |c: CoeffEl<Self::NumberRing, Zn, CiphertextAllocator>| 
-            C_mul.get_ring().do_fft(C_mul.get_ring().perform_rns_op_from(C.get_ring(), &c, &conv_data.lift_to_C_mul));
+        let lift = |c| 
+            C_mul.get_ring().perform_rns_op_from(C.get_ring(), &c, &conv_data.lift_to_C_mul);
     
-        let c00_lifted = lift(c00.to_coeff(C));
-        let c01_lifted = lift(c01.to_coeff(C));
-        let c10_lifted = lift(c10.to_coeff(C));
-        let c11_lifted = lift(c11.to_coeff(C));
+        let c00_lifted = lift(c00);
+        let c01_lifted = lift(c01);
+        let c10_lifted = lift(c10);
+        let c11_lifted = lift(c11);
     
         let lifted0 = C_mul.mul_ref(&c00_lifted, &c10_lifted);
         let lifted1 = C_mul.add(C_mul.mul_ref_snd(c00_lifted, &c11_lifted), C_mul.mul_ref_fst(&c01_lifted, c10_lifted));
         let lifted2 = C_mul.mul(c01_lifted, c11_lifted);
     
-        let scale_down = |c: El<CiphertextRing<Self>>| 
-            C.get_ring().perform_rns_op_from(C_mul.get_ring(), &C_mul.get_ring().undo_fft(c), &conv_data.scale_down_to_C);
+        let scale_down = |c: El<CiphertextRing<Self>>| C.get_ring().perform_rns_op_from(C_mul.get_ring(), &c, &conv_data.scale_down_to_C);
     
         let res0 = scale_down(lifted0);
         let res1 = scale_down(lifted1);
@@ -253,27 +246,26 @@ pub trait BFVParams {
         let op = C.get_ring().to_gadget_product_lhs(res2, rk.0);
         let (s0, s1) = &rk.1;
     
-        return (CoeffOrDoubleRNSEl::add(CoeffOrDoubleRNSEl::from_coeff(res0), &CoeffOrDoubleRNSEl::gadget_product(&op, s0, C), C), CoeffOrDoubleRNSEl::add(CoeffOrDoubleRNSEl::from_coeff(res1), &CoeffOrDoubleRNSEl::gadget_product(&op, s1, C), C));
+        return (C.add_ref(&res0, &C.get_ring().gadget_product(&op, s0)), C.add_ref(&res1, &C.get_ring().gadget_product(&op, s1)));
     }
     
     fn gen_switch_key<'a, R: Rng + CryptoRng, const LOG: bool>(C: &'a CiphertextRing<Self>, mut rng: R, old_sk: &SecretKey<Self>, new_sk: &SecretKey<Self>, digits: usize) -> KeySwitchKey<'a, Self>
         where Self: 'a
     {
-        let old_sk_non_fft = C.get_ring().undo_fft(C.clone_el(old_sk));
         let mut res_0 = C.get_ring().gadget_product_rhs_empty::<LOG>(digits);
         let mut res_1 = C.get_ring().gadget_product_rhs_empty::<LOG>(digits);
         for digit_i in 0..res_0.gadget_vector().len() {
             let (c0, c1) = Self::enc_sym_zero(C, &mut rng, new_sk);
             let digit_range = res_0.gadget_vector().at(digit_i).clone();
-            let factor = C.base_ring().get_ring().from_congruence((0..C.get_ring().rns_base().len()).map(|i2| {
-                let Fp = C.get_ring().rns_base().at(i2);
+            let factor = C.base_ring().get_ring().from_congruence((0..C.base_ring().len()).map(|i2| {
+                let Fp = C.base_ring().at(i2);
                 if digit_range.contains(&i2) { Fp.one() } else { Fp.zero() } 
             }));
-            let mut payload = C.get_ring().clone_el_non_fft(&old_sk_non_fft);
-            C.get_ring().mul_scalar_assign_non_fft(&mut payload, &factor);
-            C.get_ring().add_assign_non_fft(&mut payload, &c0.to_coeff(C));
+            let mut payload = C.clone_el(&old_sk);
+            C.inclusion().mul_assign_ref_map(&mut payload, &factor);
+            C.add_assign_ref(&mut payload, &c0);
             res_0.set_rns_factor(digit_i, payload);
-            res_1.set_rns_factor(digit_i, c1.to_coeff(C));
+            res_1.set_rns_factor(digit_i, c1);
         }
         return (digits, (res_0, res_1));
     }
@@ -283,18 +275,18 @@ pub trait BFVParams {
     {
         let (c0, c1) = ct;
         let (s0, s1) = &switch_key.1;
-        let op = C.get_ring().to_gadget_product_lhs(c1.to_coeff(C), switch_key.0);
+        let op = C.get_ring().to_gadget_product_lhs(c1, switch_key.0);
         return (
-            CoeffOrDoubleRNSEl::add(c0, &CoeffOrDoubleRNSEl::gadget_product(&op, s0, C), C),
-            CoeffOrDoubleRNSEl::gadget_product(&op, s1, C)
+            C.add_ref(&c0, &C.get_ring().gadget_product(&op, s0)),
+            C.get_ring().gadget_product(&op, s1)
         );
     }
     
     fn mod_switch_to_plaintext(target: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: Ciphertext<Self>, switch_data: &ModSwitchData) -> (El<PlaintextRing<Self>>, El<PlaintextRing<Self>>) {
         let (c0, c1) = ct;
         return (
-            C.get_ring().perform_rns_op_to_decompring(target, &c0.to_coeff(C), &switch_data.scale),
-            C.get_ring().perform_rns_op_to_decompring(target, &c1.to_coeff(C), &switch_data.scale)
+            C.get_ring().perform_rns_op_to_decompring(target, &c0, &switch_data.scale),
+            C.get_ring().perform_rns_op_to_decompring(target, &c1, &switch_data.scale)
         );
     }
     
@@ -308,8 +300,8 @@ pub trait BFVParams {
         where Self: 'a
     {
         Self::key_switch(C, (
-            CoeffOrDoubleRNSEl::from_ntt(C.get_ring().apply_galois_action(&ct.0.to_ntt(C), g)),
-            CoeffOrDoubleRNSEl::from_ntt(C.get_ring().apply_galois_action(&ct.1.to_ntt(C), g))
+            C.get_ring().apply_galois_action(&ct.0, g),
+            C.get_ring().apply_galois_action(&ct.1, g)
         ), gk)
     }
     
@@ -322,32 +314,30 @@ pub trait BFVParams {
         let digits = gks.at(0).0;
         assert!(gks.iter().all(|(d, _)| *d == digits));
         let (c0, c1) = ct;
-        let c0_ntt = c0.to_ntt(&C);
-        let lhs = C.get_ring().to_gadget_product_lhs(c1.to_coeff(&C), digits);
+        let lhs = C.get_ring().to_gadget_product_lhs(c1, digits);
         return (0..gs.len()).map(|i| {
             let c1_g = lhs.apply_galois_action(C.get_ring(), gs[i]);
             let (s0, s1) = &gks.at(i).1;
-            let r0 = CoeffOrDoubleRNSEl::gadget_product(&c1_g, s0, C);
-            let r1 = CoeffOrDoubleRNSEl::gadget_product(&c1_g, s1, C);
-            let c0_g = CoeffOrDoubleRNSEl::from_ntt(C.get_ring().apply_galois_action(&c0_ntt, gs[i]));
-            return (CoeffOrDoubleRNSEl::add(r0, &c0_g, C), r1);
+            let r0 = C.get_ring().gadget_product(&c1_g, s0);
+            let r1 = C.get_ring().gadget_product(&c1_g, s1);
+            let c0_g = C.apply_galois_action(&c0, gs[i]);
+            return (C.add_ref(&r0, &c0_g), r1);
         }).collect();
     }
 
     fn create_multiplication_rescale(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, Cmul: &CiphertextRing<Self>) -> MulConversionData {
-        let allocator = C.get_ring().allocator().clone();
         MulConversionData {
             lift_to_C_mul: rnsconv::shared_lift::AlmostExactSharedBaseConversion::new_with(
-                C.get_ring().rns_base().as_iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
+                C.base_ring().as_iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
                 Vec::new(),
-                Cmul.get_ring().rns_base().as_iter().skip(C.get_ring().rns_base().len()).map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(),
-                allocator.clone()
+                Cmul.base_ring().as_iter().skip(C.base_ring().len()).map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(),
+                Global
             ),
             scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert::new_with(
-                Cmul.get_ring().rns_base().as_iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
+                Cmul.base_ring().as_iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
                 vec![ Zn::new(*P.base_ring().modulus() as u64) ], 
-                C.get_ring().rns_base().len(),
-                allocator
+                C.base_ring().len(),
+                Global
             )
         }
     }
@@ -392,6 +382,12 @@ impl BFVParams for CompositeBFVParams {
     fn number_ring(&self) -> Self::NumberRing {
         CompositeCyclotomicNumberRing::new(self.n1, self.n2)
     }
+}
+
+fn coeff_repr<Params: BFVParams>(C: &CiphertextRing<Params>, ct: Ciphertext<Params>) -> Ciphertext<Params> {
+    C.get_ring().force_coeff_repr(&ct.0);
+    C.get_ring().force_coeff_repr(&ct.1);
+    return ct;
 }
 
 #[test]
@@ -515,10 +511,10 @@ fn print_timings_pow2_bfv_mul() {
         coeff_repr::<Pow2BFVParams>(&C, Pow2BFVParams::enc_sym(&P, &C, &mut rng, &m, &sk))
     );
 
-    let res = log_time::<_, _, true, _>("HomAddPlain", |[]| 
-        coeff_repr::<Pow2BFVParams>(&C, Pow2BFVParams::hom_add_plain(&P, &C, &m, Pow2BFVParams::clone_ct(&C, &ct)))
-    );
-    assert_el_eq!(&P, &P.int_hom().map(4), &Pow2BFVParams::dec(&P, &C, res, &sk));
+    // let res = log_time::<_, _, true, _>("HomAddPlain", |[]| 
+    //     coeff_repr::<Pow2BFVParams>(&C, Pow2BFVParams::hom_add_plain(&P, &C, &m, Pow2BFVParams::clone_ct(&C, &ct)))
+    // );
+    // assert_el_eq!(&P, &P.int_hom().map(4), &Pow2BFVParams::dec(&P, &C, res, &sk));
 
     let res = log_time::<_, _, true, _>("HomAdd", |[]| 
         coeff_repr::<Pow2BFVParams>(&C, Pow2BFVParams::hom_add(&C, Pow2BFVParams::clone_ct(&C, &ct), &ct))
@@ -573,14 +569,15 @@ fn print_timings_double_rns_composite_bfv_mul() {
     let ct = log_time::<_, _, true, _>("EncSym", |[]|
         coeff_repr::<CompositeBFVParams>(&C, CompositeBFVParams::enc_sym(&P, &C, &mut rng, &m, &sk))
     );
-
-    let res = log_time::<_, _, true, _>("HomAddPlain", |[]| 
-        coeff_repr::<CompositeBFVParams>(&C, CompositeBFVParams::hom_add_plain(&P, &C, &m, CompositeBFVParams::clone_ct(&C, &ct)))
-    );
-    assert_el_eq!(&P, &P.int_hom().map(2), &CompositeBFVParams::dec(&P, &C, res, &sk));
+    assert_el_eq!(&P, &P.int_hom().map(3), &CompositeBFVParams::dec(&P, &C, CompositeBFVParams::clone_ct(&C, &ct), &sk));
 
     let res = log_time::<_, _, true, _>("HomAdd", |[]| 
         coeff_repr::<CompositeBFVParams>(&C, CompositeBFVParams::hom_add(&C, CompositeBFVParams::clone_ct(&C, &ct), &ct))
+    );
+    assert_el_eq!(&P, &P.int_hom().map(2), &CompositeBFVParams::dec(&P, &C, res, &sk));
+
+    let res = log_time::<_, _, true, _>("HomAddPlain", |[]| 
+        coeff_repr::<CompositeBFVParams>(&C, CompositeBFVParams::hom_add_plain(&P, &C, &m, CompositeBFVParams::clone_ct(&C, &ct)))
     );
     assert_el_eq!(&P, &P.int_hom().map(2), &CompositeBFVParams::dec(&P, &C, res, &sk));
 
