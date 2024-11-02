@@ -140,19 +140,19 @@ impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, Zn, A, C>
             // currently this is the only case we use
             assert!(self.rns_base().len() == local_rns_base_len);
 
-            let mut unreduced_result = Vec::with_capacity_in(self.rank() * 2 * local_rns_base_len, self.allocator());
+            let mut unreduced_result = Vec::with_capacity_in(self.rank() * 2, self.allocator());
+            let mut result = self.zero();
             for i in 0..local_rns_base_len {
                 let Zp = self.rns_base().at(self.rns_base().len() - local_rns_base_len + i);
-                unreduced_result.extend((0..(self.rank() * 2)).map(|_| Zp.zero()));
+                unreduced_result.clear();
+                unreduced_result.resize_with(self.rank() * 2, || Zp.zero());
                 for j in 0..digits.len() {
                     if let Some(rhs_part) = &rhs.data.at(j) {
-                        self.convolutions()[self.rns_base().len() - local_rns_base_len + i].compute_convolution_prepared(&lhs.data[j][i], &rhs_part[i], &mut unreduced_result[(i * 2 * self.rank())..((i + 1) * 2 * self.rank())], Zp);
+                        self.convolutions()[self.rns_base().len() - local_rns_base_len + i].compute_convolution_prepared(&lhs.data[j][i], &rhs_part[i], &mut unreduced_result, Zp);
                     }
                 }
+                self.reduce_modulus(i, &mut unreduced_result, self.as_matrix_mut(&mut result).row_mut_at(i));
             }
-
-            let mut result = self.zero();
-            self.reduce_modulus(&mut unreduced_result, &mut result);
             return result;
         })
     }

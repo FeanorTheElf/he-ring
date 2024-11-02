@@ -233,14 +233,9 @@ impl CompositeSingleRNSBFVParams {
         let lift = |c: SingleRNSRingEl<NumberRing, Zn, CiphertextAllocator, _>| 
             C_mul.get_ring().perform_rns_op_from(C.get_ring(), &c, &conv_data.lift_to_C_mul);
     
-        let c00_lifted = C_mul.get_ring().prepare_multiplicant(&lift(c00));
-        let c01_lifted = C_mul.get_ring().prepare_multiplicant(&lift(c01));
-        let c10_lifted = C_mul.get_ring().prepare_multiplicant(&lift(c10));
-        let c11_lifted = C_mul.get_ring().prepare_multiplicant(&lift(c11));
-        
-        let lifted0 = C_mul.get_ring().mul_prepared(&c00_lifted, &c10_lifted);
-        let lifted1 = C_mul.add(C_mul.get_ring().mul_prepared(&c00_lifted, &c11_lifted), C_mul.get_ring().mul_prepared(&c01_lifted, &c10_lifted));
-        let lifted2 = C_mul.get_ring().mul_prepared(&c01_lifted, &c11_lifted);
+        let c0_lifted = [lift(c00), lift(c01)];
+        let c1_lifted = [lift(c10), lift(c11)];
+        let [lifted0, lifted1, lifted2] = C_mul.get_ring().two_by_two_convolution(&c0_lifted, &c1_lifted);
     
         let scale_down = |c: El<CiphertextRing>| 
             C.get_ring().perform_rns_op_from(C_mul.get_ring(), &c, &conv_data.scale_down_to_C);
