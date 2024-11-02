@@ -18,7 +18,6 @@ use std::marker::PhantomData;
 use std::ops::Range;
 
 use crate::rings::gadget_product::double_rns::prime_factor_groups;
-use crate::rings::hexl_conv::HEXLConv;
 use crate::rings::number_ring::HECyclotomicNumberRing;
 use crate::rings::single_rns_ring::*;
 use crate::cyclotomic::CyclotomicRing;

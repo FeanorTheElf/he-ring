@@ -28,7 +28,6 @@ use crate::rnsconv::RNSOperation;
 
 use super::decomposition_ring::{DecompositionRing, DecompositionRingBase};
 use super::double_rns_ring::{CoeffEl, DoubleRNSRingBase};
-use super::hexl_conv::HEXLConv;
 use super::ntt_conv::NTTConvolution;
 use super::number_ring::HECyclotomicNumberRing;
 
@@ -73,12 +72,13 @@ pub struct SingleRNSRingPreparedMultiplicant<NumberRing, FpTy, A, C>
     pub(super) data: Vec<C::PreparedConvolutionOperand, A>
 }
 
-impl<NumberRing> SingleRNSRingBase<NumberRing, zn_64::Zn, Global, HEXLConv> 
+#[cfg(feature = "use_hexl")]
+impl<NumberRing> SingleRNSRingBase<NumberRing, zn_64::Zn, Global, crate::rings::hexl_conv::HEXLConv> 
     where NumberRing: HECyclotomicNumberRing<zn_64::Zn>
 {
     pub fn new(number_ring: NumberRing, rns_base: zn_rns::Zn<zn_64::Zn, BigIntRing>) -> RingValue<Self> {
         let max_log2_n = StaticRing::<i64>::RING.abs_log2_ceil(&(number_ring.rank() as i64 * 2)).unwrap();
-        let convolutions = rns_base.as_iter().map(|Zp| HEXLConv::new(Zp.clone(), max_log2_n)).collect();
+        let convolutions = rns_base.as_iter().map(|Zp| crate::rings::hexl_conv::HEXLConv::new(Zp.clone(), max_log2_n)).collect();
         Self::new_with(number_ring, rns_base, Global, convolutions)
     }
 }

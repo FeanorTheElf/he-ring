@@ -26,7 +26,7 @@ use crate::bfv::print_all_timings;
 use crate::bfv::HENumberRing;
 use crate::cyclotomic::CyclotomicRing;
 use crate::extend_sampled_primes;
-use crate::rings::hexl_conv::HEXLConv;
+use crate::rings::ntt_conv::NTTConvolution;
 use crate::rings::slots::HypercubeIsomorphism;
 use crate::rnsconv;
 use crate::{cyclotomic::CyclotomicRingStore, sample_primes};
@@ -37,7 +37,12 @@ use super::{CompositeCyclotomicNumberRing, DecompositionRing, DecompositionRingB
 
 pub type PlaintextAllocator = Global;
 pub type CiphertextAllocator = Global;
-pub type UsedConvolution = HEXLConv;
+
+#[cfg(feature = "use_hexl")]
+pub type UsedConvolution = crate::rings::hexl_conv::HEXLConv;
+#[cfg(not(feature = "use_hexl"))]
+pub type UsedConvolution = NTTConvolution<Zn>;
+
 pub type NumberRing = CompositeCyclotomicNumberRing;
 pub type PlaintextRing = DecompositionRing<NumberRing, Zn, PlaintextAllocator>;
 pub type CiphertextRing = SingleRNSRing<NumberRing, Zn, CiphertextAllocator, UsedConvolution>;
@@ -225,7 +230,7 @@ impl CompositeSingleRNSBFVParams {
     {
         let (c00, c01) = lhs;
         let (c10, c11) = rhs;
-        let lift = |c: SingleRNSRingEl<NumberRing, Zn, CiphertextAllocator, HEXLConv>| 
+        let lift = |c: SingleRNSRingEl<NumberRing, Zn, CiphertextAllocator, _>| 
             C_mul.get_ring().perform_rns_op_from(C.get_ring(), &c, &conv_data.lift_to_C_mul);
     
         let c00_lifted = C_mul.get_ring().prepare_multiplicant(&lift(c00));

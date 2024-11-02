@@ -1,4 +1,5 @@
 
+#[cfg(feature = "use_hexl")]
 pub mod hexl_conv;
 
 pub mod ntt_conv;
