@@ -47,6 +47,7 @@ macro_rules! ring_literal {
 }
 
 extern crate feanor_math;
+extern crate feanor_math_hexl;
 extern crate test;
 
 pub trait IsEq<T: ?Sized> {

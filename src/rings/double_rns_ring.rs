@@ -938,7 +938,7 @@ impl<NumberRing, FpTy1, FpTy2, A1, A2> CanIsoFromTo<DoubleRNSRingBase<NumberRing
 
 #[cfg(any(test, feature = "generic_tests"))]
 pub fn test_with_number_ring<NumberRing: Clone + HECyclotomicNumberRing<zn_64::Zn>>(number_ring: NumberRing) {
-    use crate::profiling::{clear_all_timings, print_all_timings};
+    use crate::{profiling::{clear_all_timings, print_all_timings}, rings::ntt_conv::NTTConvolution};
 
     let p1 = number_ring.largest_suitable_prime(20000).unwrap();
     let p2 = number_ring.largest_suitable_prime(p1 - 1).unwrap();
@@ -965,6 +965,6 @@ pub fn test_with_number_ring<NumberRing: Clone + HECyclotomicNumberRing<zn_64::Z
     feanor_math::ring::generic_tests::test_self_iso(&ring, elements.iter().map(|x| ring.clone_el(x)));
     feanor_math::rings::extension::generic_tests::test_free_algebra_axioms(&ring);
 
-    let single_rns_ring = SingleRNSRingBase::new(number_ring.clone(), base_ring.clone());
+    let single_rns_ring = SingleRNSRingBase::<_, _, _, NTTConvolution<_>>::new(number_ring.clone(), base_ring.clone());
     feanor_math::ring::generic_tests::test_hom_axioms(&ring, &single_rns_ring, elements.iter().map(|x| ring.clone_el(x)));
 }

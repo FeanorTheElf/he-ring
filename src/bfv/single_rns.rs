@@ -26,6 +26,7 @@ use crate::bfv::print_all_timings;
 use crate::bfv::HENumberRing;
 use crate::cyclotomic::CyclotomicRing;
 use crate::extend_sampled_primes;
+use crate::rings::hexl_conv::HEXLConv;
 use crate::rings::slots::HypercubeIsomorphism;
 use crate::rnsconv;
 use crate::{cyclotomic::CyclotomicRingStore, sample_primes};
@@ -36,11 +37,12 @@ use super::{CompositeCyclotomicNumberRing, DecompositionRing, DecompositionRingB
 
 pub type PlaintextAllocator = Global;
 pub type CiphertextAllocator = Global;
+pub type UsedConvolution = HEXLConv;
 pub type NumberRing = CompositeCyclotomicNumberRing;
 pub type PlaintextRing = DecompositionRing<NumberRing, Zn, PlaintextAllocator>;
-pub type CiphertextRing = SingleRNSRing<NumberRing, Zn, CiphertextAllocator>;
+pub type CiphertextRing = SingleRNSRing<NumberRing, Zn, CiphertextAllocator, UsedConvolution>;
 pub type SecretKey = El<CiphertextRing>;
-pub type GadgetProductOperand<'a> = GadgetProductRhsOperand<'a, NumberRing, CiphertextAllocator>;
+pub type GadgetProductOperand<'a> = GadgetProductRhsOperand<'a, NumberRing, CiphertextAllocator, UsedConvolution>;
 pub type KeySwitchKey<'a> = (usize, (GadgetProductOperand<'a>, GadgetProductOperand<'a>));
 pub type RelinKey<'a> = KeySwitchKey<'a>;
 pub type Ciphertext = (El<CiphertextRing>, El<CiphertextRing>);
@@ -90,11 +92,11 @@ impl CompositeSingleRNSBFVParams {
         assert!(ZZbig.is_gt(&Cmul_rns_base[Cmul_rns_base.len() - 1], &C_rns_base[C_rns_base.len() - 1]));
         Cmul_rns_base.sort_unstable_by(|l, r| ZZbig.cmp(l, r));
 
-        let C = SingleRNSRingBase::new(
+        let C = SingleRNSRingBase::<_, _, _, UsedConvolution>::new(
             self.number_ring(),
             zn_rns::Zn::new(C_rns_base.iter().map(|p| Zn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect(), ZZbig)
         );
-        let Cmul = SingleRNSRingBase::new(
+        let Cmul = SingleRNSRingBase::<_, _, _, UsedConvolution>::new(
             number_ring,
             zn_rns::Zn::new(Cmul_rns_base.iter().map(|p| Zn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect(), ZZbig)
         );
@@ -223,7 +225,7 @@ impl CompositeSingleRNSBFVParams {
     {
         let (c00, c01) = lhs;
         let (c10, c11) = rhs;
-        let lift = |c: SingleRNSRingEl<NumberRing, Zn, CiphertextAllocator>| 
+        let lift = |c: SingleRNSRingEl<NumberRing, Zn, CiphertextAllocator, HEXLConv>| 
             C_mul.get_ring().perform_rns_op_from(C.get_ring(), &c, &conv_data.lift_to_C_mul);
     
         let c00_lifted = C_mul.get_ring().prepare_multiplicant(&lift(c00));

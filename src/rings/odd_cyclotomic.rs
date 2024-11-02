@@ -178,7 +178,7 @@ impl<FpTy> HENumberRing<FpTy> for OddCyclotomicNumberRing
 
     fn largest_suitable_prime(&self, leq_than: i64) -> Option<i64> {
         let n = <_ as HECyclotomicNumberRing<FpTy>>::n(self) as i64;
-        let log2_m = StaticRing::<i64>::RING.abs_log2_ceil(&n).unwrap() + 1;
+        let log2_m = StaticRing::<i64>::RING.abs_log2_ceil(&n).unwrap() + 2;
         let modulus = n << log2_m;
         let mut current = (leq_than - 1) - ((leq_than - 1) % modulus) + 1;
         while current > 0 && !is_prime(StaticRing::<i64>::RING, &current, 10) {
@@ -344,10 +344,10 @@ impl<FpTy> HENumberRing<FpTy> for CompositeCyclotomicNumberRing
     fn largest_suitable_prime(&self, leq_than: i64) -> Option<i64> {
         let n = <_ as HECyclotomicNumberRing<FpTy>>::n(self) as i64;
         let log2_m = max(
-            StaticRing::<i64>::RING.abs_log2_ceil(&(<_ as HECyclotomicNumberRing<FpTy>>::n(&self.tensor_factor1) as i64)).unwrap() + 1,
-            StaticRing::<i64>::RING.abs_log2_ceil(&(<_ as HECyclotomicNumberRing<FpTy>>::n(&self.tensor_factor2) as i64)).unwrap() + 1
+            StaticRing::<i64>::RING.abs_log2_ceil(&(<_ as HECyclotomicNumberRing<FpTy>>::n(&self.tensor_factor1) as i64)).unwrap() + 2,
+            StaticRing::<i64>::RING.abs_log2_ceil(&(<_ as HECyclotomicNumberRing<FpTy>>::n(&self.tensor_factor2) as i64)).unwrap() + 2
         );
-        let log2_m = StaticRing::<i64>::RING.abs_log2_ceil(&n).unwrap() + 1;
+        let log2_m = StaticRing::<i64>::RING.abs_log2_ceil(&n).unwrap() + 2;
         let modulus = n << log2_m;
         let mut current = (leq_than - 1) - ((leq_than - 1) % modulus) + 1;
         while current > 0 && !is_prime(StaticRing::<i64>::RING, &current, 10) {
