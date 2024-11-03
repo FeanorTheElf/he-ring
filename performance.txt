@@ -1,100 +1,91 @@
 CreatePtxtRing
-done in 285 ms, []
+done in 269 ms, []
 CreateCtxtRing
-done in 6528 ms, []
+done in 6178 ms, []
 GenSK
-done in 10 ms, []
+done in 11 ms, []
 CreateMulRescale
 done in 0 ms, []
 EncSym
-done in 409 ms, []
+done in 401 ms, []
 HomAdd
-done in 12 ms, []
+done in 11 ms, []
 HomAddPlain
-done in 207 ms, []
+done in 204 ms, []
 HomMulPlain
-done in 366 ms, []
+done in 364 ms, []
 GenRK
-Use naive gadget product, digits = 3, len(full RNS base) = 15
-Use naive gadget product, digits = 3, len(full RNS base) = 15
-done in 1189 ms, []
+done in 1176 ms, []
 HomMul
-done in 2155 ms, []
-DoubleRNSRing::do_fft: 4 calls, 668 ms
-CompositeCyclotomicDecomposedNumberRing::small_basis_to_mult_basis: 165 calls, 918 ms
-OddCyclotomicDecomposedNumberRing::small_basis_to_mult_basis::fft: 76230 calls, 882 ms
-DoubleRNSRing::undo_fft: 5 calls, 703 ms
-CompositeCyclotomicDecomposedNumberRing::mult_basis_to_small_basis: 120 calls, 703 ms
-OddCyclotomicDecomposedNumberRing::mult_basis_to_small_basis::fft: 55440 calls, 654 ms
-OddCyclotomicDecomposedNumberRing::mult_basis_to_small_basis::reduction: 55440 calls, 20 ms
-DoubleRNSRing::perform_rns_op_from: 7 calls, 408 ms
-AlmostExactBaseConversion::apply: 13 calls, 403 ms
-DoubleRNSRing::to_gadget_product_lhs: 1 calls, 288 ms
-DoubleRNSRing::gadget_product_ntt::naive: 2 calls, 26 ms
+done in 2173 ms, []
+ / DoubleRNSRing::do_fft                                                                                                              4 calls,  665 ms,  166390 us/call
+ / DoubleRNSRing::do_fft / CompositeCyclotomicDecomposedNumberRing::small_basis_to_mult_basis                                       120 calls,  665 ms,    5545 us/call
+ / DoubleRNSRing::undo_fft                                                                                                            5 calls,  709 ms,  141870 us/call
+ / DoubleRNSRing::undo_fft / CompositeCyclotomicDecomposedNumberRing::mult_basis_to_small_basis                                     120 calls,  709 ms,    5910 us/call
+ / DoubleRNSRing::perform_rns_op_from                                                                                                 7 calls,  420 ms,   60089 us/call
+ / double_rns::GadgetProductLhsOperand::create_from_element                                                                           1 calls,  295 ms,  295778 us/call
+ / double_rns::GadgetProductLhsOperand::create_from_element / CompositeCyclotomicDecomposedNumberRing::small_basis_to_mult_basis     45 calls,  248 ms,    5521 us/call
+ / DoubleRNSRing::gadget_product_naive                                                                                                2 calls,   25 ms,   12646 us/call
 test bfv::print_timings_double_rns_composite_bfv_mul ... ok
-
 CreatePtxtRing
-done in 7 ms, []
+done in 8 ms, []
 CreateCtxtRing
-done in 348 ms, []
+done in 346 ms, []
 GenSK
 done in 3 ms, []
 CreateMulRescale
 done in 0 ms, []
 EncSym
-done in 79 ms, []
+done in 73 ms, []
+HomAddPlain
+done in 34 ms, []
 HomAdd
-done in 4 ms, []
+done in 7 ms, []
 HomMulPlain
-done in 69 ms, []
+done in 57 ms, []
 GenRK
-Use naive gadget product, digits = 3, len(full RNS base) = 15
-Use naive gadget product, digits = 3, len(full RNS base) = 15
-done in 210 ms, []
+done in 208 ms, []
 HomMul
-done in 625 ms, []
-DoubleRNSRing::do_fft: 4 calls, 85 ms
-DoubleRNSRing::undo_fft: 5 calls, 104 ms
-DoubleRNSRing::perform_rns_op_from: 7 calls, 321 ms
-AlmostExactBaseConversion::apply: 13 calls, 322 ms
-DoubleRNSRing::to_gadget_product_lhs: 1 calls, 63 ms
-DoubleRNSRing::gadget_product_ntt::naive: 2 calls, 15 ms
+done in 639 ms, []
+ / DoubleRNSRing::do_fft                                                                                               4 calls,   84 ms,  21169 us/call
+ / DoubleRNSRing::do_fft / Pow2CyclotomicNumberRing::small_basis_to_mult_basis                                       120 calls,   84 ms,    705 us/call
+ / DoubleRNSRing::undo_fft                                                                                             5 calls,  106 ms,  21276 us/call
+ / DoubleRNSRing::undo_fft / Pow2CyclotomicNumberRing::mult_basis_to_small_basis                                     120 calls,  106 ms,    886 us/call
+ / DoubleRNSRing::perform_rns_op_from                                                                                  7 calls,  328 ms,  46988 us/call
+ / double_rns::GadgetProductLhsOperand::create_from_element                                                            1 calls,   68 ms,  68770 us/call
+ / double_rns::GadgetProductLhsOperand::create_from_element / Pow2CyclotomicNumberRing::small_basis_to_mult_basis     45 calls,   31 ms,    697 us/call
+ / DoubleRNSRing::gadget_product_naive                                                                                 2 calls,   15 ms,   7510 us/call
 test bfv::print_timings_pow2_bfv_mul ... ok
 
 CreatePtxtRing
-done in 281 ms, []
+done in 284 ms, []
 CreateCtxtRing
-done in 9248 ms, []
-CompositeCyclotomicNumberRing::mod_p: 47 calls, 6628 ms
-CompositeCyclotomicNumberRing::mod_p::set_coeff_to_small: 1989792 calls, 1960 ms
-CompositeCyclotomicNumberRing::mod_p::set_small_to_coeff: 1989792 calls, 1361 ms
-CompositeCyclotomicNumberRing::mod_p::mul_mod_Phi_n: 2011553 calls, 454 ms
-OddCyclotomicDecomposedNumberRing::mod_p: 94 calls, 60 ms
+done in 9109 ms, []
 GenSK
 done in 2 ms, []
 CreateMulRescale
-done in 0 ms, []
+done in 3 ms, []
 EncSym
-done in 346 ms, []
+done in 340 ms, []
 HomAddPlain
 done in 7 ms, []
 HomAdd
-done in 5 ms, []
+done in 10 ms, []
 HomMulPlain
-done in 610 ms, []
+done in 622 ms, []
 GenRK
-done in 1663 ms, []
+done in 1653 ms, []
 HomMul
-done in 3562 ms, []
-NTTConvolution::prepare_convolution_operand_len::fft: 165 calls, 535 ms
-NTTConvolution::compute_convolution_base::inv_fft: 210 calls, 1661 ms
-SingleRNSRing::reduce_modulus: 120 calls, 744 ms
-SingleRNSRing::prepare_multiplicant: 4 calls, 416 ms
-SingleRNSRing::perform_rns_op_from: 7 calls, 414 ms
-AlmostExactBaseConversion::apply: 13 calls, 408 ms
-SingleRNSRing::two_by_two_convolution::convolution: 30 calls, 247 ms
-SingleRNSRing::two_by_two_convolution::convolution: 30 calls, 498 ms
-SingleRNSRing::two_by_two_convolution::convolution: 30 calls, 246 ms
-SingleRNSRing::to_gadget_product_lhs: 1 calls, 191 ms
-SingleRNSRing::gadget_product: 2 calls, 962 ms
-test bfv::single_rns::print_timings_single_rns_composite_bfv_mul ... ok
+done in 3516 ms, []
+ / SingleRNSRing::perform_rns_op_from                                                                                   7 calls,   411 ms,    58785 us/call
+ / SingleRNSRing::two_by_two_convolution                                                                                1 calls,  1966 ms,  1966792 us/call
+ / SingleRNSRing::two_by_two_convolution / NTTConv::compute_convolution_base                                          120 calls,   948 ms,     7902 us/call
+ / SingleRNSRing::two_by_two_convolution / SingleRNSRing::reduce_modulus                                               90 calls,   565 ms,     6287 us/call
+ / SingleRNSRing::two_by_two_convolution / SingleRNSRing::prepare_multiplicant                                          4 calls,   409 ms,   102479 us/call
+ / SingleRNSRing::two_by_two_convolution / SingleRNSRing::prepare_multiplicant / NTTConv::prepare_convolution_base    120 calls,   409 ms,     3415 us/call
+ / SingleRNSRing::to_gadget_product_lhs                                                                                 1 calls,   191 ms,   191071 us/call
+ / SingleRNSRing::to_gadget_product_lhs / NTTConv::prepare_convolution_base                                            45 calls,   148 ms,     3310 us/call
+ / SingleRNSRing::gadget_product                                                                                        2 calls,   931 ms,   465500 us/call
+ / SingleRNSRing::gadget_product / NTTConv::compute_convolution_base                                                   90 calls,   716 ms,     7965 us/call
+ / SingleRNSRing::gadget_product / SingleRNSRing::reduce_modulus                                                       30 calls,   190 ms,     6350 us/call
+test bfv::print_timings_single_rns_composite_bfv_mul ... ok

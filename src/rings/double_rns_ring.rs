@@ -20,6 +20,7 @@ use feanor_math::seq::*;
 use serde_json::Number;
 
 use crate::cyclotomic::CyclotomicRing;
+use crate::profiling::TimeRecorder;
 use crate::rings::number_ring::*;
 use crate::rnsconv::*;
 use crate::IsEq;
@@ -130,18 +131,18 @@ impl<NumberRing, FpTy, A> DoubleRNSRingBase<NumberRing, FpTy, A>
     }
 
     pub fn undo_fft(&self, element: DoubleRNSEl<NumberRing, FpTy, A>) -> CoeffEl<NumberRing, FpTy, A> {
-        assert_eq!(element.el_wrt_mult_basis.len(), self.element_len());
-        let mut result = element.el_wrt_mult_basis;
-        record_time!("DoubleRNSRing::undo_fft", || {
+        record_time!(GLOBAL_TIME_RECORDER, "DoubleRNSRing::undo_fft", || {
+            assert_eq!(element.el_wrt_mult_basis.len(), self.element_len());
+            let mut result = element.el_wrt_mult_basis;
             for i in 0..self.rns_base().len() {
                 self.ring_decompositions[i].mult_basis_to_small_basis(&mut result[(i * self.rank())..((i + 1) * self.rank())]);
             }
-        });
-        CoeffEl {
-            el_wrt_small_basis: result,
-            number_ring: PhantomData,
-            allocator: PhantomData
-        }
+            CoeffEl {
+                el_wrt_small_basis: result,
+                number_ring: PhantomData,
+                allocator: PhantomData
+            }
+        })
     }
 
     pub fn allocator(&self) -> &A {
@@ -174,18 +175,18 @@ impl<NumberRing, FpTy, A> DoubleRNSRingBase<NumberRing, FpTy, A>
     }
 
     pub fn do_fft(&self, element: CoeffEl<NumberRing, FpTy, A>) -> DoubleRNSEl<NumberRing, FpTy, A> {
-        assert_eq!(element.el_wrt_small_basis.len(), self.element_len());
-        let mut result = element.el_wrt_small_basis;
-        record_time!("DoubleRNSRing::do_fft", || {
+        record_time!(GLOBAL_TIME_RECORDER, "DoubleRNSRing::do_fft", || {
+            assert_eq!(element.el_wrt_small_basis.len(), self.element_len());
+            let mut result = element.el_wrt_small_basis;
             for i in 0..self.rns_base().len() {
                 self.ring_decompositions[i].small_basis_to_mult_basis(&mut result[(i * self.rank())..((i + 1) * self.rank())]);
             }
-        });
-        DoubleRNSEl {
-            el_wrt_mult_basis: result,
-            number_ring: PhantomData,
-            allocator: PhantomData
-        }
+            DoubleRNSEl {
+                el_wrt_mult_basis: result,
+                number_ring: PhantomData,
+                allocator: PhantomData
+            }
+        })
     }
 
     pub fn sample_from_coefficient_distribution<G: FnMut() -> i32>(&self, mut distribution: G) -> CoeffEl<NumberRing, FpTy, A> {
@@ -315,17 +316,17 @@ impl<NumberRing, FpTy, A> DoubleRNSRingBase<NumberRing, FpTy, A>
             A2: Allocator + Clone,
             Op: RNSOperation<RingType = FpTy::Type>
     {
-        assert!(self.number_ring == from.number_ring);
-        assert_eq!(self.rns_base().len(), op.output_rings().len());
-        assert_eq!(from.rns_base().len(), op.input_rings().len());
+        record_time!(GLOBAL_TIME_RECORDER, "DoubleRNSRing::perform_rns_op_from", || {
+            assert!(self.number_ring == from.number_ring);
+            assert_eq!(self.rns_base().len(), op.output_rings().len());
+            assert_eq!(from.rns_base().len(), op.input_rings().len());
 
-        for i in 0..from.rns_base().len() {
-            assert!(from.rns_base().at(i).get_ring() == op.input_rings().at(i).get_ring());
-        }
-        for i in 0..self.rns_base().len() {
-            assert!(self.rns_base().at(i).get_ring() == op.output_rings().at(i).get_ring());
-        }
-        record_time!("DoubleRNSRing::perform_rns_op_from", || {
+            for i in 0..from.rns_base().len() {
+                assert!(from.rns_base().at(i).get_ring() == op.input_rings().at(i).get_ring());
+            }
+            for i in 0..self.rns_base().len() {
+                assert!(self.rns_base().at(i).get_ring() == op.output_rings().at(i).get_ring());
+            }
             let mut result = self.zero_non_fft();
             op.apply(from.as_matrix_wrt_small_basis(el), self.as_matrix_wrt_small_basis_mut(&mut result));
             return result;
@@ -372,16 +373,16 @@ impl<NumberRing, FpTy, A> DoubleRNSRingBase<NumberRing, FpTy, A>
             A2: Allocator + Clone,
             Op: RNSOperation<RingType = FpTy::Type>
     {
-        assert!(&self.number_ring == to.get_ring().number_ring());
-        assert_eq!(self.rns_base().len(), op.input_rings().len());
-        assert_eq!(1, op.output_rings().len());
-        
-        for i in 0..self.rns_base().len() {
-            assert!(self.rns_base().at(i).get_ring() == op.input_rings().at(i).get_ring());
-        }
-        assert!(to.base_ring().get_ring() == op.output_rings().at(0).get_ring());
+        record_time!(GLOBAL_TIME_RECORDER, "DoubleRNSRing::perform_rns_op_to_decompring", || {
+            assert!(&self.number_ring == to.get_ring().number_ring());
+            assert_eq!(self.rns_base().len(), op.input_rings().len());
+            assert_eq!(1, op.output_rings().len());
+            
+            for i in 0..self.rns_base().len() {
+                assert!(self.rns_base().at(i).get_ring() == op.input_rings().at(i).get_ring());
+            }
+            assert!(to.base_ring().get_ring() == op.output_rings().at(0).get_ring());
 
-        record_time!("DoubleRNSRing::perform_rns_op_to_decompring", || {
             let mut el_wrt_coeff_basis = self.clone_el_non_fft(element).el_wrt_small_basis;
             for i in 0..self.rns_base().len() {
                 self.ring_decompositions[i].small_basis_to_coeff_basis(&mut el_wrt_coeff_basis[(i * self.rank())..((i + 1) * self.rank())]);
@@ -934,7 +935,7 @@ impl<NumberRing, FpTy1, FpTy2, A1, A2> CanIsoFromTo<DoubleRNSRingBase<NumberRing
 
 #[cfg(any(test, feature = "generic_tests"))]
 pub fn test_with_number_ring<NumberRing: Clone + HECyclotomicNumberRing<zn_64::Zn>>(number_ring: NumberRing) {
-    use crate::{profiling::{clear_all_timings, print_all_timings}, rings::ntt_conv::NTTConvolution};
+    use crate::{profiling::{clear_all_timings, print_all_timings}, rings::ntt_conv::NTTConv};
 
     let p1 = number_ring.largest_suitable_prime(20000).unwrap();
     let p2 = number_ring.largest_suitable_prime(p1 - 1).unwrap();
@@ -961,6 +962,6 @@ pub fn test_with_number_ring<NumberRing: Clone + HECyclotomicNumberRing<zn_64::Z
     feanor_math::ring::generic_tests::test_self_iso(&ring, elements.iter().map(|x| ring.clone_el(x)));
     feanor_math::rings::extension::generic_tests::test_free_algebra_axioms(&ring);
 
-    let single_rns_ring = SingleRNSRingBase::<_, _, _, NTTConvolution<_>>::new(number_ring.clone(), base_ring.clone());
+    let single_rns_ring = SingleRNSRingBase::<_, _, _, NTTConv<_>>::new(number_ring.clone(), base_ring.clone());
     feanor_math::ring::generic_tests::test_hom_axioms(&ring, &single_rns_ring, elements.iter().map(|x| ring.clone_el(x)));
 }

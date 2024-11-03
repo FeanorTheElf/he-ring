@@ -52,7 +52,7 @@ pub mod bootstrap;
 #[cfg(feature = "use_hexl")]
 pub type UsedConvolution = crate::rings::hexl_conv::HEXLConv;
 #[cfg(not(feature = "use_hexl"))]
-pub type UsedConvolution = crate::rings::ntt_conv::NTTConvolution<Zn>;
+pub type UsedConvolution = crate::rings::ntt_conv::NTTConv<Zn>;
 
 pub type PlaintextAllocator = Global;
 pub type CiphertextAllocator = Global;
@@ -576,7 +576,6 @@ fn print_timings_pow2_bfv_mul() {
     let (C, C_mul) = log_time::<_, _, true, _>("CreateCtxtRing", |[]|
         params.create_ciphertext_rings()
     );
-    print_all_timings();
 
     let sk = log_time::<_, _, true, _>("GenSK", |[]| 
         Pow2BFV::gen_sk(&C, &mut rng)
@@ -704,7 +703,7 @@ fn test_bfv_hom_galois() {
 }
 
 #[test]
-fn test_bfv_mul() {
+fn test_single_rns_composite_bfv_mul() {
     let mut rng = thread_rng();
     
     let params = CompositeSingleRNSBFV {
@@ -755,7 +754,6 @@ fn print_timings_single_rns_composite_bfv_mul() {
     let (C, C_mul) = log_time::<_, _, true, _>("CreateCtxtRing", |[]|
         params.create_ciphertext_rings()
     );
-    print_all_timings();
 
     let sk = log_time::<_, _, true, _>("GenSK", |[]| 
         CompositeSingleRNSBFV::gen_sk(&C, &mut rng)

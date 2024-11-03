@@ -139,7 +139,7 @@ impl<A> RNSOperation for AlmostExactBaseConversion<A>
         where V1: AsPointerToSlice<El<Self::Ring>>,
             V2: AsPointerToSlice<El<Self::Ring>>
     {
-        record_time!("AlmostExactBaseConversion::apply", || {
+        {
             assert_eq!(input.row_count(), self.input_rings().len());
             assert_eq!(output.row_count(), self.output_rings().len());
             assert_eq!(input.col_count(), output.col_count());
@@ -196,7 +196,7 @@ impl<A> RNSOperation for AlmostExactBaseConversion<A>
                     self.output_rings().at(i).sub_assign(output.at_mut(i, j), self.to_summands[i].mul_ref_snd(int_to_homs[i].map_ref(&correction), &self.Q_mod_q[i]));
                 }
             }
-        })
+        }
     }
 }
 

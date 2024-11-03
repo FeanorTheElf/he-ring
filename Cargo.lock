@@ -69,6 +69,7 @@ dependencies = [
  "rand_distr",
  "serde",
  "serde_json",
+ "thread_local",
 ]
 
 [[package]]

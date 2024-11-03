@@ -50,6 +50,7 @@ extern crate feanor_math;
 #[cfg(feature = "use_hexl")]
 extern crate feanor_math_hexl;
 extern crate test;
+extern crate thread_local;
 
 pub trait IsEq<T: ?Sized> {
 

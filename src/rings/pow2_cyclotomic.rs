@@ -198,19 +198,23 @@ impl<R, F> HENumberRingMod<R::Type> for Pow2CyclotomicNumberRing<R, F>
     fn mult_basis_to_small_basis<V>(&self, mut data: V)
         where V: SwappableVectorViewMut<El<R>>
     {
-        self.fft_table.unordered_inv_fft(&mut data, &self.ring);
-        for i in 0..self.rank() {
-            self.ring.mul_assign_ref(data.at_mut(i), &self.twiddles[i]);
-        }
+        record_time!(GLOBAL_TIME_RECORDER, "Pow2CyclotomicNumberRing::mult_basis_to_small_basis", || {
+            self.fft_table.unordered_inv_fft(&mut data, &self.ring);
+            for i in 0..self.rank() {
+                self.ring.mul_assign_ref(data.at_mut(i), &self.twiddles[i]);
+            }
+        })
     }
 
     fn small_basis_to_mult_basis<V>(&self, mut data: V)
         where V: SwappableVectorViewMut<El<R>>
     {
-        for i in 0..self.rank() {
-            self.ring.mul_assign_ref(data.at_mut(i), &self.inv_twiddles[i]);
-        }
-        self.fft_table.unordered_fft(&mut data, &self.ring);
+        record_time!(GLOBAL_TIME_RECORDER, "Pow2CyclotomicNumberRing::small_basis_to_mult_basis", || {
+            for i in 0..self.rank() {
+                self.ring.mul_assign_ref(data.at_mut(i), &self.inv_twiddles[i]);
+            }
+            self.fft_table.unordered_fft(&mut data, &self.ring);
+        })
     }
 
     fn coeff_basis_to_small_basis<V>(&self, data: V) {}

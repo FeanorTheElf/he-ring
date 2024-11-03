@@ -46,9 +46,7 @@ impl<'a, NumberRing, A, C> GadgetProductRhsOperand<'a, NumberRing, A, C>
     }
 
     pub fn set_rns_factor(&mut self, i: usize, el: SingleRNSRingEl<NumberRing, Zn, A, C>) {
-        record_time!("single_rns::GadgetProductRhsOperand::set_rns_factor", || {
-            self.data[i] = Some(self.ring.prepare_multiplicant(&el).data);
-        })
+        self.data[i] = Some(self.ring.prepare_multiplicant(&el).data);
     }
     
     pub fn create_empty<const LOG: bool>(ring: &'a SingleRNSRingBase<NumberRing, Zn, A, C>, digits: usize) -> Self {
@@ -78,14 +76,12 @@ impl<'a, NumberRing, A, C>  GadgetProductLhsOperand<'a, NumberRing, A, C>
             C: PreparedConvolutionAlgorithm<ZnBase>
 {
     pub fn create_from_element(ring: &'a SingleRNSRingBase<NumberRing, Zn, A, C>, digits: usize, el: SingleRNSRingEl<NumberRing, RingValue<ZnBase>, A, C>) -> Self {
-        record_time!("single_rns::GadgetProductLhsOperand::create_from_element", || {
-            let digits = prime_factor_groups(ring.rns_base().len(), digits).iter().collect::<Vec<_>>();
-            return GadgetProductLhsOperand {
-                ring: PhantomData,
-                data: ring.gadget_decompose(&el, &digits, ring.rns_base().len()),
-                element: el,
-            };
-        })
+        let digits = prime_factor_groups(ring.rns_base().len(), digits).iter().collect::<Vec<_>>();
+        return GadgetProductLhsOperand {
+            ring: PhantomData,
+            data: ring.gadget_decompose(&el, &digits, ring.rns_base().len()),
+            element: el,
+        };
     }
 
     pub(in crate::rings) fn element(&self) -> &SingleRNSRingEl<NumberRing, Zn, A, C> {
@@ -147,31 +143,30 @@ impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, Zn, A, C>
     }
 
     pub fn gadget_product_base(&self, lhs: &GadgetProductLhsOperand<NumberRing, A, C>, rhs: &GadgetProductRhsOperand<NumberRing, A, C>) -> SingleRNSRingEl<NumberRing, Zn, A, C> {
-        record_time!("SingleRNSRing::gadget_product", || {
-            let local_rns_base_len = lhs.data[0].len();
-            let digits = &rhs.digits;
-            assert_eq!(lhs.data.len(), digits.len());
-            assert_eq!(rhs.data.len(), digits.len());
-            assert!(lhs.data.iter().all(|components| components.len() == local_rns_base_len));
-            assert!(rhs.data.iter().all(|components| if let Some(components) = components { components.len() == local_rns_base_len } else { true }));
+        let local_rns_base_len = lhs.data[0].len();
+        let digits = &rhs.digits;
+        assert_eq!(lhs.data.len(), digits.len());
+        assert_eq!(rhs.data.len(), digits.len());
+        assert!(lhs.data.iter().all(|components| components.len() == local_rns_base_len));
+        assert!(rhs.data.iter().all(|components| if let Some(components) = components { components.len() == local_rns_base_len } else { true }));
 
-            // currently this is the only case we use
-            assert!(self.rns_base().len() == local_rns_base_len);
+        // currently this is the only case we use
+        assert!(self.rns_base().len() == local_rns_base_len);
 
-            let mut unreduced_result = Vec::with_capacity_in(self.rank() * 2, self.allocator());
-            let mut result = self.zero();
-            for i in 0..local_rns_base_len {
-                let Zp = self.rns_base().at(self.rns_base().len() - local_rns_base_len + i);
-                unreduced_result.clear();
-                unreduced_result.resize_with(self.rank() * 2, || Zp.zero());
-                for j in 0..digits.len() {
-                    if let Some(rhs_part) = &rhs.data.at(j) {
-                        self.convolutions()[self.rns_base().len() - local_rns_base_len + i].compute_convolution_prepared(&lhs.data[j][i], &rhs_part[i], &mut unreduced_result, Zp);
-                    }
+        let mut unreduced_result = Vec::with_capacity_in(self.rank() * 2, self.allocator());
+        let mut result = self.zero();
+        for i in 0..local_rns_base_len {
+            let Zp = self.rns_base().at(self.rns_base().len() - local_rns_base_len + i);
+            unreduced_result.clear();
+            unreduced_result.resize_with(self.rank() * 2, || Zp.zero());
+            
+            for j in 0..digits.len() {
+                if let Some(rhs_part) = &rhs.data.at(j) {
+                    self.convolutions()[self.rns_base().len() - local_rns_base_len + i].compute_convolution_prepared(&lhs.data[j][i], &rhs_part[i], &mut unreduced_result, Zp);
                 }
-                self.reduce_modulus(i, &mut unreduced_result, self.as_matrix_mut(&mut result).row_mut_at(i));
             }
-            return result;
-        })
+            self.reduce_modulus(i, &mut unreduced_result, self.as_matrix_mut(&mut result).row_mut_at(i));
+        }
+        return result;
     }
 }

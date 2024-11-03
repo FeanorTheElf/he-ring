@@ -144,7 +144,7 @@ impl<A> RNSOperation for AlmostExactMatrixBaseConversion<A>
         where V1: AsPointerToSlice<El<Self::Ring>>,
             V2: AsPointerToSlice<El<Self::Ring>>
     {
-        record_time!("AlmostExactMatrixBaseConversion::apply", || {
+        {
             assert_eq!(input.row_count(), self.input_rings().len());
             assert_eq!(output.row_count(), self.output_rings().len());
             assert_eq!(input.col_count(), output.col_count());
@@ -178,7 +178,7 @@ impl<A> RNSOperation for AlmostExactMatrixBaseConversion<A>
             let mut memory = Vec::with_capacity_in(mem_size, self.allocator.clone());
             memory.resize(mem_size, 0);
 
-            record_time!("AlmostExactMatrixBaseConversion::apply::matmul", || {
+            {
                 for i in 0..(pad_to_block(out_len + 1) / (1 << BLOCK_SIZE_LOG2)) {
                     for k in 0..(pad_to_block(in_len) / (1 << BLOCK_SIZE_LOG2)) {
                         for j in 0..(pad_to_block(col_count) / (1 << BLOCK_SIZE_LOG2)) {
@@ -209,7 +209,7 @@ impl<A> RNSOperation for AlmostExactMatrixBaseConversion<A>
                         }
                     }
                 }
-            });
+            };
 
             for j in 0..col_count {
                 let mut correction = *output_unreduced.at(out_len, j);
@@ -222,7 +222,7 @@ impl<A> RNSOperation for AlmostExactMatrixBaseConversion<A>
                     );
                 }
             }
-        })
+        }
     }
 }
 

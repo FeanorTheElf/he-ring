@@ -55,11 +55,9 @@ impl<'a, NumberRing, A> GadgetProductRhsOperand<'a, NumberRing, A>
     }
 
     pub fn set_rns_factor(&mut self, i: usize, el: CoeffEl<NumberRing, Zn, A>) {
-        record_time!("double_rns::GadgetProductRhsOperand::set_rns_factor", || {
-            match self {
-                GadgetProductRhsOperand::LKSSStyle(op) => op.set_rns_factor(i, el),
-                GadgetProductRhsOperand::Naive(op) => op.set_rns_factor(i, el)
-            }
+        record_time!(GLOBAL_TIME_RECORDER, "double_rns::GadgetProductRhsOperand::set_rns_factor", || match self {
+            GadgetProductRhsOperand::LKSSStyle(op) => op.set_rns_factor(i, el),
+            GadgetProductRhsOperand::Naive(op) => op.set_rns_factor(i, el)
         })
     }
 
@@ -199,7 +197,7 @@ impl<'a, NumberRing, A> GadgetProductLhsOperand<'a, NumberRing, A>
         A: Allocator + Clone
 {
     pub fn create_from_element(ring: &DoubleRNSRingBase<NumberRing, Zn, A>, digits: usize, el: CoeffEl<NumberRing, RingValue<ZnBase>, A>) -> Self {
-        record_time!("double_rns::GadgetProductLhsOperand::create_from_element", || {
+        record_time!(GLOBAL_TIME_RECORDER, "double_rns::GadgetProductLhsOperand::create_from_element", || {
             let output_moduli_count = ring.get_gadget_product_modulo_count(digits);
             if ring.use_lkss_gadget_product(digits) {
                 GadgetProductLhsOperand::LKSSStyle(LKSSGadgetProductLhsOperand::new_from_element(ring, el, digits, output_moduli_count))
@@ -216,10 +214,12 @@ impl<'a, NumberRing, A> GadgetProductLhsOperand<'a, NumberRing, A>
         A: Allocator + Clone
 {
     pub fn apply_galois_action(&self, ring: &DoubleRNSRingBase<NumberRing, Zn, A>, g: ZnEl) -> Self {
-        match self {
-            GadgetProductLhsOperand::LKSSStyle(lkss_lhs_op) => GadgetProductLhsOperand::LKSSStyle(lkss_lhs_op.apply_galois_action(ring, g)),
-            GadgetProductLhsOperand::Naive(lhs_op) => GadgetProductLhsOperand::Naive(lhs_op.apply_galois_action(ring, g))
-        }
+        record_time!(GLOBAL_TIME_RECORDER, "double_rns::GadgetProductLhsOperand::apply_galois_action", || {
+            match self {
+                GadgetProductLhsOperand::LKSSStyle(lkss_lhs_op) => GadgetProductLhsOperand::LKSSStyle(lkss_lhs_op.apply_galois_action(ring, g)),
+                GadgetProductLhsOperand::Naive(lhs_op) => GadgetProductLhsOperand::Naive(lhs_op.apply_galois_action(ring, g))
+            }
+        })
     }
 }
 
@@ -438,7 +438,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, Zn, A>
     }
 
     fn gadget_product_naive(&self, lhs: &NaiveGadgetProductLhsOperand<NumberRing, A>, rhs: &NaiveGadgetProductRhsOperand<NumberRing, A>) -> El<DoubleRNSRing<NumberRing, Zn, A>> {
-        record_time!("DoubleRNSRing::gadget_product_ntt::naive", || {
+        record_time!(GLOBAL_TIME_RECORDER, "DoubleRNSRing::gadget_product_naive", || {
             let digits = &rhs.digits;
             assert_eq!(lhs.operands.len(), digits.len());
             assert_eq!(rhs.operands.len(), digits.len());
@@ -450,7 +450,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, Zn, A>
     }
 
     fn gadget_product_lkss(&self, lhs: &LKSSGadgetProductLhsOperand<NumberRing, A>, rhs: &LKSSGadgetProductRhsOperand<NumberRing, A>) -> CoeffEl<NumberRing, Zn, A> {
-        record_time!("DoubleRNSRing::gadget_product_lkss", || {
+        record_time!(GLOBAL_TIME_RECORDER, "DoubleRNSRing::gadget_product_lkss", || {
             assert_eq!(lhs.output_moduli_count, rhs.shortened_rns_base.get_ring().len());
             let digits = &rhs.digits;
             assert_eq!(lhs.operands.len(), digits.len());
@@ -460,7 +460,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, Zn, A>
 
             let mut result = self.zero_non_fft();
             for j in 0..digits.len() {
-                let mut summand = record_time!("DoubleRNSRing::gadget_product_lkss::sum", || {
+                let mut summand = record_time!(GLOBAL_TIME_RECORDER, "sum", || {
                     let mut summand = Vec::with_capacity_in(shortened_rns_base.len() * self.rank(), self.allocator().clone());
                     for k in 0..shortened_rns_base.len() {
                         for l in 0..self.rank() {
@@ -470,12 +470,12 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, Zn, A>
                     }
                     summand
                 });
-                record_time!("DoubleRNSRing::gadget_product_lkss::ffts", || {
+                record_time!(GLOBAL_TIME_RECORDER, "ffts", || {
                     for k in 0..output_moduli_count {
                         self.ring_decompositions()[self.rns_base().len() - output_moduli_count + k].mult_basis_to_small_basis(&mut summand[(k * self.rank())..((k + 1) * self.rank())]);
                     }
                 });
-                record_time!("DoubleRNSRing::gadget_product_lkss::lifting", || {
+                record_time!(GLOBAL_TIME_RECORDER, "lifting", || {
                     rhs.conversions[j].apply(
                         Submatrix::from_1d(&summand, shortened_rns_base.len(), self.rank()),
                         self.as_matrix_wrt_small_basis_mut(&mut result).restrict_rows(digits.at(j).clone())

@@ -23,8 +23,8 @@ GenRK
 done in 839 ms, []
 HomMul
 done in 1804 ms, []
-NTTConvolution::prepare_convolution_operand_len::fft: 165 calls, 205 ms
-NTTConvolution::compute_convolution_base::inv_fft: 210 calls, 278 ms
+NTTConv::prepare_convolution_operand_len::fft: 165 calls, 205 ms
+NTTConv::compute_convolution_base::inv_fft: 210 calls, 278 ms
 SingleRNSRing::reduce_modulus: 120 calls, 725 ms
 SingleRNSRing::prepare_multiplicant: 4 calls, 198 ms
 SingleRNSRing::perform_rns_op_from: 7 calls, 388 ms

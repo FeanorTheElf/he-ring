@@ -160,7 +160,7 @@ impl<FpTy> HENumberRing<FpTy> for OddCyclotomicNumberRing
     }
 
     fn mod_p(&self, Fp: FpTy) -> Self::Decomposed {
-        record_time!("OddCyclotomicDecomposedNumberRing::mod_p", || {
+        {
             let n_factorization = &self.n_factorization_squarefree;
             let n = n_factorization.iter().copied().product::<i64>();
 
@@ -173,7 +173,7 @@ impl<FpTy> HENumberRing<FpTy> for OddCyclotomicNumberRing
             let fft_table = BluesteinFFT::new(Fp.clone(), zeta, zeta_m, n as usize, log2_m, Global);
 
             return OddCyclotomicDecomposedNumberRing::create_squarefree(fft_table, Fp, &self.n_factorization_squarefree, Global);
-        })
+        }
     }
 
     fn largest_suitable_prime(&self, leq_than: i64) -> Option<i64> {
@@ -261,7 +261,7 @@ impl<FpTy> HENumberRing<FpTy> for CompositeCyclotomicNumberRing
     type Decomposed = CompositeCyclotomicDecomposedNumberRing<FpTy, BluesteinFFT<FpTy::Type, FpTy::Type, Identity<FpTy>>>;
 
     fn mod_p(&self, Fp: FpTy) -> Self::Decomposed {
-        record_time!("CompositeCyclotomicNumberRing::mod_p", || {
+        {
             let n1 = <_ as HECyclotomicNumberRing<FpTy>>::n(&self.tensor_factor1) as i64;
             let n2 = <_ as HECyclotomicNumberRing<FpTy>>::n(&self.tensor_factor2) as i64;
             let n = n1 * n2;
@@ -291,31 +291,29 @@ impl<FpTy> HENumberRing<FpTy> for CompositeCyclotomicNumberRing
                 debug_assert_eq!(i, (i1 * n / n1 + i2 * n / n2) % n);
 
                 if i < r1 * r2 {
-                    record_time!("CompositeCyclotomicNumberRing::mod_p::set_coeff_to_small", || {
-                        let X1_power_reduced = poly_ring.div_rem_monic(poly_ring.pow(poly_ring.indeterminate(), i1 as usize), &Phi_n1).1;
-                        let X2_power_reduced = poly_ring.div_rem_monic(poly_ring.pow(poly_ring.indeterminate(), i2 as usize), &Phi_n2).1;
-                        
-                        coeff_to_small_conversion_matrix[i as usize] = poly_ring.terms(&X1_power_reduced).flat_map(|(c1, j1)| poly_ring.terms(&X2_power_reduced).map(move |(c2, j2)| 
-                            (j1 + j2 * r1 as usize, hom_ref.map(poly_ring.base_ring().mul_ref(c1, c2))
-                        ))).collect::<Vec<_>>();
-                    });
+                    let X1_power_reduced = poly_ring.div_rem_monic(poly_ring.pow(poly_ring.indeterminate(), i1 as usize), &Phi_n1).1;
+                    let X2_power_reduced = poly_ring.div_rem_monic(poly_ring.pow(poly_ring.indeterminate(), i2 as usize), &Phi_n2).1;
+                    
+                    coeff_to_small_conversion_matrix[i as usize] = poly_ring.terms(&X1_power_reduced).flat_map(|(c1, j1)| poly_ring.terms(&X2_power_reduced).map(move |(c2, j2)| 
+                        (j1 + j2 * r1 as usize, hom_ref.map(poly_ring.base_ring().mul_ref(c1, c2))
+                    ))).collect::<Vec<_>>();
                 }
                 
                 if i1 < r1 && i2 < r2 {
-                    record_time!("CompositeCyclotomicNumberRing::mod_p::set_small_to_coeff", || if let Some(X_pow_i) = &X_pow_i {
+                    if let Some(X_pow_i) = &X_pow_i {
                         small_to_coeff_conversion_matrix[(i2 * r1 + i1) as usize] = dense_poly_ring.terms(X_pow_i).map(|(c, i)| {
                             assert!(i < (r1 * r2) as usize);
                             (i, hom_ref.map_ref(c))
                         }).collect::<Vec<_>>();
                     } else {
                         small_to_coeff_conversion_matrix[(i2 * r1 + i1) as usize] = vec![(i as usize, hom_ref.codomain().one())];
-                    });
+                    }
                 }
 
                 if i == (r1 * r2) - 1 {
                     X_pow_i = Some(dense_poly_ring.from_terms([(dense_poly_ring.base_ring().one(), (r1 * r2 - 1) as usize)]));
                 }
-                record_time!("CompositeCyclotomicNumberRing::mod_p::mul_mod_Phi_n", || if let Some(X_pow_i) = &mut X_pow_i {
+                if let Some(X_pow_i) = &mut X_pow_i {
                     dense_poly_ring.mul_assign_monomial(X_pow_i, 1);
                     let lc = dense_poly_ring.coefficient_at(X_pow_i, (r1 * r2) as usize);
                     // *X_pow_i = dense_poly_ring.div_rem_monic(std::mem::replace(X_pow_i, dense_poly_ring.zero()), &Phi_n).1;
@@ -329,7 +327,7 @@ impl<FpTy> HENumberRing<FpTy> for CompositeCyclotomicNumberRing
                         let lc = dense_poly_ring.base_ring().clone_el(lc);
                         dense_poly_ring.get_ring().add_assign_from_terms(X_pow_i, dense_poly_ring.terms(&Phi_n).map(|(c, i)| (dense_poly_ring.base_ring().negate(dense_poly_ring.base_ring().mul_ref(c, &lc)), i)));
                     }
-                });
+                }
             }
 
             CompositeCyclotomicDecomposedNumberRing {
@@ -338,7 +336,7 @@ impl<FpTy> HENumberRing<FpTy> for CompositeCyclotomicNumberRing
                 tensor_factor1: self.tensor_factor1.mod_p(Fp.clone()),
                 tensor_factor2: self.tensor_factor2.mod_p(Fp)
             }
-        })
+        }
     }
 
     fn largest_suitable_prime(&self, leq_than: i64) -> Option<i64> {
@@ -469,20 +467,16 @@ impl<R, F, A> HENumberRingMod<R::Type> for OddCyclotomicDecomposedNumberRing<R, 
             tmp[j] = ring.clone_el(data.at(i));
         }
 
-        record_time!("OddCyclotomicDecomposedNumberRing::mult_basis_to_small_basis::fft", || {
-            self.fft_table.unordered_inv_fft(&mut tmp[..], ring);
-        });
+        self.fft_table.unordered_inv_fft(&mut tmp[..], ring);
 
-        record_time!("OddCyclotomicDecomposedNumberRing::mult_basis_to_small_basis::reduction", || {
-            for i in (self.rank()..self.fft_table.len()).rev() {
-                let factor = ring.clone_el(&tmp[i]);
-                for (j, c) in self.zeta_pow_rank.iter() {
-                    let mut add = ring.clone_el(&factor);
-                    ring.mul_assign_ref(&mut add, c);
-                    ring.add_assign(&mut tmp[i - self.rank() + *j], add);
-                }
+        for i in (self.rank()..self.fft_table.len()).rev() {
+            let factor = ring.clone_el(&tmp[i]);
+            for (j, c) in self.zeta_pow_rank.iter() {
+                let mut add = ring.clone_el(&factor);
+                ring.mul_assign_ref(&mut add, c);
+                ring.add_assign(&mut tmp[i - self.rank() + *j], add);
             }
-        });
+        }
 
         for i in 0..self.rank() {
             *data.at_mut(i) = ring.clone_el(&tmp[i]);
@@ -499,9 +493,9 @@ impl<R, F, A> HENumberRingMod<R::Type> for OddCyclotomicDecomposedNumberRing<R, 
             tmp[i] = ring.clone_el(data.at(i));
         }
 
-        record_time!("OddCyclotomicDecomposedNumberRing::small_basis_to_mult_basis::fft", || {
+        {
             self.fft_table.unordered_fft(&mut tmp[..], ring);
-        });
+        };
         for (i, j) in self.fft_output_indices() {
             *data.at_mut(i) = ring.clone_el(&tmp[j]); 
         }
@@ -596,7 +590,7 @@ impl<R, F, A> HENumberRingMod<R::Type> for CompositeCyclotomicDecomposedNumberRi
     fn small_basis_to_mult_basis<V>(&self, mut data: V)
         where V: SwappableVectorViewMut<El<R>>
     {
-        record_time!("CompositeCyclotomicDecomposedNumberRing::small_basis_to_mult_basis", || {
+        record_time!(GLOBAL_TIME_RECORDER, "CompositeCyclotomicDecomposedNumberRing::small_basis_to_mult_basis", || {
             for i in 0..self.tensor_factor2.rank() {
                 self.tensor_factor1.small_basis_to_mult_basis(SubvectorView::new(&mut data).restrict((i * self.tensor_factor1.rank())..((i + 1) * self.tensor_factor1.rank())));
             }
@@ -609,7 +603,7 @@ impl<R, F, A> HENumberRingMod<R::Type> for CompositeCyclotomicDecomposedNumberRi
     fn mult_basis_to_small_basis<V>(&self, mut data: V)
         where V: SwappableVectorViewMut<El<R>>
     {
-        record_time!("CompositeCyclotomicDecomposedNumberRing::mult_basis_to_small_basis", || {
+        record_time!(GLOBAL_TIME_RECORDER, "CompositeCyclotomicDecomposedNumberRing::mult_basis_to_small_basis", || {
             for j in 0..self.tensor_factor1.rank() {
                 self.tensor_factor2.mult_basis_to_small_basis(SubvectorView::new(&mut data).restrict(j..).step_by(self.tensor_factor1.rank()));
             }

@@ -60,7 +60,7 @@ impl<A> HEXLConv<A>
         }
         let mut tmp = Vec::with_capacity_in(1 << log2_n, &self.allocator);
         tmp.resize_with(1 << log2_n, || self.ring.zero());
-        record_time!("NTTConvolution::compute_convolution_base::inv_fft", || self.get_fft(log2_n).unordered_negacyclic_fft_base::<true>(&mut lhs.data[..], &mut tmp[..]));
+        record_time!("HEXLConv::compute_convolution_base::inv_fft", || self.get_fft(log2_n).unordered_negacyclic_fft_base::<true>(&mut lhs.data[..], &mut tmp[..]));
         for i in 0..min(out.len(), 1 << log2_n) {
             self.ring.add_assign_ref(&mut out[i], &tmp[i]);
         }
@@ -79,14 +79,14 @@ impl<A> HEXLConv<A>
         };
     }
     
-    fn prepare_convolution_operand_len<V: VectorView<El<Zn>>>(&self, val: V, log2_n: usize) -> PreparedConvolutionOperand<A> {
+    fn prepare_convolution_base<V: VectorView<El<Zn>>>(&self, val: V, log2_n: usize) -> PreparedConvolutionOperand<A> {
         let mut input = Vec::with_capacity_in(1 << log2_n, &self.allocator);
         input.extend(val.as_iter().map(|x| self.ring.clone_el(x)));
         input.resize_with(1 << log2_n, || self.ring.zero());
         let mut result = Vec::with_capacity_in(1 << log2_n, self.allocator.clone());
         result.resize_with(1 << log2_n, || self.ring.zero());
         let fft = self.get_fft(log2_n);
-        record_time!("NTTConvolution::prepare_convolution_operand_len::fft", || fft.unordered_negacyclic_fft_base::<false>(&mut input[..], &mut result[..]));
+        record_time!("HEXLConv::prepare_convolution_base::fft", || fft.unordered_negacyclic_fft_base::<false>(&mut input[..], &mut result[..]));
         return PreparedConvolutionOperand {
             len: val.len(),
             data: result
@@ -104,8 +104,8 @@ impl<A> ConvolutionAlgorithm<ZnBase> for HEXLConv<A>
     fn compute_convolution<S: RingStore<Type = ZnBase> + Copy, V1: VectorView<<ZnBase as RingBase>::Element>, V2: VectorView<<ZnBase as RingBase>::Element>>(&self, lhs: V1, rhs: V2, dst: &mut [<ZnBase as RingBase>::Element], ring: S) {
         assert!(ring.get_ring() == self.ring.get_ring());
         let log2_n = ZZ.abs_log2_ceil(&((lhs.len() + rhs.len()) as i64)).unwrap();
-        let lhs_prep = self.prepare_convolution_operand_len(lhs, log2_n);
-        let rhs_prep = self.prepare_convolution_operand_len(rhs, log2_n);
+        let lhs_prep = self.prepare_convolution_base(lhs, log2_n);
+        let rhs_prep = self.prepare_convolution_base(rhs, log2_n);
         self.compute_convolution_base(lhs_prep, &rhs_prep, dst);
     }
 }
@@ -128,7 +128,7 @@ impl<A> PreparedConvolutionAlgorithm<ZnBase> for HEXLConv<A>
         assert!(ring.get_ring() == self.ring.get_ring());
         let log2_n_in = ZZ.abs_log2_ceil(&(val.len() as i64)).unwrap();
         let log2_n_out = log2_n_in + 1;
-        return self.prepare_convolution_operand_len(val, log2_n_out);
+        return self.prepare_convolution_base(val, log2_n_out);
     }
 
     fn compute_convolution_lhs_prepared<S: RingStore<Type = ZnBase> + Copy, V: VectorView<El<Zn>>>(&self, lhs: &Self::PreparedConvolutionOperand, rhs: V, dst: &mut [El<Zn>], ring: S) {
@@ -137,9 +137,9 @@ impl<A> PreparedConvolutionAlgorithm<ZnBase> for HEXLConv<A>
         if lhs.data.len() >= (1 << log2_n) {
             let log2_n = ZZ.abs_log2_ceil(&(lhs.data.len() as i64)).unwrap();
             assert!(lhs.data.len() == 1 << log2_n);
-            self.compute_convolution_base(self.prepare_convolution_operand_len(rhs, log2_n), lhs, dst);
+            self.compute_convolution_base(self.prepare_convolution_base(rhs, log2_n), lhs, dst);
         } else {
-            self.compute_convolution_prepared(lhs, &self.prepare_convolution_operand_len(rhs, log2_n), dst, ring)
+            self.compute_convolution_prepared(lhs, &self.prepare_convolution_base(rhs, log2_n), dst, ring)
         }
     }
 
@@ -152,7 +152,7 @@ impl<A> PreparedConvolutionAlgorithm<ZnBase> for HEXLConv<A>
         match log2_lhs.cmp(&log2_rhs) {
             std::cmp::Ordering::Equal => self.compute_convolution_base(self.clone_prepared_operand(lhs), rhs, dst),
             std::cmp::Ordering::Greater => self.compute_convolution_prepared(rhs, lhs, dst, ring),
-            std::cmp::Ordering::Less => record_time!("NTTConvolution::compute_convolution_prepared::change_fft_len", || {
+            std::cmp::Ordering::Less => record_time!("NTTConv::compute_convolution_prepared::change_fft_len", || {
                 let mut tmp1 = Vec::with_capacity_in(lhs.data.len(), self.allocator.clone());
                 tmp1.extend(lhs.data.iter().map(|x| self.ring.clone_el(x)));
                 let mut tmp2 = Vec::with_capacity_in(lhs.data.len(), &self.allocator);

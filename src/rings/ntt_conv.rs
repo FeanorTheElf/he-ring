@@ -16,7 +16,7 @@ use feanor_math::algorithms::fft::FFTAlgorithm;
 use feanor_math::homomorphism::Homomorphism;
 use feanor_math::rings::zn::zn_64::{Zn, ZnEl};
 
-pub struct NTTConvolution<R, A = Global>
+pub struct NTTConv<R, A = Global>
     where R: RingStore + Clone,
         R::Type: ZnRing,
         A: Allocator + Clone
@@ -27,7 +27,7 @@ pub struct NTTConvolution<R, A = Global>
     allocator: A
 }
 
-impl<R> NTTConvolution<R>
+impl<R> NTTConv<R>
     where R: RingStore + Clone,
         R::Type: ZnRing
 {
@@ -36,7 +36,7 @@ impl<R> NTTConvolution<R>
     }
 }
 
-impl<R, A> NTTConvolution<R, A>
+impl<R, A> NTTConv<R, A>
     where R: RingStore + Clone,
         R::Type: ZnRing,
         A: Allocator + Clone
@@ -56,17 +56,19 @@ impl<R, A> NTTConvolution<R, A>
     }
 
     fn compute_convolution_base(&self, mut lhs: PreparedConvolutionOperand<R, A>, rhs: &PreparedConvolutionOperand<R, A>, out: &mut [El<R>]) {
-        let log2_n = ZZ.abs_log2_ceil(&(lhs.data.len() as i64)).unwrap();
-        assert_eq!(lhs.data.len(), 1 << log2_n);
-        assert_eq!(rhs.data.len(), 1 << log2_n);
-        assert!(lhs.len + rhs.len <= 1 << log2_n);
-        for i in 0..(1 << log2_n) {
-            self.ring.mul_assign_ref(&mut lhs.data[i], &rhs.data[i]);
-        }
-        record_time!("NTTConvolution::compute_convolution_base::inv_fft", || self.get_fft(log2_n).unordered_inv_fft(&mut lhs.data[..], &self.ring));
-        for i in 0..min(out.len(), 1 << log2_n) {
-            self.ring.add_assign_ref(&mut out[i], &lhs.data[i]);
-        }
+        record_time!(GLOBAL_TIME_RECORDER, "NTTConv::compute_convolution_base", || {
+            let log2_n = ZZ.abs_log2_ceil(&(lhs.data.len() as i64)).unwrap();
+            assert_eq!(lhs.data.len(), 1 << log2_n);
+            assert_eq!(rhs.data.len(), 1 << log2_n);
+            assert!(lhs.len + rhs.len <= 1 << log2_n);
+            for i in 0..(1 << log2_n) {
+                self.ring.mul_assign_ref(&mut lhs.data[i], &rhs.data[i]);
+            }
+            self.get_fft(log2_n).unordered_inv_fft(&mut lhs.data[..], &self.ring);
+            for i in 0..min(out.len(), 1 << log2_n) {
+                self.ring.add_assign_ref(&mut out[i], &lhs.data[i]);
+            }
+        })
     }
 
     fn get_fft<'a>(&'a self, log2_n: usize) -> &'a CooleyTuckeyFFT<R::Type, R::Type, Identity<R>> {
@@ -82,20 +84,22 @@ impl<R, A> NTTConvolution<R, A>
         };
     }
     
-    fn prepare_convolution_operand_len<V: VectorView<El<R>>>(&self, val: V, log2_n: usize) -> PreparedConvolutionOperand<R, A> {
-        let mut result = Vec::with_capacity_in(1 << log2_n, self.allocator.clone());
-        result.extend(val.as_iter().map(|x| self.ring.clone_el(x)));
-        result.resize_with(1 << log2_n, || self.ring.zero());
-        let fft = self.get_fft(log2_n);
-        record_time!("NTTConvolution::prepare_convolution_operand_len::fft", || fft.unordered_fft(&mut result[..], &self.ring));
-        return PreparedConvolutionOperand {
-            len: val.len(),
-            data: result
-        };
+    fn prepare_convolution_base<V: VectorView<El<R>>>(&self, val: V, log2_n: usize) -> PreparedConvolutionOperand<R, A> {
+        record_time!(GLOBAL_TIME_RECORDER, "NTTConv::prepare_convolution_base", || {
+            let mut result = Vec::with_capacity_in(1 << log2_n, self.allocator.clone());
+            result.extend(val.as_iter().map(|x| self.ring.clone_el(x)));
+            result.resize_with(1 << log2_n, || self.ring.zero());
+            let fft = self.get_fft(log2_n);
+            fft.unordered_fft(&mut result[..], &self.ring);
+            return PreparedConvolutionOperand {
+                len: val.len(),
+                data: result
+            };
+        })
     }
 }
 
-impl<R, A> ConvolutionAlgorithm<R::Type> for NTTConvolution<R, A>
+impl<R, A> ConvolutionAlgorithm<R::Type> for NTTConv<R, A>
     where R: RingStore + Clone,
         R::Type: ZnRing ,
         A: Allocator + Clone
@@ -107,8 +111,8 @@ impl<R, A> ConvolutionAlgorithm<R::Type> for NTTConvolution<R, A>
     fn compute_convolution<S: RingStore<Type = R::Type> + Copy, V1: VectorView<<R::Type as RingBase>::Element>, V2: VectorView<<R::Type as RingBase>::Element>>(&self, lhs: V1, rhs: V2, dst: &mut [<R::Type as RingBase>::Element], ring: S) {
         assert!(ring.get_ring() == self.ring.get_ring());
         let log2_n = ZZ.abs_log2_ceil(&((lhs.len() + rhs.len()) as i64)).unwrap();
-        let lhs_prep = self.prepare_convolution_operand_len(lhs, log2_n);
-        let rhs_prep = self.prepare_convolution_operand_len(rhs, log2_n);
+        let lhs_prep = self.prepare_convolution_base(lhs, log2_n);
+        let rhs_prep = self.prepare_convolution_base(rhs, log2_n);
         self.compute_convolution_base(lhs_prep, &rhs_prep, dst);
     }
 }
@@ -124,7 +128,7 @@ pub struct PreparedConvolutionOperand<R, A = Global>
 
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
 
-impl<R, A> PreparedConvolutionAlgorithm<R::Type> for NTTConvolution<R, A>
+impl<R, A> PreparedConvolutionAlgorithm<R::Type> for NTTConv<R, A>
     where R: RingStore + Clone,
         R::Type: ZnRing ,
         A: Allocator + Clone
@@ -135,7 +139,7 @@ impl<R, A> PreparedConvolutionAlgorithm<R::Type> for NTTConvolution<R, A>
         assert!(ring.get_ring() == self.ring.get_ring());
         let log2_n_in = ZZ.abs_log2_ceil(&(val.len() as i64)).unwrap();
         let log2_n_out = log2_n_in + 1;
-        return self.prepare_convolution_operand_len(val, log2_n_out);
+        return self.prepare_convolution_base(val, log2_n_out);
     }
 
     fn compute_convolution_lhs_prepared<S: RingStore<Type = R::Type> + Copy, V: VectorView<El<R>>>(&self, lhs: &Self::PreparedConvolutionOperand, rhs: V, dst: &mut [El<R>], ring: S) {
@@ -144,9 +148,9 @@ impl<R, A> PreparedConvolutionAlgorithm<R::Type> for NTTConvolution<R, A>
         if lhs.data.len() >= (1 << log2_n) {
             let log2_n = ZZ.abs_log2_ceil(&(lhs.data.len() as i64)).unwrap();
             assert!(lhs.data.len() == 1 << log2_n);
-            self.compute_convolution_base(self.prepare_convolution_operand_len(rhs, log2_n), lhs, dst);
+            self.compute_convolution_base(self.prepare_convolution_base(rhs, log2_n), lhs, dst);
         } else {
-            self.compute_convolution_prepared(lhs, &self.prepare_convolution_operand_len(rhs, log2_n), dst, ring)
+            self.compute_convolution_prepared(lhs, &self.prepare_convolution_base(rhs, log2_n), dst, ring)
         }
     }
 
@@ -159,7 +163,7 @@ impl<R, A> PreparedConvolutionAlgorithm<R::Type> for NTTConvolution<R, A>
         match log2_lhs.cmp(&log2_rhs) {
             std::cmp::Ordering::Equal => self.compute_convolution_base(self.clone_prepared_operand(lhs), rhs, dst),
             std::cmp::Ordering::Greater => self.compute_convolution_prepared(rhs, lhs, dst, ring),
-            std::cmp::Ordering::Less => record_time!("NTTConvolution::compute_convolution_prepared::change_fft_len", || {
+            std::cmp::Ordering::Less => record_time!(GLOBAL_TIME_RECORDER, "NTTConv::compute_convolution_prepared::redo_fft", || {
                 let mut lhs_new = Vec::with_capacity_in(lhs.data.len(), self.allocator.clone());
                 lhs_new.extend(lhs.data.iter().map(|x| self.ring.clone_el(x)));
                 self.get_fft(log2_lhs).unordered_inv_fft(&mut lhs_new[..], ring);
@@ -174,7 +178,7 @@ impl<R, A> PreparedConvolutionAlgorithm<R::Type> for NTTConvolution<R, A>
 #[test]
 fn test_convolution() {
     let ring = Zn::new(65537);
-    let convolutor = NTTConvolution::new_with(ring, 16, Global);
+    let convolutor = NTTConv::new_with(ring, 16, Global);
 
     let check = |lhs: &[ZnEl], rhs: &[ZnEl], add: &[ZnEl]| {
         let mut expected = (0..(lhs.len() + rhs.len())).map(|i| if i < add.len() { add[i] } else { ring.zero() }).collect::<Vec<_>>();
