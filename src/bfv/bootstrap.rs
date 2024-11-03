@@ -30,8 +30,8 @@ pub struct ThinBootstrapParams<Params: BFVParams> {
     p: i64,
     // the k-th circuit works modulo `e - k` and outputs values `yi` such that `yi = lift(x mod p) mod p^(i + 2)` for `0 <= i < v - k - 2` as well as a final `y'` with `y' = lift(x mod p)`
     digit_extract_circuits: Vec<ArithCircuit>,
-    slots_to_coeffs_thin: Vec<CompiledLinearTransform<Params::NumberRing>>,
-    coeffs_to_slots_thin: (Vec<CompiledLinearTransform<Params::NumberRing>>, Option<Trace>)
+    slots_to_coeffs_thin: Vec<CompiledLinearTransform<NumberRing<Params>>>,
+    coeffs_to_slots_thin: (Vec<CompiledLinearTransform<NumberRing<Params>>>, Option<Trace>)
 }
 
 pub struct BootstrapperConfig {
@@ -67,9 +67,9 @@ pub struct BootstrappingDataBundle<Params: BFVParams> {
     pub mod_switch: ModSwitchData
 }
 
-impl ThinBootstrapParams<Pow2BFVParams> {
+impl ThinBootstrapParams<Pow2BFV> {
 
-    pub fn build_pow2<const LOG: bool>(params: Pow2BFVParams, t: i64, config: BootstrapperConfig) -> Self {
+    pub fn build_pow2<const LOG: bool>(params: Pow2BFV, t: i64, config: BootstrapperConfig) -> Self {
         let (p, r) = is_prime_power(&ZZ, &t).unwrap();
         let s_can_norm = <_ as HENumberRing<Zn>>::inf_to_can_norm_expansion_factor(&params.number_ring());
         let v = config.set_v.unwrap_or(((s_can_norm + 1.).log2() / (p as f64).log2()).ceil() as usize);
@@ -167,8 +167,8 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
         e: usize,
         p: i64,
         digit_extract_circuits: Vec<ArithCircuit>,
-        slots_to_coeffs_thin: Vec<CompiledLinearTransform<<Params as BFVParams>::NumberRing>>,
-        coeffs_to_slots_thin: (Vec<CompiledLinearTransform<<Params as BFVParams>::NumberRing>>, Option<Trace>)
+        slots_to_coeffs_thin: Vec<CompiledLinearTransform<NumberRing<Params>>>,
+        coeffs_to_slots_thin: (Vec<CompiledLinearTransform<NumberRing<Params>>>, Option<Trace>)
     ) -> Self {
         let v = e - r;
         assert_eq!(v, digit_extract_circuits.len());
@@ -237,7 +237,7 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
         return result;
     }
 
-    pub fn bootstrap_thin<const LOG: bool>(
+    pub fn bootstrap_thin<'a, const LOG: bool>(
         &self,
         C: &CiphertextRing<Params>, 
         C_mul: &CiphertextRing<Params>, 
@@ -246,10 +246,12 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
         mul_rescale_bootstrap: &[MulConversionData],
         mod_switch: &ModSwitchData,
         ct: Ciphertext<Params>,
-        rk: &RelinKey<Params>,
-        gk: &[(ZnEl, KeySwitchKey<Params>)],
+        rk: &RelinKey<'a, Params>,
+        gk: &[(ZnEl, KeySwitchKey<'a, Params>)],
         debug_sk: Option<&SecretKey<Params>>
-    ) -> Ciphertext<Params> {
+    ) -> Ciphertext<Params>
+        where Params: 'a
+    {
         assert_eq!(ZZ.pow(self.p, self.r), *P_base.base_ring().modulus());
         if LOG {
             println!("Starting Bootstrapping")
@@ -328,10 +330,12 @@ fn hom_compute_linear_transform<'a, Params: BFVParams>(
     P: &PlaintextRing<Params>, 
     C: &CiphertextRing<Params>, 
     input: Ciphertext<Params>, 
-    transform: &[CompiledLinearTransform<<Params as BFVParams>::NumberRing>], 
+    transform: &[CompiledLinearTransform<NumberRing<Params>>], 
     gk: &[(ZnEl, KeySwitchKey<'a, Params>)], 
     key_switches: &mut usize
-) -> Ciphertext<Params> {
+) -> Ciphertext<Params>
+    where Params: 'a
+{
     let Gal = P.get_ring().cyclotomic_index_ring();
     let get_gk = |g: &ZnEl| &gk.iter().filter(|(s, _)| Gal.eq_el(g, s)).next().unwrap().1;
 
@@ -348,7 +352,9 @@ fn hom_compute_linear_transform<'a, Params: BFVParams>(
     ));
 }
 
-fn hom_compute_trace<Params: BFVParams>(P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, input: Ciphertext<Params>, trace: &Trace, gk: &[(ZnEl, KeySwitchKey<Params>)], key_switches: &mut usize) -> Ciphertext<Params> {
+fn hom_compute_trace<'a, Params: BFVParams>(P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, input: Ciphertext<Params>, trace: &Trace, gk: &[(ZnEl, KeySwitchKey<'a, Params>)], key_switches: &mut usize) -> Ciphertext<Params>
+    where Params: 'a
+{
     let Gal = P.get_ring().cyclotomic_index_ring();
     let get_gk = |g: &ZnEl| &gk.iter().filter(|(s, _)| Gal.eq_el(g, s)).next().unwrap().1;
     return trace.evaluate_generic(input, |x, y| Params::hom_add(C, x, y), |x, g| {
@@ -370,7 +376,9 @@ fn hom_evaluate_circuit<'a, 'b, Params: BFVParams>(
     rk: &'a RelinKey<'b, Params>, 
     mul_rescale: &'a MulConversionData, 
     key_switches: &'a mut usize
-) -> impl ExactSizeIterator<Item = Ciphertext<Params>> + use<'a, 'b, Params> {
+) -> impl ExactSizeIterator<Item = Ciphertext<Params>> + use<'a, 'b, Params> 
+    where Params: 'b
+{
     return circuit.evaluate_generic(
         std::slice::from_ref(input), 
         |lhs, rhs, factor| {
@@ -393,7 +401,7 @@ fn test_pow2_bfv_thin_bootstrapping_17() {
     let mut rng = thread_rng();
     
     // 8 slots of rank 16
-    let params = Pow2BFVParams {
+    let params = Pow2BFV {
         log2_q_min: 790,
         log2_q_max: 800,
         log2_N: 7
@@ -407,12 +415,12 @@ fn test_pow2_bfv_thin_bootstrapping_17() {
 
     let bootstrapping_data = bootstrapper.create_all_bootstrapping_data(&C, &C_mul);
     
-    let sk = Pow2BFVParams::gen_sk(&C, &mut rng);
-    let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, Pow2BFVParams::gen_gk::<_, false>(&C, &mut rng, &sk, g, digits))).collect::<Vec<_>>();
-    let rk = Pow2BFVParams::gen_rk::<_, false>(&C, &mut rng, &sk, digits);
+    let sk = Pow2BFV::gen_sk(&C, &mut rng);
+    let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, Pow2BFV::gen_gk(&C, &mut rng, &sk, g, digits))).collect::<Vec<_>>();
+    let rk = Pow2BFV::gen_rk(&C, &mut rng, &sk, digits);
     
     let m = P.int_hom().map(2);
-    let ct = Pow2BFVParams::enc_sym(&P, &C, &mut rng, &m, &sk);
+    let ct = Pow2BFV::enc_sym(&P, &C, &mut rng, &m, &sk);
     let res_ct = bootstrapper.bootstrap_thin::<true>(
         &C, 
         &C_mul, 
@@ -426,7 +434,7 @@ fn test_pow2_bfv_thin_bootstrapping_17() {
         None
     );
 
-    assert_el_eq!(P, P.int_hom().map(2), Pow2BFVParams::dec(&P, &C, res_ct, &sk));
+    assert_el_eq!(P, P.int_hom().map(2), Pow2BFV::dec(&P, &C, res_ct, &sk));
 }
 
 #[test]
@@ -434,7 +442,7 @@ fn test_pow2_bfv_thin_bootstrapping_23() {
     let mut rng = thread_rng();
     
     // 4 slots of rank 32
-    let params = Pow2BFVParams {
+    let params = Pow2BFV {
         log2_q_min: 790,
         log2_q_max: 800,
         log2_N: 7
@@ -448,12 +456,12 @@ fn test_pow2_bfv_thin_bootstrapping_23() {
 
     let bootstrapping_data = bootstrapper.create_all_bootstrapping_data(&C, &C_mul);
     
-    let sk = Pow2BFVParams::gen_sk(&C, &mut rng);
-    let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, Pow2BFVParams::gen_gk::<_, false>(&C, &mut rng, &sk, g, digits))).collect::<Vec<_>>();
-    let rk = Pow2BFVParams::gen_rk::<_, false>(&C, &mut rng, &sk, digits);
+    let sk = Pow2BFV::gen_sk(&C, &mut rng);
+    let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, Pow2BFV::gen_gk(&C, &mut rng, &sk, g, digits))).collect::<Vec<_>>();
+    let rk = Pow2BFV::gen_rk(&C, &mut rng, &sk, digits);
     
     let m = P.int_hom().map(2);
-    let ct = Pow2BFVParams::enc_sym(&P, &C, &mut rng, &m, &sk);
+    let ct = Pow2BFV::enc_sym(&P, &C, &mut rng, &m, &sk);
     let res_ct = bootstrapper.bootstrap_thin::<true>(
         &C, 
         &C_mul, 
@@ -467,14 +475,14 @@ fn test_pow2_bfv_thin_bootstrapping_23() {
         None
     );
 
-    assert_el_eq!(P, P.int_hom().map(2), Pow2BFVParams::dec(&P, &C, res_ct, &sk));
+    assert_el_eq!(P, P.int_hom().map(2), Pow2BFV::dec(&P, &C, res_ct, &sk));
 }
 
 #[test]
 fn test_composite_bfv_thin_bootstrapping_2() {
     let mut rng = thread_rng();
     
-    let params = CompositeBFVParams {
+    let params = CompositeBFV {
         log2_q_min: 750,
         log2_q_max: 800,
         n1: 31,
@@ -489,12 +497,12 @@ fn test_composite_bfv_thin_bootstrapping_2() {
 
     let bootstrapping_data = bootstrapper.create_all_bootstrapping_data(&C, &C_mul);
     
-    let sk = CompositeBFVParams::gen_sk(&C, &mut rng);
-    let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, CompositeBFVParams::gen_gk::<_, false>(&C, &mut rng, &sk, g, digits))).collect::<Vec<_>>();
-    let rk = CompositeBFVParams::gen_rk::<_, false>(&C, &mut rng, &sk, digits);
+    let sk = CompositeBFV::gen_sk(&C, &mut rng);
+    let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, CompositeBFV::gen_gk(&C, &mut rng, &sk, g, digits))).collect::<Vec<_>>();
+    let rk = CompositeBFV::gen_rk(&C, &mut rng, &sk, digits);
     
     let m = P.int_hom().map(2);
-    let ct = CompositeBFVParams::enc_sym(&P, &C, &mut rng, &m, &sk);
+    let ct = CompositeBFV::enc_sym(&P, &C, &mut rng, &m, &sk);
     let res_ct = bootstrapper.bootstrap_thin::<true>(
         &C, 
         &C_mul, 
@@ -508,5 +516,5 @@ fn test_composite_bfv_thin_bootstrapping_2() {
         None
     );
 
-    assert_el_eq!(P, P.int_hom().map(2), CompositeBFVParams::dec(&P, &C, res_ct, &sk));
+    assert_el_eq!(P, P.int_hom().map(2), CompositeBFV::dec(&P, &C, res_ct, &sk));
 }

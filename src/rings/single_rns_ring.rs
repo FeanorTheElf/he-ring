@@ -7,12 +7,13 @@ use feanor_math::algorithms::cyclotomic::cyclotomic_polynomial;
 use feanor_math::algorithms::int_factor::factor;
 use feanor_math::algorithms::matmul::ComputeInnerProduct;
 use feanor_math::algorithms::poly_gcd::factor;
+use feanor_math::iters::{multi_cartesian_product, MultiProduct};
 use feanor_math::primitive_int::{StaticRing, StaticRingBase};
 use feanor_math::{assert_el_eq, ring::*};
 use feanor_math::homomorphism::*;
 use feanor_math::integer::*;
 use feanor_math::rings::extension::*;
-use feanor_math::rings::finite::FiniteRingStore;
+use feanor_math::rings::finite::{FiniteRing, FiniteRingStore};
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
 use feanor_math::rings::poly::sparse_poly::SparsePolyRing;
 use feanor_math::rings::poly::*;
@@ -26,10 +27,12 @@ use crate::{cyclotomic::*, euler_phi};
 use crate::rings::double_rns_ring::DoubleRNSRing;
 use crate::rnsconv::RNSOperation;
 
+use super::bxv::BXVCiphertextRing;
 use super::decomposition_ring::{DecompositionRing, DecompositionRingBase};
 use super::double_rns_ring::{CoeffEl, DoubleRNSRingBase};
+use super::gadget_product;
 use super::ntt_conv::NTTConvolution;
-use super::number_ring::HECyclotomicNumberRing;
+use super::number_ring::{HECyclotomicNumberRing, HENumberRing};
 
 pub struct SingleRNSRingBase<NumberRing, FpTy, A, C> 
     where NumberRing: HECyclotomicNumberRing<FpTy>,
@@ -212,8 +215,24 @@ impl<NumberRing, FpTy, A, C> SingleRNSRingBase<NumberRing, FpTy, A, C>
     pub fn convolutions(&self) -> &[C] {
         &self.convolutions
     }
+}
 
-    pub fn sample_from_coefficient_distribution<G: FnMut() -> i32>(&self, mut distribution: G) -> SingleRNSRingEl<NumberRing, FpTy, A, C> {
+impl<NumberRing, A, C> BXVCiphertextRing for SingleRNSRingBase<NumberRing, zn_64::Zn, A, C> 
+    where NumberRing: HECyclotomicNumberRing<zn_64::Zn>,
+        A: Allocator + Clone,
+        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
+{
+    type NumberRing = NumberRing;
+    type GadgetProductLhsOperand<'a> = gadget_product::single_rns::GadgetProductLhsOperand<'a, NumberRing, A, C>
+        where Self: 'a;
+    type GadgetProductRhsOperand<'a> = gadget_product::single_rns::GadgetProductRhsOperand<'a, NumberRing, A, C>
+        where Self: 'a;
+
+    fn number_ring(&self) -> &Self::NumberRing {
+        self.base.get_ring().number_ring()
+    }
+    
+    fn sample_from_coefficient_distribution<G: FnMut() -> i32>(&self, mut distribution: G) -> SingleRNSRingEl<NumberRing, zn_64::Zn, A, C> {
         let mut result = self.zero();
         let mut result_matrix = self.as_matrix_mut(&mut result);
         for j in 0..self.rank() {
@@ -224,29 +243,15 @@ impl<NumberRing, FpTy, A, C> SingleRNSRingBase<NumberRing, FpTy, A, C>
         }
         return result;
     }
-
-    pub fn sample_uniform<G: FnMut() -> u64>(&self, mut rng: G) -> SingleRNSRingEl<NumberRing, FpTy, A, C> {
-        let mut result = self.zero();
-        let mut result_matrix = self.as_matrix_mut(&mut result);
-        for j in 0..self.rank() {
-            for i in 0..self.rns_base().len() {
-                *result_matrix.at_mut(i, j) = self.rns_base().at(i).random_element(&mut rng);
-            }
-        }
-        return result;
-    }
-
-    pub fn perform_rns_op_from<FpTy2, A2, C2, Op>(
+    
+    fn perform_rns_op_from<Op>(
         &self, 
-        from: &SingleRNSRingBase<NumberRing, FpTy2, A2, C2>, 
-        el: &SingleRNSRingEl<NumberRing, FpTy2, A2, C2>, 
+        from: &Self, 
+        el: &SingleRNSRingEl<NumberRing, zn_64::Zn, A, C>, 
         op: &Op
-    ) -> SingleRNSRingEl<NumberRing, FpTy, A, C> 
-        where NumberRing: HECyclotomicNumberRing<FpTy2>,
-            FpTy2: RingStore<Type = FpTy::Type> + Clone,
-            A2: Allocator + Clone,
-            C2: ConvolutionAlgorithm<FpTy2::Type>,
-            Op: RNSOperation<RingType = FpTy::Type>
+    ) -> SingleRNSRingEl<NumberRing, zn_64::Zn, A, C> 
+        where NumberRing: HECyclotomicNumberRing<zn_64::Zn>,
+            Op: RNSOperation<RingType = zn_64::ZnBase>
     {
         assert!(self.number_ring() == from.number_ring());
         assert_eq!(self.rns_base().len(), op.output_rings().len());
@@ -264,14 +269,14 @@ impl<NumberRing, FpTy, A, C> SingleRNSRingBase<NumberRing, FpTy, A, C>
             return result;
         })
     }
-
-    pub fn exact_convert_from_nttring<FpTy2, A2>(
+    
+    fn exact_convert_from_decompring<FpTy2, A2>(
         &self, 
         from: &DecompositionRing<NumberRing, FpTy2, A2>, 
         element: &<DecompositionRingBase<NumberRing, FpTy2, A2> as RingBase>::Element
-    ) -> SingleRNSRingEl<NumberRing, FpTy, A, C> 
-        where NumberRing: HECyclotomicNumberRing<FpTy2>,
-            FpTy2: RingStore<Type = FpTy::Type> + Clone,
+    ) -> SingleRNSRingEl<NumberRing, zn_64::Zn, A, C> 
+        where NumberRing: HENumberRing<FpTy2>,
+            FpTy2: RingStore<Type = zn_64::ZnBase> + Clone,
             A2: Allocator + Clone
     {
         assert!(self.number_ring() == from.get_ring().number_ring());
@@ -290,17 +295,17 @@ impl<NumberRing, FpTy, A, C> SingleRNSRingBase<NumberRing, FpTy, A, C>
             number_ring: PhantomData
         };
     }
-
-    pub fn perform_rns_op_to_nttring<FpTy2, A2, Op>(
+    
+    fn perform_rns_op_to_decompring<FpTy2, A2, Op>(
         &self, 
         to: &DecompositionRing<NumberRing, FpTy2, A2>, 
-        element: &SingleRNSRingEl<NumberRing, FpTy, A, C>, 
+        element: &SingleRNSRingEl<NumberRing, zn_64::Zn, A, C>, 
         op: &Op
     ) -> <DecompositionRingBase<NumberRing, FpTy2, A2> as RingBase>::Element 
-        where NumberRing: HECyclotomicNumberRing<FpTy2>,
-            FpTy2: RingStore<Type = FpTy::Type> + Clone,
+        where NumberRing: HENumberRing<FpTy2>,
+            FpTy2: RingStore<Type = zn_64::ZnBase> + Clone,
             A2: Allocator + Clone,
-            Op: RNSOperation<RingType = FpTy::Type>
+            Op: RNSOperation<RingType = zn_64::ZnBase>
     {
         assert!(self.number_ring() == to.get_ring().number_ring());
         assert_eq!(self.rns_base().len(), op.input_rings().len());
@@ -319,16 +324,32 @@ impl<NumberRing, FpTy, A, C> SingleRNSRingBase<NumberRing, FpTy, A, C>
             return result;
         })
     }
-}
 
-impl<NumberRing, FpTy, A, C> SingleRNSRingBase<NumberRing, FpTy, A, C> 
-    where NumberRing: HECyclotomicNumberRing<FpTy>,
-        FpTy: RingStore + Clone,
-        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
-        A: Allocator + Clone,
-        C: PreparedConvolutionAlgorithm<FpTy::Type>
-{
-    pub fn two_by_two_convolution(&self, lhs: &[SingleRNSRingEl<NumberRing, FpTy, A, C>; 2], rhs: &[SingleRNSRingEl<NumberRing, FpTy, A, C>; 2]) -> [SingleRNSRingEl<NumberRing, FpTy, A, C>; 3] {
+    fn gadget_product<'b>(&self, lhs: &Self::GadgetProductLhsOperand<'b>, rhs: &Self::GadgetProductRhsOperand<'b>) -> Self::Element {
+        self.gadget_product_base(lhs, rhs)
+    }
+
+    fn gadget_product_rhs_empty<'a>(&'a self, digits: usize) -> Self::GadgetProductRhsOperand<'a> {
+        gadget_product::single_rns::GadgetProductRhsOperand::create_empty::<false>(self, digits)
+    }
+
+    fn to_gadget_product_lhs<'a>(&'a self, el: Self::Element, digits: usize) -> Self::GadgetProductLhsOperand<'a> {
+        gadget_product::single_rns::GadgetProductLhsOperand::create_from_element(self, digits, el)
+    }
+
+    fn gadget_vector<'a, 'b>(&'a self, rhs_operand: &'a Self::GadgetProductRhsOperand<'b>) -> &'a [std::ops::Range<usize>] {
+        rhs_operand.gadget_vector()
+    }
+
+    fn set_rns_factor<'b>(&self, rhs_operand: &mut Self::GadgetProductRhsOperand<'b>, i: usize, el: Self::Element) {
+        rhs_operand.set_rns_factor(i, el)
+    }
+
+    fn apply_galois_action_many_gadget_product_operand<'a>(&'a self, x: &Self::GadgetProductLhsOperand<'a>, gs: &[zn_64::ZnEl]) -> Vec<Self::GadgetProductLhsOperand<'a>> {
+        self.apply_galois_action_many(x.element(), gs).map(|res| self.to_gadget_product_lhs(res, x.digits())).collect::<Vec<_>>()
+    }
+
+    fn two_by_two_convolution(&self, lhs: [&Self::Element; 2], rhs: [&Self::Element; 2]) -> [Self::Element; 3] {
         let lhs = [self.prepare_multiplicant(&lhs[0]), self.prepare_multiplicant(&lhs[1])];
         let rhs = [self.prepare_multiplicant(&rhs[0]), self.prepare_multiplicant(&rhs[1])];
         let mut result = [self.zero(), self.zero(), self.zero()];
@@ -378,7 +399,15 @@ impl<NumberRing, FpTy, A, C> SingleRNSRingBase<NumberRing, FpTy, A, C>
         }
         return result;
     }
+}
 
+impl<NumberRing, FpTy, A, C> SingleRNSRingBase<NumberRing, FpTy, A, C> 
+    where NumberRing: HECyclotomicNumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        A: Allocator + Clone,
+        C: PreparedConvolutionAlgorithm<FpTy::Type>
+{
     pub fn prepare_multiplicant(&self, el: &SingleRNSRingEl<NumberRing, FpTy, A, C>) -> SingleRNSRingPreparedMultiplicant<NumberRing, FpTy, A, C> {
         let el_as_matrix = self.as_matrix(&el);
         let mut result = Vec::new_in(self.allocator().clone());
@@ -699,6 +728,107 @@ impl<NumberRing, FpTy, A, C> CyclotomicRing for SingleRNSRingBase<NumberRing, Fp
         let el_double_rns = iso.inv().map_ref(el);
         let result_double_rns = self.base.apply_galois_action_many(&el_double_rns, gs);
         return result_double_rns.map(|x| iso.map(x)).collect::<Vec<_>>().into_iter();
+    }
+}
+
+pub struct WRTCanonicalBasisElementCreator<'a, NumberRing, FpTy, A, C>
+    where NumberRing: HECyclotomicNumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase> + SelfIso,
+        A: Allocator + Clone,
+        C: ConvolutionAlgorithm<FpTy::Type>
+{
+    ring: &'a SingleRNSRingBase<NumberRing, FpTy, A, C>
+}
+
+impl<'a, 'b, NumberRing, FpTy, A, C> Clone for WRTCanonicalBasisElementCreator<'a, NumberRing, FpTy, A, C>
+    where NumberRing: HECyclotomicNumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase> + SelfIso,
+        A: Allocator + Clone,
+        C: ConvolutionAlgorithm<FpTy::Type>
+{
+    fn clone(&self) -> Self {
+        Self { ring: self.ring }
+    }
+}
+
+impl<'a, 'b, NumberRing, FpTy, A, C> Fn<(&'b [El<zn_rns::Zn<FpTy, BigIntRing>>],)> for WRTCanonicalBasisElementCreator<'a, NumberRing, FpTy, A, C>
+    where NumberRing: HECyclotomicNumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase> + SelfIso,
+        A: Allocator + Clone,
+        C: ConvolutionAlgorithm<FpTy::Type>
+{
+    extern "rust-call" fn call(&self, args: (&'b [El<zn_rns::Zn<FpTy, BigIntRing>>],)) -> Self::Output {
+        self.ring.from_canonical_basis(args.0.iter().map(|x| self.ring.base_ring().clone_el(x)))
+    }
+}
+
+impl<'a, 'b, NumberRing, FpTy, A, C> FnMut<(&'b [El<zn_rns::Zn<FpTy, BigIntRing>>],)> for WRTCanonicalBasisElementCreator<'a, NumberRing, FpTy, A, C>
+    where NumberRing: HECyclotomicNumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase> + SelfIso,
+        A: Allocator + Clone,
+        C: ConvolutionAlgorithm<FpTy::Type>
+{
+    extern "rust-call" fn call_mut(&mut self, args: (&'b [El<zn_rns::Zn<FpTy, BigIntRing>>],)) -> Self::Output {
+        self.call(args)
+    }
+}
+
+impl<'a, 'b, NumberRing, FpTy, A, C> FnOnce<(&'b [El<zn_rns::Zn<FpTy, BigIntRing>>],)> for WRTCanonicalBasisElementCreator<'a, NumberRing, FpTy, A, C>
+    where NumberRing: HECyclotomicNumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase> + SelfIso,
+        A: Allocator + Clone,
+        C: ConvolutionAlgorithm<FpTy::Type>
+{
+    type Output = SingleRNSRingEl<NumberRing, FpTy, A, C>;
+
+    extern "rust-call" fn call_once(self, args: (&'b [El<zn_rns::Zn<FpTy, BigIntRing>>],)) -> Self::Output {
+        self.call(args)
+    }
+}
+
+impl<NumberRing, FpTy, A, C> FiniteRing for SingleRNSRingBase<NumberRing, FpTy, A, C> 
+    where NumberRing: HECyclotomicNumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase> + SelfIso,
+        A: Allocator + Clone,
+        C: ConvolutionAlgorithm<FpTy::Type>
+{
+    type ElementsIter<'a> = MultiProduct<
+        <zn_rns::ZnBase<FpTy, BigIntRing> as FiniteRing>::ElementsIter<'a>, 
+        WRTCanonicalBasisElementCreator<'a, NumberRing, FpTy, A, C>, 
+        CloneRingEl<&'a zn_rns::Zn<FpTy, BigIntRing>>,
+        SingleRNSRingEl<NumberRing, FpTy, A, C>
+    > where Self: 'a;
+
+    fn elements<'a>(&'a self) -> Self::ElementsIter<'a> {
+        multi_cartesian_product((0..self.rank()).map(|_| self.base_ring().elements()), WRTCanonicalBasisElementCreator { ring: self }, CloneRingEl(self.base_ring()))
+    }
+
+    fn size<I: IntegerRingStore + Copy>(&self, ZZ: I) -> Option<El<I>>
+        where I::Type: IntegerRing
+    {
+        let modulus = self.base_ring().size(ZZ)?;
+        if ZZ.get_ring().representable_bits().is_none() || ZZ.get_ring().representable_bits().unwrap() >= self.rank() * ZZ.abs_log2_ceil(&modulus).unwrap() {
+            Some(ZZ.pow(modulus, self.rank()))
+        } else {
+            None
+        }
+    }
+
+    fn random_element<G: FnMut() -> u64>(&self, mut rng: G) -> <Self as RingBase>::Element {
+        let mut result = self.zero();
+        let mut result_matrix = self.as_matrix_mut(&mut result);
+        for j in 0..self.rank() {
+            for i in 0..self.rns_base().len() {
+                *result_matrix.at_mut(i, j) = self.rns_base().at(i).random_element(&mut rng);
+            }
+        }
+        return result;
     }
 }
 

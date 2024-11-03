@@ -55,9 +55,29 @@ impl<'a, NumberRing, A> GadgetProductRhsOperand<'a, NumberRing, A>
     }
 
     pub fn set_rns_factor(&mut self, i: usize, el: CoeffEl<NumberRing, Zn, A>) {
-        match self {
-            GadgetProductRhsOperand::LKSSStyle(op) => op.set_rns_factor(i, el),
-            GadgetProductRhsOperand::Naive(op) => op.set_rns_factor(i, el)
+        record_time!("double_rns::GadgetProductRhsOperand::set_rns_factor", || {
+            match self {
+                GadgetProductRhsOperand::LKSSStyle(op) => op.set_rns_factor(i, el),
+                GadgetProductRhsOperand::Naive(op) => op.set_rns_factor(i, el)
+            }
+        })
+    }
+
+    pub fn create_empty<const LOG: bool>(ring: &'a DoubleRNSRingBase<NumberRing, Zn, A>, digits: usize) -> Self {
+        let output_moduli_count = ring.get_gadget_product_modulo_count(digits);
+        // if the RNS base is very short, we don't want to do LKSS style gadget products, mainly
+        // since this avoids the treatment of complicated edge cases, but we also don't expect much 
+        // performance improvement
+        if ring.use_lkss_gadget_product(digits) {
+            if LOG {
+                println!("Use LKSS for gadget product, digits = {}, len(short RNS base) = {}, len(full RNS base) = {}", digits, output_moduli_count, ring.rns_base().len());
+            }
+            GadgetProductRhsOperand::LKSSStyle(LKSSGadgetProductRhsOperand::create_empty(ring, digits, output_moduli_count))
+        } else {
+            if LOG {
+                println!("Use naive gadget product, digits = {}, len(full RNS base) = {}", digits, ring.rns_base().len());
+            }
+            GadgetProductRhsOperand::Naive(NaiveGadgetProductRhsOperand::create_empty(ring, digits))
         }
     }
 }
@@ -172,6 +192,22 @@ pub enum GadgetProductLhsOperand<'a, NumberRing, A = Global>
 {
     LKSSStyle(LKSSGadgetProductLhsOperand<'a, NumberRing, A>),
     Naive(NaiveGadgetProductLhsOperand<'a, NumberRing, A>)
+}
+
+impl<'a, NumberRing, A> GadgetProductLhsOperand<'a, NumberRing, A>
+    where NumberRing: HENumberRing<Zn>,
+        A: Allocator + Clone
+{
+    pub fn create_from_element(ring: &DoubleRNSRingBase<NumberRing, Zn, A>, digits: usize, el: CoeffEl<NumberRing, RingValue<ZnBase>, A>) -> Self {
+        record_time!("double_rns::GadgetProductLhsOperand::create_from_element", || {
+            let output_moduli_count = ring.get_gadget_product_modulo_count(digits);
+            if ring.use_lkss_gadget_product(digits) {
+                GadgetProductLhsOperand::LKSSStyle(LKSSGadgetProductLhsOperand::new_from_element(ring, el, digits, output_moduli_count))
+            } else {
+                GadgetProductLhsOperand::Naive(NaiveGadgetProductLhsOperand::new_from_element(ring, el, digits))
+            }
+        })
+    }
 }
 
 impl<'a, NumberRing, A> GadgetProductLhsOperand<'a, NumberRing, A>
@@ -392,149 +428,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, Zn, A>
     fn use_lkss_gadget_product(&self, digits: usize) -> bool {
         self.get_gadget_product_modulo_count(digits) + 1 < digits && !cfg!(feature = "force_naive_gadget_product")
     }
-
-    ///
-    /// Computes the data necessary to perform a "gadget product" with the given operand as
-    /// left-hand side. This can be though of computing the gadget decomposition of the argument.
-    /// For more details, see [`DoubleRNSRingBase::gadget_product_ntt()`].
-    /// 
-    pub fn to_gadget_product_lhs<'a>(&'a self, el: CoeffEl<NumberRing, Zn, A>, digits: usize) -> GadgetProductLhsOperand<'a, NumberRing, A> {
-        record_time!("DoubleRNSRing::to_gadget_product_lhs", || {
-            let output_moduli_count = self.get_gadget_product_modulo_count(digits);
-            if self.use_lkss_gadget_product(digits) {
-                GadgetProductLhsOperand::LKSSStyle(LKSSGadgetProductLhsOperand::new_from_element(self, el, digits, output_moduli_count))
-            } else {
-                GadgetProductLhsOperand::Naive(NaiveGadgetProductLhsOperand::new_from_element(self, el, digits))
-            }
-        })
-    }
-
-    ///
-    /// Creates a [`GadgetProductRhsOperand`] representing 0. Its data (i.e. the noisy approximations
-    /// of scalings of the base ring element) can be set later with [`GadgetProductRhsOperand::set_rns_factor()`].
-    /// For more details, see [`DoubleRNSRingBase::gadget_product_ntt()`].
-    /// 
-    pub fn gadget_product_rhs_empty<'a, const LOG: bool>(&'a self, digits: usize) -> GadgetProductRhsOperand<'a, NumberRing, A> {
-        let output_moduli_count = self.get_gadget_product_modulo_count(digits);
-        // if the RNS base is very short, we don't want to do LKSS style gadget products, mainly
-        // for code simplicity, but we also don't expect much performance improvement
-        if self.use_lkss_gadget_product(digits) {
-            if LOG {
-                println!("Use LKSS for gadget product, digits = {}, len(short RNS base) = {}, len(full RNS base) = {}", digits, output_moduli_count, self.rns_base().len());
-            }
-            GadgetProductRhsOperand::LKSSStyle(LKSSGadgetProductRhsOperand::create_empty(self, digits, output_moduli_count))
-        } else {
-            if LOG {
-                println!("Use naive gadget product, digits = {}, len(full RNS base) = {}", digits, self.rns_base().len());
-            }
-            GadgetProductRhsOperand::Naive(NaiveGadgetProductRhsOperand::create_empty(self, digits))
-        }
-    }
-
-    ///
-    /// Computes the "RNS-gadget product" of two elements in this ring, as often required
-    /// in HE scenarios. A "gadget product" computes the approximate product of two
-    /// ring elements `x` and `y` by using `y` and multiple scaled & noisy approximations 
-    /// to `x`. This function only supports the gadget vector given by a decomposition
-    /// `q = D1 ... Dr` into coprime "digits".
-    /// 
-    /// # What exactly is a "gadget product"?
-    /// 
-    /// In an HE setting, we often have a noisy approximation to some value `x`, say
-    /// `x + e`. Now the normal product `(x + e)y = xy + ey` includes an error of `ey`, which
-    /// (if `y` is arbitrary) is not in any way an approximation to `xy` anymore. Instead,
-    /// we can take a so-called "gadget vector" `g` and provide multiple noisy scalings of `x`, 
-    /// say `g[1] * x + e1` to `g[r] * x + er`.
-    /// Using these, we can approximate `xy` by computing a gadget-decomposition 
-    /// `y = g[1] * y1 + ... + g[m] * ym` where the values `yi` are small, and then use 
-    /// `y1 (g[1] * x + e1) + ... + ym (g[m] * x + em)` as an approximation to `xy`.
-    /// 
-    /// The gadget vector used for this "RNS-gadget product" is the one given by the unit vectors
-    /// in the decomposition `q = D1 ... Dr` into pairwise coprime "digits". In the simplest case,
-    /// those digits are just the prime factors of `q`. However, it is usually beneficial to
-    /// group multiple prime factors into a single digit, since decreasing the number of digits
-    /// will significantly decrease the work we have to do when computing the inner product
-    /// `sum_i (g[i] xi + ei) yi`. Note that this will of course decrease the quality of 
-    /// approximation to `xy` (i.e. increase the error `sum_i yi ei`). Hence, choose the
-    /// parameter `digits` appropriately.
-    /// 
-    /// # Example
-    /// ```
-    /// # use feanor_math::ring::*;
-    /// # use feanor_math::assert_el_eq;
-    /// # use feanor_math::homomorphism::*;
-    /// # use feanor_math::rings::zn::*;
-    /// # use feanor_math::rings::zn::zn_64::*;
-    /// # use feanor_math::rings::finite::*;
-    /// # use feanor_math::integer::BigIntRing;
-    /// # use feanor_math::algorithms::fft::cooley_tuckey::CooleyTuckeyFFT;
-    /// # use he_ring::rings::double_rns_ring::DoubleRNSRingBase;
-    /// # use he_ring::rings::pow2_cyclotomic::Pow2CyclotomicDecomposableNumberRing;
-    /// # use feanor_math::rings::extension::FreeAlgebraStore;
-    /// # use feanor_math::seq::*;
-    /// let rns_base = vec![Zn::new(17), Zn::new(97), Zn::new(113)];
-    /// let ring = DoubleRNSRingBase::new(Pow2CyclotomicDecomposableNumberRing::new(16), zn_rns::Zn::new(rns_base.clone(), BigIntRing::RING));
-    /// let mut rng = oorandom::Rand64::new(1);
-    /// let digits = 3;
-    /// 
-    /// // build the right-hand side operand
-    /// let rhs = ring.random_element(|| rng.rand_u64());
-    /// let mut rhs_op = ring.get_ring().gadget_product_rhs_empty::<false>(digits);
-    /// let gadget_vector = |i: usize| ring.base_ring().get_ring().from_congruence((0..3).map(|j| ring.base_ring().get_ring().at(j).int_hom().map(if i == j { 1 } else { 0 })));
-    /// for i in 0..3 {
-    ///     // set the i-th component to `gadget_vector(i) * rhs`, for now without noise
-    ///     rhs_op.set_rns_factor(i, ring.get_ring().undo_fft(ring.inclusion().mul_ref_map(&rhs, &gadget_vector(i))));
-    /// }
-    /// 
-    /// // compute the gadget product
-    /// let lhs = ring.random_element(|| rng.rand_u64());
-    /// let actual = ring.get_ring().gadget_product_ntt(&ring.get_ring().to_gadget_product_lhs(ring.get_ring().undo_fft(ring.clone_el(&lhs)), digits), &rhs_op);
-    /// assert_el_eq!(&ring, &ring.mul_ref(&lhs, &rhs), &ring.get_ring().gadget_product_ntt(&ring.get_ring().to_gadget_product_lhs(ring.get_ring().undo_fft(lhs), digits), &rhs_op));
-    /// ```
-    /// To demonstrate how this keeps small error terms small, consider the following variation of the previous example:
-    /// ```
-    /// # use feanor_math::ring::*;
-    /// # use feanor_math::assert_el_eq;
-    /// # use feanor_math::homomorphism::*;
-    /// # use feanor_math::rings::zn::*;
-    /// # use feanor_math::rings::zn::zn_64::*;
-    /// # use feanor_math::algorithms::fft::cooley_tuckey::CooleyTuckeyFFT;
-    /// # use he_ring::rings::double_rns_ring::DoubleRNSRingBase;
-    /// # use he_ring::rings::pow2_cyclotomic::Pow2CyclotomicDecomposableNumberRing;
-    /// # use feanor_math::rings::extension::FreeAlgebraStore;
-    /// # use feanor_math::integer::BigIntRing;
-    /// # use feanor_math::rings::finite::*;
-    /// # use feanor_math::integer::int_cast;
-    /// # use feanor_math::primitive_int::StaticRing;
-    /// # use feanor_math::seq::*;
-    /// let rns_base = vec![Zn::new(17), Zn::new(97), Zn::new(113)];
-    /// let ring = DoubleRNSRingBase::new(Pow2CyclotomicDecomposableNumberRing::new(16), zn_rns::Zn::new(rns_base.clone(), BigIntRing::RING));
-    /// let mut rng = oorandom::Rand64::new(1);
-    /// // we have digits == rns_base.len(), so the gadget vector has entries exactly the "CRT unit vectors" ei with ei = 1 mod pi, ei = 0 mod pj for j != i
-    /// let digits = 3;
-    /// 
-    /// // build the right-hand side operand
-    /// let rhs = ring.random_element(|| rng.rand_u64());
-    /// let mut error = || ring.get_ring().do_fft(ring.get_ring().sample_from_coefficient_distribution(|| (rng.rand_u64() % 3) as i32 - 1));
-    /// let mut rhs_op = ring.get_ring().gadget_product_rhs_empty::<false>(digits);
-    /// let gadget_vector = |i: usize| ring.base_ring().get_ring().from_congruence((0..3).map(|j| ring.base_ring().get_ring().at(j).int_hom().map(if i == j { 1 } else { 0 })));
-    /// for i in 0..3 {
-    ///     // set the i-th component to `gadget_vector(i) * rhs`, with possibly some noise included
-    ///     rhs_op.set_rns_factor(i, ring.get_ring().undo_fft(ring.add(ring.inclusion().mul_ref_map(&rhs, &gadget_vector(i)), error())));
-    /// }
-    /// 
-    /// // compute the gadget product
-    /// let lhs = ring.random_element(|| rng.rand_u64());
-    /// let actual = ring.get_ring().gadget_product_ntt(&ring.get_ring().to_gadget_product_lhs(ring.get_ring().undo_fft(ring.clone_el(&lhs)), digits), &rhs_op);
-    /// 
-    /// // the final result should be close to `lhs * rhs`, except for some noise
-    /// let expected = ring.mul_ref(&lhs, &rhs);
-    /// let error = ring.sub(expected, actual);
-    /// let error_coefficients = ring.wrt_canonical_basis(&error);
-    /// let max_allowed_error = (113 / 2) * 8 * 3;
-    /// assert!((0..8).all(|i| int_cast(ring.base_ring().smallest_lift(error_coefficients.at(i)), StaticRing::<i64>::RING, BigIntRing::RING).abs() <= max_allowed_error));
-    /// ```
-    /// 
+    
     pub fn gadget_product_ntt(&self, lhs: &GadgetProductLhsOperand<NumberRing, A>, rhs: &GadgetProductRhsOperand<NumberRing, A>) -> DoubleRNSEl<NumberRing, Zn, A> {
         match (lhs, rhs) {
             (GadgetProductLhsOperand::LKSSStyle(lhs), GadgetProductRhsOperand::LKSSStyle(rhs)) => self.do_fft(self.gadget_product_lkss(lhs, rhs)),

@@ -11,6 +11,7 @@ use feanor_math::homomorphism::*;
 use feanor_math::integer::*;
 use feanor_math::ring::*;
 use feanor_math::rings::extension::*;
+use feanor_math::rings::finite::FiniteRing;
 use feanor_math::rings::zn::*;
 use zn_64::Zn;
 
@@ -18,9 +19,11 @@ use crate::cyclotomic::CyclotomicRing;
 use crate::rings::number_ring::HENumberRing;
 use crate::rnsconv::RNSOperation;
 
+use super::bxv::BXVCiphertextRing;
 use super::decomposition_ring::DecompositionRing;
 use super::decomposition_ring::DecompositionRingBase;
 use super::double_rns_ring::*;
+use super::gadget_product;
 use super::number_ring::HECyclotomicNumberRing;
 use super::pow2_cyclotomic::Pow2CyclotomicDecomposableNumberRing;
 
@@ -35,8 +38,8 @@ pub struct ManagedDoubleRNSRingBase<NumberRing, FpTy, A = Global>
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
 {
-    pub(super) base: DoubleRNSRingBase<NumberRing, FpTy, A>,
-    pub(super) zero: CoeffEl<NumberRing, FpTy, A>
+    base: DoubleRNSRingBase<NumberRing, FpTy, A>,
+    zero: CoeffEl<NumberRing, FpTy, A>
 }
 
 pub type ManagedDoubleRNSRing<NumberRing, FpTy, A = Global> = RingValue<ManagedDoubleRNSRingBase<NumberRing, FpTy, A>>;
@@ -61,7 +64,7 @@ enum ManagedDoubleRNSElRepresentation {
     Zero
 }
 
-pub(super) enum DoubleRNSElInternal<NumberRing, FpTy, A = Global> 
+enum DoubleRNSElInternal<NumberRing, FpTy, A = Global> 
     where NumberRing: HENumberRing<FpTy>,
         FpTy: RingStore + Clone,
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
@@ -124,7 +127,7 @@ pub struct ManagedDoubleRNSEl<NumberRing, FpTy, A = Global>
         FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
 {
-    pub(super) internal: Rc<RefCell<DoubleRNSElInternal<NumberRing, FpTy, A>>>
+    internal: Rc<RefCell<DoubleRNSElInternal<NumberRing, FpTy, A>>>
 }
 
 impl<NumberRing, FpTy, A> ManagedDoubleRNSRingBase<NumberRing, FpTy, A>
@@ -150,63 +153,6 @@ impl<NumberRing, FpTy, A> ManagedDoubleRNSRingBase<NumberRing, FpTy, A>
         }
     }
 
-    pub fn sample_from_coefficient_distribution<G: FnMut() -> i32>(&self, distribution: G) -> ManagedDoubleRNSEl<NumberRing, FpTy, A> {
-        ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::Coeff(self.base.sample_from_coefficient_distribution(distribution)))) }
-    }
-
-    pub fn sample_uniform<G: FnMut() -> u64>(&self, rng: G) -> ManagedDoubleRNSEl<NumberRing, FpTy, A> {
-        ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::DoubleRNS(self.base.sample_uniform(rng)))) }
-    }
-
-    pub fn perform_rns_op_from<FpTy2, A2, Op>(
-        &self, 
-        from: &ManagedDoubleRNSRingBase<NumberRing, FpTy2, A2>, 
-        el: &ManagedDoubleRNSEl<NumberRing, FpTy2, A2>, 
-        op: &Op
-    ) -> ManagedDoubleRNSEl<NumberRing, FpTy, A> 
-        where NumberRing: HENumberRing<FpTy2>,
-            FpTy2: RingStore<Type = FpTy::Type> + Clone,
-            A2: Allocator + Clone,
-            Op: RNSOperation<RingType = FpTy::Type>
-    {
-        let result = if let Some(value) = from.to_coeff(el) {
-            self.base.perform_rns_op_from(&from.base, &*value, op)
-        } else {
-            self.base.perform_rns_op_from(&from.base, &from.zero, op)
-        };
-        ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::Coeff(result))) }
-    }
-
-    pub fn exact_convert_from_decompring<FpTy2, A2>(
-        &self, 
-        from: &DecompositionRing<NumberRing, FpTy2, A2>, 
-        element: &<DecompositionRingBase<NumberRing, FpTy2, A2> as RingBase>::Element
-    ) -> ManagedDoubleRNSEl<NumberRing, FpTy, A> 
-        where NumberRing: HENumberRing<FpTy2>,
-            FpTy2: RingStore<Type = FpTy::Type> + Clone,
-            A2: Allocator + Clone
-    {
-        ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::Coeff(self.base.exact_convert_from_decompring(from, element)))) }
-    }
-
-    pub fn perform_rns_op_to_decompring<FpTy2, A2, Op>(
-        &self, 
-        to: &DecompositionRing<NumberRing, FpTy2, A2>, 
-        element: &ManagedDoubleRNSEl<NumberRing, FpTy, A>, 
-        op: &Op
-    ) -> <DecompositionRingBase<NumberRing, FpTy2, A2> as RingBase>::Element 
-        where NumberRing: HENumberRing<FpTy2>,
-            FpTy2: RingStore<Type = FpTy::Type> + Clone,
-            A2: Allocator + Clone,
-            Op: RNSOperation<RingType = FpTy::Type>
-    {
-        if let Some(value) = self.to_coeff(element) {
-            return self.base.perform_rns_op_to_decompring(to, &*value, op);
-        } else {
-            return self.base.perform_rns_op_to_decompring(to, &self.zero, op);
-        }
-    }
-
     fn get_repr(&self, value: &ManagedDoubleRNSEl<NumberRing, FpTy, A>) -> ManagedDoubleRNSElRepresentation {
         match &*value.internal.borrow() {
             DoubleRNSElInternal::Sum(_, _) => ManagedDoubleRNSElRepresentation::Sum,
@@ -217,7 +163,7 @@ impl<NumberRing, FpTy, A> ManagedDoubleRNSRingBase<NumberRing, FpTy, A>
         }
     }
 
-    pub(super) fn to_coeff<'a>(&self, value: &'a ManagedDoubleRNSEl<NumberRing, FpTy, A>) -> Option<Ref<'a, CoeffEl<NumberRing, FpTy, A>>> {
+    fn to_coeff<'a>(&self, value: &'a ManagedDoubleRNSEl<NumberRing, FpTy, A>) -> Option<Ref<'a, CoeffEl<NumberRing, FpTy, A>>> {
         match self.get_repr(value) {
             ManagedDoubleRNSElRepresentation::Sum => {
                 let mut result = value.internal.borrow_mut();
@@ -405,6 +351,130 @@ impl<NumberRing, FpTy, A> ManagedDoubleRNSRingBase<NumberRing, FpTy, A>
                 return ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::Both(result_coeff, result_fft))) };
             },
         }
+    }
+}
+
+pub struct GadgetProductRhsOperand<'a, NumberRing, A> 
+    where NumberRing: HENumberRing<Zn>,
+        A: Allocator + Clone
+{
+    base: gadget_product::double_rns::GadgetProductRhsOperand<'a, NumberRing, A>
+}
+
+pub struct GadgetProductLhsOperand<'a, NumberRing, A> 
+    where NumberRing: HENumberRing<Zn>,
+        A: Allocator + Clone
+{
+    base: gadget_product::double_rns::GadgetProductLhsOperand<'a, NumberRing, A>
+}
+
+
+impl<NumberRing, A> BXVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, zn_64::Zn, A> 
+    where NumberRing: HECyclotomicNumberRing<zn_64::Zn>,
+        A: Allocator + Clone
+{
+    type NumberRing = NumberRing;
+    type GadgetProductLhsOperand<'a> = GadgetProductLhsOperand<'a, NumberRing, A>
+        where Self: 'a;
+    type GadgetProductRhsOperand<'a> = GadgetProductRhsOperand<'a, NumberRing, A>
+        where Self: 'a;
+
+    fn number_ring(&self) -> &Self::NumberRing {
+        self.base.number_ring()
+    }
+
+    fn sample_from_coefficient_distribution<G: FnMut() -> i32>(&self, distribution: G) -> ManagedDoubleRNSEl<NumberRing, zn_64::Zn, A> {
+        ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::Coeff(self.base.sample_from_coefficient_distribution(distribution)))) }
+    }
+    
+    fn perform_rns_op_from<Op>(
+        &self, 
+        from: &Self, 
+        el: &ManagedDoubleRNSEl<NumberRing, zn_64::Zn, A>, 
+        op: &Op
+    ) -> ManagedDoubleRNSEl<NumberRing, zn_64::Zn, A> 
+        where NumberRing: HENumberRing<zn_64::Zn>,
+            Op: RNSOperation<RingType = zn_64::ZnBase>
+    {
+        let result = if let Some(value) = from.to_coeff(el) {
+            self.base.perform_rns_op_from(&from.base, &*value, op)
+        } else {
+            self.base.perform_rns_op_from(&from.base, &from.zero, op)
+        };
+        ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::Coeff(result))) }
+    }
+    
+    fn exact_convert_from_decompring<FpTy2, A2>(
+        &self, 
+        from: &DecompositionRing<NumberRing, FpTy2, A2>, 
+        element: &<DecompositionRingBase<NumberRing, FpTy2, A2> as RingBase>::Element
+    ) -> ManagedDoubleRNSEl<NumberRing, zn_64::Zn, A> 
+        where NumberRing: HENumberRing<FpTy2>,
+            FpTy2: RingStore<Type = zn_64::ZnBase> + Clone,
+            A2: Allocator + Clone
+    {
+        ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::Coeff(self.base.exact_convert_from_decompring(from, element)))) }
+    }
+    
+    fn perform_rns_op_to_decompring<FpTy2, A2, Op>(
+        &self, 
+        to: &DecompositionRing<NumberRing, FpTy2, A2>, 
+        element: &ManagedDoubleRNSEl<NumberRing, zn_64::Zn, A>, 
+        op: &Op
+    ) -> <DecompositionRingBase<NumberRing, FpTy2, A2> as RingBase>::Element 
+        where NumberRing: HENumberRing<FpTy2>,
+            FpTy2: RingStore<Type = zn_64::ZnBase> + Clone,
+            A2: Allocator + Clone,
+            Op: RNSOperation<RingType = zn_64::ZnBase>
+    {
+        if let Some(value) = self.to_coeff(element) {
+            return self.base.perform_rns_op_to_decompring(to, &*value, op);
+        } else {
+            return self.base.perform_rns_op_to_decompring(to, &self.zero, op);
+        }
+    }
+
+    fn gadget_product<'b>(&self, lhs: &Self::GadgetProductLhsOperand<'b>, rhs: &Self::GadgetProductRhsOperand<'b>) -> Self::Element {
+        match self.base.preferred_output_repr(&lhs.base, &rhs.base) {
+            gadget_product::double_rns::ElRepr::Coeff => ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::Coeff(self.base.gadget_product_coeff(&lhs.base, &rhs.base)))) },
+            gadget_product::double_rns::ElRepr::NTT => ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::DoubleRNS(self.base.gadget_product_ntt(&lhs.base, &rhs.base)))) }
+        }
+    }
+
+    fn gadget_product_rhs_empty<'a>(&'a self, digits: usize) -> Self::GadgetProductRhsOperand<'a> {
+        GadgetProductRhsOperand {
+            base: gadget_product::double_rns::GadgetProductRhsOperand::create_empty::<false>(&self.base, digits)
+        }
+    }
+
+    fn to_gadget_product_lhs<'a>(&'a self, el: Self::Element, digits: usize) -> Self::GadgetProductLhsOperand<'a> {
+        if let Some(nonzero) = self.to_coeff(&el) {
+            GadgetProductLhsOperand {
+                base: gadget_product::double_rns::GadgetProductLhsOperand::create_from_element(&self.base, digits, self.base.clone_el_non_fft(&*nonzero))
+            }
+        } else {
+            GadgetProductLhsOperand {
+                base: gadget_product::double_rns::GadgetProductLhsOperand::create_from_element(&self.base, digits, self.base.clone_el_non_fft(&self.zero))
+            }
+        }
+    }
+
+    fn gadget_vector<'a, 'b>(&'a self, rhs_operand: &'a Self::GadgetProductRhsOperand<'b>) -> &'a [std::ops::Range<usize>] {
+        rhs_operand.base.gadget_vector()
+    }
+
+    fn set_rns_factor<'b>(&self, rhs_operand: &mut Self::GadgetProductRhsOperand<'b>, i: usize, el: Self::Element) {
+        if let Some(nonzero) = self.to_coeff(&el) {
+            rhs_operand.base.set_rns_factor(i, self.base.clone_el_non_fft(&*nonzero))
+        } else {
+            rhs_operand.base.set_rns_factor(i, self.base.clone_el_non_fft(&self.zero))
+        }
+    }
+
+    fn apply_galois_action_many_gadget_product_operand<'a>(&'a self, x: &Self::GadgetProductLhsOperand<'a>, gs: &[zn_64::ZnEl]) -> Vec<Self::GadgetProductLhsOperand<'a>> {
+        gs.iter().map(|g| GadgetProductLhsOperand {
+            base: x.base.apply_galois_action(&self.base, *g)
+        }).collect()
     }
 }
 
@@ -703,6 +773,38 @@ impl<NumberRing, FpTy, A> FreeAlgebra for ManagedDoubleRNSRingBase<NumberRing, F
     {
         let result = self.base.from_canonical_basis(vec);
         return ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::DoubleRNS(result))) };
+    }
+}
+
+impl<NumberRing, FpTy, A> FiniteRing for ManagedDoubleRNSRingBase<NumberRing, FpTy, A>
+    where NumberRing: HENumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        A: Allocator + Clone
+{
+    type ElementsIter<'a> = std::iter::Map<<DoubleRNSRingBase<NumberRing, FpTy, A> as FiniteRing>::ElementsIter<'a>, fn(DoubleRNSEl<NumberRing, FpTy, A>) -> ManagedDoubleRNSEl<NumberRing, FpTy, A>>
+        where Self: 'a;
+
+    fn elements<'a>(&'a self) -> Self::ElementsIter<'a> {
+        fn from_doublerns<NumberRing, FpTy, A>(x: DoubleRNSEl<NumberRing, FpTy, A>) -> ManagedDoubleRNSEl<NumberRing, FpTy, A>
+            where NumberRing: HENumberRing<FpTy>,
+                FpTy: RingStore + Clone,
+                FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+                A: Allocator + Clone
+        {
+            ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::DoubleRNS(x))) }
+        }
+        self.base.elements().map(from_doublerns)
+    }
+
+    fn random_element<G: FnMut() -> u64>(&self, rng: G) -> <Self as RingBase>::Element {
+        ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::DoubleRNS(self.base.random_element(rng)))) }
+    }
+
+    fn size<I: IntegerRingStore + Copy>(&self, ZZ: I) -> Option<El<I>>
+        where I::Type: IntegerRing
+    {
+        self.base.size(ZZ)
     }
 }
 

@@ -206,16 +206,6 @@ impl<NumberRing, FpTy, A> DoubleRNSRingBase<NumberRing, FpTy, A>
         };
     }
 
-    pub fn sample_uniform<G: FnMut() -> u64>(&self, mut rng: G) -> DoubleRNSEl<NumberRing, FpTy, A> {
-        let mut result = self.zero();
-        for j in 0..self.rank() {
-            for i in 0..self.rns_base().len() {
-                result.el_wrt_mult_basis[j + i * self.rank()] = self.rns_base().at(i).random_element(&mut rng);
-            }
-        }
-        return result;
-    }
-
     pub fn clone_el_non_fft(&self, val: &CoeffEl<NumberRing, FpTy, A>) -> CoeffEl<NumberRing, FpTy, A> {
         assert_eq!(self.element_len(), val.el_wrt_small_basis.len());
         let mut result = Vec::with_capacity_in(self.element_len(), self.allocator.clone());
@@ -772,8 +762,14 @@ impl<NumberRing, FpTy, A> FiniteRing for DoubleRNSRingBase<NumberRing, FpTy, A>
         }
     }
 
-    fn random_element<G: FnMut() -> u64>(&self, rng: G) -> <Self as RingBase>::Element {
-        self.sample_uniform(rng)
+    fn random_element<G: FnMut() -> u64>(&self, mut rng: G) -> <Self as RingBase>::Element {
+        let mut result = self.zero();
+        for j in 0..self.rank() {
+            for i in 0..self.rns_base().len() {
+                result.el_wrt_mult_basis[j + i * self.rank()] = self.rns_base().at(i).random_element(&mut rng);
+            }
+        }
+        return result;
     }
 }
 
