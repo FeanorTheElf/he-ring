@@ -27,6 +27,7 @@ done in 2173 ms, []
  / double_rns::GadgetProductLhsOperand::create_from_element / CompositeCyclotomicDecomposedNumberRing::small_basis_to_mult_basis     45 calls,  248 ms,    5521 us/call
  / DoubleRNSRing::gadget_product_naive                                                                                                2 calls,   25 ms,   12646 us/call
 test bfv::print_timings_double_rns_composite_bfv_mul ... ok
+
 CreatePtxtRing
 done in 8 ms, []
 CreateCtxtRing

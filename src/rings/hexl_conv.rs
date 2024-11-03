@@ -51,19 +51,21 @@ impl<A> HEXLConv<A>
     }
 
     fn compute_convolution_base(&self, mut lhs: PreparedConvolutionOperand<A>, rhs: &PreparedConvolutionOperand<A>, out: &mut [El<Zn>]) {
-        let log2_n = ZZ.abs_log2_ceil(&(lhs.data.len() as i64)).unwrap();
-        assert_eq!(lhs.data.len(), 1 << log2_n);
-        assert_eq!(rhs.data.len(), 1 << log2_n);
-        assert!(lhs.len + rhs.len <= 1 << log2_n);
-        for i in 0..(1 << log2_n) {
-            self.ring.mul_assign_ref(&mut lhs.data[i], &rhs.data[i]);
-        }
-        let mut tmp = Vec::with_capacity_in(1 << log2_n, &self.allocator);
-        tmp.resize_with(1 << log2_n, || self.ring.zero());
-        record_time!("HEXLConv::compute_convolution_base::inv_fft", || self.get_fft(log2_n).unordered_negacyclic_fft_base::<true>(&mut lhs.data[..], &mut tmp[..]));
-        for i in 0..min(out.len(), 1 << log2_n) {
-            self.ring.add_assign_ref(&mut out[i], &tmp[i]);
-        }
+        record_time!(GLOBAL_TIME_RECORDER, "HEXLConv::compute_convolution_base", || {
+            let log2_n = ZZ.abs_log2_ceil(&(lhs.data.len() as i64)).unwrap();
+            assert_eq!(lhs.data.len(), 1 << log2_n);
+            assert_eq!(rhs.data.len(), 1 << log2_n);
+            assert!(lhs.len + rhs.len <= 1 << log2_n);
+            for i in 0..(1 << log2_n) {
+                self.ring.mul_assign_ref(&mut lhs.data[i], &rhs.data[i]);
+            }
+            let mut tmp = Vec::with_capacity_in(1 << log2_n, &self.allocator);
+            tmp.resize_with(1 << log2_n, || self.ring.zero());
+            self.get_fft(log2_n).unordered_negacyclic_fft_base::<true>(&mut lhs.data[..], &mut tmp[..]);
+            for i in 0..min(out.len(), 1 << log2_n) {
+                self.ring.add_assign_ref(&mut out[i], &tmp[i]);
+            }
+        })
     }
 
     fn get_fft<'a>(&'a self, log2_n: usize) -> &'a HEXLNTT {
@@ -80,17 +82,19 @@ impl<A> HEXLConv<A>
     }
     
     fn prepare_convolution_base<V: VectorView<El<Zn>>>(&self, val: V, log2_n: usize) -> PreparedConvolutionOperand<A> {
-        let mut input = Vec::with_capacity_in(1 << log2_n, &self.allocator);
-        input.extend(val.as_iter().map(|x| self.ring.clone_el(x)));
-        input.resize_with(1 << log2_n, || self.ring.zero());
-        let mut result = Vec::with_capacity_in(1 << log2_n, self.allocator.clone());
-        result.resize_with(1 << log2_n, || self.ring.zero());
-        let fft = self.get_fft(log2_n);
-        record_time!("HEXLConv::prepare_convolution_base::fft", || fft.unordered_negacyclic_fft_base::<false>(&mut input[..], &mut result[..]));
-        return PreparedConvolutionOperand {
-            len: val.len(),
-            data: result
-        };
+        record_time!(GLOBAL_TIME_RECORDER, "HEXLConv::prepare_convolution_base", || {
+            let mut input = Vec::with_capacity_in(1 << log2_n, &self.allocator);
+            input.extend(val.as_iter().map(|x| self.ring.clone_el(x)));
+            input.resize_with(1 << log2_n, || self.ring.zero());
+            let mut result = Vec::with_capacity_in(1 << log2_n, self.allocator.clone());
+            result.resize_with(1 << log2_n, || self.ring.zero());
+            let fft = self.get_fft(log2_n);
+            fft.unordered_negacyclic_fft_base::<false>(&mut input[..], &mut result[..]);
+            return PreparedConvolutionOperand {
+                len: val.len(),
+                data: result
+            };
+        })
     }
 }
 
@@ -152,7 +156,7 @@ impl<A> PreparedConvolutionAlgorithm<ZnBase> for HEXLConv<A>
         match log2_lhs.cmp(&log2_rhs) {
             std::cmp::Ordering::Equal => self.compute_convolution_base(self.clone_prepared_operand(lhs), rhs, dst),
             std::cmp::Ordering::Greater => self.compute_convolution_prepared(rhs, lhs, dst, ring),
-            std::cmp::Ordering::Less => record_time!("NTTConv::compute_convolution_prepared::change_fft_len", || {
+            std::cmp::Ordering::Less => record_time!(GLOBAL_TIME_RECORDER, "HEXLConv::compute_convolution_prepared::redo_fft", || {
                 let mut tmp1 = Vec::with_capacity_in(lhs.data.len(), self.allocator.clone());
                 tmp1.extend(lhs.data.iter().map(|x| self.ring.clone_el(x)));
                 let mut tmp2 = Vec::with_capacity_in(lhs.data.len(), &self.allocator);
