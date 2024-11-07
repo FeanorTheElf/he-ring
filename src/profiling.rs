@@ -211,6 +211,7 @@ impl TimeRecorder {
 
 pub static REGISTERED_RECORDERS: Mutex<Vec<&'static TimeRecorder>> = Mutex::new(Vec::new());
 
+#[cfg(feature = "record_timings")] 
 pub fn print_all_timings() {
     let locked = REGISTERED_RECORDERS.lock().unwrap();
     for recorder in locked.iter() {
@@ -218,9 +219,10 @@ pub fn print_all_timings() {
     }
 }
 
-// #[cfg(not(feature = "record_timings"))]
-// pub fn print_all_timings() {}
+#[cfg(not(feature = "record_timings"))]
+pub fn print_all_timings() {}
 
+#[cfg(feature = "record_timings")]
 pub fn clear_all_timings() {
     let locked = REGISTERED_RECORDERS.lock().unwrap();
     for recorder in locked.iter() {
@@ -228,13 +230,14 @@ pub fn clear_all_timings() {
     }
 }
 
-// #[cfg(not(feature = "record_timings"))]
-// pub fn clear_all_timings() {}
+#[cfg(not(feature = "record_timings"))]
+pub fn clear_all_timings() {}
 
+#[macro_export]
 macro_rules! record_time {
     ($recorder:ident, $name:literal, $fn:expr) => {
         {
-            {
+            #[cfg(feature = "record_timings")] {
                 use std::sync::*;
                 use std::sync::atomic::*;
                 use $crate::profiling::*;
@@ -253,9 +256,9 @@ macro_rules! record_time {
 
                 (&$recorder).measure_call(TimeRecorderKey::new($name, id), $fn)
             }
-            // #[cfg(not(feature = "record_timings"))] {
-            //     ($fn)()
-            // }
+            #[cfg(not(feature = "record_timings"))] {
+                ($fn)()
+            }
         }
     };
 }

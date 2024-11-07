@@ -61,6 +61,7 @@ pub type UsedNegacyclicNTT = RustNegacyclicNTT<Zn>;
 
 pub type PlaintextAllocator = Global;
 pub type CiphertextAllocator = Global;
+pub type RNSOperationAllocator = Global;
 pub type NumberRing<Params: BFVParams> = <Params::CiphertextRing as BXVCiphertextRing>::NumberRing;
 pub type PlaintextRing<Params: BFVParams> = DecompositionRing<NumberRing<Params>, Zn, PlaintextAllocator>;
 pub type SecretKey<Params: BFVParams> = El<CiphertextRing<Params>>;
@@ -74,12 +75,12 @@ const ZZbig: BigIntRing = BigIntRing::RING;
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
 
 pub struct MulConversionData {
-    lift_to_C_mul: rnsconv::shared_lift::AlmostExactSharedBaseConversion<CiphertextAllocator>,
-    scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert<CiphertextAllocator>
+    lift_to_C_mul: rnsconv::shared_lift::AlmostExactSharedBaseConversion<RNSOperationAllocator>,
+    scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert<RNSOperationAllocator>
 }
 
 pub struct ModSwitchData {
-    scale: rnsconv::bfv_rescale::AlmostExactRescaling<CiphertextAllocator>
+    scale: rnsconv::bfv_rescale::AlmostExactRescaling<RNSOperationAllocator>
 }
 
 pub trait BFVParams {
@@ -464,7 +465,7 @@ impl BFVParams for CompositeSingleRNSBFV {
     }
 }
 
-fn coeff_repr<Params, NumberRing, A>(C: &CiphertextRing<Params>, ct: Ciphertext<Params>) -> Ciphertext<Params>
+pub fn coeff_repr<Params, NumberRing, A>(C: &CiphertextRing<Params>, ct: Ciphertext<Params>) -> Ciphertext<Params>
     where Params: BFVParams<CiphertextRing = ManagedDoubleRNSRingBase<NumberRing, zn_64::Zn, A>>,
         NumberRing: HECyclotomicNumberRing<zn_64::Zn>,
         A: Allocator + Clone
