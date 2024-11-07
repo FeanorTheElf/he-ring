@@ -19,8 +19,8 @@ use std::ops::Range;
 
 use crate::rings::double_rns_ring::*;
 use crate::cyclotomic::CyclotomicRing;
-use crate::rings::pow2_cyclotomic::Pow2CyclotomicDecomposableNumberRing;
 use crate::rings::pow2_cyclotomic::Pow2CyclotomicNumberRing;
+use crate::rings::pow2_cyclotomic::Pow2CyclotomicDecomposedNumberRing;
 use crate::rnsconv::*;
 use crate::rings::number_ring::*;
 use crate::IsEq;
@@ -515,7 +515,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, Zn, A>
 
 #[test]
 fn test_naive_gadget_decomposition() {
-    let ring = DoubleRNSRingBase::new(Pow2CyclotomicDecomposableNumberRing::new(4), zn_rns::Zn::create_from_primes(vec![17, 97, 113], BigIntRing::RING));
+    let ring = DoubleRNSRingBase::new(Pow2CyclotomicNumberRing::new(4), zn_rns::Zn::create_from_primes(vec![17, 97, 113], BigIntRing::RING));
     let rns_base = ring.base_ring();
     let from_congruence = |data: &[i32]| rns_base.from_congruence(data.iter().enumerate().map(|(i, c)| rns_base.at(i).int_hom().map(*c)));
     let hom_big = ring.base_ring().can_hom(&BigIntRing::RING).unwrap();
@@ -532,7 +532,7 @@ fn test_naive_gadget_decomposition() {
 
 #[test]
 fn test_lkss_gadget_decomposition() {
-    let ring = DoubleRNSRingBase::new(Pow2CyclotomicDecomposableNumberRing::new(4), zn_rns::Zn::create_from_primes(vec![17, 97, 113], BigIntRing::RING));
+    let ring = DoubleRNSRingBase::new(Pow2CyclotomicNumberRing::new(4), zn_rns::Zn::create_from_primes(vec![17, 97, 113], BigIntRing::RING));
     let rns_base = ring.base_ring();
     let from_congruence = |data: &[i32]| rns_base.from_congruence(data.iter().enumerate().map(|(i, c)| rns_base.at(i).int_hom().map(*c)));
     let hom_big = ring.base_ring().can_hom(&BigIntRing::RING).unwrap();

@@ -56,7 +56,9 @@ use oorandom;
 
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
 
-fn get_multiplicative_generator(ring: Zn, factorization: &[(i64, usize)]) -> ZnEl {
+pub fn get_multiplicative_generator(ring: Zn, factorization: &[(i64, usize)]) -> ZnEl {
+    assert_eq!(*ring.modulus(), ZZ.prod(factorization.iter().map(|(p, e)| ZZ.pow(*p, *e))));
+    assert!(*ring.modulus() % 2 == 1, "for even n, Z/nZ* is either equal to Z/(n/2)Z* or not cyclic");
     let mut rng = oorandom::Rand64::new(ring.integer_ring().default_hash(ring.modulus()) as u128);
     let order = euler_phi(factorization);
     let order_factorization = int_factor::factor(&ZZ, order);
@@ -1187,7 +1189,7 @@ fn test_order_hypercube_dimensions_composite() {
 #[test]
 fn test_rotation() {
     // `F23[X]/(X^16 + 1) ~ F_(23^4)^4`
-    let ring = DecompositionRingBase::new(Pow2CyclotomicDecomposableNumberRing::new(32), Zn::new(23 * 23 * 23));
+    let ring = DecompositionRingBase::new(Pow2CyclotomicNumberRing::new(32), Zn::new(23 * 23 * 23));
     let hypercube = HypercubeIsomorphism::new::<false>(ring.get_ring());
     assert_eq!(1, hypercube.dim_count());
 
@@ -1218,7 +1220,7 @@ fn test_rotation() {
 #[test]
 fn test_hypercube_galois_ring() {
     // `F(23^3)[X]/(X^16 + 1) ~ GF(23, 3, 4)^4`
-    let ring = DecompositionRingBase::new(Pow2CyclotomicDecomposableNumberRing::new(32), Zn::new(23 * 23 * 23));
+    let ring = DecompositionRingBase::new(Pow2CyclotomicNumberRing::new(32), Zn::new(23 * 23 * 23));
     let hypercube = HypercubeIsomorphism::new::<false>(ring.get_ring());
     
     let a = hypercube.slot_ring().from_canonical_basis([1, 2, 0, 1].into_iter().map(|x| hypercube.slot_ring().base_ring().int_hom().map(x)));

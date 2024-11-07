@@ -5,6 +5,7 @@ use feanor_math::algorithms::fft::*;
 use feanor_math::algorithms::miller_rabin::is_prime;
 use feanor_math::algorithms::unity_root::get_prim_root_of_unity_pow2;
 use feanor_math::divisibility::DivisibilityRing;
+use feanor_math::field::Field;
 use feanor_math::primitive_int::StaticRing;
 use feanor_math::ring::*;
 use feanor_math::assert_el_eq;
@@ -21,47 +22,82 @@ use feanor_math::rings::zn::{ZnRing, ZnRingStore, zn_rns};
 use feanor_math::rings::zn::zn_64::Zn;
 use std::alloc::Allocator;
 use std::alloc::Global;
+use std::marker::PhantomData;
 
 use super::decomposition_ring;
 use super::double_rns_ring;
 use super::double_rns_ring::*;
 use super::decomposition_ring::*;
 use super::single_rns_ring;
-// use super::single_rns_ring;
 use crate::rings::number_ring::*;
 use crate::sample_primes;
 use crate::StdZn;
 use crate::cyclotomic::CyclotomicRing;
 
-#[derive(Clone)]
-pub struct Pow2CyclotomicDecomposableNumberRing {
-    log2_n: usize
+pub trait Pow2NegacyclicNTT<R>: PartialEq
+    where R: RingStore,
+        R::Type: ZnRing
+{
+    ///
+    /// Should assign to `output` the bitreversed and negacyclic NTT of `input`, i.e. the evaluation
+    /// at all primitive `(2 * self.len())`-th roots of unity.
+    /// 
+    /// Concretely, the `i`-th element of `output` should store the evaluation of `input` (interpreted
+    /// as a polynomial) at `𝝵^(bitrev(i) * 2 + 1)`.
+    /// 
+    fn bitreversed_negacyclic_fft_base<const INV: bool>(&self, input: &mut [El<R>], output: &mut [El<R>]);
+
+    fn ring(&self) -> &R;
+
+    fn len(&self) -> usize;
+
+    fn new(ring: R, log2_rank: usize) -> Self;
 }
 
-impl Pow2CyclotomicDecomposableNumberRing {
+pub struct Pow2CyclotomicNumberRing<N = RustNegacyclicNTT<Zn>> {
+    log2_n: usize,
+    ntt: PhantomData<N>
+}
+
+impl Pow2CyclotomicNumberRing {
 
     pub fn new(n: usize) -> Self {
+        Self::new_with(n)
+    }
+}
+
+impl<N> Pow2CyclotomicNumberRing<N> {
+
+    pub fn new_with(n: usize) -> Self {
         assert!(n > 2);
         let log2_n = StaticRing::<i64>::RING.abs_log2_floor(&(n as i64)).unwrap();
         assert_eq!(n, 1 << log2_n);
         Self {
-            log2_n: log2_n
+            log2_n: log2_n,
+            ntt: PhantomData
         }
     }
 }
 
-impl PartialEq for Pow2CyclotomicDecomposableNumberRing {
+impl<N> Clone for Pow2CyclotomicNumberRing<N> {
+    fn clone(&self) -> Self {
+        Self::new_with(1 << self.log2_n)
+    }
+}
+
+impl<N> PartialEq for Pow2CyclotomicNumberRing<N> {
 
     fn eq(&self, other: &Self) -> bool {
         self.log2_n == other.log2_n
     }
 }
 
-impl<FpTy> HENumberRing<FpTy> for Pow2CyclotomicDecomposableNumberRing
+impl<N, FpTy> HENumberRing<FpTy> for Pow2CyclotomicNumberRing<N>
     where FpTy: RingStore + Clone,
-        FpTy::Type: ZnRing
+        FpTy::Type: ZnRing,
+        N: Pow2NegacyclicNTT<FpTy>
 {
-    type Decomposed = Pow2CyclotomicNumberRing<FpTy, CooleyTuckeyFFT<FpTy::Type, FpTy::Type, Identity<FpTy>>>;
+    type Decomposed = Pow2CyclotomicDecomposedNumberRing<FpTy, N, Global>;
 
     fn product_expansion_factor(&self) -> f64 {
         (1 << (self.log2_n - 1)) as f64
@@ -78,25 +114,11 @@ impl<FpTy> HENumberRing<FpTy> for Pow2CyclotomicDecomposableNumberRing
     }
 
     fn mod_p(&self, Fp: FpTy) -> Self::Decomposed {
-        let rank = 1 << (self.log2_n - 1);
-        let mut twiddles = Vec::with_capacity(rank as usize);
-        let mut inv_twiddles = Vec::with_capacity(rank as usize);
-
-        let Fp_as_field = (&Fp).as_field().ok().unwrap();
-        let root_of_unity = get_prim_root_of_unity_pow2(&Fp_as_field, self.log2_n).unwrap();
-        let zeta = Fp_as_field.get_ring().unwrap_element(root_of_unity);
-        let fft_table = CooleyTuckeyFFT::new(Fp.clone(), Fp.pow(Fp.clone_el(&zeta), 2), self.log2_n - 1);
-
-        let mut current = Fp.one();
-        let mut current_inv = Fp.one();
-        let zeta_inv = Fp.pow(Fp.clone_el(&zeta), 2 * rank as usize - 1);
-        for _ in 0..rank {
-            twiddles.push(Fp.clone_el(&current));
-            inv_twiddles.push(Fp.clone_el(&current_inv));
-            Fp.mul_assign_ref(&mut current, &zeta);
-            Fp.mul_assign_ref(&mut current_inv, &zeta_inv);
-        }
-        return Pow2CyclotomicNumberRing { ring: Fp, fft_table, twiddles, inv_twiddles };
+        return Pow2CyclotomicDecomposedNumberRing {
+            ntt: N::new(Fp, self.log2_n - 1),
+            ring: PhantomData,
+            allocator: Global
+        };
     }
 
     fn largest_suitable_prime(&self, leq_than: i64) -> Option<i64> {
@@ -126,24 +148,135 @@ impl<FpTy> HENumberRing<FpTy> for Pow2CyclotomicDecomposableNumberRing
     }
 }
 
-impl<FpTy> HECyclotomicNumberRing<FpTy> for Pow2CyclotomicDecomposableNumberRing
+impl<FpTy, N> HECyclotomicNumberRing<FpTy> for Pow2CyclotomicNumberRing<N>
     where FpTy: RingStore + Clone,
-        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>
+        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        N: Pow2NegacyclicNTT<FpTy>
 {
-    type DecomposedAsCyclotomic = Pow2CyclotomicNumberRing<FpTy, CooleyTuckeyFFT<FpTy::Type, FpTy::Type, Identity<FpTy>>>;
+    type DecomposedAsCyclotomic = Pow2CyclotomicDecomposedNumberRing<FpTy, N, Global>;
 
     fn n(&self) -> u64 {
         1 << self.log2_n
     }
 }
 
-impl<R, F> HECyclotomicNumberRingMod<R::Type> for Pow2CyclotomicNumberRing<R, F> 
+pub struct RustNegacyclicNTT<R>
     where R: RingStore,
-        R::Type: ZnRing + CanHomFrom<BigIntRingBase> + DivisibilityRing,
-        F: FFTAlgorithm<R::Type> + PartialEq
+        R::Type: ZnRing
+{
+    ring: R,
+    fft_table: CooleyTuckeyFFT<R::Type, R::Type, Identity<R>>,
+    twiddles: Vec<El<R>>,
+    inv_twiddles: Vec<El<R>>,
+}
+
+impl<R> PartialEq for RustNegacyclicNTT<R> 
+    where R: RingStore,
+        R::Type: ZnRing
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.fft_table == other.fft_table && self.ring.eq_el(&self.twiddles[0], &other.twiddles[0])
+    }
+}
+
+impl<R> Pow2NegacyclicNTT<R> for RustNegacyclicNTT<R> 
+    where R: RingStore + Clone,
+        R::Type: ZnRing
+{
+    fn bitreversed_negacyclic_fft_base<const INV: bool>(&self, input: &mut [El<R>], output: &mut [El<R>]) {
+        assert_eq!(self.fft_table.len(), input.len());
+        assert_eq!(self.fft_table.len(), output.len());
+        if INV {
+            self.fft_table.unordered_inv_fft(&mut input[..], &self.ring);
+            for i in 0..input.len() {
+                output[i] = self.ring.mul_ref(input.at(i), &self.twiddles[i]);
+            }
+        } else {
+            for i in 0..input.len() {
+                output[i] = self.ring.mul_ref(input.at(i), &self.inv_twiddles[i]);
+            }
+            self.fft_table.unordered_fft(&mut output[..], &self.ring);
+        }
+    }
+
+    fn ring(&self) -> &R {
+        &self.ring
+    }
+
+    fn len(&self) -> usize {
+        self.fft_table.len()
+    }
+
+    fn new(Fp: R, log2_rank: usize) -> Self {
+        let rank = 1 << log2_rank;
+        let mut twiddles = Vec::with_capacity(rank as usize);
+        let mut inv_twiddles = Vec::with_capacity(rank as usize);
+
+        let Fp_as_field = (&Fp).as_field().ok().unwrap();
+        let root_of_unity = get_prim_root_of_unity_pow2(&Fp_as_field, log2_rank + 1).unwrap();
+        let zeta = Fp_as_field.get_ring().unwrap_element(root_of_unity);
+
+        let mut current = Fp.one();
+        let mut current_inv = Fp.one();
+        let zeta_inv = Fp.pow(Fp.clone_el(&zeta), 2 * rank as usize - 1);
+        for _ in 0..rank {
+            twiddles.push(Fp.clone_el(&current));
+            inv_twiddles.push(Fp.clone_el(&current_inv));
+            Fp.mul_assign_ref(&mut current, &zeta);
+            Fp.mul_assign_ref(&mut current_inv, &zeta_inv);
+        }
+
+        let zeta_sqr = Fp.pow(Fp.clone_el(&zeta), 2);
+        let fft_table = CooleyTuckeyFFT::new(Fp.clone(), zeta_sqr, log2_rank);
+
+        return Self {
+            ring: Fp,
+            fft_table: fft_table,
+            inv_twiddles: inv_twiddles,
+            twiddles: twiddles
+        };
+    }
+}
+
+#[cfg(feature = "use_hexl")]
+impl Pow2NegacyclicNTT<Zn> for feanor_math_hexl::hexl::HEXLNTT {
+
+    fn bitreversed_negacyclic_fft_base<const INV: bool>(&self, input: &mut [El<Zn>], output: &mut [El<Zn>]) {
+        feanor_math_hexl::hexl::HEXLNTT::unordered_negacyclic_fft_base::<INV>(self, input, output)
+    }
+
+    fn len(&self) -> usize {
+        feanor_math_hexl::hexl::HEXLNTT::n(self)
+    }
+
+    fn new(ring: Zn, log2_rank: usize) -> Self {
+        feanor_math_hexl::hexl::HEXLNTT::for_zn(ring, log2_rank).unwrap()
+    }
+
+    fn ring(&self) -> &Zn {
+        feanor_math_hexl::hexl::HEXLNTT::ring(self)
+    }
+}
+
+pub struct Pow2CyclotomicDecomposedNumberRing<R, N, A> 
+    where R: RingStore,
+        R::Type: ZnRing,
+        N: Pow2NegacyclicNTT<R>,
+        A: Allocator
+{
+    ring: PhantomData<R>,
+    ntt: N,
+    allocator: A
+}
+
+impl<R, N, A> HECyclotomicNumberRingMod<R::Type> for Pow2CyclotomicDecomposedNumberRing<R, N, A> 
+    where R: RingStore,
+        R::Type: ZnRing,
+        N: Pow2NegacyclicNTT<R>,
+        A: Allocator
 {
     fn n(&self) -> u64 {
-        2 * self.fft_table.len() as u64
+        2 * self.ntt.len() as u64
     }
 
     fn permute_galois_action<V1, V2>(&self, src: V1, mut dst: V2, galois_element: zn_64::ZnEl)
@@ -169,39 +302,36 @@ impl<R, F> HECyclotomicNumberRingMod<R::Type> for Pow2CyclotomicNumberRing<R, F>
     }
 }
 
-pub struct Pow2CyclotomicNumberRing<R, F> 
+impl<R, N, A> PartialEq for Pow2CyclotomicDecomposedNumberRing<R, N, A> 
     where R: RingStore,
         R::Type: ZnRing,
-        F: FFTAlgorithm<R::Type> + PartialEq
-{
-    ring: R,
-    fft_table: F,
-    twiddles: Vec<El<R>>,
-    inv_twiddles: Vec<El<R>>,
-}
-
-impl<R, F> PartialEq for Pow2CyclotomicNumberRing<R, F> 
-    where R: RingStore,
-        R::Type: ZnRing,
-        F: FFTAlgorithm<R::Type> + PartialEq
+        N: Pow2NegacyclicNTT<R>,
+        A: Allocator
 {
     fn eq(&self, other: &Self) -> bool {
-        self.ring.get_ring() == other.ring.get_ring() && self.fft_table == other.fft_table && self.ring.eq_el(&self.twiddles[0], &other.twiddles[0])
+        self.ntt == other.ntt
     }
 }
 
-impl<R, F> HENumberRingMod<R::Type> for Pow2CyclotomicNumberRing<R, F> 
+impl<R, N, A> HENumberRingMod<R::Type> for Pow2CyclotomicDecomposedNumberRing<R, N, A> 
     where R: RingStore,
         R::Type: ZnRing,
-        F: FFTAlgorithm<R::Type> + PartialEq
+        N: Pow2NegacyclicNTT<R>,
+        A: Allocator
 {
     fn mult_basis_to_small_basis<V>(&self, mut data: V)
         where V: SwappableVectorViewMut<El<R>>
     {
         record_time!(GLOBAL_TIME_RECORDER, "Pow2CyclotomicNumberRing::mult_basis_to_small_basis", || {
-            self.fft_table.unordered_inv_fft(&mut data, &self.ring);
-            for i in 0..self.rank() {
-                self.ring.mul_assign_ref(data.at_mut(i), &self.twiddles[i]);
+            let mut input = Vec::with_capacity_in(data.len(), &self.allocator);
+            let mut output = Vec::with_capacity_in(data.len(), &self.allocator);
+            for x in data.as_iter() {
+                input.push(self.ntt.ring().clone_el(x));
+            }
+            output.resize_with(data.len(), || self.ntt.ring().zero());
+            self.ntt.bitreversed_negacyclic_fft_base::<true>(&mut input[..], &mut output[..]);
+            for (i, x) in output.into_iter().enumerate() {
+                *data.at_mut(i) = x;
             }
         })
     }
@@ -210,10 +340,16 @@ impl<R, F> HENumberRingMod<R::Type> for Pow2CyclotomicNumberRing<R, F>
         where V: SwappableVectorViewMut<El<R>>
     {
         record_time!(GLOBAL_TIME_RECORDER, "Pow2CyclotomicNumberRing::small_basis_to_mult_basis", || {
-            for i in 0..self.rank() {
-                self.ring.mul_assign_ref(data.at_mut(i), &self.inv_twiddles[i]);
+            let mut input = Vec::with_capacity_in(data.len(), &self.allocator);
+            let mut output = Vec::with_capacity_in(data.len(), &self.allocator);
+            for x in data.as_iter() {
+                input.push(self.ntt.ring().clone_el(x));
             }
-            self.fft_table.unordered_fft(&mut data, &self.ring);
+            output.resize_with(data.len(), || self.ntt.ring().zero());
+            self.ntt.bitreversed_negacyclic_fft_base::<false>(&mut input[..], &mut output[..]);
+            for (i, x) in output.into_iter().enumerate() {
+                *data.at_mut(i) = x;
+            }
         })
     }
 
@@ -222,36 +358,36 @@ impl<R, F> HENumberRingMod<R::Type> for Pow2CyclotomicNumberRing<R, F>
     fn small_basis_to_coeff_basis<V>(&self, data: V) {}
 
     fn rank(&self) -> usize {
-        self.fft_table.len()
+        self.ntt.len()
     }
 
     fn base_ring(&self) -> RingRef<R::Type> {
-        RingRef::new(self.ring.get_ring())
+        RingRef::new(self.ntt.ring().get_ring())
     }
 }
 
 #[test]
 fn test_pow2_cyclotomic_double_rns_ring() {
-    double_rns_ring::test_with_number_ring(Pow2CyclotomicDecomposableNumberRing::new(8));
-    double_rns_ring::test_with_number_ring(Pow2CyclotomicDecomposableNumberRing::new(16));
+    double_rns_ring::test_with_number_ring(Pow2CyclotomicNumberRing::new(8));
+    double_rns_ring::test_with_number_ring(Pow2CyclotomicNumberRing::new(16));
 }
 
 #[test]
 fn test_pow2_cyclotomic_single_rns_ring() {
-    single_rns_ring::test_with_number_ring(Pow2CyclotomicDecomposableNumberRing::new(8));
-    single_rns_ring::test_with_number_ring(Pow2CyclotomicDecomposableNumberRing::new(16));
+    single_rns_ring::test_with_number_ring(Pow2CyclotomicNumberRing::new(8));
+    single_rns_ring::test_with_number_ring(Pow2CyclotomicNumberRing::new(16));
 }
 
 #[test]
 fn test_pow2_cyclotomic_decomposition_ring() {
-    decomposition_ring::test_with_number_ring(Pow2CyclotomicDecomposableNumberRing::new(8));
-    decomposition_ring::test_with_number_ring(Pow2CyclotomicDecomposableNumberRing::new(16));
+    decomposition_ring::test_with_number_ring(Pow2CyclotomicNumberRing::new(8));
+    decomposition_ring::test_with_number_ring(Pow2CyclotomicNumberRing::new(16));
 }
 
 #[test]
 fn test_permute_galois_automorphism() {
     let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
-    let R = DoubleRNSRingBase::new_with(Pow2CyclotomicDecomposableNumberRing::new(16), rns_base, Global);
+    let R = DoubleRNSRingBase::new_with(Pow2CyclotomicNumberRing::new(16), rns_base, Global);
     assert_el_eq!(R, R.pow(R.canonical_gen(), 3), R.get_ring().apply_galois_action(&R.canonical_gen(), R.get_ring().cyclotomic_index_ring().int_hom().map(3)));
     assert_el_eq!(R, R.pow(R.canonical_gen(), 6), R.get_ring().apply_galois_action(&R.pow(R.canonical_gen(), 2), R.get_ring().cyclotomic_index_ring().int_hom().map(3)));
 }

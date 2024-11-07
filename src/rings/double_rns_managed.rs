@@ -25,7 +25,7 @@ use super::decomposition_ring::DecompositionRingBase;
 use super::double_rns_ring::*;
 use super::gadget_product;
 use super::number_ring::HECyclotomicNumberRing;
-use super::pow2_cyclotomic::Pow2CyclotomicDecomposableNumberRing;
+use super::pow2_cyclotomic::Pow2CyclotomicNumberRing;
 
 ///
 /// Like [`DoubleRNSRing`] but stores element in whatever representation they
@@ -811,7 +811,7 @@ impl<NumberRing, FpTy, A> FiniteRing for ManagedDoubleRNSRingBase<NumberRing, Fp
 #[test]
 fn test_ring_axioms() {
     let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
-    let ring = ManagedDoubleRNSRingBase::new(Pow2CyclotomicDecomposableNumberRing::new(16), rns_base);
+    let ring = ManagedDoubleRNSRingBase::new(Pow2CyclotomicNumberRing::new(16), rns_base);
     
     let base_ring = ring.base_ring();
     let elements = vec![
@@ -833,7 +833,7 @@ fn test_ring_axioms() {
 #[test]
 fn test_add_result_independent_of_repr() {
     let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
-    let ring = ManagedDoubleRNSRingBase::new(Pow2CyclotomicDecomposableNumberRing::new(4), rns_base);
+    let ring = ManagedDoubleRNSRingBase::new(Pow2CyclotomicNumberRing::new(4), rns_base);
     let base = &ring.get_ring().base;
     let reprs_of_11: [Box<dyn Fn() -> DoubleRNSElInternal<_, _, _>>; 4] = [
         Box::new(|| DoubleRNSElInternal::Coeff(base.from_non_fft(base.base_ring().int_hom().map(11)))),

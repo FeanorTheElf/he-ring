@@ -923,7 +923,7 @@ use feanor_math::assert_el_eq;
 
 #[test]
 fn test_compile() {
-    let ring = DecompositionRingBase::new(Pow2CyclotomicDecomposableNumberRing::new(64), Zn::new(23));
+    let ring = DecompositionRingBase::new(Pow2CyclotomicNumberRing::new(64), Zn::new(23));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
     let compiled_transform = slots_to_coeffs_thin(&H).into_iter().map(|T| CompiledLinearTransform::create_from(&H, T, 2)).collect::<Vec<_>>();
 
@@ -940,7 +940,7 @@ fn test_compile() {
     current = compiled_composed_transform.evaluate(current, &ring);
     assert_el_eq!(&ring, &expected, &current);
 
-    let ring = DecompositionRingBase::new(Pow2CyclotomicDecomposableNumberRing::new(64), Zn::new(97));
+    let ring = DecompositionRingBase::new(Pow2CyclotomicNumberRing::new(64), Zn::new(97));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
     let compiled_transform = slots_to_coeffs_thin(&H).into_iter().map(|T| CompiledLinearTransform::create_from(&H, T, 2)).collect::<Vec<_>>();
     
@@ -1000,7 +1000,7 @@ fn test_compile_odd_case() {
 
 #[test]
 fn test_compose() {
-    let ring = DecompositionRingBase::new(Pow2CyclotomicDecomposableNumberRing::new(64), Zn::new(23));
+    let ring = DecompositionRingBase::new(Pow2CyclotomicNumberRing::new(64), Zn::new(23));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
     let composed_transform = slots_to_coeffs_thin(&H).into_iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H));
 
@@ -1011,7 +1011,7 @@ fn test_compose() {
 
     assert_el_eq!(&ring, &expected, &current);
     
-    let ring = DecompositionRingBase::new(Pow2CyclotomicDecomposableNumberRing::new(64), Zn::new(97));
+    let ring = DecompositionRingBase::new(Pow2CyclotomicNumberRing::new(64), Zn::new(97));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
     let composed_transform = slots_to_coeffs_thin(&H).into_iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H));
     
@@ -1025,7 +1025,7 @@ fn test_compose() {
 
 #[test]
 fn test_invert() {
-    let ring = DecompositionRingBase::new(Pow2CyclotomicDecomposableNumberRing::new(64), Zn::new(23));
+    let ring = DecompositionRingBase::new(Pow2CyclotomicNumberRing::new(64), Zn::new(23));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
     let composed_transform = slots_to_coeffs_thin(&H).into_iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H));
     let inv_transform = composed_transform.inverse(&H);
@@ -1035,7 +1035,7 @@ fn test_invert() {
     let actual = ring.get_ring().compute_linear_transform(&H, &current, &inv_transform);
     assert_el_eq!(&ring, &expected, &actual);
     
-    let ring = DecompositionRingBase::new(Pow2CyclotomicDecomposableNumberRing::new(64), Zn::new(97));
+    let ring = DecompositionRingBase::new(Pow2CyclotomicNumberRing::new(64), Zn::new(97));
     let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
     let composed_transform = slots_to_coeffs_thin(&H).into_iter().fold(LinearTransform::identity(&H), |current, next| next.compose(&current, &H));
     let inv_transform = composed_transform.inverse(&H);

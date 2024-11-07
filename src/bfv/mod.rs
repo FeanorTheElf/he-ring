@@ -54,6 +54,11 @@ pub type UsedConvolution = crate::rings::hexl_conv::HEXLConv;
 #[cfg(not(feature = "use_hexl"))]
 pub type UsedConvolution = crate::rings::ntt_conv::NTTConv<Zn>;
 
+#[cfg(feature = "use_hexl")]
+pub type UsedNegacyclicNTT = feanor_math_hexl::hexl::HEXLNTT;
+#[cfg(not(feature = "use_hexl"))]
+pub type UsedNegacyclicNTT = RustNegacyclicNTT<Zn>;
+
 pub type PlaintextAllocator = Global;
 pub type CiphertextAllocator = Global;
 pub type NumberRing<Params: BFVParams> = <Params::CiphertextRing as BXVCiphertextRing>::NumberRing;
@@ -340,10 +345,10 @@ pub struct Pow2BFV {
 
 impl BFVParams for Pow2BFV {
 
-    type CiphertextRing = ManagedDoubleRNSRingBase<Pow2CyclotomicDecomposableNumberRing, zn_64::Zn, CiphertextAllocator>;
+    type CiphertextRing = ManagedDoubleRNSRingBase<Pow2CyclotomicNumberRing<UsedNegacyclicNTT>, zn_64::Zn, CiphertextAllocator>;
 
-    fn number_ring(&self) -> Pow2CyclotomicDecomposableNumberRing {
-        Pow2CyclotomicDecomposableNumberRing::new(2 << self.log2_N)
+    fn number_ring(&self) -> Pow2CyclotomicNumberRing<UsedNegacyclicNTT> {
+        Pow2CyclotomicNumberRing::new_with(2 << self.log2_N)
     }
 
     fn ciphertext_modulus_bits(&self) -> Range<usize> {
