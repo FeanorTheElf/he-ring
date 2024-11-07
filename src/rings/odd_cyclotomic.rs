@@ -549,10 +549,10 @@ impl<R, F, A> HECyclotomicNumberRingMod<R::Type> for OddCyclotomicDecomposedNumb
 ///
 /// The small basis is given by 
 /// ```text
-///   1 ⊗ 1,            ζ1 ⊗ 1,            ζ1^2 ⊗ 1,           ...,  ζ1^(n1 - 1) ⊗ 1,
-///   1 ⊗ ζ2,           ζ1 ⊗ ζ2,           ζ1^2 ⊗ ζ2,          ...,  ζ1^(n1 - 1) ⊗ ζ2,
+///   1 ⊗ 1,            𝝵1 ⊗ 1,            𝝵1^2 ⊗ 1,           ...,  𝝵1^(n1 - 1) ⊗ 1,
+///   1 ⊗ 𝝵2,           𝝵1 ⊗ 𝝵2,           𝝵1^2 ⊗ 𝝵2,          ...,  𝝵1^(n1 - 1) ⊗ 𝝵2,
 ///   ...
-///   1 ⊗ ζ2^(n2 - 1),  ζ1 ⊗ ζ2^(n2 - 1),  ζ1^2 ⊗ ζ2^(n2 - 1), ...,  ζ1^(n1 - 1) ⊗ ζ2^(n2 - 1)
+///   1 ⊗ 𝝵2^(n2 - 1),  𝝵1 ⊗ 𝝵2^(n2 - 1),  𝝵1^2 ⊗ 𝝵2^(n2 - 1), ...,  𝝵1^(n1 - 1) ⊗ 𝝵2^(n2 - 1)
 /// ```
 /// 
 pub struct CompositeCyclotomicDecomposedNumberRing<R, F, A = Global> 
@@ -725,7 +725,7 @@ fn test_small_coeff_basis_conversion() {
     decomposition.small_basis_to_coeff_basis(&mut actual);
     assert_eq!(original, actual);
     
-    // ζ_15 = ζ_3^-1 ⊗ ζ_5^2 = (-1 - ζ_3) ⊗ ζ_5^2
+    // 𝝵_15 = 𝝵_3^-1 ⊗ 𝝵_5^2 = (-1 - 𝝵_3) ⊗ 𝝵_5^2
     let original = [0, 1, 0, 0, 0, 0, 0, 0];
     let expected = [0, 0, 0, 0, 240, 240, 0, 0];
     let mut actual = original;

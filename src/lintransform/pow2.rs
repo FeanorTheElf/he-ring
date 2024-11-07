@@ -21,7 +21,7 @@ use super::*;
 /// Works separately on each block `(b0, ..., b(l - 1))` of size `l = blocksize` along the given given hypercube dimension.
 /// This function computes the length-`l` DWT
 /// ```text
-/// sum_(0 <= i < l) ai * 𝜁_(4l)^(i * g^j)
+/// sum_(0 <= i < l) ai * 𝝵_(4l)^(i * g^j)
 /// ``` 
 /// from the length-`l/2` DWTs of the even-index resp. odd-index entries of `ai`. These two sub-DWTs are expected to be written
 /// in the first resp. second half of the input block (i.e. not interleaved, this is where the "bitreversed" comes from).
@@ -29,20 +29,20 @@ use super::*;
 /// 
 /// More concretely, it is expected that the input to the linear transform is
 /// ```text
-/// bj = sum_(0 <= i < l/2) a(2i) * 𝜁_(4l)^(2 * i * g^j)              if j < l/2
-/// bj = sum_(0 <= i < l/2) a(2i + 1) * 𝜁_(4l)^(2 * i * g^j)
-///    = sum_(0 <= i < l/2) a(2i + 1) * 𝜁_(4l)^(2 * i * g^(j - l/2))  otherwise
+/// bj = sum_(0 <= i < l/2) a(2i) * 𝝵_(4l)^(2 * i * g^j)              if j < l/2
+/// bj = sum_(0 <= i < l/2) a(2i + 1) * 𝝵_(4l)^(2 * i * g^j)
+///    = sum_(0 <= i < l/2) a(2i + 1) * 𝝵_(4l)^(2 * i * g^(j - l/2))  otherwise
 /// ```
 /// In this case, the output is
 /// ```text
-/// bj = sum_(0 <= i < l) ai * 𝜁_(4l)^(i * g^j)
+/// bj = sum_(0 <= i < l) ai * 𝝵_(4l)^(i * g^j)
 /// ```
 /// 
 /// # Notes
-///  - This does not compute the evaluation at all primitive `4l`-th roots of unity, but only at half of them - namely `𝜁_(4l)^(g^j)` for all `j`.
+///  - This does not compute the evaluation at all primitive `4l`-th roots of unity, but only at half of them - namely `𝝵_(4l)^(g^j)` for all `j`.
 ///    In particular, `g` does not generate `(Z/4lZ)*`, but `<g>` is an index 2 subgroup of it.
-///  - `row_autos` can be given to use different `𝜁`s for each block; in particular, for the block with hypercube indices `idxs`, the DWT with root
-///    of unity `𝜁 = root_of_unity_4l^row_autos(idxs)` is used. Note that the index passed to `row_autos` is the hypercube index of some element in the
+///  - `row_autos` can be given to use different `𝝵`s for each block; in particular, for the block with hypercube indices `idxs`, the DWT with root
+///    of unity `𝝵 = root_of_unity_4l^row_autos(idxs)` is used. Note that the index passed to `row_autos` is the hypercube index of some element in the
 ///    block. It does not make sense for `row_autos` to behave differently on different indices in the same block, this will lead to 
 ///    `pow2_bitreversed_dwt_butterfly` to give nonsensical results. If you pass `row_autos = |_| H.cyclotomic_index_ring().one()` then this uses the same
 ///    roots of unity everywhere, i.e. results in the behavior as outlined above.
@@ -215,10 +215,10 @@ fn pow2_bitreversed_inv_dwt_butterfly<'b, A, G>(H: &HypercubeIsomorphism<'b, Pow
 /// 
 /// More concretely, this computes
 /// ```text
-/// sum_(0 <= i < m) a(bitrev(i)) * 𝜁^(n / (4m) * row_autos(idxs) * g^j)
+/// sum_(0 <= i < m) a(bitrev(i)) * 𝝵^(n / (4m) * row_autos(idxs) * g^j)
 /// ```
 /// for `j` from `0` to `m`.
-/// Here `𝜁` is the canonical generator of the slot ring, which is a primitive `n`-th root of unity.
+/// Here `𝝵` is the canonical generator of the slot ring, which is a primitive `n`-th root of unity.
 /// 
 fn pow2_bitreversed_dwt<A, G>(H: &HypercubeIsomorphism<Pow2CyclotomicDecomposableNumberRing, A>, dim_index: usize, row_autos: G) -> Vec<LinearTransform<Pow2CyclotomicDecomposableNumberRing, A>>
     where A: Allocator + Clone,
@@ -302,7 +302,7 @@ pub fn slots_to_coeffs_thin<A>(H: &HypercubeIsomorphism<Pow2CyclotomicDecomposab
         let zeta4 = H.slot_ring().pow(H.slot_ring().canonical_gen(), H.ring().n() as usize / 4);
         let mut result = Vec::new();
 
-        // we first combine `ai0` and `ai1` to `(ai0 + 𝜁^(n/4) ai1, ai0 - 𝜁^(n/4) ai1)`
+        // we first combine `ai0` and `ai1` to `(ai0 + 𝝵^(n/4) ai1, ai0 - 𝝵^(n/4) ai1)`
         result.push(LinearTransform {
             data: vec![
                 (
@@ -327,8 +327,8 @@ pub fn slots_to_coeffs_thin<A>(H: &HypercubeIsomorphism<Pow2CyclotomicDecomposab
         });
         result.last_mut().unwrap().canonicalize(H);
 
-        // then map the `ai0 + 𝜁^(n/4) ai1` to `sum_i (ai0 + 𝜁^(n/4) ai1) 𝜁^(n/(2m) i g^k)` for each slot `(k, 0)`, and similarly
-        // for the slots `(*, 1)`. The negation in the second hypercolumn comes from the fact that `-𝜁^(n/4) = 𝜁^(-n/4)`
+        // then map the `ai0 + 𝝵^(n/4) ai1` to `sum_i (ai0 + 𝝵^(n/4) ai1) 𝝵^(n/(2m) i g^k)` for each slot `(k, 0)`, and similarly
+        // for the slots `(*, 1)`. The negation in the second hypercolumn comes from the fact that `-𝝵^(n/4) = 𝝵^(-n/4)`
         result.extend(pow2_bitreversed_dwt(H, 0, |idxs| if idxs[1] == 0 {
             H.cyclotomic_index_ring().one()
         } else {

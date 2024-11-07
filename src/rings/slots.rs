@@ -383,7 +383,7 @@ impl<'a, NumberRing, A> HypercubeIsomorphism<'a, NumberRing, A>
         slot_ring_modulus.scan(|_, x| ring.base_ring().negate_inplace(x));
 
         let max_log2_len = ZZ.abs_log2_ceil(&(d as i64)).unwrap() + 1;
-        let slot_ring = FreeAlgebraImpl::new_with(ring.base_ring(), tmp_slot_ring.rank(), slot_ring_modulus, "𝜁", ring.allocator().clone(), FFTRNSBasedConvolution::new_with(max_log2_len, BigIntRing::RING, Global).into());
+        let slot_ring = FreeAlgebraImpl::new_with(ring.base_ring(), tmp_slot_ring.rank(), slot_ring_modulus, "𝝵", ring.allocator().clone(), FFTRNSBasedConvolution::new_with(max_log2_len, BigIntRing::RING, Global).into());
         let max_ideal_gen = slot_ring.inclusion().map(slot_ring.base_ring().coerce(&ZZ, p));
         let slot_ring = AsLocalPIR::from(AsLocalPIRBase::promise_is_local_pir(slot_ring, max_ideal_gen, Some(e)));
 
@@ -436,7 +436,7 @@ impl<'a, NumberRing, A> HypercubeIsomorphism<'a, NumberRing, A>
         }
 
         let max_log2_len = ZZ.abs_log2_ceil(&(self.slot_ring().rank() as i64)).unwrap() + 1;
-        let slot_ring = FreeAlgebraImpl::new_with(new_ring.base_ring(), self.slot_ring().rank(), new_slot_ring_modulus, "𝜁", new_ring.allocator().clone(), FFTRNSBasedConvolution::new_with(max_log2_len, BigIntRing::RING, Global).into());
+        let slot_ring = FreeAlgebraImpl::new_with(new_ring.base_ring(), self.slot_ring().rank(), new_slot_ring_modulus, "𝝵", new_ring.allocator().clone(), FFTRNSBasedConvolution::new_with(max_log2_len, BigIntRing::RING, Global).into());
         let max_ideal_gen = slot_ring.inclusion().map(slot_ring.base_ring().coerce(&ZZ, p));
         let slot_ring = AsLocalPIR::from(AsLocalPIRBase::promise_is_local_pir(slot_ring, max_ideal_gen, Some(e)));
 
@@ -892,7 +892,7 @@ pub mod serialization {
                 }
             }
             let max_log2_len = ZZ.abs_log2_ceil(&(value.slot_rank as i64)).unwrap() + 1;
-            let slot_ring = FreeAlgebraImpl::new_with(value.ring.base_ring(), value.slot_rank, slot_ring_modulus, "𝜁", value.ring.allocator().clone(), FFTRNSBasedConvolution::new_with(max_log2_len, BigIntRing::RING, Global).into());
+            let slot_ring = FreeAlgebraImpl::new_with(value.ring.base_ring(), value.slot_rank, slot_ring_modulus, "𝝵", value.ring.allocator().clone(), FFTRNSBasedConvolution::new_with(max_log2_len, BigIntRing::RING, Global).into());
             let max_ideal_gen = slot_ring.inclusion().map(slot_ring.base_ring().coerce(&ZZ, p));
             let slot_ring: SlotRing<'a, A> = AsLocalPIR::from(AsLocalPIRBase::promise_is_local_pir(slot_ring, max_ideal_gen, Some(e)));
 

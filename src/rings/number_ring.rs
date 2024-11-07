@@ -112,14 +112,14 @@ pub trait HECyclotomicNumberRing<R>: HENumberRing<R>
 /// Note that it is valid for any of these basis to coincide, and then implement the 
 /// corresponding conversions as no-ops.
 /// 
-/// This design is motivated by the example of `Z[ζ_n]` for a composite `n`, since in
+/// This design is motivated by the example of `Z[𝝵_n]` for a composite `n`, since in
 /// this case, we need three different basis.
-///  - The "small basis" is the powerful basis `ζ^(n/n1 * i1 + ... + n/nr * ir)` with
+///  - The "small basis" is the powerful basis `𝝵^(n/n1 * i1 + ... + n/nr * ir)` with
 ///    `0 <= ij < phi(nj)`, where `nj` runs through pairwise coprime factors of `n`
-///  - The "mult basis" is the preimage of the unit vector basis under `Fp[ζ] -> Fp^phi(n)`
-///  - The "coeff basis" is the basis `1, ζ, ζ^2, ..., ζ^phi(n)`
+///  - The "mult basis" is the preimage of the unit vector basis under `Fp[𝝵] -> Fp^phi(n)`
+///  - The "coeff basis" is the basis `1, 𝝵, 𝝵^2, ..., 𝝵^phi(n)`
 /// While one could choose "small basis" and "coeff basis" to be equal (after all, the
-/// elements `ζ^i` are all "small"), staying in "small basis" whenever possible has
+/// elements `𝝵^i` are all "small"), staying in "small basis" whenever possible has
 /// performance benefits, because of the tensor-decomposition.
 /// 
 pub trait HENumberRingMod<R: ?Sized + ZnRing>: PartialEq {

@@ -32,14 +32,14 @@ fn column_dwt_matrix<'a, NumberRing, A>(H: &HypercubeIsomorphism<'a, NumberRing,
 
 ///
 /// Interprets each hypercolumn as a vector of length `ni`, and computes the discrete weighted transform 
-/// along this vector, i.e. the evaluation at the primitive roots of unity `𝜁^(n/ni * j)` for `j` coprime
+/// along this vector, i.e. the evaluation at the primitive roots of unity `𝝵^(n/ni * j)` for `j` coprime
 /// to `ni`
 /// 
 fn column_dwt<'a, NumberRing, A>(H: &HypercubeIsomorphism<'a, NumberRing, A>, dim_index: usize, zeta_powertable: &PowerTable<&SlotRing<'a, A>>) -> Vec<LinearTransform<NumberRing, A>>
     where NumberRing: HECyclotomicNumberRing<Zn>,
         A: Allocator + Clone,
 {
-    // multiplication with the matrix `A(i, j) = 𝜁^(j * shift_element(-i))` if we consider an element as multiple vectors along the `dim_index`-th dimension
+    // multiplication with the matrix `A(i, j) = 𝝵^(j * shift_element(-i))` if we consider an element as multiple vectors along the `dim_index`-th dimension
     let A = column_dwt_matrix(H, dim_index, zeta_powertable);
 
     vec![LinearTransform::matmul1d(
@@ -58,7 +58,7 @@ fn column_dwt_inv<'a, NumberRing, A>(H: &HypercubeIsomorphism<'a, NumberRing, A>
     let mut sol = OwnedMatrix::zero(H.len(dim_index), H.len(dim_index), H.slot_ring());
     <_ as LinSolveRingStore>::solve_right(H.slot_ring(), A.data_mut(), rhs.data_mut(), sol.data_mut()).assert_solved();
 
-    // multiplication with the matrix `A(i, j) = 𝜁^(j * shift_element(-i))` if we consider an element as multiple vectors along the `dim_index`-th dimension
+    // multiplication with the matrix `A(i, j) = 𝝵^(j * shift_element(-i))` if we consider an element as multiple vectors along the `dim_index`-th dimension
     vec![LinearTransform::matmul1d(
         H, 
         dim_index, 
@@ -68,8 +68,8 @@ fn column_dwt_inv<'a, NumberRing, A>(H: &HypercubeIsomorphism<'a, NumberRing, A>
 
 /// 
 /// in the first step, we arrange the coefficients of each slot in the coefficients of the corresponding hypercube dimension;
-/// in other words, we map the element `𝜁^l e_U(j)` to `X1^(j + l m0) e_U(*) = X1^(j + l m0) sum_i e_U(i)`;
-/// here `𝜁` is the canonical generator of the slot ring, and `X1` is the image of `X1` under the isomorphism
+/// in other words, we map the element `𝝵^l e_U(j)` to `X1^(j + l m0) e_U(*) = X1^(j + l m0) sum_i e_U(i)`;
+/// here `𝝵` is the canonical generator of the slot ring, and `X1` is the image of `X1` under the isomorphism
 /// `Fp[X1, ..., Xr]/(Phi_n1(X1), ..., Phi_nr(Xr)) -> Fp[X]/(Phi_n(X))`, i.e. is `X1 = X^(n/n1)`.
 ///
 fn slots_to_powcoeffs_fat_fst_step<'a, NumberRing, A>(H: &HypercubeIsomorphism<'a, NumberRing, A>, dim_index: usize, zeta_powertable: &PowerTable<&SlotRing<'a, A>>) -> OwnedMatrix<El<Zn>>
@@ -84,8 +84,8 @@ fn slots_to_powcoeffs_fat_fst_step<'a, NumberRing, A>(H: &HypercubeIsomorphism<'
         let k = row_idx % H.slot_ring().rank();
         let j = col_idx / H.slot_ring().rank();
         let l = col_idx % H.slot_ring().rank(); 
-        // the "work" that is left to do is to write `X1 e_U(*)` w.r.t. the basis `𝜁^k e_U(i)`;
-        // however, this is exactly `X1 = sum_i X^(n/n1) e_U(i) = sum_i 𝜁^(shift_element(-i) * n/n1) e_U(i)`
+        // the "work" that is left to do is to write `X1 e_U(*)` w.r.t. the basis `𝝵^k e_U(i)`;
+        // however, this is exactly `X1 = sum_i X^(n/n1) e_U(i) = sum_i 𝝵^(shift_element(-i) * n/n1) e_U(i)`
         let exponent = Gal.prod([
             H.shift_galois_element(0, -(i as i64)), 
             ZZ_to_Gal.map(H.ring().n() as i64 / H.corresponding_factor_n(0)),
@@ -98,7 +98,7 @@ fn slots_to_powcoeffs_fat_fst_step<'a, NumberRing, A>(H: &HypercubeIsomorphism<'
 ///
 /// Computes the [https://ia.cr/2014/873]-style linear transform for fat bootstrapping with composite moduli.
 /// 
-/// If for the linear transform input, the slot `(i1, ..., ir)` contains `sum_j a_(j, i1, ..., ir) 𝜁^j`, this
+/// If for the linear transform input, the slot `(i1, ..., ir)` contains `sum_j a_(j, i1, ..., ir) 𝝵^j`, this
 /// this transform "puts" `a_(j, i1, ..., ir)` into the powerful-basis coefficient of `X1^(j * m1 + i1) X2^i2 ... Xr^ir`.
 /// 
 #[allow(unused)]

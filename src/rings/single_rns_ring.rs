@@ -368,22 +368,19 @@ impl<NumberRing, A, C> BXVCiphertextRing for SingleRNSRingBase<NumberRing, zn_64
             for k in 0..self.rns_base().len() {
                 let Zp = self.rns_base().at(k);
 
-                let actual_convolution = |lhs, rhs, out: &mut _| self.convolutions[k].compute_convolution_prepared(lhs, rhs, out, Zp);
-
                 unreduced_result.clear();
                 unreduced_result.resize_with(self.rank() * 2, || Zp.zero());
-                actual_convolution(lhs[0].data.at(k), rhs[0].data.at(k), &mut unreduced_result);
+                self.convolutions[k].compute_convolution_prepared(lhs[0].data.at(k), rhs[0].data.at(k), &mut unreduced_result, Zp);
                 self.reduce_modulus(k, &mut unreduced_result, self.as_matrix_mut(&mut result[0]).row_mut_at(k));
 
                 unreduced_result.clear();
                 unreduced_result.resize_with(self.rank() * 2, || Zp.zero());
-                actual_convolution(lhs[1].data.at(k), rhs[0].data.at(k), &mut unreduced_result);
-                actual_convolution(lhs[0].data.at(k), rhs[1].data.at(k), &mut unreduced_result);
+                self.convolutions[k].compute_convolution_inner_product_prepared([(lhs[1].data.at(k), lhs[0].data.at(k)), (rhs[0].data.at(k), rhs[1].data.at(k))].into_iter(), &mut unreduced_result, Zp);
                 self.reduce_modulus(k, &mut unreduced_result, self.as_matrix_mut(&mut result[1]).row_mut_at(k));
                 
                 unreduced_result.clear();
                 unreduced_result.resize_with(self.rank() * 2, || Zp.zero());
-                actual_convolution(lhs[1].data.at(k), rhs[1].data.at(k), &mut unreduced_result);
+                self.convolutions[k].compute_convolution_prepared(lhs[1].data.at(k), rhs[1].data.at(k), &mut unreduced_result, Zp);
                 self.reduce_modulus(k, &mut unreduced_result, self.as_matrix_mut(&mut result[2]).row_mut_at(k));
             }
             return result;

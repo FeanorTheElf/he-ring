@@ -35,7 +35,7 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 [[package]]
 name = "feanor-math"
 version = "3.0.0"
-source = "git+https://github.com/feanortheelf/feanor-math.git#6e004f5c9f30c78f5206b2d78a8d992f770f9b9b"
+source = "git+https://github.com/feanortheelf/feanor-math.git#b43a36cf91e3c70ecd09cf773aea9870b73f78c0"
 dependencies = [
  "append-only-vec",
  "atomicbox",
@@ -253,9 +253,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "2.0.86"
+version = "2.0.87"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e89275301d38033efb81a6e60e3497e734dfcc62571f2854bf4b16690398824c"
+checksum = "25aa4ce346d03a6dcd68dd8b4010bcb74e54e62c90c573f394c46eae99aba32d"
 dependencies = [
  "proc-macro2",
  "quote",
