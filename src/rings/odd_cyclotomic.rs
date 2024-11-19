@@ -415,13 +415,14 @@ impl<R, F, A> OddCyclotomicDecomposedNumberRing<R, F, A>
         let n = n_factorization.iter().copied().product::<i64>();
         let rank = euler_phi_squarefree(&n_factorization) as usize;
 
-        let poly_ring = SparsePolyRing::new(&Fp, "X");
+        let Fp_as_field = (&Fp).as_field().ok().unwrap();
+        let poly_ring = SparsePolyRing::new(Fp_as_field.clone(), "X");
         let cyclotomic_poly = cyclotomic_polynomial(&poly_ring, n as usize);
         assert_eq!(poly_ring.degree(&cyclotomic_poly).unwrap(), rank);
         let mut zeta_pow_rank = Vec::new();
         for (a, i) in poly_ring.terms(&cyclotomic_poly) {
             if i != rank {
-                zeta_pow_rank.push((i, Fp.negate(Fp.clone_el(a))));
+                zeta_pow_rank.push((i, Fp.negate(Fp_as_field.get_ring().unwrap_element(Fp_as_field.clone_el(a)))));
             }
         }
         zeta_pow_rank.sort_unstable_by_key(|(i, _)| *i);
@@ -595,7 +596,7 @@ impl<R, F, A> HENumberRingMod<R::Type> for CompositeCyclotomicDecomposedNumberRi
                 self.tensor_factor1.small_basis_to_mult_basis(SubvectorView::new(&mut data).restrict((i * self.tensor_factor1.rank())..((i + 1) * self.tensor_factor1.rank())));
             }
             for j in 0..self.tensor_factor1.rank() {
-                self.tensor_factor2.small_basis_to_mult_basis(SubvectorView::new(&mut data).restrict(j..).step_by(self.tensor_factor1.rank()));
+                self.tensor_factor2.small_basis_to_mult_basis(SubvectorView::new(&mut data).restrict(j..).step_by_view(self.tensor_factor1.rank()));
             }
         })
     }
@@ -605,7 +606,7 @@ impl<R, F, A> HENumberRingMod<R::Type> for CompositeCyclotomicDecomposedNumberRi
     {
         record_time!(GLOBAL_TIME_RECORDER, "CompositeCyclotomicDecomposedNumberRing::mult_basis_to_small_basis", || {
             for j in 0..self.tensor_factor1.rank() {
-                self.tensor_factor2.mult_basis_to_small_basis(SubvectorView::new(&mut data).restrict(j..).step_by(self.tensor_factor1.rank()));
+                self.tensor_factor2.mult_basis_to_small_basis(SubvectorView::new(&mut data).restrict(j..).step_by_view(self.tensor_factor1.rank()));
             }
             for i in 0..self.tensor_factor2.rank() {
                 self.tensor_factor1.mult_basis_to_small_basis(SubvectorView::new(&mut data).restrict((i * self.tensor_factor1.rank())..((i + 1) * self.tensor_factor1.rank())));
@@ -675,10 +676,18 @@ impl<R, F, A> HECyclotomicNumberRingMod<R::Type> for CompositeCyclotomicDecompos
         let mut tmp = Vec::with_capacity_in(self.rank(), &self.tensor_factor1.allocator);
         tmp.resize_with(self.rank(), || self.base_ring().zero());
         for i in 0..self.tensor_factor2.rank() {
-            self.tensor_factor1.permute_galois_action(SubvectorView::new(&src).restrict((i * self.tensor_factor1.rank())..((i + 1) * self.tensor_factor1.rank())), &mut tmp[(i * self.tensor_factor1.rank())..((i + 1) * self.tensor_factor1.rank())], g1);
+            self.tensor_factor1.permute_galois_action(
+                SubvectorView::new(&src).restrict((i * self.tensor_factor1.rank())..((i + 1) * self.tensor_factor1.rank())), 
+                &mut tmp[(i * self.tensor_factor1.rank())..((i + 1) * self.tensor_factor1.rank())], 
+                g1
+            );
         }
         for j in 0..self.tensor_factor1.rank() {
-            self.tensor_factor2.permute_galois_action(SubvectorView::new(&tmp[..]).restrict(j..).step_by(self.tensor_factor1.rank()), SubvectorView::new(&mut dst).restrict(j..).step_by(self.tensor_factor1.rank()), g2);
+            self.tensor_factor2.permute_galois_action(
+                SubvectorView::new(&tmp[..]).restrict(j..).step_by_view(self.tensor_factor1.rank()), 
+                SubvectorView::new(&mut dst).restrict(j..).step_by_view(self.tensor_factor1.rank()), 
+                g2
+            );
         }
     }
 }

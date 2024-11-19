@@ -16,6 +16,7 @@ use feanor_math::serialization::{DeserializeWithRing, SerializableElementRing, S
 use feanor_math::ordered::OrderedRingStore;
 use feanor_math::rings::finite::*;
 
+use feanor_math::specialization::{FiniteRingOperation, FiniteRingSpecializable};
 use serde::{de, Deserializer, Serializer};
 use serde_json::Number;
 
@@ -503,6 +504,17 @@ impl<'a, 'b, NumberRing, FpTy, A> Fn<(&'b [El<FpTy>],)> for WRTCanonicalBasisEle
 {
     extern "rust-call" fn call(&self, args: (&'b [El<FpTy>],)) -> Self::Output {
         self.ring.from_canonical_basis(args.0.iter().map(|x| self.ring.base_ring().clone_el(x)))
+    }
+}
+
+impl<NumberRing, FpTy, A> FiniteRingSpecializable for DecompositionRingBase<NumberRing, FpTy, A>
+    where NumberRing: HENumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        A: Allocator + Clone
+{
+    fn specialize<O: FiniteRingOperation<Self>>(op: O) -> Result<O::Output, ()> {
+        Ok(op.execute())
     }
 }
 

@@ -13,6 +13,8 @@ use feanor_math::ring::*;
 use feanor_math::rings::extension::*;
 use feanor_math::rings::finite::FiniteRing;
 use feanor_math::rings::zn::*;
+use feanor_math::specialization::FiniteRingOperation;
+use feanor_math::specialization::FiniteRingSpecializable;
 use zn_64::Zn;
 
 use crate::cyclotomic::CyclotomicRing;
@@ -367,7 +369,6 @@ pub struct GadgetProductLhsOperand<'a, NumberRing, A>
 {
     base: gadget_product::double_rns::GadgetProductLhsOperand<'a, NumberRing, A>
 }
-
 
 impl<NumberRing, A> BXVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, zn_64::Zn, A> 
     where NumberRing: HECyclotomicNumberRing<zn_64::Zn>,
@@ -773,6 +774,17 @@ impl<NumberRing, FpTy, A> FreeAlgebra for ManagedDoubleRNSRingBase<NumberRing, F
     {
         let result = self.base.from_canonical_basis(vec);
         return ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::DoubleRNS(result))) };
+    }
+}
+
+impl<NumberRing, FpTy, A> FiniteRingSpecializable for ManagedDoubleRNSRingBase<NumberRing, FpTy, A>
+    where NumberRing: HENumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        A: Allocator + Clone
+{
+    fn specialize<O: FiniteRingOperation<Self>>(op: O) -> Result<O::Output, ()> {
+        Ok(op.execute())
     }
 }
 

@@ -46,7 +46,7 @@ impl BootstrapperConfig {
     }
 }
 
-const DEFAULT_CONFIG: BootstrapperConfig = BootstrapperConfig {
+pub const DEFAULT_CONFIG: BootstrapperConfig = BootstrapperConfig {
     set_v: None
 };
 

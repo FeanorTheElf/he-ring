@@ -17,6 +17,8 @@ use feanor_math::rings::poly::dense_poly::DensePolyRing;
 use feanor_math::rings::zn::*;
 use feanor_math::homomorphism::*;
 use feanor_math::seq::*;
+use feanor_math::specialization::FiniteRingOperation;
+use feanor_math::specialization::FiniteRingSpecializable;
 use serde_json::Number;
 
 use crate::cyclotomic::CyclotomicRing;
@@ -732,6 +734,17 @@ impl<'a, 'b, NumberRing, FpTy, A> FnOnce<(&'b [El<zn_rns::Zn<FpTy, BigIntRing>>]
 
     extern "rust-call" fn call_once(self, args: (&'b [El<zn_rns::Zn<FpTy, BigIntRing>>],)) -> Self::Output {
         self.call(args)
+    }
+}
+
+impl<NumberRing, FpTy, A> FiniteRingSpecializable for DoubleRNSRingBase<NumberRing, FpTy, A> 
+    where NumberRing: HENumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        A: Allocator + Clone
+{
+    fn specialize<O: FiniteRingOperation<Self>>(op: O) -> Result<O::Output, ()> {
+        Ok(op.execute())
     }
 }
 

@@ -135,11 +135,11 @@ pub trait BXVCiphertextRing: FreeAlgebra<BaseRing = zn_rns::Zn<zn_64::Zn, BigInt
     /// # use feanor_math::algorithms::fft::cooley_tuckey::CooleyTuckeyFFT;
     /// # use he_ring::rings::double_rns_managed::*;
     /// # use he_ring::rings::bxv::*;
-    /// # use he_ring::rings::pow2_cyclotomic::Pow2CyclotomicDecomposableNumberRing;
+    /// # use he_ring::rings::pow2_cyclotomic::Pow2CyclotomicNumberRing;
     /// # use feanor_math::rings::extension::FreeAlgebraStore;
     /// # use feanor_math::seq::*;
     /// let rns_base = vec![Zn::new(17), Zn::new(97), Zn::new(113)];
-    /// let ring = ManagedDoubleRNSRingBase::new(Pow2CyclotomicDecomposableNumberRing::new(16), zn_rns::Zn::new(rns_base.clone(), BigIntRing::RING));
+    /// let ring = ManagedDoubleRNSRingBase::new(Pow2CyclotomicNumberRing::new(16), zn_rns::Zn::new(rns_base.clone(), BigIntRing::RING));
     /// let mut rng = oorandom::Rand64::new(1);
     /// // we have digits == rns_base.len(), so the gadget vector has entries exactly the "CRT unit vectors" ei with ei = 1 mod pi, ei = 0 mod pj for j != i
     /// let digits = 3;
@@ -168,7 +168,7 @@ pub trait BXVCiphertextRing: FreeAlgebra<BaseRing = zn_rns::Zn<zn_64::Zn, BigInt
     /// # use feanor_math::algorithms::fft::cooley_tuckey::CooleyTuckeyFFT;
     /// # use he_ring::rings::double_rns_managed::*;
     /// # use he_ring::rings::bxv::*;
-    /// # use he_ring::rings::pow2_cyclotomic::Pow2CyclotomicDecomposableNumberRing;
+    /// # use he_ring::rings::pow2_cyclotomic::Pow2CyclotomicNumberRing;
     /// # use feanor_math::rings::extension::FreeAlgebraStore;
     /// # use feanor_math::integer::BigIntRing;
     /// # use feanor_math::rings::finite::*;
@@ -177,7 +177,7 @@ pub trait BXVCiphertextRing: FreeAlgebra<BaseRing = zn_rns::Zn<zn_64::Zn, BigInt
     /// # use feanor_math::seq::*;
     /// // create the ring as before
     /// # let rns_base = vec![Zn::new(17), Zn::new(97), Zn::new(113)];
-    /// # let ring = ManagedDoubleRNSRingBase::new(Pow2CyclotomicDecomposableNumberRing::new(16), zn_rns::Zn::new(rns_base.clone(), BigIntRing::RING));
+    /// # let ring = ManagedDoubleRNSRingBase::new(Pow2CyclotomicNumberRing::new(16), zn_rns::Zn::new(rns_base.clone(), BigIntRing::RING));
     /// # let mut rng = oorandom::Rand64::new(1);
     /// # let digits = 3;
     /// let rhs = ring.random_element(|| rng.rand_u64());
@@ -219,7 +219,7 @@ pub trait BXVCiphertextRing: FreeAlgebra<BaseRing = zn_rns::Zn<zn_64::Zn, BigInt
     /// # use he_ring::rings::double_rns_managed::*;
     /// # use he_ring::rings::bxv::*;
     /// # use he_ring::cyclotomic::*;
-    /// # use he_ring::rings::pow2_cyclotomic::Pow2CyclotomicDecomposableNumberRing;
+    /// # use he_ring::rings::pow2_cyclotomic::Pow2CyclotomicNumberRing;
     /// # use feanor_math::rings::extension::FreeAlgebraStore;
     /// # use feanor_math::integer::BigIntRing;
     /// # use feanor_math::rings::finite::*;
@@ -228,7 +228,7 @@ pub trait BXVCiphertextRing: FreeAlgebra<BaseRing = zn_rns::Zn<zn_64::Zn, BigInt
     /// # use feanor_math::seq::*;
     /// // we are given `ring, x, gs, digits`
     /// # let rns_base = vec![Zn::new(17), Zn::new(97), Zn::new(113)];
-    /// # let ring = ManagedDoubleRNSRingBase::new(Pow2CyclotomicDecomposableNumberRing::new(16), zn_rns::Zn::new(rns_base.clone(), BigIntRing::RING));
+    /// # let ring = ManagedDoubleRNSRingBase::new(Pow2CyclotomicNumberRing::new(16), zn_rns::Zn::new(rns_base.clone(), BigIntRing::RING));
     /// # let digits = 3;
     /// # let x = ring.canonical_gen();
     /// # let gs = vec![ring.cyclotomic_index_ring().one(), ring.cyclotomic_index_ring().int_hom().map(-1)];
@@ -247,7 +247,7 @@ pub trait BXVCiphertextRing: FreeAlgebra<BaseRing = zn_rns::Zn<zn_64::Zn, BigInt
     /// # use he_ring::rings::double_rns_managed::*;
     /// # use he_ring::rings::bxv::*;
     /// # use he_ring::cyclotomic::*;
-    /// # use he_ring::rings::pow2_cyclotomic::Pow2CyclotomicDecomposableNumberRing;
+    /// # use he_ring::rings::pow2_cyclotomic::Pow2CyclotomicNumberRing;
     /// # use feanor_math::rings::extension::FreeAlgebraStore;
     /// # use feanor_math::integer::BigIntRing;
     /// # use feanor_math::rings::finite::*;
@@ -255,7 +255,7 @@ pub trait BXVCiphertextRing: FreeAlgebra<BaseRing = zn_rns::Zn<zn_64::Zn, BigInt
     /// # use feanor_math::primitive_int::StaticRing;
     /// # use feanor_math::seq::*;
     /// # let rns_base = vec![Zn::new(17), Zn::new(97), Zn::new(113)];
-    /// # let ring = ManagedDoubleRNSRingBase::new(Pow2CyclotomicDecomposableNumberRing::new(16), zn_rns::Zn::new(rns_base.clone(), BigIntRing::RING));
+    /// # let ring = ManagedDoubleRNSRingBase::new(Pow2CyclotomicNumberRing::new(16), zn_rns::Zn::new(rns_base.clone(), BigIntRing::RING));
     /// # let digits = 3;
     /// # let x = ring.canonical_gen();
     /// # let gs = vec![ring.cyclotomic_index_ring().one(), ring.cyclotomic_index_ring().int_hom().map(-1)];

@@ -68,6 +68,7 @@ pub struct TimeRecorderEntry {
 }
 
 impl TimeRecorderEntry {
+
     fn count(&self) -> u64 {
         self.calls.load(std::sync::atomic::Ordering::Relaxed)
     }
@@ -138,22 +139,9 @@ impl TimeRecorder {
 
     fn enter(&self, key: TimeRecorderKey) {
         self.stack.get_or_default().borrow_mut().push(key);
-        // print!("enter ");
-        // let stack = self.stack.get_or_default().borrow();
-        // for i in 0..stack.len() {
-        //     print!("::{}", stack[i].description);
-        // }
-        // println!();
     }
 
     fn leave(&self, key: TimeRecorderKey) {
-        // print!("exit ");
-        // let stack = self.stack.get_or_default().borrow();
-        // for i in 0..stack.len() {
-        //     print!("::{}", stack[i].description);
-        // }
-        // println!();
-        // drop(stack);
         assert!(self.stack.get_or_default().borrow_mut().pop().unwrap() == key);
     }
 
@@ -177,6 +165,7 @@ impl TimeRecorder {
         }
     }
 
+    #[allow(dead_code)]
     fn print_timings(&self) {
         let counters = self.counters.write().unwrap();
         let counters_iter = || counters.iter().filter(|(_, entry)| entry.count() > 0);
@@ -200,6 +189,7 @@ impl TimeRecorder {
         }
     }
 
+    #[allow(dead_code)]
     fn clear(&self) {
         let mut counters = self.counters.write().unwrap();
         for (_, v) in counters.iter_mut() {

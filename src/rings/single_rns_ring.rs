@@ -9,6 +9,7 @@ use feanor_math::algorithms::matmul::ComputeInnerProduct;
 use feanor_math::algorithms::poly_gcd::factor;
 use feanor_math::iters::{multi_cartesian_product, MultiProduct};
 use feanor_math::primitive_int::{StaticRing, StaticRingBase};
+use feanor_math::specialization::{FiniteRingOperation, FiniteRingSpecializable};
 use feanor_math::{assert_el_eq, ring::*};
 use feanor_math::homomorphism::*;
 use feanor_math::integer::*;
@@ -600,9 +601,9 @@ impl<NumberRing, FpTy, A, C> RingBase for SingleRNSRingBase<NumberRing, FpTy, A,
     fn is_noetherian(&self) -> bool { true }
     fn is_approximate(&self) -> bool { false }
 
-    fn dbg<'a>(&self, value: &Self::Element, out: &mut std::fmt::Formatter<'a>) -> std::fmt::Result {
+    fn dbg_within<'a>(&self, value: &Self::Element, out: &mut std::fmt::Formatter<'a>, env: EnvBindingStrength) -> std::fmt::Result {
         let poly_ring = DensePolyRing::new(self.base_ring(), "X");
-        poly_ring.get_ring().dbg(&RingRef::new(self).poly_repr(&poly_ring, value, self.base_ring().identity()), out)
+        poly_ring.get_ring().dbg_within(&RingRef::new(self).poly_repr(&poly_ring, value, self.base_ring().identity()), out, env)
     }
 
     fn characteristic<I: IntegerRingStore + Copy>(&self, ZZ: I) -> Option<El<I>>
@@ -780,6 +781,18 @@ impl<'a, 'b, NumberRing, FpTy, A, C> FnOnce<(&'b [El<zn_rns::Zn<FpTy, BigIntRing
 
     extern "rust-call" fn call_once(self, args: (&'b [El<zn_rns::Zn<FpTy, BigIntRing>>],)) -> Self::Output {
         self.call(args)
+    }
+}
+
+impl<NumberRing, FpTy, A, C> FiniteRingSpecializable for SingleRNSRingBase<NumberRing, FpTy, A, C> 
+    where NumberRing: HECyclotomicNumberRing<FpTy>,
+        FpTy: RingStore + Clone,
+        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase> + SelfIso,
+        A: Allocator + Clone,
+        C: ConvolutionAlgorithm<FpTy::Type>
+{
+    fn specialize<O: FiniteRingOperation<Self>>(op: O) -> Result<O::Output, ()> {
+        Ok(op.execute())
     }
 }
 
