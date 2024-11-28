@@ -346,7 +346,7 @@ pub struct Pow2BFV {
 
 impl BFVParams for Pow2BFV {
 
-    type CiphertextRing = ManagedDoubleRNSRingBase<Pow2CyclotomicNumberRing<UsedNegacyclicNTT>, zn_64::Zn, CiphertextAllocator>;
+    type CiphertextRing = ManagedDoubleRNSRingBase<Pow2CyclotomicNumberRing<UsedNegacyclicNTT>, CiphertextAllocator>;
 
     fn number_ring(&self) -> Pow2CyclotomicNumberRing<UsedNegacyclicNTT> {
         Pow2CyclotomicNumberRing::new_with(2 << self.log2_N)
@@ -360,10 +360,10 @@ impl BFVParams for Pow2BFV {
         let log2_q = self.ciphertext_modulus_bits();
         let number_ring = self.number_ring();
 
-        let mut C_rns_base = sample_primes(log2_q.start, log2_q.end, 56, |bound| <_ as HENumberRing<Zn>>::largest_suitable_prime(&number_ring, int_cast(bound, ZZ, ZZbig)).map(|p| int_cast(p, ZZbig, ZZ))).unwrap();
+        let mut C_rns_base = sample_primes(log2_q.start, log2_q.end, 56, |bound| <_ as HENumberRing>::largest_suitable_prime(&number_ring, int_cast(bound, ZZ, ZZbig)).map(|p| int_cast(p, ZZbig, ZZ))).unwrap();
         C_rns_base.sort_unstable_by(|l, r| ZZbig.cmp(l, r));
 
-        let mut Cmul_rns_base = extend_sampled_primes(&C_rns_base, log2_q.end * 2, log2_q.end * 2 + 57, 57, |bound| <_ as HENumberRing<Zn>>::largest_suitable_prime(&number_ring, int_cast(bound, ZZ, ZZbig)).map(|p| int_cast(p, ZZbig, ZZ))).unwrap();
+        let mut Cmul_rns_base = extend_sampled_primes(&C_rns_base, log2_q.end * 2, log2_q.end * 2 + 57, 57, |bound| <_ as HENumberRing>::largest_suitable_prime(&number_ring, int_cast(bound, ZZ, ZZbig)).map(|p| int_cast(p, ZZbig, ZZ))).unwrap();
         assert!(ZZbig.is_gt(&Cmul_rns_base[Cmul_rns_base.len() - 1], &C_rns_base[C_rns_base.len() - 1]));
         Cmul_rns_base.sort_unstable_by(|l, r| ZZbig.cmp(l, r));
 
@@ -389,7 +389,7 @@ pub struct CompositeBFV {
 
 impl BFVParams for CompositeBFV {
 
-    type CiphertextRing = ManagedDoubleRNSRingBase<CompositeCyclotomicNumberRing, zn_64::Zn, CiphertextAllocator>;
+    type CiphertextRing = ManagedDoubleRNSRingBase<CompositeCyclotomicNumberRing, CiphertextAllocator>;
 
     fn ciphertext_modulus_bits(&self) -> Range<usize> {
         self.log2_q_min..self.log2_q_max
@@ -403,10 +403,10 @@ impl BFVParams for CompositeBFV {
         let log2_q = self.ciphertext_modulus_bits();
         let number_ring = self.number_ring();
 
-        let mut C_rns_base = sample_primes(log2_q.start, log2_q.end, 56, |bound| <_ as HENumberRing<Zn>>::largest_suitable_prime(&number_ring, int_cast(bound, ZZ, ZZbig)).map(|p| int_cast(p, ZZbig, ZZ))).unwrap();
+        let mut C_rns_base = sample_primes(log2_q.start, log2_q.end, 56, |bound| <_ as HENumberRing>::largest_suitable_prime(&number_ring, int_cast(bound, ZZ, ZZbig)).map(|p| int_cast(p, ZZbig, ZZ))).unwrap();
         C_rns_base.sort_unstable_by(|l, r| ZZbig.cmp(l, r));
 
-        let mut Cmul_rns_base = extend_sampled_primes(&C_rns_base, log2_q.end * 2, log2_q.end * 2 + 57, 57, |bound| <_ as HENumberRing<Zn>>::largest_suitable_prime(&number_ring, int_cast(bound, ZZ, ZZbig)).map(|p| int_cast(p, ZZbig, ZZ))).unwrap();
+        let mut Cmul_rns_base = extend_sampled_primes(&C_rns_base, log2_q.end * 2, log2_q.end * 2 + 57, 57, |bound| <_ as HENumberRing>::largest_suitable_prime(&number_ring, int_cast(bound, ZZ, ZZbig)).map(|p| int_cast(p, ZZbig, ZZ))).unwrap();
         assert!(ZZbig.is_gt(&Cmul_rns_base[Cmul_rns_base.len() - 1], &C_rns_base[C_rns_base.len() - 1]));
         Cmul_rns_base.sort_unstable_by(|l, r| ZZbig.cmp(l, r));
 
@@ -432,7 +432,7 @@ pub struct CompositeSingleRNSBFV {
 
 impl BFVParams for CompositeSingleRNSBFV {
 
-    type CiphertextRing = SingleRNSRingBase<CompositeCyclotomicNumberRing, Zn, CiphertextAllocator, UsedConvolution>;
+    type CiphertextRing = SingleRNSRingBase<CompositeCyclotomicNumberRing, CiphertextAllocator, UsedConvolution>;
 
     fn ciphertext_modulus_bits(&self) -> Range<usize> {
         self.log2_q_min..self.log2_q_max
@@ -446,18 +446,18 @@ impl BFVParams for CompositeSingleRNSBFV {
         let log2_q = self.ciphertext_modulus_bits();
         let number_ring = self.number_ring();
 
-        let mut C_rns_base = sample_primes(log2_q.start, log2_q.end, 56, |bound| <_ as HENumberRing<Zn>>::largest_suitable_prime(&number_ring, int_cast(bound, ZZ, ZZbig)).map(|p| int_cast(p, ZZbig, ZZ))).unwrap();
+        let mut C_rns_base = sample_primes(log2_q.start, log2_q.end, 56, |bound| <_ as HENumberRing>::largest_suitable_prime(&number_ring, int_cast(bound, ZZ, ZZbig)).map(|p| int_cast(p, ZZbig, ZZ))).unwrap();
         C_rns_base.sort_unstable_by(|l, r| ZZbig.cmp(l, r));
 
-        let mut Cmul_rns_base = extend_sampled_primes(&C_rns_base, log2_q.end * 2, log2_q.end * 2 + 57, 57, |bound| <_ as HENumberRing<Zn>>::largest_suitable_prime(&number_ring, int_cast(bound, ZZ, ZZbig)).map(|p| int_cast(p, ZZbig, ZZ))).unwrap();
+        let mut Cmul_rns_base = extend_sampled_primes(&C_rns_base, log2_q.end * 2, log2_q.end * 2 + 57, 57, |bound| <_ as HENumberRing>::largest_suitable_prime(&number_ring, int_cast(bound, ZZ, ZZbig)).map(|p| int_cast(p, ZZbig, ZZ))).unwrap();
         assert!(ZZbig.is_gt(&Cmul_rns_base[Cmul_rns_base.len() - 1], &C_rns_base[C_rns_base.len() - 1]));
         Cmul_rns_base.sort_unstable_by(|l, r| ZZbig.cmp(l, r));
 
-        let C = SingleRNSRingBase::<_, _, _, UsedConvolution>::new(
+        let C = SingleRNSRingBase::<_, _, UsedConvolution>::new(
             self.number_ring(),
             zn_rns::Zn::new(C_rns_base.iter().map(|p| Zn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect(), ZZbig)
         );
-        let Cmul = SingleRNSRingBase::<_, _, _, UsedConvolution>::new(
+        let Cmul = SingleRNSRingBase::<_, _, UsedConvolution>::new(
             number_ring,
             zn_rns::Zn::new(Cmul_rns_base.iter().map(|p| Zn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect(), ZZbig)
         );
@@ -466,8 +466,8 @@ impl BFVParams for CompositeSingleRNSBFV {
 }
 
 pub fn coeff_repr<Params, NumberRing, A>(C: &CiphertextRing<Params>, ct: Ciphertext<Params>) -> Ciphertext<Params>
-    where Params: BFVParams<CiphertextRing = ManagedDoubleRNSRingBase<NumberRing, zn_64::Zn, A>>,
-        NumberRing: HECyclotomicNumberRing<zn_64::Zn>,
+    where Params: BFVParams<CiphertextRing = ManagedDoubleRNSRingBase<NumberRing, A>>,
+        NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone
 {
     C.get_ring().force_coeff_repr(&ct.0);

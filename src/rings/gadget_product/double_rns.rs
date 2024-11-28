@@ -36,7 +36,7 @@ type UsedBaseConversion<A> = lift::AlmostExactBaseConversion<A>;
 /// 
 #[allow(private_interfaces)]
 pub enum GadgetProductRhsOperand<'a, NumberRing, A = Global> 
-    where NumberRing: HENumberRing<Zn>,
+    where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
     LKSSStyle(LKSSGadgetProductRhsOperand<'a, NumberRing, A>),
@@ -44,7 +44,7 @@ pub enum GadgetProductRhsOperand<'a, NumberRing, A = Global>
 }
 
 impl<'a, NumberRing, A> GadgetProductRhsOperand<'a, NumberRing, A> 
-    where NumberRing: HENumberRing<Zn>,
+    where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
     pub fn gadget_vector<'b>(&'b self) -> &'b [Range<usize>] {
@@ -54,14 +54,14 @@ impl<'a, NumberRing, A> GadgetProductRhsOperand<'a, NumberRing, A>
         }
     }
 
-    pub fn set_rns_factor(&mut self, i: usize, el: CoeffEl<NumberRing, Zn, A>) {
+    pub fn set_rns_factor(&mut self, i: usize, el: CoeffEl<NumberRing, A>) {
         record_time!(GLOBAL_TIME_RECORDER, "double_rns::GadgetProductRhsOperand::set_rns_factor", || match self {
             GadgetProductRhsOperand::LKSSStyle(op) => op.set_rns_factor(i, el),
             GadgetProductRhsOperand::Naive(op) => op.set_rns_factor(i, el)
         })
     }
 
-    pub fn create_empty<const LOG: bool>(ring: &'a DoubleRNSRingBase<NumberRing, Zn, A>, digits: usize) -> Self {
+    pub fn create_empty<const LOG: bool>(ring: &'a DoubleRNSRingBase<NumberRing, A>, digits: usize) -> Self {
         let output_moduli_count = ring.get_gadget_product_modulo_count(digits);
         // if the RNS base is very short, we don't want to do LKSS style gadget products, mainly
         // since this avoids the treatment of complicated edge cases, but we also don't expect much 
@@ -86,19 +86,19 @@ impl<'a, NumberRing, A> GadgetProductRhsOperand<'a, NumberRing, A>
 /// Stores ring elements in double-RNS form that represent noisy approximations to `g[i]`.
 /// 
 struct NaiveGadgetProductRhsOperand<'a, NumberRing, A = Global> 
-    where NumberRing: HENumberRing<Zn>,
+    where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
-    ring: &'a DoubleRNSRingBase<NumberRing, Zn, A>,
-    operands: Vec<El<DoubleRNSRing<NumberRing, Zn, A>>>,
+    ring: &'a DoubleRNSRingBase<NumberRing, A>,
+    operands: Vec<El<DoubleRNSRing<NumberRing, A>>>,
     digits: Vec<Range<usize>>
 }
 
 impl<'a, NumberRing, A> NaiveGadgetProductRhsOperand<'a, NumberRing, A> 
-    where NumberRing: HENumberRing<Zn>,
+    where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
-    fn create_empty(ring: &'a DoubleRNSRingBase<NumberRing, Zn, A>, digits: usize) -> Self {
+    fn create_empty(ring: &'a DoubleRNSRingBase<NumberRing, A>, digits: usize) -> Self {
         let mut operands = Vec::with_capacity(digits);
         operands.extend((0..digits).map(|_| ring.zero()));
         return NaiveGadgetProductRhsOperand {
@@ -112,7 +112,7 @@ impl<'a, NumberRing, A> NaiveGadgetProductRhsOperand<'a, NumberRing, A>
         &self.digits
     }
 
-    fn set_rns_factor(&mut self, i: usize, el: CoeffEl<NumberRing, Zn, A>) {
+    fn set_rns_factor(&mut self, i: usize, el: CoeffEl<NumberRing, A>) {
         self.operands[i] = self.ring.do_fft(el);
     }
 }
@@ -127,11 +127,11 @@ impl<'a, NumberRing, A> NaiveGadgetProductRhsOperand<'a, NumberRing, A>
 /// uniquely specified by a shorter RNS base.
 /// 
 struct LKSSGadgetProductRhsOperand<'a, NumberRing, A = Global> 
-    where NumberRing: HENumberRing<Zn>,
+    where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
     shortened_rns_base: zn_rns::Zn<Zn, BigIntRing>,
-    ring: &'a DoubleRNSRingBase<NumberRing, Zn, A>,
+    ring: &'a DoubleRNSRingBase<NumberRing, A>,
     /// the `i`-th entry contains the gadget-decomposed approximation to `g[i]`, as returned
     /// by [`gadget_decompose()`]
     operands: Vec<Vec<Vec<ZnEl, A>>>,
@@ -140,7 +140,7 @@ struct LKSSGadgetProductRhsOperand<'a, NumberRing, A = Global>
 }
 
 impl<'a, NumberRing, A> LKSSGadgetProductRhsOperand<'a, NumberRing, A> 
-    where NumberRing: HENumberRing<Zn>,
+    where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
     fn at(&self, i: usize, j: usize, k: usize, l: usize) -> &ZnEl {
@@ -151,7 +151,7 @@ impl<'a, NumberRing, A> LKSSGadgetProductRhsOperand<'a, NumberRing, A>
         &self.operands[i][j][k * self.ring.rank() + l]
     }
 
-    fn create_empty(ring: &'a DoubleRNSRingBase<NumberRing, Zn, A>, digits: usize, shortened_rns_base_len: usize) -> Self {
+    fn create_empty(ring: &'a DoubleRNSRingBase<NumberRing, A>, digits: usize, shortened_rns_base_len: usize) -> Self {
         let shortened_rns_base = zn_rns::Zn::<Zn, BigIntRing>::new(ring.rns_base().as_iter().skip(ring.rns_base().len() - shortened_rns_base_len).cloned().collect(), BigIntRing::RING);
         let mut operands = Vec::with_capacity(digits);
         operands.extend((0..digits).map(|_| Vec::new()));
@@ -173,7 +173,7 @@ impl<'a, NumberRing, A> LKSSGadgetProductRhsOperand<'a, NumberRing, A>
         &self.digits
     }
 
-    fn set_rns_factor(&mut self, i: usize, el: CoeffEl<NumberRing, Zn, A>) {
+    fn set_rns_factor(&mut self, i: usize, el: CoeffEl<NumberRing, A>) {
         self.operands[i] = self.ring.gadget_decompose(el, &self.digits, self.shortened_rns_base.get_ring().len());
     }
 }
@@ -185,7 +185,7 @@ impl<'a, NumberRing, A> LKSSGadgetProductRhsOperand<'a, NumberRing, A>
 /// 
 #[allow(private_interfaces)]
 pub enum GadgetProductLhsOperand<'a, NumberRing, A = Global> 
-    where NumberRing: HENumberRing<Zn>,
+    where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
     LKSSStyle(LKSSGadgetProductLhsOperand<'a, NumberRing, A>),
@@ -193,10 +193,10 @@ pub enum GadgetProductLhsOperand<'a, NumberRing, A = Global>
 }
 
 impl<'a, NumberRing, A> GadgetProductLhsOperand<'a, NumberRing, A>
-    where NumberRing: HENumberRing<Zn>,
+    where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
-    pub fn create_from_element(ring: &DoubleRNSRingBase<NumberRing, Zn, A>, digits: usize, el: CoeffEl<NumberRing, RingValue<ZnBase>, A>) -> Self {
+    pub fn create_from_element(ring: &DoubleRNSRingBase<NumberRing, A>, digits: usize, el: CoeffEl<NumberRing, A>) -> Self {
         record_time!(GLOBAL_TIME_RECORDER, "double_rns::GadgetProductLhsOperand::create_from_element", || {
             let output_moduli_count = ring.get_gadget_product_modulo_count(digits);
             if ring.use_lkss_gadget_product(digits) {
@@ -209,11 +209,11 @@ impl<'a, NumberRing, A> GadgetProductLhsOperand<'a, NumberRing, A>
 }
 
 impl<'a, NumberRing, A> GadgetProductLhsOperand<'a, NumberRing, A>
-    where NumberRing: HECyclotomicNumberRing<Zn>,
-        DoubleRNSRingBase<NumberRing, Zn, A>: CyclotomicRing,
+    where NumberRing: HECyclotomicNumberRing,
+        DoubleRNSRingBase<NumberRing, A>: CyclotomicRing,
         A: Allocator + Clone
 {
-    pub fn apply_galois_action(&self, ring: &DoubleRNSRingBase<NumberRing, Zn, A>, g: ZnEl) -> Self {
+    pub fn apply_galois_action(&self, ring: &DoubleRNSRingBase<NumberRing, A>, g: ZnEl) -> Self {
         record_time!(GLOBAL_TIME_RECORDER, "double_rns::GadgetProductLhsOperand::apply_galois_action", || {
             match self {
                 GadgetProductLhsOperand::LKSSStyle(lkss_lhs_op) => GadgetProductLhsOperand::LKSSStyle(lkss_lhs_op.apply_galois_action(ring, g)),
@@ -230,19 +230,19 @@ impl<'a, NumberRing, A> GadgetProductLhsOperand<'a, NumberRing, A>
 /// such that `x = sum_i g[i] xi`.
 /// 
 struct NaiveGadgetProductLhsOperand<'a, NumberRing, A> 
-    where NumberRing: HENumberRing<Zn>,
+    where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
-    ring: PhantomData<&'a DoubleRNSRingBase<NumberRing, Zn, A>>,
-    operands: Vec<El<DoubleRNSRing<NumberRing, Zn, A>>>
+    ring: PhantomData<&'a DoubleRNSRingBase<NumberRing, A>>,
+    operands: Vec<El<DoubleRNSRing<NumberRing, A>>>
 }
 
 impl<'a, NumberRing, A> NaiveGadgetProductLhsOperand<'a, NumberRing, A>
-    where NumberRing: HECyclotomicNumberRing<Zn>,
-        DoubleRNSRingBase<NumberRing, Zn, A>: CyclotomicRing,
+    where NumberRing: HECyclotomicNumberRing,
+        DoubleRNSRingBase<NumberRing, A>: CyclotomicRing,
         A: Allocator + Clone
 {
-    fn apply_galois_action(&self, ring: &DoubleRNSRingBase<NumberRing, Zn, A>, g: ZnEl) -> Self {
+    fn apply_galois_action(&self, ring: &DoubleRNSRingBase<NumberRing, A>, g: ZnEl) -> Self {
         let mut result = Vec::with_capacity_in(self.operands.len(), self.operands.allocator().clone());
         result.extend(self.operands.iter().map(|el| ring.apply_galois_action(el, g)));
         return NaiveGadgetProductLhsOperand {
@@ -253,10 +253,10 @@ impl<'a, NumberRing, A> NaiveGadgetProductLhsOperand<'a, NumberRing, A>
 }
 
 impl<'a, NumberRing, A> NaiveGadgetProductLhsOperand<'a, NumberRing, A>
-    where NumberRing: HENumberRing<Zn>,
+    where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
-    fn new_from_element(ring: &DoubleRNSRingBase<NumberRing, Zn, A>, el: CoeffEl<NumberRing, Zn, A>, digits: usize) -> Self {
+    fn new_from_element(ring: &DoubleRNSRingBase<NumberRing, A>, el: CoeffEl<NumberRing, A>, digits: usize) -> Self {
         let digits = prime_factor_groups(ring.rns_base().len(), digits).iter().collect::<Vec<_>>();
         let mut data = Vec::with_capacity(ring.rns_base().len());
         for part in ring.gadget_decompose(el, &digits, ring.rns_base().len()).into_iter() {
@@ -282,20 +282,20 @@ impl<'a, NumberRing, A> NaiveGadgetProductLhsOperand<'a, NumberRing, A>
 /// RNS components.
 /// 
 struct LKSSGadgetProductLhsOperand<'a, NumberRing, A> 
-    where NumberRing: HENumberRing<Zn>,
+    where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
     output_moduli_count: usize,
-    ring: PhantomData<&'a DoubleRNSRingBase<NumberRing, Zn, A>>,
+    ring: PhantomData<&'a DoubleRNSRingBase<NumberRing, A>>,
     operands: Vec<Vec<ZnEl, A>>
 }
 
 
 impl<'a, NumberRing, A> LKSSGadgetProductLhsOperand<'a, NumberRing, A>
-    where NumberRing: HENumberRing<Zn>,
+    where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
-    fn new_from_element(ring: &DoubleRNSRingBase<NumberRing, Zn, A>, el: CoeffEl<NumberRing, Zn, A>, digits: usize, output_moduli_count: usize) -> Self {
+    fn new_from_element(ring: &DoubleRNSRingBase<NumberRing, A>, el: CoeffEl<NumberRing, A>, digits: usize, output_moduli_count: usize) -> Self {
         let digits = prime_factor_groups(ring.rns_base().len(), digits).iter().collect::<Vec<_>>();
         LKSSGadgetProductLhsOperand {
             ring: PhantomData,
@@ -306,18 +306,18 @@ impl<'a, NumberRing, A> LKSSGadgetProductLhsOperand<'a, NumberRing, A>
 }
 
 impl<'a, NumberRing, A> LKSSGadgetProductLhsOperand<'a, NumberRing, A>
-    where NumberRing: HECyclotomicNumberRing<Zn>,
-        DoubleRNSRingBase<NumberRing, Zn, A>: CyclotomicRing,
+    where NumberRing: HECyclotomicNumberRing,
+        DoubleRNSRingBase<NumberRing, A>: CyclotomicRing,
         A: Allocator + Clone
 {
-    fn apply_galois_action(&self, ring: &DoubleRNSRingBase<NumberRing, Zn, A>, g: ZnEl) -> Self {
+    fn apply_galois_action(&self, ring: &DoubleRNSRingBase<NumberRing, A>, g: ZnEl) -> Self {
         let mut result_operands = Vec::with_capacity(self.operands.len());
         for operand in self.operands.iter() {
             let mut result_op = Vec::with_capacity_in(operand.len(), operand.allocator().clone());
             result_op.resize_with(operand.len(), || ring.rns_base().at(0).zero());
             for k in 0..self.output_moduli_count {
                 let ring_i = ring.rns_base().len() - self.output_moduli_count + k;
-                <_ as HECyclotomicNumberRingMod<_>>::permute_galois_action(
+                <_ as HECyclotomicNumberRingMod>::permute_galois_action(
                     <NumberRing::DecomposedAsCyclotomic>::from_ref(ring.ring_decompositions().at(ring_i)), 
                     &operand[(k * ring.rank())..((k + 1) * ring.rank())], &mut result_op[(k * ring.rank())..((k + 1) * ring.rank())], 
                     g
@@ -351,8 +351,8 @@ pub(super) fn prime_factor_groups<'a>(rns_base_len: usize, digits: usize) -> imp
     });
 }
 
-impl<NumberRing, A> DoubleRNSRingBase<NumberRing, Zn, A> 
-    where NumberRing: HENumberRing<Zn>,
+impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A> 
+    where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
     ///
@@ -368,7 +368,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, Zn, A>
     /// 
     /// The order of the fourier coefficients is the same as specified by the corresponding [`GeneralizedFFT`].
     /// 
-    fn gadget_decompose(&self, el: CoeffEl<NumberRing, Zn, A>, digits: &[Range<usize>], output_moduli_count: usize) -> Vec<Vec<ZnEl, A>> {
+    fn gadget_decompose(&self, el: CoeffEl<NumberRing, A>, digits: &[Range<usize>], output_moduli_count: usize) -> Vec<Vec<ZnEl, A>> {
         let ZZbig = BigIntRing::RING;
         let digit_bases = digits.iter().map(|range| zn_rns::Zn::new(range.clone().map(|i| self.rns_base().at(i)).collect::<Vec<_>>(), ZZbig)).collect::<Vec<_>>();
 
@@ -429,7 +429,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, Zn, A>
         self.get_gadget_product_modulo_count(digits) + 1 < digits && !cfg!(feature = "force_naive_gadget_product")
     }
     
-    pub fn gadget_product_ntt(&self, lhs: &GadgetProductLhsOperand<NumberRing, A>, rhs: &GadgetProductRhsOperand<NumberRing, A>) -> DoubleRNSEl<NumberRing, Zn, A> {
+    pub fn gadget_product_ntt(&self, lhs: &GadgetProductLhsOperand<NumberRing, A>, rhs: &GadgetProductRhsOperand<NumberRing, A>) -> DoubleRNSEl<NumberRing, A> {
         match (lhs, rhs) {
             (GadgetProductLhsOperand::LKSSStyle(lhs), GadgetProductRhsOperand::LKSSStyle(rhs)) => self.do_fft(self.gadget_product_lkss(lhs, rhs)),
             (GadgetProductLhsOperand::Naive(lhs), GadgetProductRhsOperand::Naive(rhs)) => self.gadget_product_naive(lhs, rhs),
@@ -437,7 +437,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, Zn, A>
         }
     }
 
-    fn gadget_product_naive(&self, lhs: &NaiveGadgetProductLhsOperand<NumberRing, A>, rhs: &NaiveGadgetProductRhsOperand<NumberRing, A>) -> El<DoubleRNSRing<NumberRing, Zn, A>> {
+    fn gadget_product_naive(&self, lhs: &NaiveGadgetProductLhsOperand<NumberRing, A>, rhs: &NaiveGadgetProductRhsOperand<NumberRing, A>) -> El<DoubleRNSRing<NumberRing, A>> {
         record_time!(GLOBAL_TIME_RECORDER, "DoubleRNSRing::gadget_product_naive", || {
             let digits = &rhs.digits;
             assert_eq!(lhs.operands.len(), digits.len());
@@ -449,7 +449,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, Zn, A>
         })
     }
 
-    fn gadget_product_lkss(&self, lhs: &LKSSGadgetProductLhsOperand<NumberRing, A>, rhs: &LKSSGadgetProductRhsOperand<NumberRing, A>) -> CoeffEl<NumberRing, Zn, A> {
+    fn gadget_product_lkss(&self, lhs: &LKSSGadgetProductLhsOperand<NumberRing, A>, rhs: &LKSSGadgetProductRhsOperand<NumberRing, A>) -> CoeffEl<NumberRing, A> {
         record_time!(GLOBAL_TIME_RECORDER, "DoubleRNSRing::gadget_product_lkss", || {
             assert_eq!(lhs.output_moduli_count, rhs.shortened_rns_base.get_ring().len());
             let digits = &rhs.digits;
@@ -504,7 +504,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, Zn, A>
     /// 
     /// The implementation uses the KLSS-style algorithm [https://ia.cr/2023/413].
     /// 
-    pub fn gadget_product_coeff(&self, lhs: &GadgetProductLhsOperand<NumberRing, A>, rhs: &GadgetProductRhsOperand<NumberRing, A>) -> CoeffEl<NumberRing, Zn, A> {
+    pub fn gadget_product_coeff(&self, lhs: &GadgetProductLhsOperand<NumberRing, A>, rhs: &GadgetProductRhsOperand<NumberRing, A>) -> CoeffEl<NumberRing, A> {
         match (lhs, rhs) {
             (GadgetProductLhsOperand::LKSSStyle(lhs), GadgetProductRhsOperand::LKSSStyle(rhs)) => self.gadget_product_lkss(lhs, rhs),
             (GadgetProductLhsOperand::Naive(lhs), GadgetProductRhsOperand::Naive(rhs)) => self.undo_fft(self.gadget_product_naive(lhs, rhs)),

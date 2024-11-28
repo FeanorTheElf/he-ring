@@ -131,10 +131,10 @@ impl Trace {
     }
 }
 
-impl<NumberRing, FpTy, A> DecompositionRingBase<NumberRing, FpTy, A> 
-    where NumberRing: HECyclotomicNumberRing<FpTy>,
-        FpTy: RingStore + Clone,
-        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+impl<NumberRing, ZnTy, A> DecompositionRingBase<NumberRing, ZnTy, A> 
+    where NumberRing: HECyclotomicNumberRing,
+        ZnTy: RingStore + Clone,
+        ZnTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
 {
     pub fn compute_trace(&self, el: &<Self as RingBase>::Element, trace: &Trace) -> <Self as RingBase>::Element {

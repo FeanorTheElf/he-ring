@@ -27,17 +27,17 @@ use crate::IsEq;
 type UsedBaseConversion<A> = lift::AlmostExactBaseConversion<A>;
 
 pub struct GadgetProductRhsOperand<'a, NumberRing, A, C> 
-    where NumberRing: HECyclotomicNumberRing<Zn>,
+    where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
         C: PreparedConvolutionAlgorithm<ZnBase>
 {
-    ring: &'a SingleRNSRingBase<NumberRing, Zn, A, C>,
+    ring: &'a SingleRNSRingBase<NumberRing, A, C>,
     data: Vec<Option<Vec<C::PreparedConvolutionOperand, A>>>,
     digits: Vec<Range<usize>>
 }
 
 impl<'a, NumberRing, A, C> GadgetProductRhsOperand<'a, NumberRing, A, C> 
-    where NumberRing: HECyclotomicNumberRing<Zn>,
+    where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
         C: PreparedConvolutionAlgorithm<ZnBase>
 {
@@ -45,11 +45,11 @@ impl<'a, NumberRing, A, C> GadgetProductRhsOperand<'a, NumberRing, A, C>
         &self.digits
     }
 
-    pub fn set_rns_factor(&mut self, i: usize, el: SingleRNSRingEl<NumberRing, Zn, A, C>) {
+    pub fn set_rns_factor(&mut self, i: usize, el: SingleRNSRingEl<NumberRing, A, C>) {
         self.data[i] = Some(self.ring.prepare_multiplicant(&el).data);
     }
     
-    pub fn create_empty<const LOG: bool>(ring: &'a SingleRNSRingBase<NumberRing, Zn, A, C>, digits: usize) -> Self {
+    pub fn create_empty<const LOG: bool>(ring: &'a SingleRNSRingBase<NumberRing, A, C>, digits: usize) -> Self {
         let mut operands = Vec::with_capacity(digits);
         operands.extend((0..digits).map(|_| None));
         return Self {
@@ -61,21 +61,21 @@ impl<'a, NumberRing, A, C> GadgetProductRhsOperand<'a, NumberRing, A, C>
 }
 
 pub struct GadgetProductLhsOperand<'a, NumberRing, A, C> 
-    where NumberRing: HECyclotomicNumberRing<Zn>,
+    where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
         C: PreparedConvolutionAlgorithm<ZnBase>
 {
     data: Vec<Vec<C::PreparedConvolutionOperand>>,
-    element: SingleRNSRingEl<NumberRing, Zn, A, C>,
-    ring: PhantomData<&'a SingleRNSRingBase<NumberRing, Zn, A, C>>
+    element: SingleRNSRingEl<NumberRing, A, C>,
+    ring: PhantomData<&'a SingleRNSRingBase<NumberRing, A, C>>
 }
 
 impl<'a, NumberRing, A, C>  GadgetProductLhsOperand<'a, NumberRing, A, C> 
-    where NumberRing: HECyclotomicNumberRing<Zn>,
+    where NumberRing: HECyclotomicNumberRing,
             A: Allocator + Clone,
             C: PreparedConvolutionAlgorithm<ZnBase>
 {
-    pub fn create_from_element(ring: &'a SingleRNSRingBase<NumberRing, Zn, A, C>, digits: usize, el: SingleRNSRingEl<NumberRing, RingValue<ZnBase>, A, C>) -> Self {
+    pub fn create_from_element(ring: &'a SingleRNSRingBase<NumberRing, A, C>, digits: usize, el: SingleRNSRingEl<NumberRing, A, C>) -> Self {
         let digits = prime_factor_groups(ring.rns_base().len(), digits).iter().collect::<Vec<_>>();
         return GadgetProductLhsOperand {
             ring: PhantomData,
@@ -84,7 +84,7 @@ impl<'a, NumberRing, A, C>  GadgetProductLhsOperand<'a, NumberRing, A, C>
         };
     }
 
-    pub(in crate::rings) fn element(&self) -> &SingleRNSRingEl<NumberRing, Zn, A, C> {
+    pub(in crate::rings) fn element(&self) -> &SingleRNSRingEl<NumberRing, A, C> {
         &self.element
     }
 
@@ -93,8 +93,8 @@ impl<'a, NumberRing, A, C>  GadgetProductLhsOperand<'a, NumberRing, A, C>
     }
 }
 
-impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, Zn, A, C> 
-    where NumberRing: HECyclotomicNumberRing<Zn>,
+impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, A, C> 
+    where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
         C: PreparedConvolutionAlgorithm<ZnBase>
 {
@@ -106,7 +106,7 @@ impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, Zn, A, C>
     /// 
     /// The order of the fourier coefficients is the same as specified by the corresponding [`GeneralizedFFT`].
     /// 
-    fn gadget_decompose(&self, el: &SingleRNSRingEl<NumberRing, Zn, A, C>, digits: &[Range<usize>], output_moduli_count: usize) -> Vec<Vec<C::PreparedConvolutionOperand>> {
+    fn gadget_decompose(&self, el: &SingleRNSRingEl<NumberRing, A, C>, digits: &[Range<usize>], output_moduli_count: usize) -> Vec<Vec<C::PreparedConvolutionOperand>> {
         let ZZbig = BigIntRing::RING;
         let digit_bases = digits.iter().map(|range| zn_rns::Zn::new(range.clone().map(|i| self.rns_base().at(i)).collect::<Vec<_>>(), ZZbig)).collect::<Vec<_>>();
 
@@ -142,7 +142,7 @@ impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, Zn, A, C>
         return result;
     }
 
-    pub fn gadget_product_base(&self, lhs: &GadgetProductLhsOperand<NumberRing, A, C>, rhs: &GadgetProductRhsOperand<NumberRing, A, C>) -> SingleRNSRingEl<NumberRing, Zn, A, C> {
+    pub fn gadget_product_base(&self, lhs: &GadgetProductLhsOperand<NumberRing, A, C>, rhs: &GadgetProductRhsOperand<NumberRing, A, C>) -> SingleRNSRingEl<NumberRing, A, C> {
         let local_rns_base_len = lhs.data[0].len();
         let digits = &rhs.digits;
         assert_eq!(lhs.data.len(), digits.len());

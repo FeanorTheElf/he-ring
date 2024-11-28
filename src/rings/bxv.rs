@@ -19,7 +19,7 @@ use super::number_ring::{HECyclotomicNumberRing, HENumberRing};
 /// 
 pub trait BXVCiphertextRing: FreeAlgebra<BaseRing = zn_rns::Zn<zn_64::Zn, BigIntRing>> + FiniteRing {
 
-    type NumberRing: HECyclotomicNumberRing<zn_64::Zn>;
+    type NumberRing: HECyclotomicNumberRing;
     type GadgetProductLhsOperand<'a>
         where Self: 'a;
     type GadgetProductRhsOperand<'a>
@@ -38,23 +38,23 @@ pub trait BXVCiphertextRing: FreeAlgebra<BaseRing = zn_rns::Zn<zn_64::Zn, BigInt
         where Op: RNSOperation<RingType = zn_64::ZnBase>;
     
     
-    fn exact_convert_from_decompring<FpTy2, A2>(
+    fn exact_convert_from_decompring<ZnTy, A2>(
         &self, 
-        from: &DecompositionRing<Self::NumberRing, FpTy2, A2>, 
-        element: &<DecompositionRingBase<Self::NumberRing, FpTy2, A2> as RingBase>::Element
+        from: &DecompositionRing<Self::NumberRing, ZnTy, A2>, 
+        element: &<DecompositionRingBase<Self::NumberRing, ZnTy, A2> as RingBase>::Element
     ) -> Self::Element
-        where Self::NumberRing: HENumberRing<FpTy2>,
-            FpTy2: RingStore<Type = zn_64::ZnBase> + Clone,
+        where Self::NumberRing: HENumberRing,
+            ZnTy: RingStore<Type = zn_64::ZnBase> + Clone,
             A2: Allocator + Clone;
     
-    fn perform_rns_op_to_decompring<FpTy2, A2, Op>(
+    fn perform_rns_op_to_decompring<ZnTy, A2, Op>(
         &self, 
-        to: &DecompositionRing<Self::NumberRing, FpTy2, A2>, 
+        to: &DecompositionRing<Self::NumberRing, ZnTy, A2>, 
         element: &Self::Element, 
         op: &Op
-    ) -> <DecompositionRingBase<Self::NumberRing, FpTy2, A2> as RingBase>::Element 
-        where Self::NumberRing: HENumberRing<FpTy2>,
-            FpTy2: RingStore<Type = zn_64::ZnBase> + Clone,
+    ) -> <DecompositionRingBase<Self::NumberRing, ZnTy, A2> as RingBase>::Element 
+        where Self::NumberRing: HENumberRing,
+            ZnTy: RingStore<Type = zn_64::ZnBase> + Clone,
             A2: Allocator + Clone,
             Op: RNSOperation<RingType = zn_64::ZnBase>;
 
@@ -94,7 +94,8 @@ pub trait BXVCiphertextRing: FreeAlgebra<BaseRing = zn_rns::Zn<zn_64::Zn, BigInt
     /// 
     fn gadget_vector<'a, 'b>(&'a self, rhs_operand: &'a Self::GadgetProductRhsOperand<'b>) -> &'a [Range<usize>];
 
-    fn set_rns_factor<'b>(&self, rhs_operand: &mut Self::GadgetProductRhsOperand<'b>, i: usize, el: Self::Element);
+    fn set_rns_factor<'b>(&self, rhs_operand: &mut Self::GadgetProductRhsOperand<'b>, i: usize, el: Self::Element)
+        where Self: 'b;
 
     ///
     /// Computes the "RNS-gadget product" of two elements in this ring, as often required
@@ -202,7 +203,8 @@ pub trait BXVCiphertextRing: FreeAlgebra<BaseRing = zn_rns::Zn<zn_64::Zn, BigInt
     /// assert!((0..8).all(|i| int_cast(ring.base_ring().smallest_lift(error_coefficients.at(i)), StaticRing::<i64>::RING, BigIntRing::RING).abs() <= max_allowed_error));
     /// ```
     /// 
-    fn gadget_product<'a, 'b>(&self, lhs: &Self::GadgetProductLhsOperand<'a>, rhs: &Self::GadgetProductRhsOperand<'b>) -> Self::Element;
+    fn gadget_product<'a, 'b>(&self, lhs: &Self::GadgetProductLhsOperand<'a>, rhs: &Self::GadgetProductRhsOperand<'b>) -> Self::Element
+        where Self: 'a + 'b;
 
     ///
     /// Computes the image of the ring element stored by the given gadget product operand under the Galois action of all given Galois elements,

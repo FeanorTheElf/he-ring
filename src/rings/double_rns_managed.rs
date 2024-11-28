@@ -34,24 +34,20 @@ use super::pow2_cyclotomic::Pow2CyclotomicNumberRing;
 /// currently are available, and automatically switches representation when 
 /// necessary.
 /// 
-pub struct ManagedDoubleRNSRingBase<NumberRing, FpTy, A = Global> 
-    where NumberRing: HENumberRing<FpTy>,
-        FpTy: RingStore + Clone,
-        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+pub struct ManagedDoubleRNSRingBase<NumberRing, A = Global> 
+    where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
-    base: DoubleRNSRingBase<NumberRing, FpTy, A>,
-    zero: CoeffEl<NumberRing, FpTy, A>
+    base: DoubleRNSRingBase<NumberRing, A>,
+    zero: CoeffEl<NumberRing, A>
 }
 
-pub type ManagedDoubleRNSRing<NumberRing, FpTy, A = Global> = RingValue<ManagedDoubleRNSRingBase<NumberRing, FpTy, A>>;
+pub type ManagedDoubleRNSRing<NumberRing, A = Global> = RingValue<ManagedDoubleRNSRingBase<NumberRing, A>>;
 
-impl<NumberRing, FpTy> ManagedDoubleRNSRingBase<NumberRing, FpTy, Global> 
-    where NumberRing: HENumberRing<FpTy>,
-        FpTy: RingStore + Clone,
-        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>
+impl<NumberRing> ManagedDoubleRNSRingBase<NumberRing, Global> 
+    where NumberRing: HENumberRing,
 {
-    pub fn new(number_ring: NumberRing, rns_base: zn_rns::Zn<FpTy, BigIntRing>) -> RingValue<Self> {
+    pub fn new(number_ring: NumberRing, rns_base: zn_rns::Zn<zn_64::Zn, BigIntRing>) -> RingValue<Self> {
         let result = DoubleRNSRingBase::new(number_ring, rns_base);
         let zero = result.get_ring().zero_non_fft();
         ManagedDoubleRNSRing::from(ManagedDoubleRNSRingBase { base: result.into(), zero: zero })
@@ -66,40 +62,36 @@ enum ManagedDoubleRNSElRepresentation {
     Zero
 }
 
-enum DoubleRNSElInternal<NumberRing, FpTy, A = Global> 
-    where NumberRing: HENumberRing<FpTy>,
-        FpTy: RingStore + Clone,
-        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+enum DoubleRNSElInternal<NumberRing, A = Global> 
+    where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
-    Sum(CoeffEl<NumberRing, FpTy, A>, DoubleRNSEl<NumberRing, FpTy, A>),
-    Coeff(CoeffEl<NumberRing, FpTy, A>),
-    DoubleRNS(DoubleRNSEl<NumberRing, FpTy, A>),
-    Both(CoeffEl<NumberRing, FpTy, A>, DoubleRNSEl<NumberRing, FpTy, A>),
+    Sum(CoeffEl<NumberRing, A>, DoubleRNSEl<NumberRing, A>),
+    Coeff(CoeffEl<NumberRing, A>),
+    DoubleRNS(DoubleRNSEl<NumberRing, A>),
+    Both(CoeffEl<NumberRing, A>, DoubleRNSEl<NumberRing, A>),
     Zero
 }
 
-impl<NumberRing, FpTy, A> DoubleRNSElInternal<NumberRing, FpTy, A> 
-    where NumberRing: HENumberRing<FpTy>,
-        FpTy: RingStore + Clone,
-        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+impl<NumberRing, A> DoubleRNSElInternal<NumberRing, A> 
+    where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
-    fn unwrap_sum(self) -> (CoeffEl<NumberRing, FpTy, A>, DoubleRNSEl<NumberRing, FpTy, A>) {
+    fn unwrap_sum(self) -> (CoeffEl<NumberRing, A>, DoubleRNSEl<NumberRing, A>) {
         match self {
             DoubleRNSElInternal::Sum(coeff, doublerns) => (coeff, doublerns),
             _ => unreachable!()
         }
     }
 
-    fn unwrap_coeff(self) -> CoeffEl<NumberRing, FpTy, A> {
+    fn unwrap_coeff(self) -> CoeffEl<NumberRing, A> {
         match self {
             DoubleRNSElInternal::Coeff(coeff) => coeff,
             _ => unreachable!()
         }
     }
 
-    fn unwrap_ref_coeff<'a>(&'a self) -> &'a CoeffEl<NumberRing, FpTy, A> {
+    fn unwrap_ref_coeff<'a>(&'a self) -> &'a CoeffEl<NumberRing, A> {
         match self {
             DoubleRNSElInternal::Coeff(coeff) => coeff,
             DoubleRNSElInternal::Both(coeff, _) => coeff,
@@ -107,14 +99,14 @@ impl<NumberRing, FpTy, A> DoubleRNSElInternal<NumberRing, FpTy, A>
         }
     }
     
-    fn unwrap_doublerns(self) -> DoubleRNSEl<NumberRing, FpTy, A> {
+    fn unwrap_doublerns(self) -> DoubleRNSEl<NumberRing, A> {
         match self {
             DoubleRNSElInternal::DoubleRNS(doublerns) => doublerns,
             _ => unreachable!()
         }
     }
 
-    fn unwrap_ref_doublerns<'a>(&'a self) -> &'a DoubleRNSEl<NumberRing, FpTy, A> {
+    fn unwrap_ref_doublerns<'a>(&'a self) -> &'a DoubleRNSEl<NumberRing, A> {
         match self {
             DoubleRNSElInternal::DoubleRNS(doublerns) => doublerns,
             DoubleRNSElInternal::Both(_, doublerns) => doublerns,
@@ -123,19 +115,15 @@ impl<NumberRing, FpTy, A> DoubleRNSElInternal<NumberRing, FpTy, A>
     }
 }
 
-pub struct ManagedDoubleRNSEl<NumberRing, FpTy, A = Global> 
-    where NumberRing: HENumberRing<FpTy>,
-        FpTy: RingStore + Clone,
-        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+pub struct ManagedDoubleRNSEl<NumberRing, A = Global> 
+    where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
-    internal: Rc<RefCell<DoubleRNSElInternal<NumberRing, FpTy, A>>>
+    internal: Rc<RefCell<DoubleRNSElInternal<NumberRing, A>>>
 }
 
-impl<NumberRing, FpTy, A> ManagedDoubleRNSRingBase<NumberRing, FpTy, A>
-    where NumberRing: HENumberRing<FpTy>,
-        FpTy: RingStore + Clone,
-        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+impl<NumberRing, A> ManagedDoubleRNSRingBase<NumberRing, A>
+    where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
     ///
@@ -147,7 +135,7 @@ impl<NumberRing, FpTy, A> ManagedDoubleRNSRingBase<NumberRing, FpTy, A>
     /// or not. Thus, in such benchmarks, every operation should be followed by 
     /// `force_coeff_repr()`.
     /// 
-    pub fn force_coeff_repr(&self, value: &ManagedDoubleRNSEl<NumberRing, FpTy, A>) {
+    pub fn force_coeff_repr(&self, value: &ManagedDoubleRNSEl<NumberRing, A>) {
         if let Some(coeff) = self.to_coeff(value) {
             let new_value = self.base.clone_el_non_fft(&*coeff);
             drop(coeff);
@@ -155,7 +143,7 @@ impl<NumberRing, FpTy, A> ManagedDoubleRNSRingBase<NumberRing, FpTy, A>
         }
     }
 
-    fn get_repr(&self, value: &ManagedDoubleRNSEl<NumberRing, FpTy, A>) -> ManagedDoubleRNSElRepresentation {
+    fn get_repr(&self, value: &ManagedDoubleRNSEl<NumberRing, A>) -> ManagedDoubleRNSElRepresentation {
         match &*value.internal.borrow() {
             DoubleRNSElInternal::Sum(_, _) => ManagedDoubleRNSElRepresentation::Sum,
             DoubleRNSElInternal::Coeff(_) => ManagedDoubleRNSElRepresentation::Coeff,
@@ -165,7 +153,7 @@ impl<NumberRing, FpTy, A> ManagedDoubleRNSRingBase<NumberRing, FpTy, A>
         }
     }
 
-    fn to_coeff<'a>(&self, value: &'a ManagedDoubleRNSEl<NumberRing, FpTy, A>) -> Option<Ref<'a, CoeffEl<NumberRing, FpTy, A>>> {
+    fn to_coeff<'a>(&self, value: &'a ManagedDoubleRNSEl<NumberRing, A>) -> Option<Ref<'a, CoeffEl<NumberRing, A>>> {
         match self.get_repr(value) {
             ManagedDoubleRNSElRepresentation::Sum => {
                 let mut result = value.internal.borrow_mut();
@@ -191,7 +179,7 @@ impl<NumberRing, FpTy, A> ManagedDoubleRNSRingBase<NumberRing, FpTy, A>
         }
     }
 
-    fn to_doublerns<'a>(&self, value: &'a ManagedDoubleRNSEl<NumberRing, FpTy, A>) -> Option<Ref<'a, DoubleRNSEl<NumberRing, FpTy, A>>> {
+    fn to_doublerns<'a>(&self, value: &'a ManagedDoubleRNSEl<NumberRing, A>) -> Option<Ref<'a, DoubleRNSEl<NumberRing, A>>> {
         match self.get_repr(value) {
             ManagedDoubleRNSElRepresentation::Sum => {
                 let mut result = value.internal.borrow_mut();
@@ -219,17 +207,17 @@ impl<NumberRing, FpTy, A> ManagedDoubleRNSRingBase<NumberRing, FpTy, A>
 
     fn apply_linear_operation<F_coeff_bin, F_doublerns_bin, F_coeff_un, F_doublerns_un>(
         &self, 
-        lhs: &ManagedDoubleRNSEl<NumberRing, FpTy, A>, 
-        rhs: &ManagedDoubleRNSEl<NumberRing, FpTy, A>, 
+        lhs: &ManagedDoubleRNSEl<NumberRing, A>, 
+        rhs: &ManagedDoubleRNSEl<NumberRing, A>, 
         f1: F_coeff_bin, 
         f2: F_doublerns_bin, 
         f3: F_coeff_un, 
         f4: F_doublerns_un
-    ) -> ManagedDoubleRNSEl<NumberRing, FpTy, A> 
-        where F_coeff_bin: FnOnce(&mut CoeffEl<NumberRing, FpTy, A>, &CoeffEl<NumberRing, FpTy, A>),
-            F_doublerns_bin: FnOnce(&mut DoubleRNSEl<NumberRing, FpTy, A>, &DoubleRNSEl<NumberRing, FpTy, A>),
-            F_coeff_un: FnOnce(&mut CoeffEl<NumberRing, FpTy, A>),
-            F_doublerns_un: FnOnce(&mut DoubleRNSEl<NumberRing, FpTy, A>),
+    ) -> ManagedDoubleRNSEl<NumberRing, A> 
+        where F_coeff_bin: FnOnce(&mut CoeffEl<NumberRing, A>, &CoeffEl<NumberRing, A>),
+            F_doublerns_bin: FnOnce(&mut DoubleRNSEl<NumberRing, A>, &DoubleRNSEl<NumberRing, A>),
+            F_coeff_un: FnOnce(&mut CoeffEl<NumberRing, A>),
+            F_doublerns_un: FnOnce(&mut DoubleRNSEl<NumberRing, A>),
     {
         match (&*lhs.internal.borrow(), &*rhs.internal.borrow()) {
             (_, DoubleRNSElInternal::Zero) => self.clone_el(lhs),
@@ -357,21 +345,21 @@ impl<NumberRing, FpTy, A> ManagedDoubleRNSRingBase<NumberRing, FpTy, A>
 }
 
 pub struct GadgetProductRhsOperand<'a, NumberRing, A> 
-    where NumberRing: HENumberRing<Zn>,
+    where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
     base: gadget_product::double_rns::GadgetProductRhsOperand<'a, NumberRing, A>
 }
 
 pub struct GadgetProductLhsOperand<'a, NumberRing, A> 
-    where NumberRing: HENumberRing<Zn>,
+    where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
     base: gadget_product::double_rns::GadgetProductLhsOperand<'a, NumberRing, A>
 }
 
-impl<NumberRing, A> BXVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, zn_64::Zn, A> 
-    where NumberRing: HECyclotomicNumberRing<zn_64::Zn>,
+impl<NumberRing, A> BXVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, A> 
+    where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone
 {
     type NumberRing = NumberRing;
@@ -384,17 +372,17 @@ impl<NumberRing, A> BXVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, z
         self.base.number_ring()
     }
 
-    fn sample_from_coefficient_distribution<G: FnMut() -> i32>(&self, distribution: G) -> ManagedDoubleRNSEl<NumberRing, zn_64::Zn, A> {
+    fn sample_from_coefficient_distribution<G: FnMut() -> i32>(&self, distribution: G) -> ManagedDoubleRNSEl<NumberRing, A> {
         ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::Coeff(self.base.sample_from_coefficient_distribution(distribution)))) }
     }
     
     fn perform_rns_op_from<Op>(
         &self, 
         from: &Self, 
-        el: &ManagedDoubleRNSEl<NumberRing, zn_64::Zn, A>, 
+        el: &ManagedDoubleRNSEl<NumberRing, A>, 
         op: &Op
-    ) -> ManagedDoubleRNSEl<NumberRing, zn_64::Zn, A> 
-        where NumberRing: HENumberRing<zn_64::Zn>,
+    ) -> ManagedDoubleRNSEl<NumberRing, A> 
+        where NumberRing: HENumberRing,
             Op: RNSOperation<RingType = zn_64::ZnBase>
     {
         let result = if let Some(value) = from.to_coeff(el) {
@@ -405,26 +393,26 @@ impl<NumberRing, A> BXVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, z
         ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::Coeff(result))) }
     }
     
-    fn exact_convert_from_decompring<FpTy2, A2>(
+    fn exact_convert_from_decompring<ZnTy, A2>(
         &self, 
-        from: &DecompositionRing<NumberRing, FpTy2, A2>, 
-        element: &<DecompositionRingBase<NumberRing, FpTy2, A2> as RingBase>::Element
-    ) -> ManagedDoubleRNSEl<NumberRing, zn_64::Zn, A> 
-        where NumberRing: HENumberRing<FpTy2>,
-            FpTy2: RingStore<Type = zn_64::ZnBase> + Clone,
+        from: &DecompositionRing<NumberRing, ZnTy, A2>, 
+        element: &<DecompositionRingBase<NumberRing, ZnTy, A2> as RingBase>::Element
+    ) -> ManagedDoubleRNSEl<NumberRing, A> 
+        where NumberRing: HENumberRing,
+            ZnTy: RingStore<Type = zn_64::ZnBase> + Clone,
             A2: Allocator + Clone
     {
         ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::Coeff(self.base.exact_convert_from_decompring(from, element)))) }
     }
     
-    fn perform_rns_op_to_decompring<FpTy2, A2, Op>(
+    fn perform_rns_op_to_decompring<ZnTy, A2, Op>(
         &self, 
-        to: &DecompositionRing<NumberRing, FpTy2, A2>, 
-        element: &ManagedDoubleRNSEl<NumberRing, zn_64::Zn, A>, 
+        to: &DecompositionRing<NumberRing, ZnTy, A2>, 
+        element: &ManagedDoubleRNSEl<NumberRing, A>, 
         op: &Op
-    ) -> <DecompositionRingBase<NumberRing, FpTy2, A2> as RingBase>::Element 
-        where NumberRing: HENumberRing<FpTy2>,
-            FpTy2: RingStore<Type = zn_64::ZnBase> + Clone,
+    ) -> <DecompositionRingBase<NumberRing, ZnTy, A2> as RingBase>::Element 
+        where NumberRing: HENumberRing,
+            ZnTy: RingStore<Type = zn_64::ZnBase> + Clone,
             A2: Allocator + Clone,
             Op: RNSOperation<RingType = zn_64::ZnBase>
     {
@@ -435,7 +423,9 @@ impl<NumberRing, A> BXVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, z
         }
     }
 
-    fn gadget_product<'b>(&self, lhs: &Self::GadgetProductLhsOperand<'b>, rhs: &Self::GadgetProductRhsOperand<'b>) -> Self::Element {
+    fn gadget_product<'a, 'b>(&self, lhs: &Self::GadgetProductLhsOperand<'a>, rhs: &Self::GadgetProductRhsOperand<'b>) -> Self::Element
+        where Self: 'a + 'b
+    {
         match self.base.preferred_output_repr(&lhs.base, &rhs.base) {
             gadget_product::double_rns::ElRepr::Coeff => ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::Coeff(self.base.gadget_product_coeff(&lhs.base, &rhs.base)))) },
             gadget_product::double_rns::ElRepr::NTT => ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::DoubleRNS(self.base.gadget_product_ntt(&lhs.base, &rhs.base)))) }
@@ -464,7 +454,9 @@ impl<NumberRing, A> BXVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, z
         rhs_operand.base.gadget_vector()
     }
 
-    fn set_rns_factor<'b>(&self, rhs_operand: &mut Self::GadgetProductRhsOperand<'b>, i: usize, el: Self::Element) {
+    fn set_rns_factor<'b>(&self, rhs_operand: &mut Self::GadgetProductRhsOperand<'b>, i: usize, el: Self::Element)
+        where Self: 'b
+    {
         if let Some(nonzero) = self.to_coeff(&el) {
             rhs_operand.base.set_rns_factor(i, self.base.clone_el_non_fft(&*nonzero))
         } else {
@@ -479,10 +471,8 @@ impl<NumberRing, A> BXVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, z
     }
 }
 
-impl<NumberRing, FpTy, A> CyclotomicRing for ManagedDoubleRNSRingBase<NumberRing, FpTy, A> 
-    where NumberRing: HECyclotomicNumberRing<FpTy>,
-        FpTy: RingStore + Clone,
-        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+impl<NumberRing, A> CyclotomicRing for ManagedDoubleRNSRingBase<NumberRing, A> 
+    where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone
 {
     fn n(&self) -> u64 {
@@ -499,10 +489,8 @@ impl<NumberRing, FpTy, A> CyclotomicRing for ManagedDoubleRNSRingBase<NumberRing
     }
 }
 
-impl<NumberRing, FpTy, A> PartialEq for ManagedDoubleRNSRingBase<NumberRing, FpTy, A>
-    where NumberRing: HENumberRing<FpTy>,
-        FpTy: RingStore + Clone,
-        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+impl<NumberRing, A> PartialEq for ManagedDoubleRNSRingBase<NumberRing, A>
+    where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
     fn eq(&self, other: &Self) -> bool {
@@ -510,13 +498,11 @@ impl<NumberRing, FpTy, A> PartialEq for ManagedDoubleRNSRingBase<NumberRing, FpT
     }
 }
 
-impl<NumberRing, FpTy, A> RingBase for ManagedDoubleRNSRingBase<NumberRing, FpTy, A>
-    where NumberRing: HENumberRing<FpTy>,
-        FpTy: RingStore + Clone,
-        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+impl<NumberRing, A> RingBase for ManagedDoubleRNSRingBase<NumberRing, A>
+    where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
-    type Element = ManagedDoubleRNSEl<NumberRing, FpTy, A>;
+    type Element = ManagedDoubleRNSEl<NumberRing, A>;
 
     fn clone_el(&self, val: &Self::Element) -> Self::Element {
         ManagedDoubleRNSEl { internal: val.internal.clone() }
@@ -723,13 +709,11 @@ impl<NumberRing, FpTy, A> RingBase for ManagedDoubleRNSRingBase<NumberRing, FpTy
     }
 }
 
-impl<NumberRing, FpTy, A> RingExtension for ManagedDoubleRNSRingBase<NumberRing, FpTy, A>
-    where NumberRing: HENumberRing<FpTy>,
-        FpTy: RingStore + Clone,
-        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+impl<NumberRing, A> RingExtension for ManagedDoubleRNSRingBase<NumberRing, A>
+    where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
-    type BaseRing = <DoubleRNSRingBase<NumberRing, FpTy, A> as RingExtension>::BaseRing;
+    type BaseRing = <DoubleRNSRingBase<NumberRing, A> as RingExtension>::BaseRing;
 
     fn base_ring<'a>(&'a self) -> &'a Self::BaseRing {
         self.base.base_ring()
@@ -742,13 +726,11 @@ impl<NumberRing, FpTy, A> RingExtension for ManagedDoubleRNSRingBase<NumberRing,
     }
 }
 
-impl<NumberRing, FpTy, A> FreeAlgebra for ManagedDoubleRNSRingBase<NumberRing, FpTy, A>
-    where NumberRing: HENumberRing<FpTy>,
-        FpTy: RingStore + Clone,
-        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+impl<NumberRing, A> FreeAlgebra for ManagedDoubleRNSRingBase<NumberRing, A>
+    where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
-    type VectorRepresentation<'a> = DoubleRNSRingBaseElVectorRepresentation<'a, NumberRing, FpTy, A> 
+    type VectorRepresentation<'a> = DoubleRNSRingBaseElVectorRepresentation<'a, NumberRing, A> 
         where Self: 'a;
 
     fn canonical_gen(&self) -> Self::Element {
@@ -777,10 +759,8 @@ impl<NumberRing, FpTy, A> FreeAlgebra for ManagedDoubleRNSRingBase<NumberRing, F
     }
 }
 
-impl<NumberRing, FpTy, A> FiniteRingSpecializable for ManagedDoubleRNSRingBase<NumberRing, FpTy, A>
-    where NumberRing: HENumberRing<FpTy>,
-        FpTy: RingStore + Clone,
-        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+impl<NumberRing, A> FiniteRingSpecializable for ManagedDoubleRNSRingBase<NumberRing, A>
+    where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
     fn specialize<O: FiniteRingOperation<Self>>(op: O) -> Result<O::Output, ()> {
@@ -788,20 +768,16 @@ impl<NumberRing, FpTy, A> FiniteRingSpecializable for ManagedDoubleRNSRingBase<N
     }
 }
 
-impl<NumberRing, FpTy, A> FiniteRing for ManagedDoubleRNSRingBase<NumberRing, FpTy, A>
-    where NumberRing: HENumberRing<FpTy>,
-        FpTy: RingStore + Clone,
-        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+impl<NumberRing, A> FiniteRing for ManagedDoubleRNSRingBase<NumberRing, A>
+    where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
-    type ElementsIter<'a> = std::iter::Map<<DoubleRNSRingBase<NumberRing, FpTy, A> as FiniteRing>::ElementsIter<'a>, fn(DoubleRNSEl<NumberRing, FpTy, A>) -> ManagedDoubleRNSEl<NumberRing, FpTy, A>>
+    type ElementsIter<'a> = std::iter::Map<<DoubleRNSRingBase<NumberRing, A> as FiniteRing>::ElementsIter<'a>, fn(DoubleRNSEl<NumberRing, A>) -> ManagedDoubleRNSEl<NumberRing, A>>
         where Self: 'a;
 
     fn elements<'a>(&'a self) -> Self::ElementsIter<'a> {
-        fn from_doublerns<NumberRing, FpTy, A>(x: DoubleRNSEl<NumberRing, FpTy, A>) -> ManagedDoubleRNSEl<NumberRing, FpTy, A>
-            where NumberRing: HENumberRing<FpTy>,
-                FpTy: RingStore + Clone,
-                FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        fn from_doublerns<NumberRing, A>(x: DoubleRNSEl<NumberRing, A>) -> ManagedDoubleRNSEl<NumberRing, A>
+            where NumberRing: HENumberRing,
                 A: Allocator + Clone
         {
             ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::DoubleRNS(x))) }
@@ -847,13 +823,13 @@ fn test_add_result_independent_of_repr() {
     let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
     let ring = ManagedDoubleRNSRingBase::new(Pow2CyclotomicNumberRing::new(4), rns_base);
     let base = &ring.get_ring().base;
-    let reprs_of_11: [Box<dyn Fn() -> DoubleRNSElInternal<_, _, _>>; 4] = [
+    let reprs_of_11: [Box<dyn Fn() -> DoubleRNSElInternal<_, _>>; 4] = [
         Box::new(|| DoubleRNSElInternal::Coeff(base.from_non_fft(base.base_ring().int_hom().map(11)))),
         Box::new(|| DoubleRNSElInternal::DoubleRNS(base.from_int(11))),
         Box::new(|| DoubleRNSElInternal::Sum(base.from_non_fft(base.base_ring().int_hom().map(1)), base.from_int(10))),
         Box::new(|| DoubleRNSElInternal::Both(base.from_non_fft(base.base_ring().int_hom().map(11)), base.from_int(11))),
     ];
-    let reprs_of_102: [Box<dyn Fn() -> DoubleRNSElInternal<_, _, _>>; 4] = [
+    let reprs_of_102: [Box<dyn Fn() -> DoubleRNSElInternal<_, _>>; 4] = [
        Box::new(|| DoubleRNSElInternal::Coeff(base.from_non_fft(base.base_ring().int_hom().map(102)))),
        Box::new(|| DoubleRNSElInternal::DoubleRNS(base.from_int(102))),
        Box::new(|| DoubleRNSElInternal::Sum(base.from_non_fft(base.base_ring().int_hom().map(2)), base.from_int(100))),

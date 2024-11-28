@@ -92,12 +92,10 @@ impl<N> PartialEq for Pow2CyclotomicNumberRing<N> {
     }
 }
 
-impl<N, FpTy> HENumberRing<FpTy> for Pow2CyclotomicNumberRing<N>
-    where FpTy: RingStore + Clone,
-        FpTy::Type: ZnRing,
-        N: Pow2NegacyclicNTT<FpTy>
+impl<N> HENumberRing for Pow2CyclotomicNumberRing<N>
+    where N: Pow2NegacyclicNTT<zn_64::Zn>
 {
-    type Decomposed = Pow2CyclotomicDecomposedNumberRing<FpTy, N, Global>;
+    type Decomposed = Pow2CyclotomicDecomposedNumberRing<N, Global>;
 
     fn product_expansion_factor(&self) -> f64 {
         (1 << (self.log2_n - 1)) as f64
@@ -113,10 +111,9 @@ impl<N, FpTy> HENumberRing<FpTy> for Pow2CyclotomicNumberRing<N>
         (1 << (self.log2_n - 1)) as f64
     }
 
-    fn mod_p(&self, Fp: FpTy) -> Self::Decomposed {
+    fn mod_p(&self, Fp: zn_64::Zn) -> Self::Decomposed {
         return Pow2CyclotomicDecomposedNumberRing {
             ntt: N::new(Fp, self.log2_n - 1),
-            ring: PhantomData,
             allocator: Global
         };
     }
@@ -148,12 +145,10 @@ impl<N, FpTy> HENumberRing<FpTy> for Pow2CyclotomicNumberRing<N>
     }
 }
 
-impl<FpTy, N> HECyclotomicNumberRing<FpTy> for Pow2CyclotomicNumberRing<N>
-    where FpTy: RingStore + Clone,
-        FpTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
-        N: Pow2NegacyclicNTT<FpTy>
+impl<N> HECyclotomicNumberRing for Pow2CyclotomicNumberRing<N>
+    where N: Pow2NegacyclicNTT<zn_64::Zn>
 {
-    type DecomposedAsCyclotomic = Pow2CyclotomicDecomposedNumberRing<FpTy, N, Global>;
+    type DecomposedAsCyclotomic = Pow2CyclotomicDecomposedNumberRing<N, Global>;
 
     fn n(&self) -> u64 {
         1 << self.log2_n
@@ -258,21 +253,16 @@ impl Pow2NegacyclicNTT<Zn> for feanor_math_hexl::hexl::HEXLNTT {
     }
 }
 
-pub struct Pow2CyclotomicDecomposedNumberRing<R, N, A> 
-    where R: RingStore,
-        R::Type: ZnRing,
-        N: Pow2NegacyclicNTT<R>,
+pub struct Pow2CyclotomicDecomposedNumberRing<N, A> 
+    where N: Pow2NegacyclicNTT<zn_64::Zn>,
         A: Allocator
 {
-    ring: PhantomData<R>,
     ntt: N,
     allocator: A
 }
 
-impl<R, N, A> HECyclotomicNumberRingMod<R::Type> for Pow2CyclotomicDecomposedNumberRing<R, N, A> 
-    where R: RingStore,
-        R::Type: ZnRing,
-        N: Pow2NegacyclicNTT<R>,
+impl<N, A> HECyclotomicNumberRingMod for Pow2CyclotomicDecomposedNumberRing<N, A> 
+    where N: Pow2NegacyclicNTT<zn_64::Zn>,
         A: Allocator
 {
     fn n(&self) -> u64 {
@@ -280,8 +270,8 @@ impl<R, N, A> HECyclotomicNumberRingMod<R::Type> for Pow2CyclotomicDecomposedNum
     }
 
     fn permute_galois_action<V1, V2>(&self, src: V1, mut dst: V2, galois_element: zn_64::ZnEl)
-        where V1: VectorView<El<R>>,
-            V2: SwappableVectorViewMut<El<R>>
+        where V1: VectorView<zn_64::ZnEl>,
+            V2: SwappableVectorViewMut<zn_64::ZnEl>
     {
         assert_eq!(self.rank(), src.len());
         assert_eq!(self.rank(), dst.len());
@@ -302,10 +292,8 @@ impl<R, N, A> HECyclotomicNumberRingMod<R::Type> for Pow2CyclotomicDecomposedNum
     }
 }
 
-impl<R, N, A> PartialEq for Pow2CyclotomicDecomposedNumberRing<R, N, A> 
-    where R: RingStore,
-        R::Type: ZnRing,
-        N: Pow2NegacyclicNTT<R>,
+impl<N, A> PartialEq for Pow2CyclotomicDecomposedNumberRing<N, A> 
+    where N: Pow2NegacyclicNTT<zn_64::Zn>,
         A: Allocator
 {
     fn eq(&self, other: &Self) -> bool {
@@ -313,14 +301,12 @@ impl<R, N, A> PartialEq for Pow2CyclotomicDecomposedNumberRing<R, N, A>
     }
 }
 
-impl<R, N, A> HENumberRingMod<R::Type> for Pow2CyclotomicDecomposedNumberRing<R, N, A> 
-    where R: RingStore,
-        R::Type: ZnRing,
-        N: Pow2NegacyclicNTT<R>,
+impl<N, A> HENumberRingMod for Pow2CyclotomicDecomposedNumberRing<N, A> 
+    where N: Pow2NegacyclicNTT<zn_64::Zn>,
         A: Allocator
 {
     fn mult_basis_to_small_basis<V>(&self, mut data: V)
-        where V: SwappableVectorViewMut<El<R>>
+        where V: SwappableVectorViewMut<zn_64::ZnEl>
     {
         record_time!(GLOBAL_TIME_RECORDER, "Pow2CyclotomicNumberRing::mult_basis_to_small_basis", || {
             let mut input = Vec::with_capacity_in(data.len(), &self.allocator);
@@ -337,7 +323,7 @@ impl<R, N, A> HENumberRingMod<R::Type> for Pow2CyclotomicDecomposedNumberRing<R,
     }
 
     fn small_basis_to_mult_basis<V>(&self, mut data: V)
-        where V: SwappableVectorViewMut<El<R>>
+        where V: SwappableVectorViewMut<zn_64::ZnEl>
     {
         record_time!(GLOBAL_TIME_RECORDER, "Pow2CyclotomicNumberRing::small_basis_to_mult_basis", || {
             let mut input = Vec::with_capacity_in(data.len(), &self.allocator);
@@ -361,8 +347,8 @@ impl<R, N, A> HENumberRingMod<R::Type> for Pow2CyclotomicDecomposedNumberRing<R,
         self.ntt.len()
     }
 
-    fn base_ring(&self) -> RingRef<R::Type> {
-        RingRef::new(self.ntt.ring().get_ring())
+    fn base_ring(&self) -> &zn_64::Zn {
+        self.ntt.ring()
     }
 }
 

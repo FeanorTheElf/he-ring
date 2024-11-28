@@ -30,13 +30,11 @@ use crate::IsEq;
 /// represent the same ring, and also all three basis should coincide (in case of the "mult basis",
 /// it should coincide for every prime `p`).
 /// 
-pub trait HENumberRing<R>: PartialEq
-    where R: RingStore,
-        R::Type: ZnRing
-{
-    type Decomposed: HENumberRingMod<R::Type>;
+pub trait HENumberRing: PartialEq {
 
-    fn mod_p(&self, Fp: R) -> Self::Decomposed;
+    type Decomposed: HENumberRingMod;
+
+    fn mod_p(&self, Fp: zn_64::Zn) -> Self::Decomposed;
 
     fn largest_suitable_prime(&self, leq_than: i64) -> Option<i64>;
 
@@ -82,11 +80,9 @@ pub trait HENumberRing<R>: PartialEq
     fn rank(&self) -> usize;
 }
 
-pub trait HECyclotomicNumberRing<R>: HENumberRing<R>
-    where R: RingStore,
-        R::Type: ZnRing
-{    
-    type DecomposedAsCyclotomic: HECyclotomicNumberRingMod<R::Type> + IsEq<Self::Decomposed>;
+pub trait HECyclotomicNumberRing: HENumberRing {    
+
+    type DecomposedAsCyclotomic: HECyclotomicNumberRingMod + IsEq<Self::Decomposed>;
 
     fn n(&self) -> u64;
 
@@ -122,26 +118,26 @@ pub trait HECyclotomicNumberRing<R>: HENumberRing<R>
 /// elements `𝝵^i` are all "small"), staying in "small basis" whenever possible has
 /// performance benefits, because of the tensor-decomposition.
 /// 
-pub trait HENumberRingMod<R: ?Sized + ZnRing>: PartialEq {
+pub trait HENumberRingMod: PartialEq {
 
-    fn base_ring(&self) -> RingRef<R>;
+    fn base_ring(&self) -> &zn_64::Zn;
 
     fn rank(&self) -> usize;
 
     fn small_basis_to_mult_basis<V>(&self, data: V)
-        where V: SwappableVectorViewMut<R::Element>;
+        where V: SwappableVectorViewMut<zn_64::ZnEl>;
 
     fn mult_basis_to_small_basis<V>(&self, data: V)
-        where V: SwappableVectorViewMut<R::Element>;
+        where V: SwappableVectorViewMut<zn_64::ZnEl>;
 
     fn coeff_basis_to_small_basis<V>(&self, data: V)
-        where V: SwappableVectorViewMut<R::Element>;
+        where V: SwappableVectorViewMut<zn_64::ZnEl>;
 
     fn small_basis_to_coeff_basis<V>(&self, data: V)
-        where V: SwappableVectorViewMut<R::Element>;
+        where V: SwappableVectorViewMut<zn_64::ZnEl>;
 }
 
-pub trait HECyclotomicNumberRingMod<R: ?Sized + ZnRing>: HENumberRingMod<R> {
+pub trait HECyclotomicNumberRingMod: HENumberRingMod {
 
     fn n(&self) -> u64;
 
@@ -154,6 +150,6 @@ pub trait HECyclotomicNumberRingMod<R: ?Sized + ZnRing>: HENumberRingMod<R> {
     /// obtain its image under the given Galois action.
     /// 
     fn permute_galois_action<V1, V2>(&self, src: V1, dst: V2, galois_element: zn_64::ZnEl)
-        where V1: VectorView<R::Element>,
-            V2: SwappableVectorViewMut<R::Element>;
+        where V1: VectorView<zn_64::ZnEl>,
+            V2: SwappableVectorViewMut<zn_64::ZnEl>;
 }

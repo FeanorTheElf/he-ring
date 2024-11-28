@@ -141,11 +141,9 @@ impl PartialEq for OddCyclotomicNumberRing {
     }
 }
 
-impl<FpTy> HENumberRing<FpTy> for OddCyclotomicNumberRing
-    where FpTy: RingStore + Clone,
-        FpTy::Type: ZnRing
-{
-    type Decomposed = OddCyclotomicDecomposedNumberRing<FpTy, BluesteinFFT<FpTy::Type, FpTy::Type, Identity<FpTy>>>;
+impl HENumberRing for OddCyclotomicNumberRing {
+
+    type Decomposed = OddCyclotomicDecomposedNumberRing<BluesteinFFT<zn_64::ZnBase, zn_64::ZnBase, Identity<zn_64::Zn>>>;
 
     fn can_to_inf_norm_expansion_factor(&self) -> f64 {
         self.powful_inf_to_inf_norm_expansion_factor() * self.can_to_powful_inf_norm_expansion_factor()
@@ -159,7 +157,7 @@ impl<FpTy> HENumberRing<FpTy> for OddCyclotomicNumberRing
         (rank as f64).powi(3).sqrt()
     }
 
-    fn mod_p(&self, Fp: FpTy) -> Self::Decomposed {
+    fn mod_p(&self, Fp: zn_64::Zn) -> Self::Decomposed {
         {
             let n_factorization = &self.n_factorization_squarefree;
             let n = n_factorization.iter().copied().product::<i64>();
@@ -177,7 +175,7 @@ impl<FpTy> HENumberRing<FpTy> for OddCyclotomicNumberRing
     }
 
     fn largest_suitable_prime(&self, leq_than: i64) -> Option<i64> {
-        let n = <_ as HECyclotomicNumberRing<FpTy>>::n(self) as i64;
+        let n = <_ as HECyclotomicNumberRing>::n(self) as i64;
         let log2_m = StaticRing::<i64>::RING.abs_log2_ceil(&n).unwrap() + 2;
         let modulus = n << log2_m;
         let mut current = (leq_than - 1) - ((leq_than - 1) % modulus) + 1;
@@ -196,7 +194,7 @@ impl<FpTy> HENumberRing<FpTy> for OddCyclotomicNumberRing
             P::Type: PolyRing + DivisibilityRing,
             <<P::Type as RingExtension>::BaseRing as RingStore>::Type: IntegerRing
     {
-        cyclotomic_polynomial(&poly_ring, <_ as HECyclotomicNumberRing<FpTy>>::n(self) as usize)
+        cyclotomic_polynomial(&poly_ring, <_ as HECyclotomicNumberRing>::n(self) as usize)
     }
 
     fn rank(&self) -> usize {
@@ -204,11 +202,9 @@ impl<FpTy> HENumberRing<FpTy> for OddCyclotomicNumberRing
     }
 }
 
-impl<FpTy> HECyclotomicNumberRing<FpTy> for OddCyclotomicNumberRing
-    where FpTy: RingStore + Clone,
-        FpTy::Type: ZnRing
-{
-    type DecomposedAsCyclotomic = OddCyclotomicDecomposedNumberRing<FpTy, BluesteinFFT<FpTy::Type, FpTy::Type, Identity<FpTy>>>;
+impl HECyclotomicNumberRing for OddCyclotomicNumberRing {
+
+    type DecomposedAsCyclotomic = OddCyclotomicDecomposedNumberRing<BluesteinFFT<zn_64::ZnBase, zn_64::ZnBase, Identity<zn_64::Zn>>>;
 
     fn n(&self) -> u64 {
         self.n_factorization_squarefree.iter().copied().product::<i64>() as u64
@@ -243,30 +239,26 @@ impl PartialEq for CompositeCyclotomicNumberRing {
     }
 }
 
-impl<FpTy> HECyclotomicNumberRing<FpTy> for CompositeCyclotomicNumberRing
-    where FpTy: RingStore + Clone,
-        FpTy::Type: ZnRing
-{
-    type DecomposedAsCyclotomic = CompositeCyclotomicDecomposedNumberRing<FpTy, BluesteinFFT<FpTy::Type, FpTy::Type, Identity<FpTy>>>;
+impl HECyclotomicNumberRing for CompositeCyclotomicNumberRing {
+
+    type DecomposedAsCyclotomic = CompositeCyclotomicDecomposedNumberRing<BluesteinFFT<zn_64::ZnBase, zn_64::ZnBase, Identity<zn_64::Zn>>>;
 
     fn n(&self) -> u64 {
-        <_ as HECyclotomicNumberRing<FpTy>>::n(&self.tensor_factor1) * <_ as HECyclotomicNumberRing<FpTy>>::n(&self.tensor_factor2)
+        <_ as HECyclotomicNumberRing>::n(&self.tensor_factor1) * <_ as HECyclotomicNumberRing>::n(&self.tensor_factor2)
     }
 }
 
-impl<FpTy> HENumberRing<FpTy> for CompositeCyclotomicNumberRing
-    where FpTy: RingStore + Clone,
-        FpTy::Type: ZnRing
-{
-    type Decomposed = CompositeCyclotomicDecomposedNumberRing<FpTy, BluesteinFFT<FpTy::Type, FpTy::Type, Identity<FpTy>>>;
+impl HENumberRing for CompositeCyclotomicNumberRing {
 
-    fn mod_p(&self, Fp: FpTy) -> Self::Decomposed {
+    type Decomposed = CompositeCyclotomicDecomposedNumberRing<BluesteinFFT<zn_64::ZnBase, zn_64::ZnBase, Identity<zn_64::Zn>>>;
+
+    fn mod_p(&self, Fp: zn_64::Zn) -> Self::Decomposed {
         {
-            let n1 = <_ as HECyclotomicNumberRing<FpTy>>::n(&self.tensor_factor1) as i64;
-            let n2 = <_ as HECyclotomicNumberRing<FpTy>>::n(&self.tensor_factor2) as i64;
+            let n1 = <_ as HECyclotomicNumberRing>::n(&self.tensor_factor1) as i64;
+            let n2 = <_ as HECyclotomicNumberRing>::n(&self.tensor_factor2) as i64;
             let n = n1 * n2;
-            let r1 = <_ as HENumberRing<FpTy>>::rank(&self.tensor_factor1) as i64;
-            let r2 = <_ as HENumberRing<FpTy>>::rank(&self.tensor_factor2) as i64;
+            let r1 = <_ as HENumberRing>::rank(&self.tensor_factor1) as i64;
+            let r2 = <_ as HENumberRing>::rank(&self.tensor_factor2) as i64;
 
             let poly_ring = &self.tensor_factor1.sparse_poly_ring;
             let Phi_n1 = poly_ring.coerce(&self.tensor_factor1.sparse_poly_ring, self.tensor_factor1.sparse_poly_ring.clone_el(&self.tensor_factor1.cyclotomic_poly));
@@ -340,10 +332,10 @@ impl<FpTy> HENumberRing<FpTy> for CompositeCyclotomicNumberRing
     }
 
     fn largest_suitable_prime(&self, leq_than: i64) -> Option<i64> {
-        let n = <_ as HECyclotomicNumberRing<FpTy>>::n(self) as i64;
+        let n = <_ as HECyclotomicNumberRing>::n(self) as i64;
         let log2_m = max(
-            StaticRing::<i64>::RING.abs_log2_ceil(&(<_ as HECyclotomicNumberRing<FpTy>>::n(&self.tensor_factor1) as i64)).unwrap() + 2,
-            StaticRing::<i64>::RING.abs_log2_ceil(&(<_ as HECyclotomicNumberRing<FpTy>>::n(&self.tensor_factor2) as i64)).unwrap() + 2
+            StaticRing::<i64>::RING.abs_log2_ceil(&(<_ as HECyclotomicNumberRing>::n(&self.tensor_factor1) as i64)).unwrap() + 2,
+            StaticRing::<i64>::RING.abs_log2_ceil(&(<_ as HECyclotomicNumberRing>::n(&self.tensor_factor2) as i64)).unwrap() + 2
         );
         let log2_m = StaticRing::<i64>::RING.abs_log2_ceil(&n).unwrap() + 2;
         let modulus = n << log2_m;
@@ -359,11 +351,11 @@ impl<FpTy> HENumberRing<FpTy> for CompositeCyclotomicNumberRing
     }
 
     fn inf_to_can_norm_expansion_factor(&self) -> f64 {
-        return <_ as HENumberRing<FpTy>>::inf_to_can_norm_expansion_factor(&self.tensor_factor1) * <_ as HENumberRing<FpTy>>::inf_to_can_norm_expansion_factor(&self.tensor_factor2);
+        return <_ as HENumberRing>::inf_to_can_norm_expansion_factor(&self.tensor_factor1) * <_ as HENumberRing>::inf_to_can_norm_expansion_factor(&self.tensor_factor2);
     }
 
     fn can_to_inf_norm_expansion_factor(&self) -> f64 {
-        return <_ as HENumberRing<FpTy>>::can_to_inf_norm_expansion_factor(&self.tensor_factor1) * <_ as HENumberRing<FpTy>>::can_to_inf_norm_expansion_factor(&self.tensor_factor2);
+        return <_ as HENumberRing>::can_to_inf_norm_expansion_factor(&self.tensor_factor1) * <_ as HENumberRing>::can_to_inf_norm_expansion_factor(&self.tensor_factor2);
     }
 
     fn generating_poly<P>(&self, poly_ring: P) -> El<P>
@@ -371,33 +363,29 @@ impl<FpTy> HENumberRing<FpTy> for CompositeCyclotomicNumberRing
             P::Type: PolyRing + DivisibilityRing,
             <<P::Type as RingExtension>::BaseRing as RingStore>::Type: IntegerRing
     {
-        cyclotomic_polynomial(&poly_ring, <_ as HECyclotomicNumberRing<FpTy>>::n(self) as usize)
+        cyclotomic_polynomial(&poly_ring, <_ as HECyclotomicNumberRing>::n(self) as usize)
     }
 
     fn rank(&self) -> usize {
-        <_ as HENumberRing<FpTy>>::rank(&self.tensor_factor1) * <_ as HENumberRing<FpTy>>::rank(&self.tensor_factor2)
+        <_ as HENumberRing>::rank(&self.tensor_factor1) * <_ as HENumberRing>::rank(&self.tensor_factor2)
     }
 }
 
-pub struct OddCyclotomicDecomposedNumberRing<R, F, A = Global> 
-    where R: RingStore,
-        R::Type: ZnRing + DivisibilityRing,
-        F: FFTAlgorithm<R::Type> + PartialEq,
+pub struct OddCyclotomicDecomposedNumberRing<F, A = Global> 
+    where F: FFTAlgorithm<zn_64::ZnBase> + PartialEq,
         A: Allocator + Clone
 {
-    ring: R,
+    ring: zn_64::Zn,
     fft_table: F,
     /// contains `usize::MAX` whenenver the fft output index corresponds to a non-primitive root of unity, and an index otherwise
     fft_output_indices_to_indices: Vec<usize>,
-    zeta_pow_rank: Vec<(usize, El<R>)>,
+    zeta_pow_rank: Vec<(usize, zn_64::ZnEl)>,
     rank: usize,
     allocator: A
 }
 
-impl<R, F, A> PartialEq for OddCyclotomicDecomposedNumberRing<R, F, A> 
-    where R: RingStore,
-        R::Type: ZnRing + DivisibilityRing,
-        F: FFTAlgorithm<R::Type> + PartialEq,
+impl<F, A> PartialEq for OddCyclotomicDecomposedNumberRing<F, A> 
+    where F: FFTAlgorithm<zn_64::ZnBase> + PartialEq,
         A: Allocator + Clone
 {
     fn eq(&self, other: &Self) -> bool {
@@ -405,13 +393,11 @@ impl<R, F, A> PartialEq for OddCyclotomicDecomposedNumberRing<R, F, A>
     }
 }
 
-impl<R, F, A> OddCyclotomicDecomposedNumberRing<R, F, A> 
-    where R: RingStore,
-        R::Type: ZnRing + DivisibilityRing,
-        F: FFTAlgorithm<R::Type> + PartialEq,
+impl<F, A> OddCyclotomicDecomposedNumberRing<F, A> 
+    where F: FFTAlgorithm<zn_64::ZnBase> + PartialEq,
         A: Allocator + Clone
 {
-    fn create_squarefree(fft_table: F, Fp: R, n_factorization: &[i64], allocator: A) -> Self {
+    fn create_squarefree(fft_table: F, Fp: zn_64::Zn, n_factorization: &[i64], allocator: A) -> Self {
         let n = n_factorization.iter().copied().product::<i64>();
         let rank = euler_phi_squarefree(&n_factorization) as usize;
 
@@ -452,14 +438,12 @@ impl<R, F, A> OddCyclotomicDecomposedNumberRing<R, F, A>
     }
 }
 
-impl<R, F, A> HENumberRingMod<R::Type> for OddCyclotomicDecomposedNumberRing<R, F , A> 
-    where R: RingStore,
-        R::Type: ZnRing + DivisibilityRing,
-        F: FFTAlgorithm<R::Type> + PartialEq,
+impl<F, A> HENumberRingMod for OddCyclotomicDecomposedNumberRing<F, A> 
+    where F: FFTAlgorithm<zn_64::ZnBase> + PartialEq,
         A: Allocator + Clone
 {
     fn mult_basis_to_small_basis<V>(&self, mut data: V)
-        where V: VectorViewMut<El<R>>
+        where V: VectorViewMut<zn_64::ZnEl>
     {
         let ring = self.base_ring();
         let mut tmp = Vec::with_capacity_in(self.fft_table.len(), &self.allocator);
@@ -485,7 +469,7 @@ impl<R, F, A> HENumberRingMod<R::Type> for OddCyclotomicDecomposedNumberRing<R, 
     }
 
     fn small_basis_to_mult_basis<V>(&self, mut data: V)
-        where V: VectorViewMut<El<R>>
+        where V: VectorViewMut<zn_64::ZnEl>
     {
         let ring = self.base_ring();
         let mut tmp = Vec::with_capacity_in(self.fft_table.len(), self.allocator.clone());
@@ -503,26 +487,24 @@ impl<R, F, A> HENumberRingMod<R::Type> for OddCyclotomicDecomposedNumberRing<R, 
     }
 
     fn coeff_basis_to_small_basis<V>(&self, data: V)
-        where V: VectorViewMut<El<R>>
+        where V: VectorViewMut<zn_64::ZnEl>
     {}
 
     fn small_basis_to_coeff_basis<V>(&self, data: V)
-        where V: VectorViewMut<El<R>>
+        where V: VectorViewMut<zn_64::ZnEl>
     {}
 
     fn rank(&self) -> usize {
         self.rank
     }
 
-    fn base_ring(&self) -> RingRef<R::Type> {
-        RingRef::new(self.ring.get_ring())
+    fn base_ring(&self) -> &zn_64::Zn {
+        &self.ring
     }
 }
 
-impl<R, F, A> HECyclotomicNumberRingMod<R::Type> for OddCyclotomicDecomposedNumberRing<R, F , A> 
-    where R: RingStore,
-        R::Type: ZnRing + DivisibilityRing,
-        F: FFTAlgorithm<R::Type> + PartialEq,
+impl<F, A> HECyclotomicNumberRingMod for OddCyclotomicDecomposedNumberRing<F, A> 
+    where F: FFTAlgorithm<zn_64::ZnBase> + PartialEq,
         A: Allocator + Clone
 {
     fn n(&self) -> u64 {
@@ -530,8 +512,8 @@ impl<R, F, A> HECyclotomicNumberRingMod<R::Type> for OddCyclotomicDecomposedNumb
     }
 
     fn permute_galois_action<V1, V2>(&self, src: V1, mut dst: V2, galois_element: zn_64::ZnEl)
-        where V1: VectorView<El<R>>,
-            V2: SwappableVectorViewMut<El<R>>
+        where V1: VectorView<zn_64::ZnEl>,
+            V2: SwappableVectorViewMut<zn_64::ZnEl>
     {
         assert_eq!(self.rank(), src.len());
         assert_eq!(self.rank(), dst.len());
@@ -556,25 +538,21 @@ impl<R, F, A> HECyclotomicNumberRingMod<R::Type> for OddCyclotomicDecomposedNumb
 ///   1 ⊗ 𝝵2^(n2 - 1),  𝝵1 ⊗ 𝝵2^(n2 - 1),  𝝵1^2 ⊗ 𝝵2^(n2 - 1), ...,  𝝵1^(n1 - 1) ⊗ 𝝵2^(n2 - 1)
 /// ```
 /// 
-pub struct CompositeCyclotomicDecomposedNumberRing<R, F, A = Global> 
-    where R: RingStore,
-        R::Type: ZnRing + DivisibilityRing,
-        F: FFTAlgorithm<R::Type> + PartialEq,
+pub struct CompositeCyclotomicDecomposedNumberRing<F, A = Global> 
+    where F: FFTAlgorithm<zn_64::ZnBase> + PartialEq,
         A: Allocator + Clone
 {
-    tensor_factor1: OddCyclotomicDecomposedNumberRing<R, F, A>,
-    tensor_factor2: OddCyclotomicDecomposedNumberRing<R, F, A>,
+    tensor_factor1: OddCyclotomicDecomposedNumberRing<F, A>,
+    tensor_factor2: OddCyclotomicDecomposedNumberRing<F, A>,
     // the `i`-th entry is none if the `i`-th small basis vector equals the `i`-th coeff basis vector,
     // and otherwise, it contains the coeff basis representation of the `i`-th small basis vector
-    small_to_coeff_conversion_matrix: Vec<Vec<(usize, El<R>)>>,
+    small_to_coeff_conversion_matrix: Vec<Vec<(usize, zn_64::ZnEl)>>,
     // same as `small_to_coeff_conversion_matrix` but with small and coeff basis swapped
-    coeff_to_small_conversion_matrix: Vec<Vec<(usize, El<R>)>>
+    coeff_to_small_conversion_matrix: Vec<Vec<(usize, zn_64::ZnEl)>>
 }
 
-impl<R, F, A> PartialEq for CompositeCyclotomicDecomposedNumberRing<R, F, A> 
-    where R: RingStore,
-        R::Type: ZnRing + DivisibilityRing,
-        F: FFTAlgorithm<R::Type> + PartialEq,
+impl<F, A> PartialEq for CompositeCyclotomicDecomposedNumberRing<F, A> 
+    where F: FFTAlgorithm<zn_64::ZnBase> + PartialEq,
         A: Allocator + Clone
 {
     fn eq(&self, other: &Self) -> bool {
@@ -582,14 +560,12 @@ impl<R, F, A> PartialEq for CompositeCyclotomicDecomposedNumberRing<R, F, A>
     }
 }
 
-impl<R, F, A> HENumberRingMod<R::Type> for CompositeCyclotomicDecomposedNumberRing<R, F, A> 
-    where R: RingStore,
-        R::Type: ZnRing + DivisibilityRing,
-        F: FFTAlgorithm<R::Type> + PartialEq,
+impl<F, A> HENumberRingMod for CompositeCyclotomicDecomposedNumberRing<F, A> 
+    where F: FFTAlgorithm<zn_64::ZnBase> + PartialEq,
         A: Allocator + Clone
 {
     fn small_basis_to_mult_basis<V>(&self, mut data: V)
-        where V: SwappableVectorViewMut<El<R>>
+        where V: SwappableVectorViewMut<zn_64::ZnEl>
     {
         record_time!(GLOBAL_TIME_RECORDER, "CompositeCyclotomicDecomposedNumberRing::small_basis_to_mult_basis", || {
             for i in 0..self.tensor_factor2.rank() {
@@ -602,7 +578,7 @@ impl<R, F, A> HENumberRingMod<R::Type> for CompositeCyclotomicDecomposedNumberRi
     }
 
     fn mult_basis_to_small_basis<V>(&self, mut data: V)
-        where V: SwappableVectorViewMut<El<R>>
+        where V: SwappableVectorViewMut<zn_64::ZnEl>
     {
         record_time!(GLOBAL_TIME_RECORDER, "CompositeCyclotomicDecomposedNumberRing::mult_basis_to_small_basis", || {
             for j in 0..self.tensor_factor1.rank() {
@@ -615,7 +591,7 @@ impl<R, F, A> HENumberRingMod<R::Type> for CompositeCyclotomicDecomposedNumberRi
     }
 
     fn coeff_basis_to_small_basis<V>(&self, mut data: V)
-        where V: SwappableVectorViewMut<El<R>>
+        where V: SwappableVectorViewMut<zn_64::ZnEl>
     {
         let mut result = Vec::with_capacity_in(self.rank(), &self.tensor_factor1.allocator);
         result.resize_with(self.rank(), || self.base_ring().zero());
@@ -630,7 +606,7 @@ impl<R, F, A> HENumberRingMod<R::Type> for CompositeCyclotomicDecomposedNumberRi
     }
 
     fn small_basis_to_coeff_basis<V>(&self, mut data: V)
-        where V: SwappableVectorViewMut<El<R>>
+        where V: SwappableVectorViewMut<zn_64::ZnEl>
     {
         let mut result = Vec::with_capacity_in(self.rank(), &self.tensor_factor1.allocator);
         result.resize_with(self.rank(), || self.base_ring().zero());
@@ -648,15 +624,13 @@ impl<R, F, A> HENumberRingMod<R::Type> for CompositeCyclotomicDecomposedNumberRi
         self.tensor_factor1.rank() * self.tensor_factor2.rank()
     }
 
-    fn base_ring(&self) -> RingRef<R::Type> {
+    fn base_ring(&self) -> &zn_64::Zn {
         self.tensor_factor1.base_ring()
     }
 }
 
-impl<R, F, A> HECyclotomicNumberRingMod<R::Type> for CompositeCyclotomicDecomposedNumberRing<R, F , A> 
-    where R: RingStore,
-        R::Type: ZnRing + DivisibilityRing,
-        F: FFTAlgorithm<R::Type> + PartialEq,
+impl<F, A> HECyclotomicNumberRingMod for CompositeCyclotomicDecomposedNumberRing<F, A> 
+    where F: FFTAlgorithm<zn_64::ZnBase> + PartialEq,
         A: Allocator + Clone
 {
     fn n(&self) -> u64 {
@@ -664,8 +638,8 @@ impl<R, F, A> HECyclotomicNumberRingMod<R::Type> for CompositeCyclotomicDecompos
     }
 
     fn permute_galois_action<V1, V2>(&self, src: V1, mut dst: V2, galois_element: zn_64::ZnEl)
-        where V1: VectorView<El<R>>,
-            V2: SwappableVectorViewMut<El<R>>
+        where V1: VectorView<zn_64::ZnEl>,
+            V2: SwappableVectorViewMut<zn_64::ZnEl>
     {
         let index_ring = self.cyclotomic_index_ring();
         let ring_factor1 = self.tensor_factor1.cyclotomic_index_ring();
@@ -722,50 +696,58 @@ fn test_odd_cyclotomic_decomposition_ring() {
 
 #[test]
 fn test_small_coeff_basis_conversion() {
-    let ring = Fp::<241>::RING;
+    let ring = zn_64::Zn::new(241);
     let number_ring = CompositeCyclotomicNumberRing::new(3, 5);
     let decomposition = number_ring.mod_p(ring);
 
-    let original = [1, 0, 0, 0, 0, 0, 0, 0];
-    let expected = [1, 0, 0, 0, 0, 0, 0, 0];
+    let arr_create = |data: [i32; 8]| std::array::from_fn::<_, 8, _>(|i| ring.int_hom().map(data[i]));
+    let assert_arr_eq = |fst: [zn_64::ZnEl; 8], snd: [zn_64::ZnEl; 8]| assert!(
+        fst.iter().zip(snd.iter()).all(|(x, y)| ring.eq_el(x, y)),
+        "expected {:?} = {:?}",
+        std::array::from_fn::<_, 8, _>(|i| ring.format(&fst[i])),
+        std::array::from_fn::<_, 8, _>(|i| ring.format(&snd[i]))
+    );
+
+    let original = arr_create([1, 0, 0, 0, 0, 0, 0, 0]);
+    let expected = arr_create([1, 0, 0, 0, 0, 0, 0, 0]);
     let mut actual = original;
     decomposition.coeff_basis_to_small_basis(&mut actual);
-    assert_eq!(expected, actual);
+    assert_arr_eq(expected, actual);
     decomposition.small_basis_to_coeff_basis(&mut actual);
-    assert_eq!(original, actual);
+    assert_arr_eq(original, actual);
     
     // 𝝵_15 = 𝝵_3^-1 ⊗ 𝝵_5^2 = (-1 - 𝝵_3) ⊗ 𝝵_5^2
-    let original = [0, 1, 0, 0, 0, 0, 0, 0];
-    let expected = [0, 0, 0, 0, 240, 240, 0, 0];
+    let original = arr_create([0, 1, 0, 0, 0, 0, 0, 0]);
+    let expected = arr_create([0, 0, 0, 0, 240, 240, 0, 0]);
     let mut actual = original;
     decomposition.coeff_basis_to_small_basis(&mut actual);
-    assert_eq!(expected, actual);
+    assert_arr_eq(expected, actual);
     decomposition.small_basis_to_coeff_basis(&mut actual);
-    assert_eq!(original, actual);
+    assert_arr_eq(original, actual);
 
-    let original = [0, 0, 240, 0, 0, 0, 0, 0];
-    let expected = [0, 1, 0, 1, 0, 1, 0, 1];
+    let original = arr_create([0, 0, 240, 0, 0, 0, 0, 0]);
+    let expected = arr_create([0, 1, 0, 1, 0, 1, 0, 1]);
     let mut actual = original;
     decomposition.coeff_basis_to_small_basis(&mut actual);
-    assert_eq!(expected, actual);
+    assert_arr_eq(expected, actual);
     decomposition.small_basis_to_coeff_basis(&mut actual);
-    assert_eq!(original, actual);
+    assert_arr_eq(original, actual);
 
-    let original = [0, 0, 0, 1, 0, 0, 0, 0];
-    let expected = [0, 0, 1, 0, 0, 0, 0, 0];
+    let original = arr_create([0, 0, 0, 1, 0, 0, 0, 0]);
+    let expected = arr_create([0, 0, 1, 0, 0, 0, 0, 0]);
     let mut actual = original;
     decomposition.coeff_basis_to_small_basis(&mut actual);
-    assert_eq!(expected, actual);
+    assert_arr_eq(expected, actual);
     decomposition.small_basis_to_coeff_basis(&mut actual);
-    assert_eq!(original, actual);
+    assert_arr_eq(original, actual);
 
-    let original = [0, 0, 0, 0, 0, 1, 0, 0];
-    let expected = [0, 1, 0, 0, 0, 0, 0, 0];
+    let original = arr_create([0, 0, 0, 0, 0, 1, 0, 0]);
+    let expected = arr_create([0, 1, 0, 0, 0, 0, 0, 0]);
     let mut actual = original;
     decomposition.coeff_basis_to_small_basis(&mut actual);
-    assert_eq!(expected, actual);
+    assert_arr_eq(expected, actual);
     decomposition.small_basis_to_coeff_basis(&mut actual);
-    assert_eq!(original, actual);
+    assert_arr_eq(original, actual);
 }
 
 // #[test]

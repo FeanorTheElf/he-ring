@@ -50,7 +50,7 @@ use super::*;
 fn pow2_bitreversed_dwt_butterfly<'b, A, G, N>(H: &HypercubeIsomorphism<'b, Pow2CyclotomicNumberRing<N>, A>, dim_index: usize, l: usize, root_of_unity_4l: El<SlotRing<'b, A>>, row_autos: G) -> LinearTransform<Pow2CyclotomicNumberRing<N>, A>
     where A: Allocator + Clone,
         G: Fn(&[usize]) -> ZnEl,
-        Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing<Zn>
+        Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing
 {
     let m = H.len(dim_index);
     let g = H.shift_galois_element(dim_index, -1);
@@ -128,7 +128,7 @@ fn pow2_bitreversed_dwt_butterfly<'b, A, G, N>(H: &HypercubeIsomorphism<'b, Pow2
 fn pow2_bitreversed_inv_dwt_butterfly<'b, A, G, N>(H: &HypercubeIsomorphism<'b, Pow2CyclotomicNumberRing<N>, A>, dim_index: usize, l: usize, root_of_unity_4l: El<SlotRing<'b, A>>, row_autos: G) -> LinearTransform<Pow2CyclotomicNumberRing<N>, A>
     where A: Allocator + Clone,
         G: Fn(&[usize]) -> ZnEl,
-        Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing<Zn>
+        Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing
 {
     let m = H.len(dim_index);
     let g = H.shift_galois_element(dim_index, -1);
@@ -225,7 +225,7 @@ fn pow2_bitreversed_inv_dwt_butterfly<'b, A, G, N>(H: &HypercubeIsomorphism<'b, 
 fn pow2_bitreversed_dwt<A, G, N>(H: &HypercubeIsomorphism<Pow2CyclotomicNumberRing<N>, A>, dim_index: usize, row_autos: G) -> Vec<LinearTransform<Pow2CyclotomicNumberRing<N>, A>>
     where A: Allocator + Clone,
         G: Fn(&[usize]) -> ZnEl,
-        Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing<Zn>
+        Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing
 {
     let m = H.len(dim_index);
     let log2_m = ZZ.abs_log2_ceil(&(m as i64)).unwrap();
@@ -257,7 +257,7 @@ fn pow2_bitreversed_dwt<A, G, N>(H: &HypercubeIsomorphism<Pow2CyclotomicNumberRi
 fn pow2_bitreversed_inv_dwt<A, G, N>(H: &HypercubeIsomorphism<Pow2CyclotomicNumberRing<N>, A>, dim_index: usize, row_autos: G) -> Vec<LinearTransform<Pow2CyclotomicNumberRing<N>, A>>
     where A: Allocator + Clone,
         G: Fn(&[usize]) -> ZnEl,
-        Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing<Zn>
+        Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing
 {
     let m = H.len(dim_index);
     let log2_m = ZZ.abs_log2_ceil(&(m as i64)).unwrap();
@@ -295,7 +295,7 @@ fn pow2_bitreversed_inv_dwt<A, G, N>(H: &HypercubeIsomorphism<Pow2CyclotomicNumb
 /// 
 pub fn slots_to_coeffs_thin<A, N>(H: &HypercubeIsomorphism<Pow2CyclotomicNumberRing<N>, A>) -> Vec<LinearTransform<Pow2CyclotomicNumberRing<N>, A>>
     where A: Allocator + Clone,
-        Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing<Zn>
+        Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing
 {
     let n = H.ring().get_ring().n();
     let log2_n = ZZ.abs_log2_ceil(&(n as i64)).unwrap();
@@ -356,7 +356,7 @@ pub fn slots_to_coeffs_thin<A, N>(H: &HypercubeIsomorphism<Pow2CyclotomicNumberR
 /// 
 pub fn slots_to_coeffs_thin_inv<A, N>(H: &HypercubeIsomorphism<Pow2CyclotomicNumberRing<N>, A>) -> Vec<LinearTransform<Pow2CyclotomicNumberRing<N>, A>>
     where A: Allocator + Clone,
-        Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing<Zn>
+        Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing
 {
     let n = H.ring().get_ring().n();
     let log2_n = ZZ.abs_log2_ceil(&(n as i64)).unwrap();
@@ -408,7 +408,7 @@ pub fn slots_to_coeffs_thin_inv<A, N>(H: &HypercubeIsomorphism<Pow2CyclotomicNum
 
 pub fn coeffs_to_slots_thin<A, N>(H: &HypercubeIsomorphism<Pow2CyclotomicNumberRing<N>, A>) -> (Vec<LinearTransform<Pow2CyclotomicNumberRing<N>, A>>, Trace)
     where A: Allocator + Clone,
-        Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing<Zn>
+        Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing
 {
     let trace = Trace::new(&H.cyclotomic_index_ring(), H.cyclotomic_index_ring().smallest_positive_lift(H.frobenius_element(1)), H.slot_ring().rank());
     let mut result = slots_to_coeffs_thin_inv(H);
