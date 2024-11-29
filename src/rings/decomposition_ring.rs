@@ -8,7 +8,7 @@ use feanor_math::primitive_int::StaticRing;
 use feanor_math::rings::extension::{FreeAlgebra, FreeAlgebraStore};
 use feanor_math::rings::finite::FiniteRing;
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
-use feanor_math::rings::zn::{zn_64, zn_rns, FromModulusCreateableZnRing, ZnRing, ZnRingStore};
+use feanor_math::rings::zn::{zn_64, zn_big, zn_rns, FromModulusCreateableZnRing, ZnRing, ZnRingStore};
 use feanor_math::ring::*;
 use feanor_math::seq::{CloneElFn, CloneRingEl};
 use feanor_math::seq::VectorView;
@@ -24,6 +24,8 @@ use crate::cyclotomic::CyclotomicRing;
 use crate::sample_primes;
 use crate::IsEq;
 use crate::rings::number_ring::*;
+
+use super::pow2_cyclotomic::Pow2CyclotomicNumberRing;
 
 pub struct DecompositionRingBase<NumberRing, ZnTy, A = Global> 
     where NumberRing: HENumberRing,
@@ -57,10 +59,10 @@ impl<NumberRing, ZnTy> DecompositionRingBase<NumberRing, ZnTy>
         ZnTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
 {
     pub fn new(number_ring: NumberRing, base_ring: ZnTy) -> RingValue<Self> {
-        let max_product_expansion_factor = number_ring.product_expansion_factor();
-        let max_lift_size = int_cast(base_ring.integer_ring().clone_el(base_ring.modulus()), StaticRing::<i64>::RING, base_ring.integer_ring()) as f64 / 2.;
-        let max_product_size = max_lift_size * max_lift_size * max_product_expansion_factor;
-        let required_bits = max_product_size.log2().ceil() as usize;
+        let max_product_expansion_factor = BigIntRing::RING.from_float_approx(number_ring.product_expansion_factor().ceil()).unwrap();
+        let max_lift_size = int_cast(base_ring.integer_ring().clone_el(base_ring.modulus()), BigIntRing::RING, base_ring.integer_ring());
+        let max_product_size = BigIntRing::RING.mul(BigIntRing::RING.pow(max_lift_size, 2), max_product_expansion_factor);
+        let required_bits = BigIntRing::RING.abs_log2_ceil(&max_product_size).unwrap();
         let rns_base_primes = sample_primes(required_bits, required_bits + 57, 57, |n| number_ring.largest_suitable_prime(int_cast(n, StaticRing::<i64>::RING, BigIntRing::RING)).map(|n| int_cast(n, BigIntRing::RING, StaticRing::<i64>::RING))).unwrap();
         let rns_base = zn_rns::Zn::new(rns_base_primes.into_iter().map(|p| zn_64::Zn::new(int_cast(p, StaticRing::<i64>::RING, BigIntRing::RING) as u64)).collect(), BigIntRing::RING);
         return Self::new_with(number_ring, base_ring, rns_base, Global);
@@ -75,11 +77,11 @@ impl<NumberRing, ZnTy, A> DecompositionRingBase<NumberRing, ZnTy, A>
 {
     pub fn new_with(number_ring: NumberRing, base_ring: ZnTy, rns_base: zn_rns::Zn<zn_64::Zn, BigIntRing>, allocator: A) -> RingValue<Self> {
         assert!(rns_base.len() > 0);
-        let max_product_expansion_factor = number_ring.product_expansion_factor();
-        let max_lift_size = int_cast(base_ring.integer_ring().clone_el(base_ring.modulus()), StaticRing::<i64>::RING, base_ring.integer_ring()) as f64 / 2.;
-        let max_product_size = max_lift_size * max_lift_size * max_product_expansion_factor;
         let ZZbig = BigIntRing::RING;
-        assert!(ZZbig.is_gt(&ZZbig.prod(rns_base.as_iter().map(|rns_base_ring| int_cast(rns_base_ring.integer_ring().clone_el(rns_base_ring.modulus()), ZZbig, rns_base_ring.integer_ring()))), &ZZbig.from_float_approx(max_product_size).unwrap()));
+        let max_product_expansion_factor = ZZbig.from_float_approx(number_ring.product_expansion_factor().ceil()).unwrap();
+        let max_lift_size = int_cast(base_ring.integer_ring().clone_el(base_ring.modulus()), ZZbig, base_ring.integer_ring());
+        let max_product_size = ZZbig.mul(ZZbig.pow(max_lift_size, 2), max_product_expansion_factor);
+        assert!(ZZbig.is_gt(&ZZbig.prod(rns_base.as_iter().map(|rns_base_ring| int_cast(rns_base_ring.integer_ring().clone_el(rns_base_ring.modulus()), ZZbig, rns_base_ring.integer_ring()))), &max_product_size));
         RingValue::from(Self {
             base_ring: base_ring,
             ring_decompositions: rns_base.as_iter().map(|Fp| number_ring.mod_p(Fp.clone())).collect(),
@@ -666,6 +668,30 @@ pub fn test_with_number_ring<NumberRing: HENumberRing>(number_ring: NumberRing) 
         ring.int_hom().mul_map(ring.pow(ring.canonical_gen(), rank - 1), 2)
     ];
 
+    feanor_math::ring::generic_tests::test_ring_axioms(&ring, elements.iter().map(|x| ring.clone_el(x)));
+    feanor_math::ring::generic_tests::test_self_iso(&ring, elements.iter().map(|x| ring.clone_el(x)));
+    feanor_math::rings::extension::generic_tests::test_free_algebra_axioms(&ring);
+}
+
+#[test]
+pub fn test_decomposition_ring_large_modulus() {
+    let number_ring = Pow2CyclotomicNumberRing::new(32);
+    let rank = number_ring.rank();
+    let ring = DecompositionRingBase::new(number_ring, zn_big::Zn::new(BigIntRing::RING, BigIntRing::RING.get_ring().parse("1267650600228229401496703205653", 10).unwrap()));
+    
+    let large_base_ring_element = ring.base_ring().coerce(&BigIntRing::RING, BigIntRing::RING.power_of_two(51));
+    let elements = vec![
+        ring.zero(),
+        ring.one(),
+        ring.neg_one(),
+        ring.inclusion().map_ref(&large_base_ring_element),
+        ring.canonical_gen(),
+        ring.pow(ring.canonical_gen(), 2),
+        ring.pow(ring.canonical_gen(), rank - 1),
+        ring.inclusion().mul_ref_map(&ring.canonical_gen(), &large_base_ring_element),
+        ring.inclusion().mul_ref_map(&ring.pow(ring.canonical_gen(), rank - 1), &large_base_ring_element)
+    ];
+    
     feanor_math::ring::generic_tests::test_ring_axioms(&ring, elements.iter().map(|x| ring.clone_el(x)));
     feanor_math::ring::generic_tests::test_self_iso(&ring, elements.iter().map(|x| ring.clone_el(x)));
     feanor_math::rings::extension::generic_tests::test_free_algebra_axioms(&ring);

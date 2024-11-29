@@ -89,12 +89,11 @@ pub trait BFVParams {
 
     fn ciphertext_modulus_bits(&self) -> Range<usize>;
     fn number_ring(&self) -> NumberRing<Self>;
+    fn create_ciphertext_rings(&self) -> (CiphertextRing<Self>, CiphertextRing<Self>);
 
     fn create_plaintext_ring(&self, modulus: i64) -> PlaintextRing<Self> {
         DecompositionRingBase::new(self.number_ring(), Zn::new(modulus as u64))
     }
-
-    fn create_ciphertext_rings(&self) -> (CiphertextRing<Self>, CiphertextRing<Self>);
 
     fn gen_sk<R: Rng + CryptoRng>(C: &CiphertextRing<Self>, mut rng: R) -> SecretKey<Self> {
         // we sample uniform ternary secrets 

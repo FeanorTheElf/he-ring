@@ -576,6 +576,7 @@ impl<'a, NumberRing, A> VectorFn<El<zn_rns::Zn<zn_64::Zn, BigIntRing>>> for Doub
     }
 
     fn at(&self, i: usize) -> El<zn_rns::Zn<zn_64::Zn, BigIntRing>> {
+        assert!(i < self.len());
         self.ring.rns_base().from_congruence(self.el_wrt_coeff_basis[i..].iter().step_by(self.ring.rank()).enumerate().map(|(i, x)| self.ring.rns_base().at(i).clone_el(x)))
     }
 }
