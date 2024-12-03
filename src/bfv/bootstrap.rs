@@ -483,8 +483,8 @@ fn test_composite_bfv_thin_bootstrapping_2() {
     let mut rng = thread_rng();
     
     let params = CompositeBFV {
-        log2_q_min: 750,
-        log2_q_max: 800,
+        log2_q_min: 660,
+        log2_q_max: 700,
         n1: 31,
         n2: 11
     };

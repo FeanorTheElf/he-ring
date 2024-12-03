@@ -55,7 +55,7 @@ fn pow2_bitreversed_dwt_butterfly<'b, A, G, N>(H: &HypercubeIsomorphism<'b, Pow2
     let m = H.len(dim_index);
     let g = H.shift_galois_element(dim_index, -1);
     let smaller_cyclotomic_index_ring = Zn::new(4 * l as u64);
-    let red = ReductionMap::new(H.cyclotomic_index_ring(), &smaller_cyclotomic_index_ring).unwrap();
+    let red = ZnReductionMap::new(H.cyclotomic_index_ring(), &smaller_cyclotomic_index_ring).unwrap();
     assert_el_eq!(&smaller_cyclotomic_index_ring, &smaller_cyclotomic_index_ring.one(), &smaller_cyclotomic_index_ring.pow(red.map(g), l));
 
     let log2_m = ZZ.abs_log2_ceil(&(m as i64)).unwrap();
@@ -133,7 +133,7 @@ fn pow2_bitreversed_inv_dwt_butterfly<'b, A, G, N>(H: &HypercubeIsomorphism<'b, 
     let m = H.len(dim_index);
     let g = H.shift_galois_element(dim_index, -1);
     let smaller_cyclotomic_index_ring = Zn::new(4 * l as u64);
-    let red = ReductionMap::new(H.cyclotomic_index_ring(), &smaller_cyclotomic_index_ring).unwrap();
+    let red = ZnReductionMap::new(H.cyclotomic_index_ring(), &smaller_cyclotomic_index_ring).unwrap();
     assert_el_eq!(&smaller_cyclotomic_index_ring, &smaller_cyclotomic_index_ring.one(), &smaller_cyclotomic_index_ring.pow(red.map(g), l));
 
     let log2_m = ZZ.abs_log2_ceil(&(m as i64)).unwrap();

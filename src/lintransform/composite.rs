@@ -101,8 +101,7 @@ fn slots_to_powcoeffs_fat_fst_step<'a, NumberRing, A>(H: &HypercubeIsomorphism<'
 /// If for the linear transform input, the slot `(i1, ..., ir)` contains `sum_j a_(j, i1, ..., ir) 𝝵^j`, this
 /// this transform "puts" `a_(j, i1, ..., ir)` into the powerful-basis coefficient of `X1^(j * m1 + i1) X2^i2 ... Xr^ir`.
 /// 
-#[allow(unused)]
-fn slots_to_powcoeffs_fat<NumberRing, A>(H: &HypercubeIsomorphism<NumberRing, A>) -> Vec<LinearTransform<NumberRing, A>>
+pub fn slots_to_powcoeffs_fat<NumberRing, A>(H: &HypercubeIsomorphism<NumberRing, A>) -> Vec<LinearTransform<NumberRing, A>>
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
 {
@@ -130,7 +129,7 @@ fn slots_to_powcoeffs_fat<NumberRing, A>(H: &HypercubeIsomorphism<NumberRing, A>
 /// Inverse of [`slots_to_powcoeffs_fat()`], i.e. moves the powerful-basis coefficient of `X1^(j * m1 + i1) X2^i2 ... Xr^ir`
 /// to the slot ``(i1, ..., ir)`.
 /// 
-fn powcoeffs_to_slots_fat<NumberRing, A>(H: &HypercubeIsomorphism<NumberRing, A>) -> Vec<LinearTransform<NumberRing, A>>
+pub fn powcoeffs_to_slots_fat<NumberRing, A>(H: &HypercubeIsomorphism<NumberRing, A>) -> Vec<LinearTransform<NumberRing, A>>
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
 {

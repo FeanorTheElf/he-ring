@@ -271,7 +271,7 @@ impl<NumberRing, A> LinearTransform<NumberRing, A>
         self.check_valid(H_from);
         assert_eq!(H_from.ring().n(), to.n());
         let from = H_from.ring();
-        let red_map = ReductionMap::new(from.base_ring(), to.base_ring()).unwrap();
+        let red_map = ZnReductionMap::new(from.base_ring(), to.base_ring()).unwrap();
         let hom = |x: &El<DecompositionRing<NumberRing, Zn, A>>| to.from_canonical_basis(H_from.ring().wrt_canonical_basis(x).into_iter().map(|x| red_map.map(x)));
         Self {
             data: self.data.iter().map(|(g, coeff)| (g.clone(), hom(coeff))).collect()

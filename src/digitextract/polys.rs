@@ -70,10 +70,10 @@ pub fn poly_to_circuit<P>(poly_ring: P, polys: &[El<P>]) -> ArithCircuit
     let optimal_depths = degrees.iter().copied().map(|d| ZZ.abs_log2_ceil(&(d as i64)).unwrap()).collect::<Vec<_>>();
     
     let baby_steps = (1..max_deg).filter(|bs| {
-            let (depths, _) = low_depth_paterson_stockmeyer_cost((&degrees).into_fn(|d| *d), *bs);
+            let (depths, _) = low_depth_paterson_stockmeyer_cost((&degrees).copy_els(), *bs);
             (0..optimal_depths.len()).all(|i| depths.at(i) <= optimal_depths[i] + 1)
         })
-        .min_by_key(|bs| low_depth_paterson_stockmeyer_cost((&degrees).into_fn(|d| *d), *bs).1)
+        .min_by_key(|bs| low_depth_paterson_stockmeyer_cost((&degrees).copy_els(), *bs).1)
         .unwrap();
 
     return low_depth_paterson_stockmeyer(&poly_ring, polys, baby_steps);

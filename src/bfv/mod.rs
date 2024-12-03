@@ -50,12 +50,12 @@ use rand_distr::StandardNormal;
 pub mod bootstrap;
 
 #[cfg(feature = "use_hexl")]
-pub type UsedConvolution = crate::rings::hexl_conv::HEXLConv;
+pub type UsedConvolution = feanor_math_hexl::conv::HEXLConvolution;
 #[cfg(not(feature = "use_hexl"))]
 pub type UsedConvolution = crate::rings::ntt_conv::NTTConv<Zn>;
 
 #[cfg(feature = "use_hexl")]
-pub type UsedNegacyclicNTT = feanor_math_hexl::hexl::HEXLNTT;
+pub type UsedNegacyclicNTT = feanor_math_hexl::hexl::HEXLNegacyclicNTT;
 #[cfg(not(feature = "use_hexl"))]
 pub type UsedNegacyclicNTT = RustNegacyclicNTT<Zn>;
 

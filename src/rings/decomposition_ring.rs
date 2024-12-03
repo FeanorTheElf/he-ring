@@ -434,7 +434,7 @@ impl<NumberRing, ZnTy, A> FreeAlgebra for DecompositionRingBase<NumberRing, ZnTy
     }
 
     fn wrt_canonical_basis<'a>(&'a self, el: &'a Self::Element) -> Self::VectorRepresentation<'a> {
-        (&el.data[..]).into_ring_el_fn(self.base_ring())
+        (&el.data[..]).clone_ring_els(self.base_ring())
     }
 
     fn canonical_gen(&self) -> Self::Element {

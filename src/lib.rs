@@ -51,6 +51,9 @@ extern crate feanor_math;
 extern crate feanor_math_hexl;
 extern crate test;
 extern crate thread_local;
+extern crate serde;
+extern crate rand;
+extern crate rand_distr;
 
 pub trait IsEq<T: ?Sized> {
 

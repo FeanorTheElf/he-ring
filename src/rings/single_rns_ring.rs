@@ -72,12 +72,12 @@ pub struct SingleRNSRingPreparedMultiplicant<NumberRing, A, C>
 }
 
 #[cfg(feature = "use_hexl")]
-impl<NumberRing> SingleRNSRingBase<NumberRing, zn_64::Zn, Global, crate::rings::hexl_conv::HEXLConv> 
-    where NumberRing: HECyclotomicNumberRing<zn_64::Zn>
+impl<NumberRing> SingleRNSRingBase<NumberRing, Global, feanor_math_hexl::conv::HEXLConvolution> 
+    where NumberRing: HECyclotomicNumberRing
 {
     pub fn new(number_ring: NumberRing, rns_base: zn_rns::Zn<zn_64::Zn, BigIntRing>) -> RingValue<Self> {
         let max_log2_n = StaticRing::<i64>::RING.abs_log2_ceil(&(number_ring.rank() as i64 * 2)).unwrap();
-        let convolutions = rns_base.as_iter().map(|Zp| crate::rings::hexl_conv::HEXLConv::new(Zp.clone(), max_log2_n)).collect();
+        let convolutions = rns_base.as_iter().map(|Zp| feanor_math_hexl::conv::HEXLConvolution::new(Zp.clone(), max_log2_n)).collect();
         Self::new_with(number_ring, rns_base, Global, convolutions)
     }
 }

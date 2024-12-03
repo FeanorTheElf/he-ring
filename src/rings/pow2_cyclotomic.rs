@@ -234,22 +234,22 @@ impl<R> Pow2NegacyclicNTT<R> for RustNegacyclicNTT<R>
 }
 
 #[cfg(feature = "use_hexl")]
-impl Pow2NegacyclicNTT<Zn> for feanor_math_hexl::hexl::HEXLNTT {
+impl Pow2NegacyclicNTT<Zn> for feanor_math_hexl::hexl::HEXLNegacyclicNTT {
 
     fn bitreversed_negacyclic_fft_base<const INV: bool>(&self, input: &mut [El<Zn>], output: &mut [El<Zn>]) {
-        feanor_math_hexl::hexl::HEXLNTT::unordered_negacyclic_fft_base::<INV>(self, input, output)
+        feanor_math_hexl::hexl::HEXLNegacyclicNTT::unordered_negacyclic_fft_base::<INV>(self, input, output)
     }
 
     fn len(&self) -> usize {
-        feanor_math_hexl::hexl::HEXLNTT::n(self)
+        feanor_math_hexl::hexl::HEXLNegacyclicNTT::n(self)
     }
 
     fn new(ring: Zn, log2_rank: usize) -> Self {
-        feanor_math_hexl::hexl::HEXLNTT::for_zn(ring, log2_rank).unwrap()
+        feanor_math_hexl::hexl::HEXLNegacyclicNTT::for_zn(ring, log2_rank).unwrap()
     }
 
     fn ring(&self) -> &Zn {
-        feanor_math_hexl::hexl::HEXLNTT::ring(self)
+        feanor_math_hexl::hexl::HEXLNegacyclicNTT::ring(self)
     }
 }
 

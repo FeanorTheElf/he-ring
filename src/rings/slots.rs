@@ -169,7 +169,7 @@ fn get_prim_root_of_unity<R>(ring: R, m: usize) -> El<R>
 
     let rou = feanor_math::algorithms::unity_root::get_prim_root_of_unity(&galois_field, m).unwrap();
 
-    let red_map = ReductionMap::new(ring.base_ring(), galois_field.base_ring()).unwrap();
+    let red_map = ZnReductionMap::new(ring.base_ring(), galois_field.base_ring()).unwrap();
     let mut result = ring.from_canonical_basis(galois_field.wrt_canonical_basis(&rou).into_iter().map(|x| red_map.smallest_lift(x)));
     for _ in 0..e {
         let delta = ring.checked_div(
@@ -426,7 +426,7 @@ impl<'a, NumberRing, A> HypercubeIsomorphism<'a, NumberRing, A>
         let t = int_cast(self.ring.base_ring().integer_ring().clone_el(self.ring.base_ring().modulus()), ZZ, self.ring.base_ring().integer_ring());
         let (p, e) = is_prime_power(&ZZ, &t).unwrap();
         let self_ring = self.ring();
-        let red_map = ReductionMap::new(self_ring.base_ring(), new_ring.base_ring()).unwrap();
+        let red_map = ZnReductionMap::new(self_ring.base_ring(), new_ring.base_ring()).unwrap();
 
         let poly_ring = DensePolyRing::new(self.slot_ring().base_ring(), "X");
         let slot_ring_modulus = self.slot_ring().generating_poly(&poly_ring, &poly_ring.base_ring().identity());
