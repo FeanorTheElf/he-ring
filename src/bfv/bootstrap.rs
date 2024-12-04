@@ -12,13 +12,14 @@ use polys::poly_to_circuit;
 use rand::thread_rng;
 
 use crate::cyclotomic::CyclotomicRingStore;
-use crate::lintransform::composite;
 use crate::lintransform::trace::Trace;
 use crate::rnsconv;
 use crate::digitextract::*;
 use crate::lintransform::pow2;
+use crate::lintransform::HELinearTransform;
 use crate::digitextract::polys::digit_retain_poly;
-use crate::lintransform::CompiledLinearTransform;
+use crate::lintransform::composite;
+use crate::lintransform::matmul::CompiledLinearTransform;
 use crate::rings::slots::*;
 
 use super::*;
@@ -113,8 +114,9 @@ impl ThinBootstrapParams<Pow2BFV> {
     }
 }
 
-impl<Params: BFVParams> ThinBootstrapParams<Params> {
-
+impl<Params: BFVParams> ThinBootstrapParams<Params>
+    where NumberRing<Params>: Clone
+{
     pub fn build_odd<const LOG: bool>(params: Params, t: i64, config: BootstrapperConfig) -> Self {
         assert!(params.number_ring().n() % 2 != 0);
 
@@ -227,8 +229,8 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
 
     pub fn required_galois_keys(&self, P: &PlaintextRing<Params>) -> Vec<ZnEl> {
         let mut result = Vec::new();
-        result.extend(self.slots_to_coeffs_thin.iter().flat_map(|T| T.required_galois_keys().map(|g| *g)));
-        result.extend(self.coeffs_to_slots_thin.0.iter().flat_map(|T| T.required_galois_keys().map(|g| *g)));
+        result.extend(self.slots_to_coeffs_thin.iter().flat_map(|T| T.required_galois_keys().into_iter()));
+        result.extend(self.coeffs_to_slots_thin.0.iter().flat_map(|T| T.required_galois_keys().into_iter()));
         if let Some(trace) = &self.coeffs_to_slots_thin.1 {
             result.extend(trace.required_galois_keys());
         }
@@ -341,14 +343,17 @@ fn hom_compute_linear_transform<'a, Params: BFVParams>(
 
     return transform.iter().fold(input, |current, T| T.evaluate_generic(
         current,
-        |lhs, rhs, factor| {
-            *lhs = Params::hom_add(C, Params::hom_mul_plain(P, C, factor, Params::clone_ct(C, rhs)), lhs)
+        |lhs, rhs| {
+            Params::hom_add(C, lhs, rhs)
         }, 
+        |value, factor| {
+            Params::hom_mul_plain(P, C, factor, value)
+        },
         |value, gs| {
             *key_switches += gs.len();
             Params::hom_galois_many(C, value, gs, gs.as_fn().map_fn(|g| get_gk(g)))
         },
-        || Params::transparent_zero(C)
+        |value| Params::clone_ct(C, value)
     ));
 }
 

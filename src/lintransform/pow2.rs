@@ -2,8 +2,10 @@ use std::alloc::Allocator;
 
 use feanor_math::algorithms::fft::cooley_tuckey::bitreverse;
 use feanor_math::algorithms::unity_root::is_prim_root_of_unity;
+use feanor_math::divisibility::DivisibilityRingStore;
 use feanor_math::homomorphism::Homomorphism;
 use feanor_math::integer::IntegerRingStore;
+use feanor_math::primitive_int::StaticRing;
 use feanor_math::ring::*;
 use feanor_math::rings::extension::*;
 use feanor_math::rings::zn::zn_64::*;
@@ -11,11 +13,15 @@ use feanor_math::rings::zn::*;
 use feanor_math::assert_el_eq;
 
 use crate::cyclotomic::*;
+use crate::lintransform::matmul::*;
 use crate::rings::number_ring::*;
 use crate::rings::decomposition_ring::*;
 use crate::rings::pow2_cyclotomic::*;
+use crate::rings::slots::*;
 use crate::StdZn;
-use super::*;
+use crate::lintransform::trace::Trace;
+
+const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
 
 ///
 /// Works separately on each block `(b0, ..., b(l - 1))` of size `l = blocksize` along the given given hypercube dimension.
@@ -47,7 +53,7 @@ use super::*;
 ///    `pow2_bitreversed_dwt_butterfly` to give nonsensical results. If you pass `row_autos = |_| H.cyclotomic_index_ring().one()` then this uses the same
 ///    roots of unity everywhere, i.e. results in the behavior as outlined above.
 /// 
-fn pow2_bitreversed_dwt_butterfly<'b, A, G, N>(H: &HypercubeIsomorphism<'b, Pow2CyclotomicNumberRing<N>, A>, dim_index: usize, l: usize, root_of_unity_4l: El<SlotRing<'b, A>>, row_autos: G) -> LinearTransform<Pow2CyclotomicNumberRing<N>, A>
+fn pow2_bitreversed_dwt_butterfly<'b, A, G, N>(H: &HypercubeIsomorphism<'b, Pow2CyclotomicNumberRing<N>, A>, dim_index: usize, l: usize, root_of_unity_4l: El<SlotRing<'b, A>>, row_autos: G) -> MatmulTransform<Pow2CyclotomicNumberRing<N>, A>
     where A: Allocator + Clone,
         G: Fn(&[usize]) -> ZnEl,
         Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing
@@ -102,30 +108,27 @@ fn pow2_bitreversed_dwt_butterfly<'b, A, G, N>(H: &HypercubeIsomorphism<'b, Pow2
         }
     }).map(&pow_of_zeta));
 
-    let mut result = LinearTransform {
-        data: vec![
-            (
-                GaloisElementIndex::shift_1d(H.dim_count(), dim_index, 0),
-                diagonal_mask
-            ),
-            (
-                GaloisElementIndex::shift_1d(H.dim_count(), dim_index, l as i64 / 2),
-                forward_mask
-            ),
-            (
-                GaloisElementIndex::shift_1d(H.dim_count(), dim_index, -(l as i64) / 2),
-                backward_mask
-            )
-        ]
-    };
-    result.canonicalize(H);
+    let result = MatmulTransform::linear_combine_shifts(H, [
+        (
+            (0..H.dim_count()).map(|i| 0).collect::<Vec<_>>(),
+            diagonal_mask
+        ),
+        (
+            (0..H.dim_count()).map(|i| if i == dim_index { l as i64 / 2 } else { 0 }).collect::<Vec<_>>(),
+            forward_mask
+        ),
+        (
+            (0..H.dim_count()).map(|i| if i == dim_index { -(l as i64) / 2 } else { 0 }).collect::<Vec<_>>(),
+            backward_mask
+        )
+    ].iter().map(|(shift, coeff)| (&shift[..], H.ring().clone_el(coeff))));
     return result;
 }
 
 ///
 /// Inverse of [`pow2_bitreversed_dwt_butterfly()`]
 /// 
-fn pow2_bitreversed_inv_dwt_butterfly<'b, A, G, N>(H: &HypercubeIsomorphism<'b, Pow2CyclotomicNumberRing<N>, A>, dim_index: usize, l: usize, root_of_unity_4l: El<SlotRing<'b, A>>, row_autos: G) -> LinearTransform<Pow2CyclotomicNumberRing<N>, A>
+fn pow2_bitreversed_inv_dwt_butterfly<'b, A, G, N>(H: &HypercubeIsomorphism<'b, Pow2CyclotomicNumberRing<N>, A>, dim_index: usize, l: usize, root_of_unity_4l: El<SlotRing<'b, A>>, row_autos: G) -> MatmulTransform<Pow2CyclotomicNumberRing<N>, A>
     where A: Allocator + Clone,
         G: Fn(&[usize]) -> ZnEl,
         Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing
@@ -185,23 +188,20 @@ fn pow2_bitreversed_inv_dwt_butterfly<'b, A, G, N>(H: &HypercubeIsomorphism<'b, 
     }).map(&pow_of_zeta));
     H.ring().inclusion().mul_assign_ref_map(&mut backward_mask, &inv_2);
 
-    let mut result = LinearTransform {
-        data: vec![
-            (
-                GaloisElementIndex::shift_1d(H.dim_count(), dim_index, 0),
-                diagonal_mask
-            ),
-            (
-                GaloisElementIndex::shift_1d(H.dim_count(), dim_index, l as i64 / 2),
-                forward_mask
-            ),
-            (
-                GaloisElementIndex::shift_1d(H.dim_count(), dim_index, -(l as i64) / 2),
-                backward_mask
-            )
-        ]
-    };
-    result.canonicalize(&H);
+    let result = MatmulTransform::linear_combine_shifts(H, [
+        (
+            (0..H.dim_count()).map(|i| 0).collect::<Vec<_>>(),
+            diagonal_mask
+        ),
+        (
+            (0..H.dim_count()).map(|i| if i == dim_index { l as i64 / 2 } else { 0 }).collect::<Vec<_>>(),
+            forward_mask
+        ),
+        (
+            (0..H.dim_count()).map(|i| if i == dim_index { -(l as i64) / 2 } else { 0 }).collect::<Vec<_>>(),
+            backward_mask
+        )
+    ].iter().map(|(shift, coeff)| (&shift[..], H.ring().clone_el(coeff))));
     #[cfg(debug_assertions)] {
         let expected = pow2_bitreversed_dwt_butterfly(H, dim_index, l, H.slot_ring().clone_el(&zeta_power_table.get_power(1)), row_autos).inverse(&H);
         debug_assert!(result.eq(&expected, H));
@@ -222,7 +222,7 @@ fn pow2_bitreversed_inv_dwt_butterfly<'b, A, G, N>(H: &HypercubeIsomorphism<'b, 
 /// for `j` from `0` to `m`.
 /// Here `𝝵` is the canonical generator of the slot ring, which is a primitive `n`-th root of unity.
 /// 
-fn pow2_bitreversed_dwt<A, G, N>(H: &HypercubeIsomorphism<Pow2CyclotomicNumberRing<N>, A>, dim_index: usize, row_autos: G) -> Vec<LinearTransform<Pow2CyclotomicNumberRing<N>, A>>
+fn pow2_bitreversed_dwt<A, G, N>(H: &HypercubeIsomorphism<Pow2CyclotomicNumberRing<N>, A>, dim_index: usize, row_autos: G) -> Vec<MatmulTransform<Pow2CyclotomicNumberRing<N>, A>>
     where A: Allocator + Clone,
         G: Fn(&[usize]) -> ZnEl,
         Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing
@@ -254,7 +254,7 @@ fn pow2_bitreversed_dwt<A, G, N>(H: &HypercubeIsomorphism<Pow2CyclotomicNumberRi
 ///
 /// Inverse to [`pow2_bitreversed_dwt()`]
 /// 
-fn pow2_bitreversed_inv_dwt<A, G, N>(H: &HypercubeIsomorphism<Pow2CyclotomicNumberRing<N>, A>, dim_index: usize, row_autos: G) -> Vec<LinearTransform<Pow2CyclotomicNumberRing<N>, A>>
+fn pow2_bitreversed_inv_dwt<A, G, N>(H: &HypercubeIsomorphism<Pow2CyclotomicNumberRing<N>, A>, dim_index: usize, row_autos: G) -> Vec<MatmulTransform<Pow2CyclotomicNumberRing<N>, A>>
     where A: Allocator + Clone,
         G: Fn(&[usize]) -> ZnEl,
         Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing
@@ -293,7 +293,7 @@ fn pow2_bitreversed_inv_dwt<A, G, N>(H: &HypercubeIsomorphism<Pow2CyclotomicNumb
 /// If `p = 3 mod 4`, the slots are enumerated by `i` with `0 <= i < m` and the transform will put the value of slot `i` into the coefficient
 /// of `X^(bitrev(i, m) * n/(4m))`
 /// 
-pub fn slots_to_coeffs_thin<A, N>(H: &HypercubeIsomorphism<Pow2CyclotomicNumberRing<N>, A>) -> Vec<LinearTransform<Pow2CyclotomicNumberRing<N>, A>>
+pub fn slots_to_coeffs_thin<A, N>(H: &HypercubeIsomorphism<Pow2CyclotomicNumberRing<N>, A>) -> Vec<MatmulTransform<Pow2CyclotomicNumberRing<N>, A>>
     where A: Allocator + Clone,
         Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing
 {
@@ -308,29 +308,26 @@ pub fn slots_to_coeffs_thin<A, N>(H: &HypercubeIsomorphism<Pow2CyclotomicNumberR
         let mut result = Vec::new();
 
         // we first combine `ai0` and `ai1` to `(ai0 + 𝝵^(n/4) ai1, ai0 - 𝝵^(n/4) ai1)`
-        result.push(LinearTransform {
-            data: vec![
-                (
-                    GaloisElementIndex::shift_1d(H.dim_count(), 1, 0),
-                    H.from_slot_vec(H.slot_iter(|idxs| if idxs[1] == 0 {
-                        H.slot_ring().one()
-                    } else {
-                        debug_assert!(idxs[1] == 1);
-                        H.slot_ring().negate(H.slot_ring().clone_el(&zeta4))
-                    }))
-                ), 
-                (
-                    GaloisElementIndex::shift_1d(H.dim_count(), 1, 1),
-                    H.from_slot_vec(H.slot_iter(|idxs| if idxs[1] == 0 {
-                        H.slot_ring().clone_el(&zeta4)
-                    } else {
-                        debug_assert!(idxs[1] == 1);
-                        H.slot_ring().one()
-                    }))
-                )
-            ]
-        });
-        result.last_mut().unwrap().canonicalize(H);
+        result.push(MatmulTransform::linear_combine_shifts(H, [
+            (
+                (0..H.dim_count()).map(|i| 0).collect::<Vec<_>>(),
+                H.from_slot_vec(H.slot_iter(|idxs| if idxs[1] == 0 {
+                    H.slot_ring().one()
+                } else {
+                    debug_assert!(idxs[1] == 1);
+                    H.slot_ring().negate(H.slot_ring().clone_el(&zeta4))
+                }))
+            ),
+            (
+                (0..H.dim_count()).map(|i| if i == 1 { 1 } else { 0 }).collect::<Vec<_>>(),
+                H.from_slot_vec(H.slot_iter(|idxs| if idxs[1] == 0 {
+                    H.slot_ring().clone_el(&zeta4)
+                } else {
+                    debug_assert!(idxs[1] == 1);
+                    H.slot_ring().one()
+                }))
+            )
+        ].iter().map(|(shift, coeff)| (&shift[..], H.ring().clone_el(coeff)))));
 
         // then map the `ai0 + 𝝵^(n/4) ai1` to `sum_i (ai0 + 𝝵^(n/4) ai1) 𝝵^(n/(2m) i g^k)` for each slot `(k, 0)`, and similarly
         // for the slots `(*, 1)`. The negation in the second hypercolumn comes from the fact that `-𝝵^(n/4) = 𝝵^(-n/4)`
@@ -354,7 +351,7 @@ pub fn slots_to_coeffs_thin<A, N>(H: &HypercubeIsomorphism<Pow2CyclotomicNumberR
 /// "Coeffs-to-Slots" map, as it does not discard unused factors. However, it is not
 /// too hard to build the "coeffs-to-slots" map from this, see [`coeffs_to_slots_thin()`]. 
 /// 
-pub fn slots_to_coeffs_thin_inv<A, N>(H: &HypercubeIsomorphism<Pow2CyclotomicNumberRing<N>, A>) -> Vec<LinearTransform<Pow2CyclotomicNumberRing<N>, A>>
+pub fn slots_to_coeffs_thin_inv<A, N>(H: &HypercubeIsomorphism<Pow2CyclotomicNumberRing<N>, A>) -> Vec<MatmulTransform<Pow2CyclotomicNumberRing<N>, A>>
     where A: Allocator + Clone,
         Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing
 {
@@ -375,29 +372,26 @@ pub fn slots_to_coeffs_thin_inv<A, N>(H: &HypercubeIsomorphism<Pow2CyclotomicNum
             H.cyclotomic_index_ring().neg_one()
         }));
 
-        result.push(LinearTransform {
-            data: vec![
-                (
-                    GaloisElementIndex::shift_1d(H.dim_count(), 1, 0),
-                    H.ring().inclusion().mul_map(H.from_slot_vec(H.slot_iter(|idxs| if idxs[1] == 0 {
-                        H.slot_ring().one()
-                    } else {
-                        debug_assert!(idxs[1] == 1);
-                        H.slot_ring().negate(H.slot_ring().clone_el(&zeta4_inv))
-                    })), H.ring().base_ring().clone_el(&two_inv))
-                ), 
-                (
-                    GaloisElementIndex::shift_1d(H.dim_count(), 1, 1),
-                    H.ring().inclusion().mul_map(H.from_slot_vec(H.slot_iter(|idxs| if idxs[1] == 0 {
-                        H.slot_ring().one()
-                    } else {
-                        debug_assert!(idxs[1] == 1);
-                        H.slot_ring().clone_el(&zeta4_inv)
-                    })), two_inv)
-                )
-            ]
-        });
-        result.last_mut().unwrap().canonicalize(H);
+        result.push(MatmulTransform::linear_combine_shifts(H, [
+            (
+                (0..H.dim_count()).map(|i| 0).collect::<Vec<_>>(),
+                H.ring().inclusion().mul_map(H.from_slot_vec(H.slot_iter(|idxs| if idxs[1] == 0 {
+                    H.slot_ring().one()
+                } else {
+                    debug_assert!(idxs[1] == 1);
+                    H.slot_ring().negate(H.slot_ring().clone_el(&zeta4_inv))
+                })), H.ring().base_ring().clone_el(&two_inv))
+            ),
+            (
+                (0..H.dim_count()).map(|i| if i == 1 { 1 } else { 0 }).collect::<Vec<_>>(),
+                H.ring().inclusion().mul_map(H.from_slot_vec(H.slot_iter(|idxs| if idxs[1] == 0 {
+                    H.slot_ring().one()
+                } else {
+                    debug_assert!(idxs[1] == 1);
+                    H.slot_ring().clone_el(&zeta4_inv)
+                })), two_inv)
+            )
+        ].iter().map(|(shift, coeff)| (&shift[..], H.ring().clone_el(coeff)))));
 
         return result;
     } else {
@@ -406,13 +400,13 @@ pub fn slots_to_coeffs_thin_inv<A, N>(H: &HypercubeIsomorphism<Pow2CyclotomicNum
     }
 }
 
-pub fn coeffs_to_slots_thin<A, N>(H: &HypercubeIsomorphism<Pow2CyclotomicNumberRing<N>, A>) -> (Vec<LinearTransform<Pow2CyclotomicNumberRing<N>, A>>, Trace)
+pub fn coeffs_to_slots_thin<A, N>(H: &HypercubeIsomorphism<Pow2CyclotomicNumberRing<N>, A>) -> (Vec<MatmulTransform<Pow2CyclotomicNumberRing<N>, A>>, Trace)
     where A: Allocator + Clone,
         Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing
 {
     let trace = Trace::new(&H.cyclotomic_index_ring(), H.cyclotomic_index_ring().smallest_positive_lift(H.frobenius_element(1)), H.slot_ring().rank());
     let mut result = slots_to_coeffs_thin_inv(H);
-    let last = LinearTransform::mult_scalar_slots(H, &H.slot_ring().inclusion().map(H.slot_ring().base_ring().invert(&H.slot_ring().base_ring().int_hom().map(H.slot_ring().rank() as i32)).unwrap()));
+    let last = MatmulTransform::mult_scalar_slots(H, &H.slot_ring().inclusion().map(H.slot_ring().base_ring().invert(&H.slot_ring().base_ring().int_hom().map(H.slot_ring().rank() as i32)).unwrap()));
     *result.last_mut().unwrap() = result.last().unwrap().compose(&last, H);
     return (result, trace);
 }

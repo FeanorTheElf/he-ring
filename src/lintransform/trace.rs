@@ -1,6 +1,7 @@
 use std::alloc::*;
 use std::cell::RefCell;
 
+use feanor_math::algorithms::sqr_mul::generic_pow_shortest_chain_table;
 use feanor_math::homomorphism::*;
 use feanor_math::integer::*;
 use feanor_math::matrix::OwnedMatrix;
@@ -16,7 +17,12 @@ use feanor_math::rings::zn::*;
 use feanor_math::seq::*;
 use feanor_math::algorithms::linsolve::LinSolveRingStore;
 
+use crate::rings::number_ring::HECyclotomicNumberRing;
 use crate::StdZn;
+
+use crate::rings::decomposition_ring::*;
+use crate::rings::slots::*;
+use crate::cyclotomic::*;
 
 pub struct Trace {
     Gal: Zn,
@@ -98,7 +104,7 @@ impl Trace {
         let add_fn = RefCell::new(add_fn);
         let apply_galois_fn = RefCell::new(apply_galois_fn);
         let clone = RefCell::new(clone);
-        sqr_mul::generic_pow_shortest_chain_table::<_, _, _, _, _, !>(
+        generic_pow_shortest_chain_table::<_, _, _, _, _, !>(
             (1, Some(input)), 
             &self.trace_rank_quo, 
             StaticRing::<i64>::RING, 
@@ -106,12 +112,15 @@ impl Trace {
                 if let Some(x) = x {
                     Ok((2 * i, Some(add_fn.borrow_mut()(apply_galois_fn.borrow_mut()(x, self.Gal.pow(self.frobenius, *i)), x))))
                 } else {
-                    Ok((*i, None))
+                    assert_eq!(0, *i);
+                    Ok((0, None))
                 }
             }, |(i, x), (j, y)| {
                 if x.is_none() {
+                    assert_eq!(0, *i);
                     return Ok((i + j, y.as_ref().map(|y| clone.borrow_mut()(y))));
                 } else if y.is_none() {
+                    assert_eq!(0, *j);
                     return Ok((i + j, x.as_ref().map(|x| clone.borrow_mut()(x))));
                 }
                 Ok((i + j, Some(add_fn.borrow_mut()(apply_galois_fn.borrow_mut()(x.as_ref().unwrap(), self.Gal.pow(self.frobenius, *j)), y.as_ref().unwrap()))))
@@ -156,11 +165,6 @@ use feanor_math::algorithms::unity_root::is_prim_root_of_unity;
 use feanor_math::integer::BigIntRing;
 #[cfg(test)]
 use feanor_math::rings::extension::extension_impl::FreeAlgebraImpl;
-
-use super::DecompositionRing;
-use super::DecompositionRingBase;
-use super::SlotRing;
-use super::{CyclotomicRing, HECyclotomicNumberRing};
 
 #[test]
 fn test_extract_coefficient_map() {
