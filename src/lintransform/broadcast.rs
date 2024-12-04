@@ -5,7 +5,8 @@ use feanor_math::homomorphism::Homomorphism;
 use feanor_math::primitive_int::StaticRing;
 use feanor_math::algorithms::sqr_mul::generic_pow_shortest_chain_table;
 use feanor_math::rings::zn::zn_64::{Zn, ZnEl};
-use feanor_math::{assert_el_eq, ring::*};
+use feanor_math::assert_el_eq;
+use feanor_math::ring::*;
 
 use crate::rings::decomposition_ring::{DecompositionRing, DecompositionRingBase};
 use crate::rings::number_ring::HECyclotomicNumberRing;

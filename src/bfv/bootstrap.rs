@@ -32,7 +32,7 @@ pub struct ThinBootstrapParams<Params: BFVParams> {
     // the k-th circuit works modulo `p^(e - k)` and outputs values `yi` such that `yi = lift(x mod p) mod p^(i + 2)` for `0 <= i < v - k - 2` as well as a final `y'` with `y' = lift(x mod p)`
     digit_extract_circuits: Vec<ArithCircuit>,
     slots_to_coeffs_thin: Vec<CompiledLinearTransform<NumberRing<Params>>>,
-    coeffs_to_slots_thin: (Vec<CompiledLinearTransform<NumberRing<Params>>>, Option<Trace>)
+    coeffs_to_slots_thin: (Vec<CompiledLinearTransform<NumberRing<Params>>>, Option<Trace<NumberRing<Params>, PlaintextAllocator>>)
 }
 
 pub struct BootstrapperConfig {
@@ -170,7 +170,7 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
         p: i64,
         digit_extract_circuits: Vec<ArithCircuit>,
         slots_to_coeffs_thin: Vec<CompiledLinearTransform<NumberRing<Params>>>,
-        coeffs_to_slots_thin: (Vec<CompiledLinearTransform<NumberRing<Params>>>, Option<Trace>)
+        coeffs_to_slots_thin: (Vec<CompiledLinearTransform<NumberRing<Params>>>, Option<Trace<NumberRing<Params>, PlaintextAllocator>>)
     ) -> Self {
         let v = e - r;
         assert_eq!(v, digit_extract_circuits.len());
@@ -357,19 +357,22 @@ fn hom_compute_linear_transform<'a, Params: BFVParams>(
     ));
 }
 
-fn hom_compute_trace<'a, Params: BFVParams>(P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, input: Ciphertext<Params>, trace: &Trace, gk: &[(ZnEl, KeySwitchKey<'a, Params>)], key_switches: &mut usize) -> Ciphertext<Params>
+fn hom_compute_trace<'a, Params: BFVParams>(P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, input: Ciphertext<Params>, trace: &Trace<NumberRing<Params>, PlaintextAllocator>, gk: &[(ZnEl, KeySwitchKey<'a, Params>)], key_switches: &mut usize) -> Ciphertext<Params>
     where Params: 'a
 {
     let Gal = P.get_ring().cyclotomic_index_ring();
     let get_gk = |g: &ZnEl| &gk.iter().filter(|(s, _)| Gal.eq_el(g, s)).next().unwrap().1;
-    return trace.evaluate_generic(input, |x, y| Params::hom_add(C, x, y), |x, g| {
+    return trace.evaluate_generic(input, 
+    |x, y| Params::hom_add(C, x, y), 
+    |value, factor| Params::hom_mul_plain(P, C, factor, value),
+    |x, gs| gs.iter().map(|g| {
         if !Gal.is_one(&g) {
             *key_switches += 1;
-            Params::hom_galois(C, Params::clone_ct(C, x), g, get_gk(&g))
+            Params::hom_galois(C, Params::clone_ct(C, &x), *g, get_gk(&g))
         } else {
-            Params::clone_ct(C, x)
+            Params::clone_ct(C, &x)
         }
-    }, |x| Params::clone_ct(C, x));
+    }).collect(), |x| Params::clone_ct(C, x));
 }
 
 fn hom_evaluate_circuit<'a, 'b, Params: BFVParams>(

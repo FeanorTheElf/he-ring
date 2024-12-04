@@ -125,7 +125,7 @@ pub struct MatmulTransform<NumberRing, A = Global>
 }
 
 impl<NumberRing, A> MatmulTransform<NumberRing, A>
-    where NumberRing: HECyclotomicNumberRing,
+    where NumberRing: HECyclotomicNumberRing + Clone,
         A: Allocator + Clone
 {
     pub fn eq(&self, other: &Self, H: &HypercubeIsomorphism<NumberRing, A>) -> bool {
@@ -179,7 +179,7 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
     {
         let d = H.slot_ring().rank();
         let Gal = H.cyclotomic_index_ring();
-        let trace = Trace::new(&Gal, Gal.smallest_positive_lift(H.frobenius_element(1)), d);
+        let trace = Trace::new(H.ring().get_ring().number_ring().clone(), Gal.smallest_positive_lift(H.frobenius_element(1)), d);
         let extract_coeff_factors = (0..d).map(|j| trace.extract_coefficient_map(H.slot_ring(), j)).collect::<Vec<_>>();
         
         let poly_ring = DensePolyRing::new(H.slot_ring().base_ring(), "X");
@@ -224,7 +224,7 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
         let m = H.len(dim_index) as i64;
         let d = H.slot_ring().rank();
         let Gal = H.cyclotomic_index_ring();
-        let trace = Trace::new(&Gal, Gal.smallest_positive_lift(H.frobenius_element(1)), d);
+        let trace = Trace::new(H.ring().get_ring().number_ring().clone(), Gal.smallest_positive_lift(H.frobenius_element(1)), d);
         let extract_coeff_factors = (0..d).map(|j| trace.extract_coefficient_map(H.slot_ring(), j)).collect::<Vec<_>>();
         
         let poly_ring = DensePolyRing::new(H.slot_ring().base_ring(), "X");

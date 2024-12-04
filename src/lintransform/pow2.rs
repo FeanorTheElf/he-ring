@@ -14,6 +14,7 @@ use feanor_math::assert_el_eq;
 
 use crate::cyclotomic::*;
 use crate::lintransform::matmul::*;
+use crate::lintransform::HELinearTransform;
 use crate::rings::number_ring::*;
 use crate::rings::decomposition_ring::*;
 use crate::rings::pow2_cyclotomic::*;
@@ -400,11 +401,11 @@ pub fn slots_to_coeffs_thin_inv<A, N>(H: &HypercubeIsomorphism<Pow2CyclotomicNum
     }
 }
 
-pub fn coeffs_to_slots_thin<A, N>(H: &HypercubeIsomorphism<Pow2CyclotomicNumberRing<N>, A>) -> (Vec<MatmulTransform<Pow2CyclotomicNumberRing<N>, A>>, Trace)
+pub fn coeffs_to_slots_thin<A, N>(H: &HypercubeIsomorphism<Pow2CyclotomicNumberRing<N>, A>) -> (Vec<MatmulTransform<Pow2CyclotomicNumberRing<N>, A>>, Trace<Pow2CyclotomicNumberRing<N>, A>)
     where A: Allocator + Clone,
-        Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing
+        Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing + Clone
 {
-    let trace = Trace::new(&H.cyclotomic_index_ring(), H.cyclotomic_index_ring().smallest_positive_lift(H.frobenius_element(1)), H.slot_ring().rank());
+    let trace = Trace::new(H.ring().get_ring().number_ring().clone(), H.cyclotomic_index_ring().smallest_positive_lift(H.frobenius_element(1)), H.slot_ring().rank());
     let mut result = slots_to_coeffs_thin_inv(H);
     let last = MatmulTransform::mult_scalar_slots(H, &H.slot_ring().inclusion().map(H.slot_ring().base_ring().invert(&H.slot_ring().base_ring().int_hom().map(H.slot_ring().rank() as i32)).unwrap()));
     *result.last_mut().unwrap() = result.last().unwrap().compose(&last, H);
@@ -485,7 +486,7 @@ fn test_coeffs_to_slots_thin() {
     for T in main_transform {
         current = ring.get_ring().compute_linear_transform(&H, &current, &T);
     }
-    current = ring.get_ring().compute_trace(&current, &trace);
+    current = trace.evaluate(&ring, ring.clone_el(&current));
 
     let expected = H.from_slot_vec((1..17).map(|n| H.slot_ring().int_hom().map(n)));
     assert_el_eq!(&ring, &expected, &current);
@@ -507,7 +508,7 @@ fn test_coeffs_to_slots_thin() {
     }
     println!();
     current = ring.get_ring().compute_linear_transform(&H, &current, main_transform.last().unwrap());
-    current = ring.get_ring().compute_trace(&current, &trace);
+    current = trace.evaluate(&ring, ring.clone_el(&current));
 
     let expected = H.from_slot_vec([0, 0, 1, 0].into_iter().map(|n| H.slot_ring().int_hom().map(n)));
     
@@ -532,12 +533,11 @@ fn test_coeffs_to_slots_thin() {
         }
     }
     let mut current = ring_literal!(&ring, input);
-    ring.println(&current);
     let (main_transform, trace) = coeffs_to_slots_thin(&H);
     for T in main_transform.iter() {
         current = ring.get_ring().compute_linear_transform(&H, &current, &T);
     }
-    current = ring.get_ring().compute_trace(&current, &trace);
+    current = trace.evaluate(&ring, ring.clone_el(&current));
 
     let expected = H.from_slot_vec([1, 2, 3, 4].into_iter().map(|n| H.slot_ring().int_hom().map(n)));
 

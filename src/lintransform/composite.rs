@@ -41,7 +41,7 @@ fn dwt1d_matrix<'a, NumberRing, A>(H: &HypercubeIsomorphism<'a, NumberRing, A>, 
 /// to `ni`
 /// 
 fn dwt1d<'a, NumberRing, A>(H: &HypercubeIsomorphism<'a, NumberRing, A>, dim_index: usize, zeta_powertable: &PowerTable<&SlotRing<'a, A>>) -> Vec<MatmulTransform<NumberRing, A>>
-    where NumberRing: HECyclotomicNumberRing,
+    where NumberRing: HECyclotomicNumberRing + Clone,
         A: Allocator + Clone,
 {
     // multiplication with the matrix `A(i, j) = 𝝵^(j * shift_element(-i))` if we consider an element as multiple vectors along the `dim_index`-th dimension
@@ -55,7 +55,7 @@ fn dwt1d<'a, NumberRing, A>(H: &HypercubeIsomorphism<'a, NumberRing, A>, dim_ind
 }
 
 fn dwt1d_inv<'a, NumberRing, A>(H: &HypercubeIsomorphism<'a, NumberRing, A>, dim_index: usize, zeta_powertable: &PowerTable<&SlotRing<'a, A>>) -> Vec<MatmulTransform<NumberRing, A>>
-    where NumberRing: HECyclotomicNumberRing,
+    where NumberRing: HECyclotomicNumberRing + Clone,
         A: Allocator + Clone,
 {
     let mut A = dwt1d_matrix(H, dim_index, zeta_powertable);
@@ -78,7 +78,7 @@ fn dwt1d_inv<'a, NumberRing, A>(H: &HypercubeIsomorphism<'a, NumberRing, A>, dim
 /// `Fp[X1, ..., Xr]/(Phi_n1(X1), ..., Phi_nr(Xr)) -> Fp[X]/(Phi_n(X))`, i.e. is `X1 = X^(n/n1)`.
 ///
 fn slots_to_powcoeffs_fat_fst_step<'a, NumberRing, A>(H: &HypercubeIsomorphism<'a, NumberRing, A>, dim_index: usize, zeta_powertable: &PowerTable<&SlotRing<'a, A>>) -> OwnedMatrix<El<Zn>>
-    where NumberRing: HECyclotomicNumberRing,
+    where NumberRing: HECyclotomicNumberRing + Clone,
         A: Allocator + Clone,
 {
     let Gal = H.cyclotomic_index_ring();
@@ -107,7 +107,7 @@ fn slots_to_powcoeffs_fat_fst_step<'a, NumberRing, A>(H: &HypercubeIsomorphism<'
 /// this transform "puts" `a_(j, i1, ..., ir)` into the powerful-basis coefficient of `X1^(j * m1 + i1) X2^i2 ... Xr^ir`.
 /// 
 pub fn slots_to_powcoeffs_fat<NumberRing, A>(H: &HypercubeIsomorphism<NumberRing, A>) -> Vec<MatmulTransform<NumberRing, A>>
-    where NumberRing: HECyclotomicNumberRing,
+    where NumberRing: HECyclotomicNumberRing + Clone,
         A: Allocator + Clone,
 {
     assert!(H.ring().n() % 2 != 0);
@@ -135,7 +135,7 @@ pub fn slots_to_powcoeffs_fat<NumberRing, A>(H: &HypercubeIsomorphism<NumberRing
 /// to the slot ``(i1, ..., ir)`.
 /// 
 pub fn powcoeffs_to_slots_fat<NumberRing, A>(H: &HypercubeIsomorphism<NumberRing, A>) -> Vec<MatmulTransform<NumberRing, A>>
-    where NumberRing: HECyclotomicNumberRing,
+    where NumberRing: HECyclotomicNumberRing + Clone,
         A: Allocator + Clone,
 {
     assert!(H.ring().n() % 2 != 0);
@@ -169,7 +169,7 @@ pub fn powcoeffs_to_slots_fat<NumberRing, A>(H: &HypercubeIsomorphism<NumberRing
 /// transform "puts" `a_(i1, ..., ir)` into the powerful-basis coefficient of `X1^i1 ... Xr^ir`.
 /// 
 pub fn slots_to_powcoeffs_thin<NumberRing, A>(H: &HypercubeIsomorphism<NumberRing, A>) -> Vec<MatmulTransform<NumberRing, A>>
-    where NumberRing: HECyclotomicNumberRing,
+    where NumberRing: HECyclotomicNumberRing + Clone,
         A: Allocator + Clone,
 {
     assert!(H.ring().n() % 2 != 0);
@@ -193,7 +193,7 @@ pub fn slots_to_powcoeffs_thin<NumberRing, A>(H: &HypercubeIsomorphism<NumberRin
 /// full rank, and cannot be the mathematical inverse of [`slots_to_powcoeffs_thin()`].
 /// 
 pub fn powcoeffs_to_slots_thin<NumberRing, A>(H: &HypercubeIsomorphism<NumberRing, A>) -> Vec<MatmulTransform<NumberRing, A>>
-    where NumberRing: HECyclotomicNumberRing,
+    where NumberRing: HECyclotomicNumberRing + Clone,
         A: Allocator + Clone,
 {
     let mut result = powcoeffs_to_slots_fat(H);
