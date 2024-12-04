@@ -28,7 +28,7 @@ pub struct ThinBootstrapParams<Params: BFVParams> {
     r: usize,
     e: usize,
     p: i64,
-    // the k-th circuit works modulo `e - k` and outputs values `yi` such that `yi = lift(x mod p) mod p^(i + 2)` for `0 <= i < v - k - 2` as well as a final `y'` with `y' = lift(x mod p)`
+    // the k-th circuit works modulo `p^(e - k)` and outputs values `yi` such that `yi = lift(x mod p) mod p^(i + 2)` for `0 <= i < v - k - 2` as well as a final `y'` with `y' = lift(x mod p)`
     digit_extract_circuits: Vec<ArithCircuit>,
     slots_to_coeffs_thin: Vec<CompiledLinearTransform<NumberRing<Params>>>,
     coeffs_to_slots_thin: (Vec<CompiledLinearTransform<NumberRing<Params>>>, Option<Trace>)
