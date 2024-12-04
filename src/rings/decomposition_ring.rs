@@ -40,6 +40,9 @@ pub struct DecompositionRingBase<NumberRing, ZnTy, A = Global>
     allocator: A
 }
 
+///
+/// [`RingStore`] for [`DecompositionRingBase`]
+/// 
 pub type DecompositionRing<NumberRing, ZnTy, A = Global> = RingValue<DecompositionRingBase<NumberRing, ZnTy, A>>;
 
 pub struct DecompositionRingEl<NumberRing, ZnTy, A = Global> 

@@ -412,7 +412,7 @@ pub fn coeffs_to_slots_thin<A, N>(H: &HypercubeIsomorphism<Pow2CyclotomicNumberR
 {
     let trace = Trace::new(&H.cyclotomic_index_ring(), H.cyclotomic_index_ring().smallest_positive_lift(H.frobenius_element(1)), H.slot_ring().rank());
     let mut result = slots_to_coeffs_thin_inv(H);
-    let last = LinearTransform::slot_scalar_mult(H, &H.slot_ring().inclusion().map(H.slot_ring().base_ring().invert(&H.slot_ring().base_ring().int_hom().map(H.slot_ring().rank() as i32)).unwrap()));
+    let last = LinearTransform::mult_scalar_slots(H, &H.slot_ring().inclusion().map(H.slot_ring().base_ring().invert(&H.slot_ring().base_ring().int_hom().map(H.slot_ring().rank() as i32)).unwrap()));
     *result.last_mut().unwrap() = result.last().unwrap().compose(&last, H);
     return (result, trace);
 }

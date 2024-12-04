@@ -45,6 +45,14 @@ struct GaloisElementIndex {
 
 impl GaloisElementIndex {
 
+    fn shift(dim_count: usize, positions: &[i64]) -> Self {
+        assert_eq!(dim_count, positions.len());
+        GaloisElementIndex {
+            shift_steps: positions.iter().copied().collect(),
+            frobenius_count: 0
+        }
+    }
+
     fn identity(dim_count: usize) -> GaloisElementIndex {
         GaloisElementIndex {
             shift_steps: (0..dim_count).map(|_| 0).collect(),
@@ -167,12 +175,6 @@ impl<NumberRing, A> LinearTransform<NumberRing, A>
         };
         result.canonicalize(H);
         return result;
-    }
-
-    pub fn slot_scalar_mult<'a>(H: &HypercubeIsomorphism<'a, NumberRing, A>, scalar: &El<SlotRing<'a, A>>) -> LinearTransform<NumberRing, A> {
-        return LinearTransform {
-            data: vec![(GaloisElementIndex::identity(H.dim_count()), H.from_slot_vec((0..H.slot_count()).map(|_| H.slot_ring().clone_el(scalar))))]
-        };
     }
     
     ///
@@ -323,16 +325,6 @@ impl<NumberRing, A> LinearTransform<NumberRing, A>
 
         let result = result_by_slots.into_iter().map(|coeff_by_slots| H.from_slot_vec(coeff_by_slots.into_iter())).collect::<Vec<_>>();
 
-        #[cfg(test)] {
-            let sol = Submatrix::from_1d(&result, matrix.col_count(), 1);
-            let mut check: OwnedMatrix<_> = OwnedMatrix::zero(matrix.row_count(), 1, H.ring());
-            STANDARD_MATMUL.matmul(TransposableSubmatrix::from(matrix.data()), TransposableSubmatrix::from(sol), TransposableSubmatrixMut::from(check.data_mut()), H.ring());
-            assert!(H.ring().is_one(check.at(0, 0)));
-            for i in 1..matrix.row_count() {
-                assert!(H.ring().is_zero(check.at(i, 0)));
-            }
-        }
-
         let mut result = Self {
             data: self.data.iter().zip(result.into_iter()).map(|((g, _), coeff)| (
                 g.clone().inverse(),
@@ -359,7 +351,7 @@ impl<NumberRing, A> LinearTransform<NumberRing, A>
         }
     }
 
-    fn compose(&self, run_first: &LinearTransform<NumberRing, A>, H: &HypercubeIsomorphism<NumberRing, A>) -> Self {
+    pub fn compose(&self, run_first: &LinearTransform<NumberRing, A>, H: &HypercubeIsomorphism<NumberRing, A>) -> Self {
         self.check_valid(H);
         run_first.check_valid(H);
         let mut result = Self {
@@ -372,9 +364,36 @@ impl<NumberRing, A> LinearTransform<NumberRing, A>
         return result;
     }
 
-    fn identity(H: &HypercubeIsomorphism<NumberRing, A>) -> Self {
+    pub fn mult_scalar_slots<'a>(H: &HypercubeIsomorphism<'a, NumberRing, A>, scalar: &El<SlotRing<'a, A>>) -> LinearTransform<NumberRing, A> {
+        return LinearTransform {
+            data: vec![(GaloisElementIndex::identity(H.dim_count()), H.from_slot_vec((0..H.slot_count()).map(|_| H.slot_ring().clone_el(scalar))))]
+        };
+    }
+
+    pub fn mult_ring_element<'a>(H: &HypercubeIsomorphism<'a, NumberRing, A>, factor: El<DecompositionRing<NumberRing, Zn, A>>) -> LinearTransform<NumberRing, A> {
+        return LinearTransform {
+            data: vec![(GaloisElementIndex::identity(H.dim_count()), factor)]
+        };
+    }
+
+    pub fn identity(H: &HypercubeIsomorphism<NumberRing, A>) -> Self {
         Self {
-            data: vec![(GaloisElementIndex::shift_1d(H.dim_count(), 0, 0), H.ring().one())]
+            data: vec![(GaloisElementIndex::identity(H.dim_count()), H.ring().one())]
+        }
+    }
+
+    pub fn shift(H: &HypercubeIsomorphism<NumberRing, A>, positions: &[i64]) -> Self {
+        assert_eq!(H.dim_count(), positions.len());
+        Self {
+            data: vec![(GaloisElementIndex::shift(H.dim_count(), positions), H.ring().one())]
+        }
+    }
+
+    pub fn linear_combine_shifts<'a, I>(H: &HypercubeIsomorphism<NumberRing, A>, summands: I) -> Self
+        where I: Iterator<Item = (&'a [i64], El<DecompositionRing<NumberRing, Zn, A>>)>
+    {
+        Self {
+            data: summands.map(|(positions, factor)| (GaloisElementIndex::shift(H.dim_count(), positions), H.ring().one())).collect()
         }
     }
 
@@ -396,7 +415,7 @@ impl<NumberRing, A> LinearTransform<NumberRing, A>
 
     #[cfg(test)]
     #[allow(unused)]
-    fn print(&self, H: &HypercubeIsomorphism<NumberRing, A>) {
+    pub fn print(&self, H: &HypercubeIsomorphism<NumberRing, A>) {
         for (g, c) in &self.data {
             println!("p^{} {:?}: {}", g.frobenius_count, g.shift_steps, H.ring().format(c));
         }
