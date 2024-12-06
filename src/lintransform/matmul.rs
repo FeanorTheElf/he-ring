@@ -38,10 +38,12 @@ pub(super) struct GaloisElementIndex {
 
 impl GaloisElementIndex {
 
-    pub(super) fn shift(dim_count: usize, positions: &[i64]) -> Self {
+    pub fn shift<V>(dim_count: usize, positions: V) -> Self
+        where V: VectorFn<i64>
+    {
         assert_eq!(dim_count, positions.len());
         GaloisElementIndex {
-            shift_steps: positions.iter().copied().collect(),
+            shift_steps: positions.iter().collect(),
             frobenius_count: 0
         }
     }
@@ -53,11 +55,8 @@ impl GaloisElementIndex {
         }
     }
 
-    pub(super) fn shift_1d(dim_count: usize, dim_index: usize, steps: i64) -> GaloisElementIndex {
-        GaloisElementIndex {
-            shift_steps: (0..dim_count).map(|i| if i == dim_index { steps } else { 0 }).collect::<Vec<_>>(),
-            frobenius_count: 0
-        }
+    pub fn shift_1d(dim_count: usize, dim_index: usize, steps: i64) -> GaloisElementIndex {
+        Self::shift(dim_count, (0..dim_count).map_fn(|i| if i == dim_index { steps } else { 0 }))
     }
 
     fn frobenius(dim_count: usize, count: i64) -> GaloisElementIndex {
@@ -378,12 +377,13 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
     pub fn shift(H: &HypercubeIsomorphism<NumberRing, A>, positions: &[i64]) -> Self {
         assert_eq!(H.dim_count(), positions.len());
         Self {
-            data: vec![(GaloisElementIndex::shift(H.dim_count(), positions), H.ring().one())]
+            data: vec![(GaloisElementIndex::shift(H.dim_count(), positions.copy_els()), H.ring().one())]
         }
     }
 
-    pub fn linear_combine_shifts<'a, I>(H: &HypercubeIsomorphism<NumberRing, A>, summands: I) -> Self
-        where I: Iterator<Item = (&'a [i64], El<DecompositionRing<NumberRing, Zn, A>>)>
+    pub fn linear_combine_shifts<V, I>(H: &HypercubeIsomorphism<NumberRing, A>, summands: I) -> Self
+        where I: Iterator<Item = (V, El<DecompositionRing<NumberRing, Zn, A>>)>,
+            V: VectorFn<i64>
     {
         let mut result = Self {
             data: summands.map(|(positions, factor)| (GaloisElementIndex::shift(H.dim_count(), positions), factor)).collect()
