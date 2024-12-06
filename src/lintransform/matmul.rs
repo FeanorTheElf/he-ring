@@ -381,6 +381,15 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
         }
     }
 
+    ///
+    /// Creates the linear transform that maps
+    /// ```text
+    ///   x  ->  sum_(i1, ..., ir, c) c σ_(i1, ..., ir)(x)
+    /// ```
+    /// where the sum is over all elements returned by the iterator and
+    /// `σ_(i1, ..., ir)` is the Galois automorphism that corresponds to
+    /// a shift by `ij` along the `j`-th hypercube dimension.
+    /// 
     pub fn linear_combine_shifts<V, I>(H: &HypercubeIsomorphism<NumberRing, A>, summands: I) -> Self
         where I: Iterator<Item = (V, El<DecompositionRing<NumberRing, Zn, A>>)>,
             V: VectorFn<i64>

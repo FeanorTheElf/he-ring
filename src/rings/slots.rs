@@ -619,12 +619,45 @@ impl<'a, NumberRing, A> HypercubeIsomorphism<'a, NumberRing, A>
     ///
     /// Returns a galois element that represents a shift along the given hypercube dimension.
     /// 
-    /// Note that the behavior on "overflow", i.e. when a nonzero slot is "shifted out" at the
-    /// end (or the beginning in case of negative `steps`) is quite complicated. If the current
-    /// dimension corresponds to a power-of-two factor, this can even influence another hypercolumn.
-    /// In other cases, this will stay within the current hypercolumn, but potentially affect every
-    /// entry. On the other hand, when a slot holding zero is shifted out, this will just shift in zero
-    /// at the other hand.
+    /// Note that on "overflow", i.e. when a nonzero slot is "shifted out" at the end (or the beginning 
+    /// in case of negative `steps`) can have very unpredictable consequences. **In general, this will not
+    /// shift in the element on the opposite side, as one might expect.**
+    /// 
+    /// Instead, a Galois conjugate of the element will be moved to some other slot (not necessarily in the same 
+    /// hypercolumn), depending on the choice of hypercolumn generators. More concretely, if these generators 
+    /// are `g1, ..., gr`, then the galois automorphism will move a Galois conjugate of the element from slot 
+    /// `(i1, ..., ir)` to slot `(j1, ..., jr)` where
+    /// ```text
+    ///   g1^(i1 + s1) ... gr^(ir + sr) = p^k g1^j1 ... gr^jr
+    /// ```
+    /// for some arbitrary `k`.
+    /// 
+    /// This is demonstrated by the following example.
+    /// ```
+    /// # use feanor_math::assert_el_eq;
+    /// # use feanor_math::ring::*;
+    /// # use feanor_math::rings::zn::zn_64::*;
+    /// # use feanor_math::rings::extension::FreeAlgebraStore;
+    /// # use he_ring::cyclotomic::*;
+    /// # use he_ring::rings::number_ring::*;
+    /// # use he_ring::rings::odd_cyclotomic::CompositeCyclotomicNumberRing;
+    /// # use he_ring::rings::decomposition_ring::*;
+    /// # use he_ring::rings::slots::*;
+    /// let R = DecompositionRingBase::new(CompositeCyclotomicNumberRing::new(5, 7), Zn::new(139));
+    /// let H = HypercubeIsomorphism::new::<false>(R.get_ring());
+    /// let S = H.slot_ring();
+    /// assert_eq!(2, S.rank());
+    /// assert_eq!(2, H.len(0));
+    /// assert_eq!(6, H.len(1));
+    /// 
+    /// let a = S.canonical_gen();
+    /// let a_in_slot_10 = H.from_slot_vec((0..12).map(|i| if i == 6 { S.clone_el(&a) } else { S.zero() }));
+    /// let b = S.pow(S.canonical_gen(), 139);
+    /// let b_in_slot_03 = H.from_slot_vec((0..12).map(|i| if i == 3 { S.clone_el(&b) } else { S.zero() }));
+    /// 
+    /// let result = R.apply_galois_action(&a_in_slot_10, H.shift_galois_element(0, 1));
+    /// assert_el_eq!(&R, b_in_slot_03, result);
+    /// ```
     /// 
     pub fn shift_galois_element(&self, dim_index: usize, steps: i64) -> ZnEl {
         let g = self.dims[dim_index].g_main;
