@@ -286,7 +286,8 @@ pub fn digit_retain_poly<P>(poly_ring: P, k: usize) -> El<P>
     }
     let Zn = poly_ring.base_ring();
     let hom = Zn.can_hom(Zn.integer_ring()).unwrap().compose(Zn.integer_ring().can_hom(&StaticRing::<i64>::RING).unwrap());
-    let (p, _) = is_prime_power(Zn.integer_ring(), Zn.modulus()).unwrap();
+    let (p, e) = is_prime_power(Zn.integer_ring(), Zn.modulus()).unwrap();
+    assert!(e >= k);
     let p = int_cast(p, StaticRing::<i64>::RING, Zn.integer_ring());
     let mut current = poly_ring.evaluate(&digit_extraction_poly(&poly_ring), &digit_retain_poly(poly_ring, k - 1), &poly_ring.inclusion());
 
