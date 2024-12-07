@@ -29,8 +29,10 @@ use feanor_math::pid::EuclideanRingStore;
 use feanor_math::rings::finite::FiniteRingStore;
 
 use crate::cyclotomic::*;
+use crate::digitextract::ArithCircuit;
 use crate::euler_phi;
 use crate::extend_sampled_primes;
+use crate::lintransform::HELinearTransform;
 use crate::rings::bxv::BXVCiphertextRing;
 use crate::rings::double_rns_managed::*;
 use crate::rings::number_ring::*;
@@ -462,6 +464,64 @@ impl BFVParams for CompositeSingleRNSBFV {
         );
         return (C, Cmul);
     }
+}
+
+pub fn hom_compute_linear_transform<'a, Params: BFVParams, Transform: HELinearTransform<NumberRing<Params>, Global>>(
+    P: &PlaintextRing<Params>, 
+    C: &CiphertextRing<Params>, 
+    input: Ciphertext<Params>, 
+    transform: &[Transform], 
+    gk: &[(ZnEl, KeySwitchKey<'a, Params>)], 
+    key_switches: &mut usize
+) -> Ciphertext<Params>
+    where Params: 'a
+{
+    let Gal = P.get_ring().cyclotomic_index_ring();
+    let get_gk = |g: &ZnEl| &gk.iter().filter(|(s, _)| Gal.eq_el(g, s)).next().unwrap().1;
+
+    return transform.iter().fold(input, |current, T| T.evaluate_generic(
+        current,
+        |lhs, rhs| {
+            Params::hom_add(C, lhs, rhs)
+        }, 
+        |value, factor| {
+            Params::hom_mul_plain(P, C, factor, value)
+        },
+        |value, gs| {
+            *key_switches += gs.len();
+            Params::hom_galois_many(C, value, gs, gs.as_fn().map_fn(|g| get_gk(g)))
+        },
+        |value| Params::clone_ct(C, value)
+    ));
+}
+
+pub fn hom_evaluate_circuit<'a, 'b, Params: BFVParams>(
+    P: &'a PlaintextRing<Params>, 
+    C: &'a CiphertextRing<Params>, 
+    C_mul: &'a CiphertextRing<Params>, 
+    input: &'a Ciphertext<Params>, 
+    circuit: &'a ArithCircuit, 
+    rk: &'a RelinKey<'b, Params>, 
+    mul_rescale: &'a MulConversionData, 
+    key_switches: &'a mut usize
+) -> impl ExactSizeIterator<Item = Ciphertext<Params>> + use<'a, 'b, Params> 
+    where Params: 'b
+{
+    return circuit.evaluate_generic(
+        std::slice::from_ref(input), 
+        |lhs, rhs, factor| {
+            let result = Params::hom_add(C, Params::hom_mul_plain_i64(P, C, factor, Params::clone_ct(C, rhs)), &lhs);
+            return result;
+        }, 
+        |lhs, rhs| {
+            *key_switches += 1;
+            let result =  Params::hom_mul(C, C_mul, lhs, rhs, rk, mul_rescale);
+            return result;
+        }, 
+        move |x| {
+            Params::hom_add_plain(P, C, &P.inclusion().compose(P.base_ring().can_hom(&ZZ).unwrap()).map(x), Params::transparent_zero(C))
+        }
+    );
 }
 
 pub fn coeff_repr<Params, NumberRing, A>(C: &CiphertextRing<Params>, ct: Ciphertext<Params>) -> Ciphertext<Params>

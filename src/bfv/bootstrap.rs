@@ -421,7 +421,7 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
         debug_assert_eq!(ZZ.pow(self.p(), self.e()), *P_main.base_ring().modulus());
 
         let values_in_coefficients = log_time::<_, _, LOG, _>("1. Computing Slots-to-Coeffs transform", |[key_switches]| {
-            return hom_compute_linear_transform::<Params>(P_base, C, ct, &self.slots_to_coeffs_thin, gk, key_switches);
+            return hom_compute_linear_transform::<Params, _>(P_base, C, ct, &self.slots_to_coeffs_thin, gk, key_switches);
         });
         if let Some(sk) = debug_sk {
             Params::dec_println(P_base, C, &values_in_coefficients, sk);
@@ -438,9 +438,9 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
         }
 
         let noisy_decryption_in_slots = log_time::<_, _, LOG, _>("3. Computing Coeffs-to-Slots transform", |[key_switches]| {
-            let moved_to_slots = hom_compute_linear_transform::<Params>(P_main, C, noisy_decryption, &self.coeffs_to_slots_thin.0, gk, key_switches);
+            let moved_to_slots = hom_compute_linear_transform::<Params, _>(P_main, C, noisy_decryption, &self.coeffs_to_slots_thin.0, gk, key_switches);
             if let Some(trace) = &self.coeffs_to_slots_thin.1 {
-                return hom_compute_trace::<Params>(P_main, C, moved_to_slots, trace, gk, key_switches);
+                return hom_compute_linear_transform::<Params, _>(P_main, C, moved_to_slots, std::slice::from_ref(trace), gk, key_switches);
             } else {
                 return moved_to_slots;
             };
@@ -458,82 +458,6 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
 
         return result;
     }
-}
-
-fn hom_compute_linear_transform<'a, Params: BFVParams>(
-    P: &PlaintextRing<Params>, 
-    C: &CiphertextRing<Params>, 
-    input: Ciphertext<Params>, 
-    transform: &[CompiledLinearTransform<NumberRing<Params>>], 
-    gk: &[(ZnEl, KeySwitchKey<'a, Params>)], 
-    key_switches: &mut usize
-) -> Ciphertext<Params>
-    where Params: 'a
-{
-    let Gal = P.get_ring().cyclotomic_index_ring();
-    let get_gk = |g: &ZnEl| &gk.iter().filter(|(s, _)| Gal.eq_el(g, s)).next().unwrap().1;
-
-    return transform.iter().fold(input, |current, T| T.evaluate_generic(
-        current,
-        |lhs, rhs| {
-            Params::hom_add(C, lhs, rhs)
-        }, 
-        |value, factor| {
-            Params::hom_mul_plain(P, C, factor, value)
-        },
-        |value, gs| {
-            *key_switches += gs.len();
-            Params::hom_galois_many(C, value, gs, gs.as_fn().map_fn(|g| get_gk(g)))
-        },
-        |value| Params::clone_ct(C, value)
-    ));
-}
-
-fn hom_compute_trace<'a, Params: BFVParams>(P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, input: Ciphertext<Params>, trace: &Trace<NumberRing<Params>, PlaintextAllocator>, gk: &[(ZnEl, KeySwitchKey<'a, Params>)], key_switches: &mut usize) -> Ciphertext<Params>
-    where Params: 'a
-{
-    let Gal = P.get_ring().cyclotomic_index_ring();
-    let get_gk = |g: &ZnEl| &gk.iter().filter(|(s, _)| Gal.eq_el(g, s)).next().unwrap().1;
-    return trace.evaluate_generic(input, 
-    |x, y| Params::hom_add(C, x, y), 
-    |value, factor| Params::hom_mul_plain(P, C, factor, value),
-    |x, gs| gs.iter().map(|g| {
-        if !Gal.is_one(&g) {
-            *key_switches += 1;
-            Params::hom_galois(C, Params::clone_ct(C, &x), *g, get_gk(&g))
-        } else {
-            Params::clone_ct(C, &x)
-        }
-    }).collect(), |x| Params::clone_ct(C, x));
-}
-
-fn hom_evaluate_circuit<'a, 'b, Params: BFVParams>(
-    P: &'a PlaintextRing<Params>, 
-    C: &'a CiphertextRing<Params>, 
-    C_mul: &'a CiphertextRing<Params>, 
-    input: &'a Ciphertext<Params>, 
-    circuit: &'a ArithCircuit, 
-    rk: &'a RelinKey<'b, Params>, 
-    mul_rescale: &'a MulConversionData, 
-    key_switches: &'a mut usize
-) -> impl ExactSizeIterator<Item = Ciphertext<Params>> + use<'a, 'b, Params> 
-    where Params: 'b
-{
-    return circuit.evaluate_generic(
-        std::slice::from_ref(input), 
-        |lhs, rhs, factor| {
-            let result = Params::hom_add(C, Params::hom_mul_plain_i64(P, C, factor, Params::clone_ct(C, rhs)), &lhs);
-            return result;
-        }, 
-        |lhs, rhs| {
-            *key_switches += 1;
-            let result =  Params::hom_mul(C, C_mul, lhs, rhs, rk, mul_rescale);
-            return result;
-        }, 
-        move |x| {
-            Params::hom_add_plain(P, C, &P.inclusion().compose(P.base_ring().can_hom(&ZZ).unwrap()).map(x), Params::transparent_zero(C))
-        }
-    );
 }
 
 #[test]
