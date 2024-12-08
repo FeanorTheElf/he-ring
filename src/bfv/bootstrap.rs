@@ -282,7 +282,7 @@ impl DigitExtract {
         return (floor_div_result, mod_result);
     }
 
-    fn evaluate_homomorphic<'a, Params: BFVParams, const LOG: bool>(&self, 
+    pub fn evaluate_homomorphic<'a, Params: BFVParams, const LOG: bool>(&self, 
         P_base: &PlaintextRing<Params>, 
         P_bootstrap: &[PlaintextRing<Params>], 
         C: &CiphertextRing<Params>, 
