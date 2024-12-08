@@ -77,12 +77,12 @@ const ZZbig: BigIntRing = BigIntRing::RING;
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
 
 pub struct MulConversionData {
-    lift_to_C_mul: rnsconv::shared_lift::AlmostExactSharedBaseConversion<RNSOperationAllocator>,
-    scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert<RNSOperationAllocator>
+    pub lift_to_C_mul: rnsconv::shared_lift::AlmostExactSharedBaseConversion<RNSOperationAllocator>,
+    pub scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert<RNSOperationAllocator>
 }
 
 pub struct ModSwitchData {
-    scale: rnsconv::bfv_rescale::AlmostExactRescaling<RNSOperationAllocator>
+    pub scale: rnsconv::bfv_rescale::AlmostExactRescaling<RNSOperationAllocator>
 }
 
 pub trait BFVParams {
