@@ -145,6 +145,7 @@ pub trait BFVParams {
     
     fn dec_println(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: &Ciphertext<Self>, sk: &SecretKey<Self>) {
         let m = Self::dec(P, C, Self::clone_ct(C, ct), sk);
+        println!("ciphertext (noise budget: {}):", Self::noise_budget(P, C, ct, sk));
         P.println(&m);
         println!();
     }
@@ -152,6 +153,7 @@ pub trait BFVParams {
     fn dec_println_slots(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: &Ciphertext<Self>, sk: &SecretKey<Self>) {
         let H = HypercubeIsomorphism::new::<false>(P.get_ring());
         let m = Self::dec(P, C, Self::clone_ct(C, ct), sk);
+        println!("ciphertext (noise budget: {}):", Self::noise_budget(P, C, ct, sk));
         for a in H.get_slot_values(&m) {
             H.slot_ring().println(&a);
         }
