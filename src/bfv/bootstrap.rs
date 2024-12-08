@@ -223,6 +223,22 @@ impl DigitExtract {
         }
     }
 
+    pub fn r(&self) -> usize {
+        self.e - self.v
+    }
+
+    pub fn e(&self) -> usize {
+        self.e
+    }
+
+    pub fn v(&self) -> usize {
+        self.v
+    }
+
+    pub fn p(&self) -> i64 {
+        self.p
+    }
+
     ///
     /// Computes the function directly on a ring. Mainly designed for testing.
     /// 
