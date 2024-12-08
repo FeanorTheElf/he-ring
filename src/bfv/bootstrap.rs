@@ -622,3 +622,57 @@ fn test_digit_extract_evaluate() {
         assert_eq!(x % 5, ring.smallest_positive_lift(actual_low) as i32);
     }
 }
+
+#[cfg(test)]
+fn test_circuit() -> ArithCircuit {
+    
+    let id = ArithCircuit::linear_transform(&[1]);
+    let f0 = id.clone();
+    let f1 = id.tensor(&ArithCircuit::mul()).compose(&ArithCircuit::select(1, &[0, 0, 0]).compose(&f0));
+    let f2 = id.tensor(&id).tensor(&ArithCircuit::mul()).compose(&ArithCircuit::select(2, &[0, 1, 1, 1]).compose(&f1));
+    
+    let f3_comp = ArithCircuit::add().compose(&ArithCircuit::linear_transform(&[112]).tensor(
+        &ArithCircuit::mul().compose(&ArithCircuit::linear_transform(&[94, 121]).output_twice())
+    )).compose(&ArithCircuit::select(2, &[0, 0, 1]));
+    let f3 = id.tensor(&id).tensor(&id).tensor(&f3_comp).compose(&ArithCircuit::select(3, &[0, 1, 2, 1, 2]).compose(&f2));
+
+    let f4_comp = ArithCircuit::add().compose(&ArithCircuit::linear_transform(&[1984, 528, 22620]).tensor(
+        &ArithCircuit::mul().compose(&ArithCircuit::linear_transform(&[226, 113]).tensor(&ArithCircuit::linear_transform(&[8, 2, 301])))
+    )).compose(&ArithCircuit::select(3, &[0, 1, 2, 1, 2, 0, 1, 2]));
+    let f4 = id.tensor(&id).tensor(&id).tensor(&id).tensor(&f4_comp).compose(&ArithCircuit::select(4, &[0, 1, 2, 3, 1, 2, 3]).compose(&f3));
+
+    return f4;
+}
+
+#[test]
+fn test_evaluate_circuit() {
+    let mut rng = thread_rng();
+    let params = CompositeSingleRNSBFV {
+        log2_q_max: 800,
+        log2_q_min: 780,
+        n1: 11,
+        n2: 31
+    };
+    let t = ZZ.pow(2, 15);
+    let digits = 4;
+    
+    let P = params.create_plaintext_ring(t);
+    let (C, C_mul) = params.create_ciphertext_rings();
+
+    let sk = CompositeSingleRNSBFV::gen_sk(&C, &mut rng);
+    let mul_rescale = CompositeSingleRNSBFV::create_multiplication_rescale(&P, &C, &C_mul);
+    let rk = CompositeSingleRNSBFV::gen_rk(&C, &mut rng, &sk, digits);
+
+    let m = P.zero();
+    let ct = CompositeSingleRNSBFV::enc_sym(&P, &C, &mut rng, &m, &sk);
+
+    let circuit = test_circuit();
+    let mut key_switches = 0;
+    let result = hom_evaluate_circuit::<CompositeSingleRNSBFV>(&P, &C, &C_mul, &ct, &circuit, &rk, &mul_rescale, &mut key_switches);
+
+    let result_dec = result.map(|ct| CompositeSingleRNSBFV::dec(&P, &C, ct, &sk)).collect::<Vec<_>>();
+    assert_el_eq!(&P, P.zero(), &result_dec[0]);
+    assert_el_eq!(&P, P.zero(), &result_dec[1]);
+    assert_el_eq!(&P, P.zero(), &result_dec[2]);
+    assert_el_eq!(&P, P.zero(), &result_dec[4]);
+}

@@ -349,7 +349,7 @@ impl<NumberRing, A, C> BXVCiphertextRing for SingleRNSRingBase<NumberRing, A, C>
     }
 
     fn two_by_two_convolution(&self, lhs: [&Self::Element; 2], rhs: [&Self::Element; 2]) -> [Self::Element; 3] {
-        record_time!(GLOBAL_TIME_RECORDER, "SingleRNSRing::two_by_two_convolution", || {
+        let result = record_time!(GLOBAL_TIME_RECORDER, "SingleRNSRing::two_by_two_convolution", || {
             let lhs = [self.prepare_multiplicant(&lhs[0]), self.prepare_multiplicant(&lhs[1])];
             let rhs = [self.prepare_multiplicant(&rhs[0]), self.prepare_multiplicant(&rhs[1])];
             let mut result = [self.zero(), self.zero(), self.zero()];
@@ -374,7 +374,8 @@ impl<NumberRing, A, C> BXVCiphertextRing for SingleRNSRingBase<NumberRing, A, C>
                 self.reduce_modulus(k, &mut unreduced_result, self.as_matrix_mut(&mut result[2]).row_mut_at(k));
             }
             return result;
-        })
+        });
+        return result;
     }
 }
 
@@ -923,6 +924,18 @@ pub fn test_with_number_ring<NumberRing: Clone + HECyclotomicNumberRing>(number_
     feanor_math::ring::generic_tests::test_ring_axioms(&ring, elements.iter().map(|x| ring.clone_el(x)));
     feanor_math::ring::generic_tests::test_self_iso(&ring, elements.iter().map(|x| ring.clone_el(x)));
     feanor_math::rings::extension::generic_tests::test_free_algebra_axioms(&ring);
+
+    let one = ring.one();
+    for a in &elements {
+        for b in &elements {
+            for c in &elements {
+                let actual = ring.get_ring().two_by_two_convolution([a, b], [c, &one]);
+                assert_el_eq!(&ring, ring.mul_ref(a, c), &actual[0]);
+                assert_el_eq!(&ring, ring.add_ref_snd(ring.mul_ref(b, c), a), &actual[1]);
+                assert_el_eq!(&ring, b, &actual[2]);
+            }
+        }
+    }
 
     let double_rns_ring = DoubleRNSRingBase::new(number_ring.clone(), base_ring.clone());
     feanor_math::ring::generic_tests::test_hom_axioms(&ring, &double_rns_ring, elements.iter().map(|x| ring.clone_el(x)));
