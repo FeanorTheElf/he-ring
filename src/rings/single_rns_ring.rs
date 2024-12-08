@@ -365,7 +365,7 @@ impl<NumberRing, A, C> BXVCiphertextRing for SingleRNSRingBase<NumberRing, A, C>
 
                 unreduced_result.clear();
                 unreduced_result.resize_with(self.rank() * 2, || Zp.zero());
-                self.convolutions[k].compute_convolution_inner_product_prepared([(lhs[1].data.at(k), lhs[0].data.at(k)), (rhs[0].data.at(k), rhs[1].data.at(k))].into_iter(), &mut unreduced_result, Zp);
+                self.convolutions[k].compute_convolution_inner_product_prepared([(lhs[1].data.at(k), rhs[0].data.at(k)), (lhs[0].data.at(k), rhs[1].data.at(k))].into_iter(), &mut unreduced_result, Zp);
                 self.reduce_modulus(k, &mut unreduced_result, self.as_matrix_mut(&mut result[1]).row_mut_at(k));
                 
                 unreduced_result.clear();
