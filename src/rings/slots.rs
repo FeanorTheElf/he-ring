@@ -10,6 +10,8 @@ use std::cmp::max;
 use de::DeserializeSeed;
 use de::Visitor;
 use feanor_math::algorithms::eea::signed_lcm;
+use feanor_math::algorithms::sqr_mul::generic_pow_shortest_chain_table;
+use feanor_math::computation::no_error;
 use feanor_math::serialization::*;
 use feanor_math::serialization::SerializeWithRing;
 use ser::SerializeStruct;
@@ -398,27 +400,74 @@ impl<'a, NumberRing, A> HypercubeIsomorphism<'a, NumberRing, A>
             slot_ring: slot_ring,
             slot_unit_vec: ring.zero()
         };
-
-        let slot_unit_vector = log_time::<_, _, LOG, _>("Computing slot unit vector representation", |[]| {
-            let unormalized_result = ring.prod(result.slot_iter(|idxs| if idxs.iter().all(|x| *x == 0) {
-                    None
-                } else {
-                    Some(galois_group_ring.prod(result.dims.iter().enumerate().map(|(i, dim)| galois_group_ring.pow(dim.g_main, idxs[i]))))
-                })
-                .filter_map(|x| x)
-                .map(|s| ring.apply_galois_action(&irred_factor, s)));
-                
-            let normalization_factor = result.slot_ring().invert(&result.get_slot_values(&unormalized_result).next().unwrap()).unwrap();
-            let normalization_factor_wrt_basis = result.slot_ring().wrt_canonical_basis(&normalization_factor);
-            ring.mul(
-                ring.from_canonical_basis((0..ring.rank()).map(|i| if i < normalization_factor_wrt_basis.len() { normalization_factor_wrt_basis.at(i) } else { ring.base_ring().zero() })),
-                unormalized_result
-            )
-        });
-
-        result.slot_unit_vec = slot_unit_vector;
-
+        log_time::<_, _, LOG, _>("Computing slot unit vector representation", |[]| result.init_slot_unit_vec(&irred_factor));
         return result;
+    }
+
+    fn init_slot_unit_vec(&mut self, irred_factor: &El<DecompositionRing<NumberRing, Zn, A>>) {
+        // we compute prod_(k != 1) σ_k(irred_factor) where k goes through a set of representatives of (Z/nZ)*/<p>;
+        // for performance reasons, we don't directly compute the product, but build it using a square-and-multiply
+        // approach.
+        let R = self.ring();
+        let first_dim_product_except_1 = generic_pow_shortest_chain_table::<_, _, _, _, _, !>(
+            (1, R.apply_galois_action(irred_factor, self.shift_galois_element(0, 1))),
+            &(self.len(0) as i64 - 1),
+            StaticRing::<i64>::RING,
+            |(i, a)| Ok((2 * *i, R.mul_ref_fst(a, R.apply_galois_action(a, self.shift_galois_element(0, *i as i64))))),
+            |(i, a), (j, b)| Ok((*i + *j, R.mul_ref_fst(a, R.apply_galois_action(b, self.shift_galois_element(0, *i as i64))))),
+            |(i, a)| (*i, R.clone_el(a)),
+            (0, R.one())
+        ).unwrap_or_else(no_error).1;
+        debug_assert!(R.eq_el(
+            &first_dim_product_except_1, 
+            &R.prod((1..self.len(0))
+                .map(|i| self.shift_galois_element(0, i as i64))
+                .map(|g| R.apply_galois_action(irred_factor, g))
+            )
+        ));
+
+        let first_dim_product = R.mul_ref(&first_dim_product_except_1, irred_factor);
+        let mut current_exc_1 = first_dim_product_except_1;
+        let mut current_inc_1 = first_dim_product;
+        for dim in 1..self.dim_count() {
+
+            #[cfg(debug_assertions)]
+            let expected = R.prod([R.clone_el(&current_exc_1)].into_iter().chain((1..self.len(dim))
+                .map(|i| self.shift_galois_element(dim, i as i64))
+                .map(|g| R.apply_galois_action(&current_inc_1, g))
+            ));
+
+            let (_, new_exc_1, new_inc_1) = generic_pow_shortest_chain_table::<_, _, _, _, _, !>(
+                (1, current_exc_1, current_inc_1),
+                &(self.len(dim) as i64),
+                StaticRing::<i64>::RING,
+                |(i, a_exc_1, a_inc_1)| {
+                    let galois_a_inc_1 = R.apply_galois_action(&a_inc_1, self.shift_galois_element(dim, *i as i64));
+                    Ok((2 * *i, R.mul_ref(&a_exc_1, &galois_a_inc_1), R.mul_ref_fst(a_inc_1, galois_a_inc_1)))
+                },
+                |(i, a_exc_1, a_inc_1), (j, _, b_inc_1)| {
+                    let galois_b_inc_1 = R.apply_galois_action(&b_inc_1, self.shift_galois_element(dim, *i as i64));
+                    Ok((*i + *j, R.mul_ref(a_exc_1, &galois_b_inc_1), R.mul_ref_fst(a_inc_1, galois_b_inc_1)))
+                },
+                |(i, a_exc_1, a_inc_1)| (*i, R.clone_el(a_exc_1), R.clone_el(a_inc_1)),
+                (0, R.one(), R.one())
+            ).unwrap_or_else(no_error);
+
+            #[cfg(debug_assertions)]
+            assert!(R.eq_el(&new_exc_1, &expected));
+            current_exc_1 = new_exc_1;
+            current_inc_1 = new_inc_1;
+        }
+
+        let result = current_exc_1;
+
+        let first_slot_value = self.get_slot_value(&result, self.cyclotomic_index_ring().one());
+        let normalization_factor = self.slot_ring().invert(&first_slot_value).unwrap();
+        let normalization_factor_wrt_basis = self.slot_ring().wrt_canonical_basis(&normalization_factor);
+        self.slot_unit_vec = R.mul(
+            R.from_canonical_basis((0..R.rank()).map(|i| if i < normalization_factor_wrt_basis.len() { normalization_factor_wrt_basis.at(i) } else { R.base_ring().zero() })),
+            result
+        );
     }
 
     pub fn change_modulus<'b>(&self, new_ring: &'b DecompositionRingBase<NumberRing, Zn, A>) -> HypercubeIsomorphism<'b, NumberRing, A> {
@@ -1091,6 +1140,13 @@ fn test_create_hypercube() {
 }
 
 #[test]
+#[ignore]
+fn test_create_hypercube_large() {
+    let ring = DecompositionRingBase::new(CompositeCyclotomicNumberRing::new(337, 127), Zn::new(65536));
+    let hypercube = HypercubeIsomorphism::new::<true>(ring.get_ring());
+}
+
+#[test]
 fn test_order_hypercube_dimensions_pow2() {
     {
         let ring = Zn::new(32);
@@ -1220,7 +1276,7 @@ fn test_order_hypercube_dimensions_composite() {
 }
 
 #[test]
-fn test_rotation() {
+fn test_shift_galois_element() {
     // `F23[X]/(X^16 + 1) ~ F_(23^4)^4`
     let ring = DecompositionRingBase::new(Pow2CyclotomicNumberRing::new(32), Zn::new(23 * 23 * 23));
     let hypercube = HypercubeIsomorphism::new::<false>(ring.get_ring());
@@ -1251,7 +1307,7 @@ fn test_rotation() {
 }
 
 #[test]
-fn test_hypercube_galois_ring() {
+fn test_hypercube_from_slot_isomorphism() {
     // `F(23^3)[X]/(X^16 + 1) ~ GF(23, 3, 4)^4`
     let ring = DecompositionRingBase::new(Pow2CyclotomicNumberRing::new(32), Zn::new(23 * 23 * 23));
     let hypercube = HypercubeIsomorphism::new::<false>(ring.get_ring());
