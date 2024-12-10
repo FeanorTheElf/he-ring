@@ -413,8 +413,14 @@ impl<'a, NumberRing, A> HypercubeIsomorphism<'a, NumberRing, A>
             (1, R.apply_galois_action(irred_factor, self.shift_galois_element(0, 1))),
             &(self.len(0) as i64 - 1),
             StaticRing::<i64>::RING,
-            |(i, a)| Ok((2 * *i, R.mul_ref_fst(a, R.apply_galois_action(a, self.shift_galois_element(0, *i as i64))))),
-            |(i, a), (j, b)| Ok((*i + *j, R.mul_ref_fst(a, R.apply_galois_action(b, self.shift_galois_element(0, *i as i64))))),
+            |(i, a)| {
+                println!("dim 0: double");
+                Ok((2 * *i, R.mul_ref_fst(a, R.apply_galois_action(a, self.shift_galois_element(0, *i as i64)))))
+            },
+            |(i, a), (j, b)| {
+                println!("dim 0: mul");
+                Ok((*i + *j, R.mul_ref_fst(a, R.apply_galois_action(b, self.shift_galois_element(0, *i as i64)))))
+            },
             |(i, a)| (*i, R.clone_el(a)),
             (0, R.one())
         ).unwrap_or_else(no_error).1;
