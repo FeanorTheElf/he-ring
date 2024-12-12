@@ -2,22 +2,25 @@ use std::alloc::*;
 use std::cell::RefCell;
 use std::marker::PhantomData;
 
+use feanor_math::algorithms::convolution::STANDARD_CONVOLUTION;
 use feanor_math::algorithms::sqr_mul::generic_pow_shortest_chain_table;
 use feanor_math::homomorphism::*;
 use feanor_math::integer::*;
 use feanor_math::matrix::OwnedMatrix;
 use feanor_math::rings::extension::FreeAlgebraStore;
+use feanor_math::rings::field::AsFieldBase;
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
 use feanor_math::rings::poly::PolyRingStore;
 use feanor_math::algorithms::sqr_mul;
 use feanor_math::rings::zn::zn_64::ZnEl;
 use feanor_math::primitive_int::StaticRing;
 use feanor_math::ring::*;
-use feanor_math::rings::zn::zn_64::Zn;
+use feanor_math::rings::zn::zn_64::*;
 use feanor_math::rings::zn::*;
 use feanor_math::seq::*;
 use feanor_math::algorithms::linsolve::LinSolveRingStore;
 
+use crate::rings::dynconv::DynConvolutionAlgorithmConvolution;
 use crate::rings::number_ring::HECyclotomicNumberRing;
 use crate::rings::odd_cyclotomic::OddCyclotomicNumberRing;
 use crate::rings::pow2_cyclotomic::Pow2CyclotomicNumberRing;
@@ -200,7 +203,7 @@ fn test_extract_coefficient_map() {
         }
     };
 
-    let convolution = || FFTRNSBasedConvolutionZn::from(FFTRNSBasedConvolution::new_with(10, BigIntRing::RING, Global));
+    let convolution = || DynConvolutionAlgorithmConvolution::<ZnBase>::new(Box::new(STANDARD_CONVOLUTION));
 
     let base_ring = Zn::new(17).as_field().ok().unwrap();
     let mut modulus = SparseMapVector::new(4, &base_ring);
@@ -208,7 +211,7 @@ fn test_extract_coefficient_map() {
         *modulus.at_mut(i) = base_ring.neg_one();
     }
 
-    let slot_ring = GaloisField::create(FreeAlgebraImpl::new(&base_ring, 4, modulus).into().set_convolution(convolution()).as_field().ok().unwrap());
+    let slot_ring = GaloisField::create(FreeAlgebraImpl::new(&base_ring, 4, modulus).as_field().ok().unwrap());
     assert!(is_prim_root_of_unity(&slot_ring, &slot_ring.canonical_gen(), 5));
     let Gal = Zn::new(5);
     let trace = Trace::new(OddCyclotomicNumberRing::new(5), 17, 4);

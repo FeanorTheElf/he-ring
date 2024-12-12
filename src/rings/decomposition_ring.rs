@@ -62,12 +62,14 @@ impl<NumberRing, ZnTy> DecompositionRingBase<NumberRing, ZnTy>
         ZnTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
 {
     pub fn new(number_ring: NumberRing, base_ring: ZnTy) -> RingValue<Self> {
-        let max_product_expansion_factor = BigIntRing::RING.from_float_approx(number_ring.product_expansion_factor().ceil()).unwrap();
-        let max_lift_size = int_cast(base_ring.integer_ring().clone_el(base_ring.modulus()), BigIntRing::RING, base_ring.integer_ring());
-        let max_product_size = BigIntRing::RING.mul(BigIntRing::RING.pow(max_lift_size, 2), max_product_expansion_factor);
-        let required_bits = BigIntRing::RING.abs_log2_ceil(&max_product_size).unwrap();
-        let rns_base_primes = sample_primes(required_bits, required_bits + 57, 57, |n| number_ring.largest_suitable_prime(int_cast(n, StaticRing::<i64>::RING, BigIntRing::RING)).map(|n| int_cast(n, BigIntRing::RING, StaticRing::<i64>::RING))).unwrap();
-        let rns_base = zn_rns::Zn::new(rns_base_primes.into_iter().map(|p| zn_64::Zn::new(int_cast(p, StaticRing::<i64>::RING, BigIntRing::RING) as u64)).collect(), BigIntRing::RING);
+        let ZZbig = BigIntRing::RING;
+        let max_product_expansion_factor = ZZbig.from_float_approx(number_ring.product_expansion_factor().ceil()).unwrap();
+        let max_lift_size = ZZbig.ceil_div(int_cast(base_ring.integer_ring().clone_el(base_ring.modulus()), ZZbig, base_ring.integer_ring()), &ZZbig.int_hom().map(2));
+        let max_product_size = ZZbig.mul(ZZbig.pow(max_lift_size, 2), max_product_expansion_factor);
+        let required_bits = ZZbig.abs_log2_ceil(&max_product_size).unwrap();
+        let rns_base_primes = sample_primes(required_bits, required_bits + 57, 57, |n| number_ring.largest_suitable_prime(int_cast(n, StaticRing::<i64>::RING, ZZbig)).map(|n| int_cast(n, ZZbig, StaticRing::<i64>::RING))).unwrap();
+        let rns_base = zn_rns::Zn::new(rns_base_primes.into_iter().map(|p| zn_64::Zn::new(int_cast(p, StaticRing::<i64>::RING, ZZbig) as u64)).collect(), ZZbig);
+        println!("rns base len: {}", rns_base.len());
         return Self::new_with(number_ring, base_ring, rns_base, Global);
     }
 }
@@ -92,6 +94,18 @@ impl<NumberRing, ZnTy, A> DecompositionRingBase<NumberRing, ZnTy, A>
             rns_base: rns_base,
             allocator: allocator
         })
+    }
+
+    pub fn with_allocator<ANew>(self, new_allocator: ANew) -> DecompositionRingBase<NumberRing, ZnTy, ANew>
+        where ANew: Allocator + Clone
+    {
+        DecompositionRingBase {
+            allocator: new_allocator,
+            number_ring: self.number_ring,
+            base_ring: self.base_ring,
+            ring_decompositions: self.ring_decompositions,
+            rns_base: self.rns_base
+        }
     }
 
     pub fn allocator(&self) -> &A {

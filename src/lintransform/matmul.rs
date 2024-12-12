@@ -154,6 +154,7 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
         let m = H.len(dim_index) as i64;
         let mut result = MatmulTransform {
             data: ((1 - m)..m).map(|s| {
+                println!("{}", s);
                 let coeff = H.from_slot_vec(H.slot_iter(|idxs| if idxs[dim_index] as i64 >= s && idxs[dim_index] as i64 - s < m {
                     matrix(idxs[dim_index], (idxs[dim_index] as i64 - s) as usize, idxs)
                 } else {

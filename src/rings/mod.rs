@@ -1,6 +1,8 @@
 
 pub mod ntt_conv;
 
+pub mod dynconv;
+
 pub mod number_ring;
 
 ///

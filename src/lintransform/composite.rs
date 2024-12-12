@@ -1,4 +1,7 @@
 use std::alloc::Allocator;
+use std::alloc::Global;
+use std::ptr::Alignment;
+use std::rc::Rc;
 
 use feanor_math::algorithms::linsolve::LinSolveRingStore;
 use feanor_math::assert_el_eq;
@@ -11,6 +14,8 @@ use feanor_math::primitive_int::*;
 use feanor_math::seq::VectorFn;
 use matmul::MatmulTransform;
 
+use crate::profiling::log_time;
+use crate::profiling::print_all_timings;
 use crate::rings::decomposition_ring::DecompositionRingBase;
 use crate::rings::odd_cyclotomic::CompositeCyclotomicNumberRing;
 use crate::rings::slots::*;
@@ -22,16 +27,18 @@ fn dwt1d_matrix<'a, NumberRing, A>(H: &HypercubeIsomorphism<'a, NumberRing, A>, 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
 {
-    let index_ring = H.cyclotomic_index_ring();
-    let ZZ_to_Gal = index_ring.can_hom(&StaticRing::<i64>::RING).unwrap();
+    record_time!(CREATE_LINEAR_TRANSFORM_TIME_RECORDER, "dwt1d_matrix", || {
+        let index_ring = H.cyclotomic_index_ring();
+        let ZZ_to_Gal = index_ring.can_hom(&StaticRing::<i64>::RING).unwrap();
 
-    OwnedMatrix::from_fn(H.len(dim_index), H.len(dim_index), |i, j| {
-        let exponent = H.cyclotomic_index_ring().prod([
-            H.shift_galois_element(dim_index, -(i as i64)),
-            ZZ_to_Gal.map(j as i64),
-            ZZ_to_Gal.map(H.ring().n() as i64 / H.corresponding_factor_n(dim_index))
-        ]);
-        return H.slot_ring().clone_el(&*zeta_powertable.get_power(H.cyclotomic_index_ring().smallest_lift(exponent)));
+        OwnedMatrix::from_fn(H.len(dim_index), H.len(dim_index), |i, j| {
+            let exponent = H.cyclotomic_index_ring().prod([
+                H.shift_galois_element(dim_index, -(i as i64)),
+                ZZ_to_Gal.map(j as i64),
+                ZZ_to_Gal.map(H.ring().n() as i64 / H.corresponding_factor_n(dim_index))
+            ]);
+            return H.slot_ring().clone_el(&*zeta_powertable.get_power(H.cyclotomic_index_ring().smallest_lift(exponent)));
+        })
     })
 }
 
@@ -44,31 +51,35 @@ fn dwt1d<'a, NumberRing, A>(H: &HypercubeIsomorphism<'a, NumberRing, A>, dim_ind
     where NumberRing: HECyclotomicNumberRing + Clone,
         A: Allocator + Clone,
 {
-    // multiplication with the matrix `A(i, j) = 𝝵^(j * shift_element(-i))` if we consider an element as multiple vectors along the `dim_index`-th dimension
-    let A = dwt1d_matrix(H, dim_index, zeta_powertable);
+    record_time!(CREATE_LINEAR_TRANSFORM_TIME_RECORDER, "dwt1d", || {
+        // multiplication with the matrix `A(i, j) = 𝝵^(j * shift_element(-i))` if we consider an element as multiple vectors along the `dim_index`-th dimension
+        let A = dwt1d_matrix(H, dim_index, zeta_powertable);
 
-    vec![MatmulTransform::matmul1d(
-        H, 
-        dim_index, 
-        |i, j, _idxs| H.slot_ring().clone_el(A.at(i, j))
-    )]
+        vec![MatmulTransform::matmul1d(
+            H, 
+            dim_index, 
+            |i, j, _idxs| H.slot_ring().clone_el(A.at(i, j))
+        )]
+    })
 }
 
 fn dwt1d_inv<'a, NumberRing, A>(H: &HypercubeIsomorphism<'a, NumberRing, A>, dim_index: usize, zeta_powertable: &PowerTable<&SlotRing<'a, A>>) -> Vec<MatmulTransform<NumberRing, A>>
     where NumberRing: HECyclotomicNumberRing + Clone,
         A: Allocator + Clone,
 {
-    let mut A = dwt1d_matrix(H, dim_index, zeta_powertable);
-    let mut rhs = OwnedMatrix::identity(H.len(dim_index), H.len(dim_index), H.slot_ring());
-    let mut sol = OwnedMatrix::zero(H.len(dim_index), H.len(dim_index), H.slot_ring());
-    <_ as LinSolveRingStore>::solve_right(H.slot_ring(), A.data_mut(), rhs.data_mut(), sol.data_mut()).assert_solved();
+    record_time!(CREATE_LINEAR_TRANSFORM_TIME_RECORDER, "dwt1d_inv", || {
+        let mut A = log_time::<_, _, true, _>("creating matrix", |[]| dwt1d_matrix(H, dim_index, zeta_powertable));
+        let mut rhs = OwnedMatrix::identity(H.len(dim_index), H.len(dim_index), H.slot_ring());
+        let mut sol = OwnedMatrix::zero(H.len(dim_index), H.len(dim_index), H.slot_ring());
+        log_time::<_, _, true, _>("inverting matrix", |[]| <_ as LinSolveRingStore>::solve_right(H.slot_ring(), A.data_mut(), rhs.data_mut(), sol.data_mut()).assert_solved());
 
-    // multiplication with the matrix `A(i, j) = 𝝵^(j * shift_element(-i))` if we consider an element as multiple vectors along the `dim_index`-th dimension
-    vec![MatmulTransform::matmul1d(
-        H, 
-        dim_index, 
-        |i, j, _idxs| H.slot_ring().clone_el(sol.at(i, j))
-    )]
+        // multiplication with the matrix `A(i, j) = 𝝵^(j * shift_element(-i))` if we consider an element as multiple vectors along the `dim_index`-th dimension
+        log_time::<_, _, true, _>("creating linear transform", |[]| vec![MatmulTransform::matmul1d(
+            H, 
+            dim_index, 
+            |i, j, _idxs| H.slot_ring().clone_el(sol.at(i, j))
+        )])
+    })
 }
 
 /// 
@@ -81,22 +92,24 @@ fn slots_to_powcoeffs_fat_fst_step<'a, NumberRing, A>(H: &HypercubeIsomorphism<'
     where NumberRing: HECyclotomicNumberRing + Clone,
         A: Allocator + Clone,
 {
-    let Gal = H.cyclotomic_index_ring();
-    let ZZ_to_Gal = Gal.can_hom(&StaticRing::<i64>::RING).unwrap();
+    record_time!(CREATE_LINEAR_TRANSFORM_TIME_RECORDER, "slots_to_powcoeffs_fat_fst_step", || {
+        let Gal = H.cyclotomic_index_ring();
+        let ZZ_to_Gal = Gal.can_hom(&StaticRing::<i64>::RING).unwrap();
 
-    OwnedMatrix::from_fn(H.len(dim_index) * H.slot_ring().rank(), H.len(dim_index) * H.slot_ring().rank(), |row_idx, col_idx| {
-        let i = row_idx / H.slot_ring().rank();
-        let k = row_idx % H.slot_ring().rank();
-        let j = col_idx / H.slot_ring().rank();
-        let l = col_idx % H.slot_ring().rank(); 
-        // the "work" that is left to do is to write `X1 e_U(*)` w.r.t. the basis `𝝵^k e_U(i)`;
-        // however, this is exactly `X1 = sum_i X^(n/n1) e_U(i) = sum_i 𝝵^(shift_element(-i) * n/n1) e_U(i)`
-        let exponent = Gal.prod([
-            H.shift_galois_element(0, -(i as i64)), 
-            ZZ_to_Gal.map(H.ring().n() as i64 / H.corresponding_factor_n(0)),
-            ZZ_to_Gal.map((j + l * H.len(0)) as i64)
-        ]);
-        return H.slot_ring().wrt_canonical_basis(&*zeta_powertable.get_power(Gal.smallest_lift(exponent))).at(k);
+        OwnedMatrix::from_fn(H.len(dim_index) * H.slot_ring().rank(), H.len(dim_index) * H.slot_ring().rank(), |row_idx, col_idx| {
+            let i = row_idx / H.slot_ring().rank();
+            let k = row_idx % H.slot_ring().rank();
+            let j = col_idx / H.slot_ring().rank();
+            let l = col_idx % H.slot_ring().rank(); 
+            // the "work" that is left to do is to write `X1 e_U(*)` w.r.t. the basis `𝝵^k e_U(i)`;
+            // however, this is exactly `X1 = sum_i X^(n/n1) e_U(i) = sum_i 𝝵^(shift_element(-i) * n/n1) e_U(i)`
+            let exponent = Gal.prod([
+                H.shift_galois_element(0, -(i as i64)), 
+                ZZ_to_Gal.map(H.ring().n() as i64 / H.corresponding_factor_n(0)),
+                ZZ_to_Gal.map((j + l * H.len(0)) as i64)
+            ]);
+            return H.slot_ring().wrt_canonical_basis(&*zeta_powertable.get_power(Gal.smallest_lift(exponent))).at(k);
+        })
     })
 }
 
@@ -110,24 +123,26 @@ pub fn slots_to_powcoeffs_fat<NumberRing, A>(H: &HypercubeIsomorphism<NumberRing
     where NumberRing: HECyclotomicNumberRing + Clone,
         A: Allocator + Clone,
 {
-    assert!(H.ring().n() % 2 != 0);
-    assert!(H.slot_ring().rank() == H.local_slot_rank(0));
+    record_time!(CREATE_LINEAR_TRANSFORM_TIME_RECORDER, "slots_to_powcoeffs_fat", || {
+        assert!(H.ring().n() % 2 != 0);
+        assert!(H.slot_ring().rank() == H.local_slot_rank(0));
 
-    let mut result = Vec::new();
-    let zeta_powertable = PowerTable::new(H.slot_ring(), H.slot_ring().canonical_gen(), H.ring().n() as usize);
+        let mut result = Vec::new();
+        let zeta_powertable = PowerTable::new(H.slot_ring(), H.slot_ring().canonical_gen(), H.ring().n() as usize);
 
-    let fst_step_matrix = slots_to_powcoeffs_fat_fst_step(H, 0, &zeta_powertable);
-    result.push(MatmulTransform::blockmatmul1d(
-        H,
-        0,
-        |(i, k), (j, l), _idxs| H.slot_ring().base_ring().clone_el(fst_step_matrix.at(i * H.slot_ring().rank() + k, j * H.slot_ring().rank() + l))
-    ));
+        let fst_step_matrix = slots_to_powcoeffs_fat_fst_step(H, 0, &zeta_powertable);
+        result.push(MatmulTransform::blockmatmul1d(
+            H,
+            0,
+            |(i, k), (j, l), _idxs| H.slot_ring().base_ring().clone_el(fst_step_matrix.at(i * H.slot_ring().rank() + k, j * H.slot_ring().rank() + l))
+        ));
 
-    for i in 1..H.dim_count() {
-        result.extend(dwt1d(H, i, &zeta_powertable));
-    }
+        for i in 1..H.dim_count() {
+            result.extend(dwt1d(H, i, &zeta_powertable));
+        }
 
-    return result;
+        return result;
+    })
 }
 
 ///
@@ -138,28 +153,37 @@ pub fn powcoeffs_to_slots_fat<NumberRing, A>(H: &HypercubeIsomorphism<NumberRing
     where NumberRing: HECyclotomicNumberRing + Clone,
         A: Allocator + Clone,
 {
-    assert!(H.ring().n() % 2 != 0);
-    assert!(H.slot_ring().rank() == H.local_slot_rank(0));
+    record_time!(CREATE_LINEAR_TRANSFORM_TIME_RECORDER, "powcoeffs_to_slots_fat", || {
+        assert!(H.ring().n() % 2 != 0);
+        assert!(H.slot_ring().rank() == H.local_slot_rank(0));
 
-    let mut result = Vec::new();
-    let zeta_powertable = PowerTable::new(H.slot_ring(), H.slot_ring().canonical_gen(), H.ring().n() as usize);
+        let mut result = Vec::new();
+        let zeta_powertable = PowerTable::new(H.slot_ring(), H.slot_ring().canonical_gen(), H.ring().n() as usize);
 
-    for i in (1..H.dim_count()).rev() {
-        result.extend(dwt1d_inv(H, i, &zeta_powertable));
-    }
+        for i in (1..H.dim_count()).rev() {
+            result.extend(dwt1d_inv(H, i, &zeta_powertable));
+        }
 
-    let mut A = slots_to_powcoeffs_fat_fst_step(H, 0, &zeta_powertable);
-    let mut rhs = OwnedMatrix::identity(H.len(0) * H.slot_ring().rank(), H.len(0) * H.slot_ring().rank(), H.slot_ring().base_ring());
-    let mut sol = OwnedMatrix::zero(H.len(0) * H.slot_ring().rank(), H.len(0) * H.slot_ring().rank(), H.slot_ring().base_ring());
-    <_ as LinSolveRingStore>::solve_right(H.slot_ring().base_ring(), A.data_mut(), rhs.data_mut(), sol.data_mut()).assert_solved();
+        println!("first dwts");
 
-    result.push(MatmulTransform::blockmatmul1d(
-        H,
-        0,
-        |(i, k), (j, l), _idxs| H.slot_ring().base_ring().clone_el(sol.at(i * H.slot_ring().rank() + k, j * H.slot_ring().rank() + l))
-    ));
+        let mut A = slots_to_powcoeffs_fat_fst_step(H, 0, &zeta_powertable);
 
-    return result;
+        println!("created first step matrix");
+
+        let mut rhs = OwnedMatrix::identity(H.len(0) * H.slot_ring().rank(), H.len(0) * H.slot_ring().rank(), H.slot_ring().base_ring());
+        let mut sol = OwnedMatrix::zero(H.len(0) * H.slot_ring().rank(), H.len(0) * H.slot_ring().rank(), H.slot_ring().base_ring());
+        <_ as LinSolveRingStore>::solve_right(H.slot_ring().base_ring(), A.data_mut(), rhs.data_mut(), sol.data_mut()).assert_solved();
+
+        println!("inverted first step matrix");
+
+        result.push(MatmulTransform::blockmatmul1d(
+            H,
+            0,
+            |(i, k), (j, l), _idxs| H.slot_ring().base_ring().clone_el(sol.at(i * H.slot_ring().rank() + k, j * H.slot_ring().rank() + l))
+        ));
+
+        return result;
+    })
 }
 
 ///
@@ -172,16 +196,18 @@ pub fn slots_to_powcoeffs_thin<NumberRing, A>(H: &HypercubeIsomorphism<NumberRin
     where NumberRing: HECyclotomicNumberRing + Clone,
         A: Allocator + Clone,
 {
-    assert!(H.ring().n() % 2 != 0);
-    assert!(H.slot_ring().rank() == H.local_slot_rank(0));
+    record_time!(CREATE_LINEAR_TRANSFORM_TIME_RECORDER, "slots_to_powcoeffs_thin", || {
+        assert!(H.ring().n() % 2 != 0);
+        assert!(H.slot_ring().rank() == H.local_slot_rank(0));
 
-    let zeta_powertable = PowerTable::new(H.slot_ring(), H.slot_ring().canonical_gen(), H.ring().n() as usize);
-    let mut result = Vec::new();
+        let zeta_powertable = PowerTable::new(H.slot_ring(), H.slot_ring().canonical_gen(), H.ring().n() as usize);
+        let mut result = Vec::new();
 
-    for i in 0..H.dim_count() {
-        result.extend(dwt1d(H, i, &zeta_powertable));
-    }
-    return result;
+        for i in 0..H.dim_count() {
+            result.extend(dwt1d(H, i, &zeta_powertable));
+        }
+        return result;
+    })
 }
 
 ///
@@ -196,14 +222,16 @@ pub fn powcoeffs_to_slots_thin<NumberRing, A>(H: &HypercubeIsomorphism<NumberRin
     where NumberRing: HECyclotomicNumberRing + Clone,
         A: Allocator + Clone,
 {
-    let mut result = powcoeffs_to_slots_fat(H);
-    let discard_unused = MatmulTransform::blockmatmul0d(
-        H, 
-        |i, j, _idxs| if j == 0 && i == 0 { H.slot_ring().base_ring().one() } else { H.slot_ring().base_ring().zero() }
-    );
-    let last_step = result.last_mut().unwrap();
-    *last_step = discard_unused.compose(last_step, H);
-    return result;
+    record_time!(CREATE_LINEAR_TRANSFORM_TIME_RECORDER, "powcoeffs_to_slots_thin", || {
+        let mut result = powcoeffs_to_slots_fat(H);
+        let discard_unused = MatmulTransform::blockmatmul0d(
+            H, 
+            |i, j, _idxs| if j == 0 && i == 0 { H.slot_ring().base_ring().one() } else { H.slot_ring().base_ring().zero() }
+        );
+        let last_step = result.last_mut().unwrap();
+        *last_step = discard_unused.compose(last_step, H);
+        return result;
+    })
 }
 
 #[test]
@@ -371,4 +399,31 @@ fn test_powcoeffs_to_slots_fat() {
     }
     let expected = H.from_slot_vec([1, 2, 3, 4, 5, 6, 7, 8].into_iter().map(|n| H.slot_ring().from_canonical_basis([n, n + 8, n + 16].into_iter().map(|m| H.slot_ring().base_ring().int_hom().map(m)))));
     assert_el_eq!(ring, expected, current);
+}
+
+#[test]
+#[ignore]
+fn test_powcoeffs_to_slots_fat_large() {
+    let allocator = feanor_mempool::AllocRc(Rc::new(feanor_mempool::dynsize::DynLayoutMempool::<Global>::new(Alignment::of::<u64>())));
+    let ring = RingValue::from(DecompositionRingBase::new(CompositeCyclotomicNumberRing::new(337, 127), Zn::new(65536)).into().with_allocator(allocator));
+    let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
+    assert_eq!(337, H.corresponding_factor_n(0));
+    assert_eq!(16, H.len(0));
+    assert_eq!(127, H.corresponding_factor_n(1));
+    assert_eq!(126, H.len(1));
+
+    let transform = powcoeffs_to_slots_fat(&H);
+    let ring_ref = &ring;
+    let mut current = ring.pow(ring_ref.canonical_gen(), 7 * 127 + 2 * 337);
+    for transform in powcoeffs_to_slots_fat(&H) {
+        current = ring.get_ring().compute_linear_transform(&H, &current, &transform);
+    }
+    let expected = H.from_slot_vec(H.slot_iter(|idxs| if idxs[0] == 0 && idxs[1] == 2 {
+        H.slot_ring().pow(H.slot_ring().canonical_gen(), 7)
+    } else {
+        H.slot_ring().zero()
+    }));
+    assert_el_eq!(ring, expected, current);
+
+    print_all_timings();
 }

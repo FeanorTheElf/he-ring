@@ -129,6 +129,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "feanor-mempool"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "818891a937efd69a09c8c304e2bc86b5f188a48ad0ba845d31aa8b9dacddae26"
+dependencies = [
+ "thread_local",
+]
+
+[[package]]
 name = "getrandom"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -145,6 +154,7 @@ version = "0.3.1"
 dependencies = [
  "feanor-math",
  "feanor-math-hexl",
+ "feanor-mempool",
  "oorandom",
  "rand",
  "rand_distr",

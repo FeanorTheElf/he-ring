@@ -5,8 +5,11 @@ use feanor_math::ring::*;
 use feanor_math::rings::zn::ZnRingStore;
 
 use crate::cyclotomic::CyclotomicRingStore;
+use crate::profiling::TimeRecorder;
 use crate::rings::number_ring::HECyclotomicNumberRing;
 use crate::rings::{decomposition_ring::DecompositionRing, number_ring::HENumberRing};
+
+pub static CREATE_LINEAR_TRANSFORM_TIME_RECORDER: TimeRecorder = TimeRecorder::new("CreateLinTransform");
 
 pub mod matmul;
 pub mod composite;
