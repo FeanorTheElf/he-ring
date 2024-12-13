@@ -60,6 +60,7 @@ use crate::profiling::log_time;
 use crate::StdZn;
 use crate::euler_phi;
 use super::dynconv::DynConvolutionAlgorithmConvolution;
+use super::interpolate::FastPolyInterpolation;
 use super::number_ring::*;
 use super::decomposition_ring::*;
 use oorandom;
@@ -286,104 +287,6 @@ fn order_hypercube_dimensions(mut dims: Vec<HypercubeDimension>) -> (Vec<Hypercu
     return (dims, result);
 }
 
-struct InvCRTTree {
-    poly_ring: DensePolyRing<Zn>,
-    dim_lengths: Vec<usize>,
-    data: Vec<Vec<(El<DensePolyRing<Zn>>, El<DensePolyRing<Zn>>, El<DensePolyRing<Zn>>)>>
-}
-
-impl InvCRTTree {
-
-    fn new<NumberRing, A>(
-        Gal: Zn,
-        dim_lengths: &[usize], 
-        dims: &[HypercubeDimension], 
-        total_ring: RingRef<DecompositionRingBase<NumberRing, Zn, A>>,
-        first_slot_modulus: El<DecompositionRing<NumberRing, Zn, A>>,
-        first_slot_unit_vector: El<DecompositionRing<NumberRing, Zn, A>>,
-        ZZX: &DensePolyRing<StaticRing<i64>>,
-        Phi_n: &El<DensePolyRing<StaticRing<i64>>>
-    ) -> Self
-        where NumberRing: HECyclotomicNumberRing,
-            A: Allocator + Clone
-    {
-        let ring = DensePolyRing::new(*total_ring.base_ring(), "X");
-        let hom = ring.can_hom(ZZX).unwrap();
-        let mut result = Vec::new();
-        let mut current_modulus = first_slot_modulus;
-        let mut current_unit_vector = first_slot_unit_vector;
-        for (dim_idx, dim) in dims.iter().enumerate().rev() {
-            let mut current_len = dim_lengths[dim_idx];
-            let mut dim_result = Vec::new();
-            let mut step = 1;
-            while current_len > 1 {
-                let left_modulus = current_modulus;
-                let right_modulus = total_ring.apply_galois_action(&left_modulus, Gal.pow(dims[dim_idx].g_main, step));
-                let new_modulus = total_ring.mul_ref(&left_modulus, &right_modulus);
-                let left_unit_vector = current_unit_vector;
-                let right_unit_vector = total_ring.apply_galois_action(&left_unit_vector, Gal.pow(dims[dim_idx].g_main, step));
-
-                total_ring.println(&new_modulus);
-                let mut modulus_repr = poly_gcd_finite_reduced(&ring, total_ring.poly_repr(&ring, &new_modulus, ring.base_ring().identity()), hom.map_ref(&Phi_n)).ok().unwrap();
-                let lc_inv = ring.base_ring().invert(ring.lc(&modulus_repr).unwrap()).unwrap();
-                ring.inclusion().mul_assign_ref_map(&mut modulus_repr, &lc_inv);
-                let left_repr = ring.div_rem_monic(total_ring.poly_repr(&ring, &left_unit_vector, ring.base_ring().identity()), &modulus_repr).1;
-                let right_repr = ring.div_rem_monic(total_ring.poly_repr(&ring, &right_unit_vector, ring.base_ring().identity()), &modulus_repr).1;
-                dim_result.push((left_repr, right_repr, modulus_repr));
-
-                current_unit_vector = total_ring.add(left_unit_vector, right_unit_vector);
-                current_modulus = new_modulus;
-                current_len = (current_len - 1) / 2 + 1;
-                step = step * 2;
-                debug_assert!(step * current_len >= dim_lengths[dim_idx]);
-                debug_assert!(step * current_len < 2 * dim_lengths[dim_idx]);
-            }
-            result.push(dim_result);
-        }
-        return Self {
-            data: result,
-            poly_ring: ring,
-            dim_lengths: dim_lengths.iter().copied().collect()
-        };
-    }
-
-    fn inv_crt(&self, inputs: Vec<El<DensePolyRing<Zn>>>) -> El<DensePolyRing<Zn>> {
-        let ring = &self.poly_ring;
-        let mut current = inputs;
-        let zero = ring.zero();
-        for (dim_idx, steps) in self.data.iter().enumerate().rev() {
-            let mut current_len = self.dim_lengths[dim_idx];
-            for (a, b, modulus) in steps {
-                debug_assert!(current_len > 1);
-                let mut new = Vec::new();
-                for first_idx in 0..StaticRing::<i64>::RING.prod((0..dim_idx).map(|i| self.dim_lengths[i] as i64)) {
-                    for last_idx in (0..current_len).step_by(2) {
-                        let idx = first_idx as usize * current_len + last_idx;
-                        let lhs = &current[idx];
-                        let rhs = if last_idx + 1 < current_len {
-                            &current[idx + 1]
-                        } else {
-                            &zero
-                        };
-                        new.push(ring.div_rem_monic(
-                            ring.add(
-                                ring.mul_ref(lhs, a),
-                                ring.mul_ref(rhs, b)
-                            ),
-                            modulus
-                        ).1);
-                    }
-                }
-                current_len = (current_len - 1) / 2 + 1;
-                current = new;
-            }
-            debug_assert_eq!(1, current_len);
-        }
-        debug_assert_eq!(1, current.len());
-        return current.pop().unwrap();
-    }
-}
-
 pub type SlotRing<'a, A = Global> = AsLocalPIR<FreeAlgebraImpl<&'a Zn, SparseMapVector<&'a Zn>, A, DynConvolutionAlgorithmConvolution<ZnBase>>>;
 
 ///
@@ -431,8 +334,6 @@ pub struct HypercubeIsomorphism<'a, NumberRing, A>
 {
     /// The main ring `(Z/qZ)[X]/(Phi_n)` with `q = p^e`
     ring: &'a DecompositionRingBase<NumberRing, Zn, A>,
-    /// Element of `(Z/qZ)[X]/(Phi_n)` that is `= 1 mod f_0` and `= 0 mod f_i` for `i > 0` where `f_i` are the factors of `Phi_n` modulo `p`
-    slot_unit_vec: El<DecompositionRing<NumberRing, Zn, A>>,
     /// Implementation of `(Z/qZ)[X]/(f_0)` where `f_i` are the factors of `Phi_n` modulo `p`
     slot_ring: SlotRing<'a, A>,
     /// Information about `(Z/n_iZ)*` and `<p>` as subgroup of `(Z/n_iZ)*` for each prime power `n_i` dividing `n`
@@ -443,7 +344,9 @@ pub struct HypercubeIsomorphism<'a, NumberRing, A>
     galois_group_ring: Zn,
     /// The rank of the slot ring, i.e. `deg(f_0)`
     d: usize,
-    eval_tree: InvCRTTree
+    slots_to_ring: FastPolyInterpolation<DensePolyRing<Zn, Global, FFTRNSBasedConvolutionZn<ZnBase>>>,
+    // /// Element of `(Z/qZ)[X]/(Phi_n)` that is `= 1 mod f_0` and `= 0 mod f_i` for `i > 0` where `f_i` are the factors of `Phi_n` modulo `p`
+    // slot_unit_vec: El<DecompositionRing<NumberRing, Zn, A>>,
 }
 
 impl<'a, NumberRing, A> HypercubeIsomorphism<'a, NumberRing, A>
@@ -475,7 +378,7 @@ impl<'a, NumberRing, A> HypercubeIsomorphism<'a, NumberRing, A>
         );
         
         let poly_ring = DensePolyRing::new(&tmp_slot_ring, "X");
-        let slot_generating_poly = log_time::<_, _, LOG, _>("Computing minimal polynomial of root of unity", |[]| {
+        let slot_modulus = log_time::<_, _, LOG, _>("Computing minimal polynomial of root of unity", |[]| {
             let mut result = poly_ring.prod((0..d).scan(tmp_slot_ring.clone_el(&root_of_unity), |current_root_of_unity, _| {
                 let result = poly_ring.sub(poly_ring.indeterminate(), poly_ring.inclusion().map_ref(current_root_of_unity));
                 *current_root_of_unity = tmp_slot_ring.pow(tmp_slot_ring.clone_el(current_root_of_unity), galois_group_ring.smallest_positive_lift(frobenius) as usize);
@@ -488,21 +391,13 @@ impl<'a, NumberRing, A> HypercubeIsomorphism<'a, NumberRing, A>
 
         let hom = ring.base_ring().can_hom(tmp_slot_ring.base_ring()).unwrap();
         let mut slot_ring_modulus = SparseMapVector::new(d, ring.base_ring());
-        for (coeff, i) in poly_ring.terms(&slot_generating_poly) {
+        for (coeff, i) in poly_ring.terms(&slot_modulus) {
             let coeff_wrt_basis = tmp_slot_ring.wrt_canonical_basis(&coeff);
             assert!((1..tmp_slot_ring.rank()).all(|i| tmp_slot_ring.base_ring().is_zero(&coeff_wrt_basis.at(i))));
             if i != tmp_slot_ring.rank() {
                 *slot_ring_modulus.at_mut(i) = hom.map(coeff_wrt_basis.at(0));
             }
         }
-
-        let irred_factor = ring.from_canonical_basis((0..ring.rank()).map(|i| if i < slot_ring_modulus.len() { 
-            ring.base_ring().clone_el(slot_ring_modulus.at(i))
-        } else if i == slot_ring_modulus.len() {
-            ring.base_ring().one()
-        } else {
-            ring.base_ring().zero()
-        }));
 
         slot_ring_modulus.scan(|_, x| ring.base_ring().negate_inplace(x));
 
@@ -517,84 +412,16 @@ impl<'a, NumberRing, A> HypercubeIsomorphism<'a, NumberRing, A>
         let max_ideal_gen = slot_ring.inclusion().map(slot_ring.base_ring().coerce(&ZZ, p));
         let slot_ring = AsLocalPIR::from(AsLocalPIRBase::promise_is_local_pir(slot_ring, max_ideal_gen, Some(e)));
 
-        let mut result = HypercubeIsomorphism {
+        let result = HypercubeIsomorphism {
+            slots_to_ring: Self::create_interpolation_data(galois_group_ring, ring.rank(), &slot_ring, &dims, &dim_lengths),
             d: d,
             dims: dims,
             dim_lengths: dim_lengths,
             ring: ring,
             galois_group_ring: galois_group_ring,
             slot_ring: slot_ring,
-            slot_unit_vec: ring.zero(),
-            eval_tree: unimplemented!()
         };
-        log_time::<_, _, LOG, _>("Computing slot unit vector representation", |[]| result.init_slot_unit_vec(&irred_factor));
         return result;
-    }
-
-    fn init_slot_unit_vec(&mut self, irred_factor: &El<DecompositionRing<NumberRing, Zn, A>>) {
-        // we compute prod_(k != 1) σ_k(irred_factor) where k goes through a set of representatives of (Z/nZ)*/<p>;
-        // for performance reasons, we don't directly compute the product, but build it using a square-and-multiply
-        // approach.
-        let R = self.ring();
-        let first_dim_product_except_1 = generic_pow_shortest_chain_table::<_, _, _, _, _, !>(
-            (1, R.apply_galois_action(irred_factor, self.shift_galois_element(0, 1))),
-            &(self.len(0) as i64 - 1),
-            StaticRing::<i64>::RING,
-            |(i, a)| Ok((2 * *i, R.mul_ref_fst(a, R.apply_galois_action(a, self.shift_galois_element(0, *i as i64))))),
-            |(i, a), (j, b)| Ok((*i + *j, R.mul_ref_fst(a, R.apply_galois_action(b, self.shift_galois_element(0, *i as i64))))),
-            |(i, a)| (*i, R.clone_el(a)),
-            (0, R.one())
-        ).unwrap_or_else(no_error).1;
-        debug_assert!(R.eq_el(
-            &first_dim_product_except_1, 
-            &R.prod((1..self.len(0))
-                .map(|i| self.shift_galois_element(0, i as i64))
-                .map(|g| R.apply_galois_action(irred_factor, g))
-            )
-        ));
-
-        let first_dim_product = R.mul_ref(&first_dim_product_except_1, irred_factor);
-        let mut current_exc_1 = first_dim_product_except_1;
-        let mut current_inc_1 = first_dim_product;
-        for dim in 1..self.dim_count() {
-
-            #[cfg(debug_assertions)]
-            let expected = R.prod([R.clone_el(&current_exc_1)].into_iter().chain((1..self.len(dim))
-                .map(|i| self.shift_galois_element(dim, i as i64))
-                .map(|g| R.apply_galois_action(&current_inc_1, g))
-            ));
-
-            let (_, new_exc_1, new_inc_1) = generic_pow_shortest_chain_table::<_, _, _, _, _, !>(
-                (1, current_exc_1, current_inc_1),
-                &(self.len(dim) as i64),
-                StaticRing::<i64>::RING,
-                |(i, a_exc_1, a_inc_1)| {
-                    let galois_a_inc_1 = R.apply_galois_action(&a_inc_1, self.shift_galois_element(dim, *i as i64));
-                    Ok((2 * *i, R.mul_ref(&a_exc_1, &galois_a_inc_1), R.mul_ref_fst(a_inc_1, galois_a_inc_1)))
-                },
-                |(i, a_exc_1, a_inc_1), (j, _, b_inc_1)| {
-                    let galois_b_inc_1 = R.apply_galois_action(&b_inc_1, self.shift_galois_element(dim, *i as i64));
-                    Ok((*i + *j, R.mul_ref(a_exc_1, &galois_b_inc_1), R.mul_ref_fst(a_inc_1, galois_b_inc_1)))
-                },
-                |(i, a_exc_1, a_inc_1)| (*i, R.clone_el(a_exc_1), R.clone_el(a_inc_1)),
-                (0, R.one(), R.one())
-            ).unwrap_or_else(no_error);
-
-            #[cfg(debug_assertions)]
-            assert!(R.eq_el(&new_exc_1, &expected));
-            current_exc_1 = new_exc_1;
-            current_inc_1 = new_inc_1;
-        }
-
-        let result = current_exc_1;
-
-        let first_slot_value = self.get_slot_value(&result, self.cyclotomic_index_ring().one());
-        let normalization_factor = self.slot_ring().invert(&first_slot_value).unwrap();
-        let normalization_factor_wrt_basis = self.slot_ring().wrt_canonical_basis(&normalization_factor);
-        self.slot_unit_vec = R.mul(
-            R.from_canonical_basis((0..R.rank()).map(|i| if i < normalization_factor_wrt_basis.len() { normalization_factor_wrt_basis.at(i) } else { R.base_ring().zero() })),
-            result
-        );
     }
 
     pub fn change_modulus<'b>(&self, new_ring: &'b DecompositionRingBase<NumberRing, Zn, A>) -> HypercubeIsomorphism<'b, NumberRing, A> {
@@ -620,22 +447,30 @@ impl<'a, NumberRing, A> HypercubeIsomorphism<'a, NumberRing, A>
             let convolution: FFTRNSBasedConvolutionZn<ZnBase, _, _> = FFTRNSBasedConvolution::new_with(max_log2_len, BigIntRing::RING, Global).into();
             DynConvolutionAlgorithmConvolution::<ZnBase>::new(Box::new(convolution))
         };
-        let slot_ring: RingValue<extension_impl::FreeAlgebraImplBase<&RingValue<ZnBase>, SparseMapVector<&RingValue<ZnBase>>, A, DynConvolutionAlgorithmConvolution<ZnBase>>> = FreeAlgebraImpl::new_with(new_ring.base_ring(), self.slot_ring().rank(), new_slot_ring_modulus, "𝝵", new_ring.allocator().clone(), convolution);
+        let slot_ring = FreeAlgebraImpl::new_with(new_ring.base_ring(), self.slot_ring().rank(), new_slot_ring_modulus, "𝝵", new_ring.allocator().clone(), convolution);
         let max_ideal_gen = slot_ring.inclusion().map(slot_ring.base_ring().coerce(&ZZ, p));
-        let slot_ring = AsLocalPIR::from(AsLocalPIRBase::promise_is_local_pir(slot_ring, max_ideal_gen, Some(e)));
-
-        let slot_unit_vec = new_ring.from_canonical_basis(self_ring.wrt_canonical_basis(&self.slot_unit_vec).into_iter().map(|x| red_map.map(x)));
+        let slot_ring: SlotRing<'b, A> = AsLocalPIR::from(AsLocalPIRBase::promise_is_local_pir(slot_ring, max_ideal_gen, Some(e)));
 
         return HypercubeIsomorphism {
+            slots_to_ring: HypercubeIsomorphism::<'b, NumberRing, A>::create_interpolation_data(self.galois_group_ring, new_ring.rank(), &slot_ring, &self.dims, &self.dim_lengths),
             d: self.d,
             dims: self.dims.clone(),
             dim_lengths: self.dim_lengths.clone(),
             galois_group_ring: self.galois_group_ring.clone(),
             ring: new_ring,
-            slot_unit_vec: slot_unit_vec,
             slot_ring: slot_ring,
-            eval_tree: unimplemented!()
         };
+    }
+
+    fn create_interpolation_data(Gal: Zn, rank: usize, slot_ring: &SlotRing<'a, A>, dims: &[HypercubeDimension], dim_lengths: &[usize]) -> FastPolyInterpolation<DensePolyRing<Zn, Global, FFTRNSBasedConvolutionZn<ZnBase>>> {
+        let convolution: FFTRNSBasedConvolutionZn<ZnBase, _, _> = FFTRNSBasedConvolution::new_with(ZZ.abs_log2_ceil(&(rank as i64)).unwrap() + 1, BigIntRing::RING, Global).into();
+        let poly_ring = DensePolyRing::new_with(**slot_ring.base_ring(), "X", Global, convolution);
+        let mut moduli = Vec::new();
+        for g in multi_cartesian_product(dim_lengths.iter().map(|l| (0..*l)), |idxs| Gal.prod(idxs.iter().zip(dims.iter()).map(|(s, dim)| Gal.pow(dim.g_main, *s))), |_, x| *x) {
+            moduli.push(slot_ring.charpoly(&slot_ring.pow(slot_ring.canonical_gen(), Gal.smallest_positive_lift(g) as usize), &poly_ring, poly_ring.base_ring().identity()));
+            poly_ring.println(moduli.last().unwrap());
+        }
+        return FastPolyInterpolation::new(poly_ring, moduli);
     }
 
     pub fn save(&self, filename: &str) {
@@ -758,22 +593,30 @@ impl<'a, NumberRing, A> HypercubeIsomorphism<'a, NumberRing, A>
     pub fn from_slot_vec<I>(&self, vec: I) -> El<DecompositionRing<NumberRing, Zn, A>>
         where I: IntoIterator<Item = El<SlotRing<'a, A>>>
     {
-        let mut given_len = 0;
-        let mut vec_it = vec.into_iter().inspect(|_| given_len += 1);
+        let poly_ring = self.slots_to_ring.poly_ring();
+        let slot_values = vec.into_iter().map(|a| self.slot_ring().poly_repr(poly_ring, &a, poly_ring.base_ring().identity())).collect::<Vec<_>>();
+        let result_unreduced = self.slots_to_ring.interpolate_unreduced(slot_values);
 
-        let move_to_slot_gens = self.slot_iter(|idxs| self.cyclotomic_index_ring().prod(idxs.iter().enumerate().map(|(j, e)| self.shift_galois_element(j, *e as i64))));
-        let result = self.ring.sum_galois_transforms(move_to_slot_gens.zip(vec_it.by_ref())
-            .filter(|(_, x)| !self.slot_ring().is_zero(&x))
-            .map(|(g, x)| {
-                let x_wrt_basis = self.slot_ring().wrt_canonical_basis(&x);
-                let mut lift_of_x = self.ring.from_canonical_basis((0..self.ring.rank()).map(|i| if i < x_wrt_basis.len() { x_wrt_basis.at(i) } else { self.ring.base_ring().zero() }));
-                self.ring.mul_assign_ref(&mut lift_of_x, &self.slot_unit_vec);
-                return (lift_of_x, g);
-            })
-        );
-        assert!(vec_it.next().is_none());
-        assert_eq!(given_len, self.ring.rank() / self.d);
-        return result;
+        let n = self.ring.n() as usize;
+        let mut result = (0..=poly_ring.degree(&result_unreduced).unwrap()).map(|i| *poly_ring.coefficient_at(&result_unreduced, i)).collect::<Vec<_>>();
+        let (result, rest) = if result.len() >= n {
+            result.split_at_mut(n)
+        } else {
+            (&mut result[..], &mut [][..])
+        };
+        for i in 0..rest.len() {
+            poly_ring.base_ring().add_assign_ref(&mut result[i], &rest[i]);
+        }
+
+        let canonical_gen_pow_rank = self.ring().pow(self.ring().canonical_gen(), self.ring().rank());
+        let mut current = self.ring().one();
+        return self.ring.sum(result.chunks(self.ring.rank()).map(|chunk| self.ring.from_canonical_basis(
+            chunk.iter().copied().chain(std::iter::repeat(poly_ring.base_ring().zero()).take(self.ring.rank() - chunk.len()))
+        )).map(|x| {
+            let result = self.ring().mul_ref_snd(x, &current);
+            self.ring().mul_assign_ref(&mut current, &canonical_gen_pow_rank);
+            return result;
+        }));
     }
 
     pub fn get_slot_value(&self, el: &El<DecompositionRing<NumberRing, Zn, A>>, move_to_slot_zero_el: ZnEl) -> El<SlotRing<'a, A>> {
@@ -895,7 +738,6 @@ pub mod serialization {
         n: usize,
         slot_rank: usize,
         slot_ring_modulus: SerializeWithRing<'a, DensePolyRing<&'a <DecompositionRingBase<NumberRing, Zn, A> as RingExtension>::BaseRing>>,
-        slot_unit_vec: SerializeWithRing<'a, RingRef<'a, DecompositionRingBase<NumberRing, Zn, A>>>,
         galois_group_ring_modulus: u64,
         dims: Vec<HypercubeDimensionSerializable>,
         dim_lengths: Vec<usize>
@@ -913,7 +755,6 @@ pub mod serialization {
             out.serialize_field("n", &self.n)?;
             out.serialize_field("slot_rank", &self.slot_rank)?;
             out.serialize_field("slot_ring_modulus", &self.slot_ring_modulus)?;
-            out.serialize_field("slot_unit_vec", &self.slot_unit_vec)?;
             out.serialize_field("galois_group_ring_modulus", &self.galois_group_ring_modulus)?;
             out.serialize_field("dims", &self.dims)?;
             out.serialize_field("dim_lengths", &self.dim_lengths)?;
@@ -938,7 +779,6 @@ pub mod serialization {
         n: usize,
         slot_rank: usize,
         slot_ring_modulus: El<DensePolyRing<&'a Zn>>,
-        slot_unit_vec: El<DecompositionRing<NumberRing, Zn, A>>,
         galois_group_ring_modulus: u64,
         dims: Vec<HypercubeDimensionSerializable>,
         dim_lengths: Vec<usize>,
@@ -981,14 +821,13 @@ pub mod serialization {
                     let n: usize = seq.next_element()?.ok_or_else(|| de::Error::invalid_length(1, &self))?;
                     let slot_rank: usize = seq.next_element()?.ok_or_else(|| de::Error::invalid_length(2, &self))?;
                     let slot_ring_modulus = seq.next_element_seed(DeserializeWithRing::new(&self.poly_ring))?.ok_or_else(|| de::Error::invalid_length(3, &self))?;
-                    let slot_unit_vec = seq.next_element_seed(DeserializeWithRing::new(RingRef::new(self.ring)))?.ok_or_else(|| de::Error::invalid_length(4, &self))?;
                     let galois_group_ring_modulus: u64 = seq.next_element()?.ok_or_else(|| de::Error::invalid_length(5, &self))?;
                     let dims: Vec<HypercubeDimensionSerializable> = seq.next_element()?.ok_or_else(|| de::Error::invalid_length(6, &self))?;
                     let dim_lengths: Vec<usize> = seq.next_element()?.ok_or_else(|| de::Error::invalid_length(7, &self))?;
                     let ring = self.ring;
                     let poly_ring = self.poly_ring;
                     return Ok(HypercubeIsomorphismDeserializable {
-                        slot_rank, slot_ring_modulus, slot_unit_vec, galois_group_ring_modulus, dims, dim_lengths, ring, poly_ring, t, n
+                        slot_rank, slot_ring_modulus, galois_group_ring_modulus, dims, dim_lengths, ring, poly_ring, t, n
                     });
                 }
 
@@ -1071,14 +910,13 @@ pub mod serialization {
                     let n = n.ok_or_else(|| de::Error::missing_field("n"))?;
                     let slot_rank = slot_rank.ok_or_else(|| de::Error::missing_field("slot_rank"))?;
                     let slot_ring_modulus = slot_ring_modulus.ok_or_else(|| de::Error::missing_field("slot_ring_modulus"))?;
-                    let slot_unit_vec = slot_unit_vec.ok_or_else(|| de::Error::missing_field("slot_unit_vec"))?;
                     let galois_group_ring_modulus = galois_group_ring_modulus.ok_or_else(|| de::Error::missing_field("galois_group_ring_modulus"))?;
                     let dims = dims.ok_or_else(|| de::Error::missing_field("dims"))?;
                     let dim_lengths = dim_lengths.ok_or_else(|| de::Error::missing_field("dim_lengths"))?;
                     let ring = self.ring;
                     let poly_ring = self.poly_ring;
                     return Ok(HypercubeIsomorphismDeserializable {
-                        slot_rank, slot_ring_modulus, slot_unit_vec, galois_group_ring_modulus, dims, dim_lengths, ring, poly_ring, t, n
+                        slot_rank, slot_ring_modulus, galois_group_ring_modulus, dims, dim_lengths, ring, poly_ring, t, n
                     });
                 }
             }
@@ -1123,7 +961,6 @@ pub mod serialization {
             Self {
                 d: value.slot_rank,
                 ring: value.ring,
-                slot_unit_vec: value.slot_unit_vec,
                 slot_ring: slot_ring,
                 dims: value.dims.into_iter().map(|d| HypercubeDimension {
                     factor_n: d.factor_n,
@@ -1135,7 +972,7 @@ pub mod serialization {
                 }).collect(),
                 galois_group_ring: galois_group_ring,
                 dim_lengths: value.dim_lengths,
-                eval_tree: unimplemented!()
+                slots_to_ring: unimplemented!()
             }
         }
     }
@@ -1164,7 +1001,6 @@ pub mod serialization {
                 galois_group_ring_modulus: *self.cyclotomic_index_ring().modulus() as u64,
                 slot_rank: self.d,
                 slot_ring_modulus: SerializeWithRing::new(&self.slot_ring().generating_poly(&poly_ring, &poly_ring.base_ring().identity()), poly_ring),
-                slot_unit_vec: SerializeWithRing::new(&self.slot_unit_vec, self.ring()),
                 dim_lengths: self.dim_lengths.clone()
             });
         }
@@ -1455,50 +1291,26 @@ fn test_shift_galois_element() {
 
 #[test]
 fn test_hypercube_from_slot_isomorphism() {
-    // `F(23^3)[X]/(X^16 + 1) ~ GF(23, 3, 4)^4`
+    // `GR(23, 3, 1)[X]/(X^16 + 1) ~ GF(23, 3, 4)^4`
     let ring = DecompositionRingBase::new(Pow2CyclotomicNumberRing::new(32), Zn::new(23 * 23 * 23));
     let hypercube = HypercubeIsomorphism::new::<false>(ring.get_ring());
     
     let a = hypercube.slot_ring().from_canonical_basis([1, 2, 0, 1].into_iter().map(|x| hypercube.slot_ring().base_ring().int_hom().map(x)));
     let base = hypercube.from_slot_vec([None, Some(hypercube.slot_ring().clone_el(&a)), None, None].into_iter().map(|x| x.unwrap_or(hypercube.slot_ring().zero())));
+    for x in hypercube.get_slot_values(&base) {
+        hypercube.slot_ring().println(&x);
+    }
     let actual = ring.pow(ring.clone_el(&base), 2);
+    for x in hypercube.get_slot_values(&actual) {
+        hypercube.slot_ring().println(&x);
+    }
     let expected = hypercube.from_slot_vec([None, Some(hypercube.slot_ring().pow(hypercube.slot_ring().clone_el(&a), 2)), None, None].into_iter().map(|x| x.unwrap_or(hypercube.slot_ring().zero())));
+    for x in hypercube.get_slot_values(&expected) {
+        hypercube.slot_ring().println(&x);
+    }
     assert_el_eq!(ring, expected, actual);
 
     let actual = ring.get_ring().apply_galois_action(&base, hypercube.shift_galois_element(0, 1));
     let expected = hypercube.from_slot_vec([None, None, Some(hypercube.slot_ring().clone_el(&a)), None].into_iter().map(|x| x.unwrap_or(hypercube.slot_ring().zero())));
     assert_el_eq!(ring, expected, actual);
-}
-
-#[test]
-fn test_inv_crt_tree() {
-    let base_ring = Zn::new(23);
-    let ring = DecompositionRingBase::new(Pow2CyclotomicNumberRing::new(32), base_ring);
-    let index_ring = Zn::new(32);
-    let dims = [
-        HypercubeDimension {
-            g_main: index_ring.int_hom().map(5),
-            factor_n: (2, 5),
-            is_primary_dim: true,
-            local_order_of_p: 4,
-            order_of_g_main: 8,
-            base_group_order: 16,
-        }
-    ];
-    let dim_lengths = [4];
-    let first_slot_modulus = ring.from_canonical_basis([22, 0, 4, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0].into_iter().map(|x| base_ring.int_hom().map(x)));
-    let first_slot_unit_vector = ring.from_canonical_basis([6, 0, 12, 0, 8, 0, 21, 0, 0, 0, 21, 0, 15, 0, 12, 0].into_iter().map(|x| base_ring.int_hom().map(x)));
-    let ZZX = DensePolyRing::new(ZZ, "X");
-    let Phi_n = cyclotomic_polynomial(&ZZX, 32);
-
-    let inv_crt_tree = InvCRTTree::new(
-        index_ring, 
-        &dim_lengths, 
-        &dims, 
-        RingRef::new(ring.get_ring()),
-        first_slot_modulus,
-        first_slot_unit_vector,
-        &ZZX,
-        &Phi_n
-    );
 }

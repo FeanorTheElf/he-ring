@@ -8,6 +8,7 @@
 #![feature(associated_type_defaults)]
 #![feature(generic_arg_infer)]
 #![feature(min_specialization)]
+#![feature(array_chunks)]
 
 #![allow(non_snake_case)]
 #![allow(type_alias_bounds)]

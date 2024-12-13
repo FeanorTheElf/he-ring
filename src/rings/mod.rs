@@ -1,6 +1,8 @@
 
 pub mod ntt_conv;
 
+pub mod interpolate;
+
 pub mod dynconv;
 
 pub mod number_ring;
@@ -29,3 +31,5 @@ pub mod slots;
 pub mod double_rns_managed;
 
 pub mod bxv;
+
+pub mod hypercube;
