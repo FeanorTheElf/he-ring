@@ -1,5 +1,8 @@
 use std::alloc::Global;
 use std::fmt::Debug;
+use std::ptr::Alignment;
+use std::rc::Rc;
+use std::time::Instant;
 
 use feanor_math::algorithms::convolution::fft::{FFTRNSBasedConvolution, FFTRNSBasedConvolutionZn};
 use feanor_math::algorithms::convolution::STANDARD_CONVOLUTION;
@@ -7,6 +10,8 @@ use feanor_math::algorithms::int_factor::{factor, is_prime_power};
 use feanor_math::algorithms::linsolve::LinSolveRing;
 use feanor_math::algorithms::poly_gcd::factor;
 use feanor_math::divisibility::{DivisibilityRing, DivisibilityRingStore};
+use feanor_math::rings::field::AsFieldBase;
+use feanor_math::rings::poly::generic_impls::Isomorphism;
 use feanor_math::{assert_el_eq, homomorphism::*};
 use feanor_math::integer::{int_cast, BigIntRing, BigIntRingBase, IntegerRingStore};
 use feanor_math::iters::multi_cartesian_product;
@@ -22,14 +27,15 @@ use feanor_math::rings::poly::PolyRingStore;
 use feanor_math::rings::zn::zn_64::{Zn, ZnBase, ZnEl};
 use feanor_math::delegate::DelegateRing;
 use feanor_math::ring::*;
-use feanor_math::rings::zn::{ZnReductionMap, ZnRing, ZnRingStore};
+use feanor_math::rings::zn::{FromModulusCreateableZnRing, ZnReductionMap, ZnRing, ZnRingStore};
 use feanor_math::seq::sparse::SparseMapVector;
 use feanor_math::seq::*;
 
 use crate::cyclotomic::{CyclotomicRing, CyclotomicRingStore};
 use crate::euler_phi;
-use crate::profiling::log_time;
+use crate::profiling::{log_time, print_all_timings};
 use crate::rings::dynconv::DynConvolutionAlgorithm;
+use crate::lintransform::CREATE_LINEAR_TRANSFORM_TIME_RECORDER;
 
 use super::decomposition_ring::{DecompositionRing, DecompositionRingBase};
 use super::dynconv::DynConvolutionAlgorithmConvolution;
@@ -252,15 +258,18 @@ fn get_prim_root_of_unity<R>(ring: R, m: usize) -> El<R>
 pub type SlotRingOver<'a, R> = AsLocalPIR<FreeAlgebraImpl<&'a R, &'a [El<R>], Global, &'a DynConvolutionAlgorithmConvolution<<R as RingStore>::Type>>>;
 pub type SlotRingOf<'a, R> = SlotRingOver<'a, <<R as RingStore>::Type as RingExtension>::BaseRing>;
 
+type DecoratedBaseRing<R> = AsLocalPIR<RingValue<<<<R as RingStore>::Type as RingExtension>::BaseRing as RingStore>::Type>>;
+
 pub struct HypercubeIsomorphism<R>
     where R: RingStore,
         R::Type: CyclotomicRing,
-        <<R::Type as RingExtension>::BaseRing as RingStore>::Type: ZnRing + CanHomFrom<StaticRingBase<i64>> + CanHomFrom<BigIntRingBase> + LinSolveRing
+        <<R::Type as RingExtension>::BaseRing as RingStore>::Type: Clone + ZnRing + CanHomFrom<StaticRingBase<i64>> + CanHomFrom<BigIntRingBase> + LinSolveRing + FromModulusCreateableZnRing,
+        AsFieldBase<DecoratedBaseRing<R>>: CanIsoFromTo<<DecoratedBaseRing<R> as RingStore>::Type> + SelfIso
 {
     ring: R,
     e: usize,
     slot_ring_x_pow_rank: Vec<Vec<El<<R::Type as RingExtension>::BaseRing>>>,
-    slot_to_ring_interpolation: FastPolyInterpolation<DensePolyRing<<R::Type as RingExtension>::BaseRing, Global, FFTRNSBasedConvolutionZn>>,
+    slot_to_ring_interpolation: FastPolyInterpolation<DensePolyRing<DecoratedBaseRing<R>, Global, FFTRNSBasedConvolutionZn>>,
     hypercube_structure: HypercubeStructure,
     slot_ring_convolution: DynConvolutionAlgorithmConvolution<<<R::Type as RingExtension>::BaseRing as RingStore>::Type>
 }
@@ -268,8 +277,8 @@ pub struct HypercubeIsomorphism<R>
 impl<R> HypercubeIsomorphism<R>
     where R: RingStore,
         R::Type: CyclotomicRing,
-        <R::Type as RingExtension>::BaseRing: Clone,
-        <<R::Type as RingExtension>::BaseRing as RingStore>::Type: ZnRing + CanHomFrom<StaticRingBase<i64>> + CanHomFrom<BigIntRingBase> + LinSolveRing
+        <<R::Type as RingExtension>::BaseRing as RingStore>::Type: Clone + ZnRing + CanHomFrom<StaticRingBase<i64>> + CanHomFrom<BigIntRingBase> + LinSolveRing + FromModulusCreateableZnRing,
+        AsFieldBase<DecoratedBaseRing<R>>: CanIsoFromTo<<DecoratedBaseRing<R> as RingStore>::Type> + SelfIso
 {
     pub fn new<const LOG: bool>(ring: R, hypercube_structure: HypercubeStructure) -> Self {
         let n = ring.n() as usize;
@@ -292,7 +301,8 @@ impl<R> HypercubeIsomorphism<R>
         );
 
         let poly_ring_convolution: FFTRNSBasedConvolutionZn = FFTRNSBasedConvolutionZn::from(FFTRNSBasedConvolution::new_with(ZZi64.abs_log2_ceil(&(n as i64)).unwrap() + 1, BigIntRing::RING, Global));
-        let base_poly_ring = DensePolyRing::new_with(ring.base_ring().clone(), "X", Global, poly_ring_convolution);
+        let decorated_base_ring: DecoratedBaseRing<R> = AsLocalPIR::from_zn(RingValue::from(ring.base_ring().get_ring().clone())).unwrap();
+        let base_poly_ring = DensePolyRing::new_with(decorated_base_ring, "X", Global, poly_ring_convolution);
         let slot_ring_moduli = log_time::<_, _, LOG, _>("[HypercubeIsomorphism::new] Computing factorization of cyclotomic polynomial", |[]| {
             let poly_ring = DensePolyRing::new(&tmp_slot_ring, "X");
             let mut slot_ring_moduli = Vec::new();
@@ -311,14 +321,14 @@ impl<R> HypercubeIsomorphism<R>
                 slot_ring_moduli.push(base_poly_ring.from_terms(poly_ring.terms(&result).map(|(c, i)| {
                     let c_wrt_basis = tmp_slot_ring.wrt_canonical_basis(c);
                     debug_assert!(c_wrt_basis.iter().skip(1).all(|c| tmp_slot_ring.base_ring().is_zero(&c)));
-                    return (tmp_slot_ring.base_ring().get_ring().delegate(c_wrt_basis.at(0)), i);
+                    return (base_poly_ring.base_ring().get_ring().rev_delegate(tmp_slot_ring.base_ring().get_ring().delegate(c_wrt_basis.at(0))), i);
                 })));
             }
             slot_ring_moduli
         });
 
         let slot_ring_x_pow_rank = log_time::<_, _, LOG, _>("[HypercubeIsomorphism::new] Computing slot rings", |[]| 
-            slot_ring_moduli.iter().map(|f| (0..d).map(|i| base_poly_ring.base_ring().negate(base_poly_ring.base_ring().clone_el(base_poly_ring.coefficient_at(f, i)))).collect::<Vec<_>>()).collect::<Vec<_>>()
+            slot_ring_moduli.iter().map(|f| (0..d).map(|i| base_poly_ring.base_ring().get_ring().delegate(base_poly_ring.base_ring().negate(base_poly_ring.base_ring().clone_el(base_poly_ring.coefficient_at(f, i))))).collect::<Vec<_>>()).collect::<Vec<_>>()
         );
 
         let interpolation = log_time::<_, _, LOG, _>("[HypercubeIsomorphism::new] Computing interpolation data", |[]|
@@ -407,32 +417,37 @@ impl<R> HypercubeIsomorphism<R>
     pub fn from_slot_values<'a, I>(&'a self, values: I) -> El<R>
         where I: IntoIterator<Item = El<SlotRingOf<'a, R>>>
     {
-        let poly_ring = self.slot_to_ring_interpolation.poly_ring();
-        let first_slot_ring: SlotRingOf<'a, R> = self.slot_ring();
-        let mut values_it = values.into_iter();
-        let remainders = values_it.by_ref().zip(self.hypercube_structure.element_iter()).enumerate().map(|(i, (a, g))| {
-            let f = first_slot_ring.poly_repr(&poly_ring, &a, poly_ring.base_ring().identity());
-            let local_slot_ring = self.slot_ring_at(i);
-            let image_zeta = local_slot_ring.pow(local_slot_ring.canonical_gen(), self.galois_group().nonnegative_representative(g));
-            return local_slot_ring.poly_repr(&poly_ring, &poly_ring.evaluate(&f, &image_zeta, local_slot_ring.inclusion()), local_slot_ring.base_ring().identity());
-        }).collect::<Vec<_>>();
-        assert!(values_it.next().is_none(), "iterator should only have {} elements", self.slot_count());
+        record_time!(CREATE_LINEAR_TRANSFORM_TIME_RECORDER, "from_slot_values", || {
+            let poly_ring = self.slot_to_ring_interpolation.poly_ring();
+            let first_slot_ring: SlotRingOf<'a, R> = self.slot_ring();
+            let mut values_it = values.into_iter();
+            let wrap = LambdaHom::new(first_slot_ring.base_ring(), poly_ring.base_ring(), |from, to, x| to.get_ring().rev_delegate(from.clone_el(x)));
+            let unwrap = LambdaHom::new(poly_ring.base_ring(), first_slot_ring.base_ring(), |from, _to, x| from.get_ring().delegate(from.clone_el(x)));
+            let remainders = values_it.by_ref().zip(self.hypercube_structure.element_iter()).enumerate().map(|(i, (a, g))| {
+                let f = first_slot_ring.poly_repr(&poly_ring, &a, &wrap);
+                let local_slot_ring = self.slot_ring_at(i);
+                let image_zeta = local_slot_ring.pow(local_slot_ring.canonical_gen(), self.galois_group().nonnegative_representative(g));
+                return local_slot_ring.poly_repr(&poly_ring, &poly_ring.evaluate(&f, &image_zeta, local_slot_ring.inclusion().compose(&unwrap)), &wrap);
+            }).collect::<Vec<_>>();
+            assert!(values_it.next().is_none(), "iterator should only have {} elements", self.slot_count());
 
-        let unreduced_result = self.slot_to_ring_interpolation.interpolate_unreduced(remainders);
-        if poly_ring.is_zero(&unreduced_result) {
-            return self.ring.zero();
-        }
-        let unreduced_result = (0..=poly_ring.degree(&unreduced_result).unwrap()).map(|i| poly_ring.base_ring().clone_el(poly_ring.coefficient_at(&unreduced_result, i))).collect::<Vec<_>>();
+            let unreduced_result = record_time!(CREATE_LINEAR_TRANSFORM_TIME_RECORDER, "interpolate_unreduced", || self.slot_to_ring_interpolation.interpolate_unreduced(remainders));
+            if poly_ring.is_zero(&unreduced_result) {
+                return self.ring.zero();
+            }
+            let unreduced_result = (0..=poly_ring.degree(&unreduced_result).unwrap()).map(|i| poly_ring.base_ring().clone_el(poly_ring.coefficient_at(&unreduced_result, i))).collect::<Vec<_>>();
 
-        let canonical_gen_pow_rank = self.ring().pow(self.ring().canonical_gen(), self.ring().rank());
-        let mut current = self.ring().one();
-        return self.ring.sum(unreduced_result.chunks(self.ring.rank()).map(|chunk| self.ring.from_canonical_basis(
-            chunk.iter().map(|a| poly_ring.base_ring().clone_el(a)).chain((0..(self.ring.rank() - chunk.len())).map(|_| poly_ring.base_ring().zero()))
-        )).map(|x| {
-            let result = self.ring().mul_ref_snd(x, &current);
-            self.ring().mul_assign_ref(&mut current, &canonical_gen_pow_rank);
-            return result;
-        }));
+            let canonical_gen_pow_rank = self.ring().pow(self.ring().canonical_gen(), self.ring().rank());
+            let mut current = self.ring().one();
+            return self.ring.sum(unreduced_result.chunks(self.ring.rank()).map(|chunk| self.ring.from_canonical_basis(
+                chunk.iter().map(|a| poly_ring.base_ring().clone_el(a)).chain((0..(self.ring.rank() - chunk.len())).map(|_| poly_ring.base_ring().zero()))
+                    .map(|x| unwrap.map(x))
+            )).map(|x| {
+                let result = self.ring().mul_ref_snd(x, &current);
+                self.ring().mul_assign_ref(&mut current, &canonical_gen_pow_rank);
+                return result;
+            }));
+        })
     }
 }
 
@@ -653,4 +668,30 @@ fn test_hypercube_isomorphism_rotation() {
             assert_el_eq!(slot_ring, expected, actual);
         }
     }
+}
+
+#[test]
+#[ignore]
+fn time_from_slot_values_large() {
+    let mut rng = oorandom::Rand64::new(1);
+
+    let allocator = feanor_mempool::AllocRc(Rc::new(feanor_mempool::dynsize::DynLayoutMempool::<Global>::new(Alignment::of::<u64>())));
+    let ring = RingValue::from(DecompositionRingBase::new(CompositeCyclotomicNumberRing::new(337, 127), Zn::new(65536)).into().with_allocator(allocator));
+    let galois_group = CyclotomicGaloisGroup::new(337 * 127);
+    let hypercube = HypercubeStructure::new(
+        galois_group,
+        galois_group.from_representative(2),
+        21,
+        vec![16, 126],
+        vec![galois_group.from_representative(37085), galois_group.from_representative(25276)]
+    );
+    let H = HypercubeIsomorphism::new::<true>(ring, hypercube);
+    let slot_ring = H.slot_ring();
+
+    let value = log_time::<_, _, true, _>("from_slot_values", |[]| {
+        H.from_slot_values((0..H.slot_count()).map(|_| slot_ring.random_element(|| rng.rand_u64())))
+    });
+    std::hint::black_box(value);
+
+    print_all_timings();
 }

@@ -463,14 +463,7 @@ impl<'a, NumberRing, A> HypercubeIsomorphism<'a, NumberRing, A>
     }
 
     fn create_interpolation_data(Gal: Zn, rank: usize, slot_ring: &SlotRing<'a, A>, dims: &[HypercubeDimension], dim_lengths: &[usize]) -> FastPolyInterpolation<DensePolyRing<Zn, Global, FFTRNSBasedConvolutionZn<ZnBase>>> {
-        let convolution: FFTRNSBasedConvolutionZn<ZnBase, _, _> = FFTRNSBasedConvolution::new_with(ZZ.abs_log2_ceil(&(rank as i64)).unwrap() + 1, BigIntRing::RING, Global).into();
-        let poly_ring = DensePolyRing::new_with(**slot_ring.base_ring(), "X", Global, convolution);
-        let mut moduli = Vec::new();
-        for g in multi_cartesian_product(dim_lengths.iter().map(|l| (0..*l)), |idxs| Gal.prod(idxs.iter().zip(dims.iter()).map(|(s, dim)| Gal.pow(dim.g_main, *s))), |_, x| *x) {
-            moduli.push(slot_ring.charpoly(&slot_ring.pow(slot_ring.canonical_gen(), Gal.smallest_positive_lift(g) as usize), &poly_ring, poly_ring.base_ring().identity()));
-            poly_ring.println(moduli.last().unwrap());
-        }
-        return FastPolyInterpolation::new(poly_ring, moduli);
+        unimplemented!()
     }
 
     pub fn save(&self, filename: &str) {
@@ -593,30 +586,31 @@ impl<'a, NumberRing, A> HypercubeIsomorphism<'a, NumberRing, A>
     pub fn from_slot_vec<I>(&self, vec: I) -> El<DecompositionRing<NumberRing, Zn, A>>
         where I: IntoIterator<Item = El<SlotRing<'a, A>>>
     {
-        let poly_ring = self.slots_to_ring.poly_ring();
-        let slot_values = vec.into_iter().map(|a| self.slot_ring().poly_repr(poly_ring, &a, poly_ring.base_ring().identity())).collect::<Vec<_>>();
-        let result_unreduced = self.slots_to_ring.interpolate_unreduced(slot_values);
+        unimplemented!()
+        // let poly_ring = self.slots_to_ring.poly_ring();
+        // let slot_values = vec.into_iter().map(|a| self.slot_ring().poly_repr(poly_ring, &a, poly_ring.base_ring().identity())).collect::<Vec<_>>();
+        // let result_unreduced = self.slots_to_ring.interpolate_unreduced(slot_values);
 
-        let n = self.ring.n() as usize;
-        let mut result = (0..=poly_ring.degree(&result_unreduced).unwrap()).map(|i| *poly_ring.coefficient_at(&result_unreduced, i)).collect::<Vec<_>>();
-        let (result, rest) = if result.len() >= n {
-            result.split_at_mut(n)
-        } else {
-            (&mut result[..], &mut [][..])
-        };
-        for i in 0..rest.len() {
-            poly_ring.base_ring().add_assign_ref(&mut result[i], &rest[i]);
-        }
+        // let n = self.ring.n() as usize;
+        // let mut result = (0..=poly_ring.degree(&result_unreduced).unwrap()).map(|i| *poly_ring.coefficient_at(&result_unreduced, i)).collect::<Vec<_>>();
+        // let (result, rest) = if result.len() >= n {
+        //     result.split_at_mut(n)
+        // } else {
+        //     (&mut result[..], &mut [][..])
+        // };
+        // for i in 0..rest.len() {
+        //     poly_ring.base_ring().add_assign_ref(&mut result[i], &rest[i]);
+        // }
 
-        let canonical_gen_pow_rank = self.ring().pow(self.ring().canonical_gen(), self.ring().rank());
-        let mut current = self.ring().one();
-        return self.ring.sum(result.chunks(self.ring.rank()).map(|chunk| self.ring.from_canonical_basis(
-            chunk.iter().copied().chain(std::iter::repeat(poly_ring.base_ring().zero()).take(self.ring.rank() - chunk.len()))
-        )).map(|x| {
-            let result = self.ring().mul_ref_snd(x, &current);
-            self.ring().mul_assign_ref(&mut current, &canonical_gen_pow_rank);
-            return result;
-        }));
+        // let canonical_gen_pow_rank = self.ring().pow(self.ring().canonical_gen(), self.ring().rank());
+        // let mut current = self.ring().one();
+        // return self.ring.sum(result.chunks(self.ring.rank()).map(|chunk| self.ring.from_canonical_basis(
+        //     chunk.iter().copied().chain(std::iter::repeat(poly_ring.base_ring().zero()).take(self.ring.rank() - chunk.len()))
+        // )).map(|x| {
+        //     let result = self.ring().mul_ref_snd(x, &current);
+        //     self.ring().mul_assign_ref(&mut current, &canonical_gen_pow_rank);
+        //     return result;
+        // }));
     }
 
     pub fn get_slot_value(&self, el: &El<DecompositionRing<NumberRing, Zn, A>>, move_to_slot_zero_el: ZnEl) -> El<SlotRing<'a, A>> {

@@ -1,13 +1,23 @@
+use std::time::Instant;
+
 use dense_poly::DensePolyRing;
+use extension_impl::invert_faster_over_local_zn;
 use feanor_math::algorithms::linsolve::LinSolveRing;
 use feanor_math::assert_el_eq;
 use feanor_math::divisibility::DivisibilityRingStore;
+use feanor_math::homomorphism::CanIsoFromTo;
+use feanor_math::homomorphism::SelfIso;
+use feanor_math::local::PrincipalLocalRing;
 use feanor_math::primitive_int::StaticRing;
 use feanor_math::ring::*;
 use feanor_math::rings::extension::extension_impl::FreeAlgebraImpl;
 use feanor_math::rings::extension::*;
+use feanor_math::rings::field::AsFieldBase;
+use feanor_math::rings::local::AsLocalPIR;
 use feanor_math::rings::poly::*;
 use feanor_math::rings::zn::zn_64::Zn;
+use feanor_math::rings::zn::FromModulusCreateableZnRing;
+use feanor_math::rings::zn::ZnRing;
 
 ///
 /// Interpolation data for a list of moduli `f1, ..., fn` that can be used
@@ -37,7 +47,8 @@ pub struct FastPolyInterpolation<P>
 fn crt_unit_vectors<P>(poly_ring: P, f: &El<P>, g: &El<P>) -> El<P>
     where P: RingStore,
         P::Type: PolyRing,
-        <<P::Type as RingExtension>::BaseRing as RingStore>::Type: LinSolveRing
+        <<P::Type as RingExtension>::BaseRing as RingStore>::Type: LinSolveRing + FromModulusCreateableZnRing + ZnRing + PrincipalLocalRing,
+        AsFieldBase<RingValue<<<P::Type as RingExtension>::BaseRing as RingStore>::Type>>: CanIsoFromTo<<<P::Type as RingExtension>::BaseRing as RingStore>::Type> + SelfIso
 {
     assert!(poly_ring.base_ring().is_one(poly_ring.lc(f).unwrap()));
     assert!(poly_ring.base_ring().is_one(poly_ring.lc(g).unwrap()));
@@ -46,8 +57,11 @@ fn crt_unit_vectors<P>(poly_ring: P, f: &El<P>, g: &El<P>) -> El<P>
     let mod_f_ring = FreeAlgebraImpl::new(poly_ring.base_ring(), deg_f, (0..deg_f).map(|i| poly_ring.base_ring().negate(poly_ring.base_ring().clone_el(poly_ring.coefficient_at(&f, i)))).collect::<Vec<_>>());
     let g_mod_f = poly_ring.div_rem_monic(poly_ring.clone_el(&g), &f).1;
     let g_mod_f = mod_f_ring.from_canonical_basis((0..deg_f).map(|i| poly_ring.base_ring().clone_el(poly_ring.coefficient_at(&g_mod_f, i))));
-    let normalization_factor = mod_f_ring.invert(&g_mod_f);
+
+    let normalization_factor = invert_faster_over_local_zn(RingRef::new(mod_f_ring.get_ring()), &g_mod_f);
+    
     assert!(normalization_factor.is_some(), "crt unit vector modulo {} and {} does not exist", poly_ring.format(f), poly_ring.format(g));
+    debug_assert!(mod_f_ring.is_one(&mod_f_ring.mul_ref(normalization_factor.as_ref().unwrap(), &g_mod_f)));
     let g_mod_f_inv = mod_f_ring.poly_repr(&poly_ring, &normalization_factor.unwrap(), poly_ring.base_ring().identity());
     let first_unit_vector = poly_ring.mul_ref_snd(g_mod_f_inv, &g);
 
@@ -60,7 +74,8 @@ fn crt_unit_vectors<P>(poly_ring: P, f: &El<P>, g: &El<P>) -> El<P>
 impl<P> FastPolyInterpolation<P>
     where P: RingStore,
         P::Type: PolyRing,
-        <<P::Type as RingExtension>::BaseRing as RingStore>::Type: LinSolveRing
+        <<P::Type as RingExtension>::BaseRing as RingStore>::Type: LinSolveRing + FromModulusCreateableZnRing + ZnRing + PrincipalLocalRing,
+        AsFieldBase<RingValue<<<P::Type as RingExtension>::BaseRing as RingStore>::Type>>: CanIsoFromTo<<<P::Type as RingExtension>::BaseRing as RingStore>::Type> + SelfIso
 {
     pub fn new(poly_ring: P, moduli: Vec<El<P>>) -> Self {
         let n = moduli.len();
@@ -143,7 +158,7 @@ impl<P> FastPolyInterpolation<P>
 
 #[test]
 fn test_interpolate() {
-    let base_ring = Zn::new(257);
+    let base_ring = AsLocalPIR::from_zn(Zn::new(257)).unwrap();
     let poly_ring = DensePolyRing::new(base_ring, "X");
 
     let moduli = poly_ring.with_wrapped_indeterminate(|X| [
