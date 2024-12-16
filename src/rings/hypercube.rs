@@ -12,7 +12,8 @@ use feanor_math::algorithms::poly_gcd::factor;
 use feanor_math::divisibility::{DivisibilityRing, DivisibilityRingStore};
 use feanor_math::rings::field::AsFieldBase;
 use feanor_math::rings::poly::generic_impls::Isomorphism;
-use feanor_math::{assert_el_eq, homomorphism::*};
+use feanor_math::homomorphism::*;
+use feanor_math::assert_el_eq;
 use feanor_math::integer::{int_cast, BigIntRing, BigIntRingBase, IntegerRingStore};
 use feanor_math::iters::multi_cartesian_product;
 use feanor_math::local::PrincipalLocalRing;
@@ -244,6 +245,8 @@ fn get_prim_root_of_unity<R>(ring: R, m: usize) -> El<R>
 
     let red_map = ZnReductionMap::new(ring.base_ring(), galois_field.base_ring()).unwrap();
     let mut result = ring.from_canonical_basis(galois_field.wrt_canonical_basis(&rou).into_iter().map(|x| red_map.smallest_lift(x)));
+
+    // perform hensel lifting
     for _ in 0..e {
         let delta = ring.checked_div(
             &ring.sub(ring.pow(ring.clone_el(&result), m), ring.one()),
@@ -260,6 +263,13 @@ pub type SlotRingOf<'a, R> = SlotRingOver<'a, <<R as RingStore>::Type as RingExt
 
 type DecoratedBaseRing<R> = AsLocalPIR<RingValue<<<<R as RingStore>::Type as RingExtension>::BaseRing as RingStore>::Type>>;
 
+///
+/// Represents the isomorphism
+/// ```text
+///   Fp[X]/(Phi_n(X)) -> F_(p^d)^((Z/nZ)*/<p>)
+/// ```
+/// where `d` is the order of `p` in `(Z/nZ)*`.
+/// 
 pub struct HypercubeIsomorphism<R>
     where R: RingStore,
         R::Type: CyclotomicRing,
@@ -269,7 +279,7 @@ pub struct HypercubeIsomorphism<R>
     ring: R,
     e: usize,
     slot_ring_x_pow_rank: Vec<Vec<El<<R::Type as RingExtension>::BaseRing>>>,
-    slot_to_ring_interpolation: FastPolyInterpolation<DensePolyRing<DecoratedBaseRing<R>, Global, FFTRNSBasedConvolutionZn>>,
+    slot_to_ring_interpolation: FastPolyInterpolation<DensePolyRing<DecoratedBaseRing<R>, Global>>,
     hypercube_structure: HypercubeStructure,
     slot_ring_convolution: DynConvolutionAlgorithmConvolution<<<R::Type as RingExtension>::BaseRing as RingStore>::Type>
 }
@@ -300,9 +310,9 @@ impl<R> HypercubeIsomorphism<R>
             get_prim_root_of_unity(&tmp_slot_ring, n)
         );
 
-        let poly_ring_convolution: FFTRNSBasedConvolutionZn = FFTRNSBasedConvolutionZn::from(FFTRNSBasedConvolution::new_with(ZZi64.abs_log2_ceil(&(n as i64)).unwrap() + 1, BigIntRing::RING, Global));
+        // let poly_ring_convolution: FFTRNSBasedConvolutionZn = FFTRNSBasedConvolutionZn::from(FFTRNSBasedConvolution::new_with(ZZi64.abs_log2_ceil(&(n as i64)).unwrap() + 1, BigIntRing::RING, Global));
         let decorated_base_ring: DecoratedBaseRing<R> = AsLocalPIR::from_zn(RingValue::from(ring.base_ring().get_ring().clone())).unwrap();
-        let base_poly_ring = DensePolyRing::new_with(decorated_base_ring, "X", Global, poly_ring_convolution);
+        let base_poly_ring = DensePolyRing::new_with(decorated_base_ring, "X", Global, STANDARD_CONVOLUTION);
         let slot_ring_moduli = log_time::<_, _, LOG, _>("[HypercubeIsomorphism::new] Computing factorization of cyclotomic polynomial", |[]| {
             let poly_ring = DensePolyRing::new(&tmp_slot_ring, "X");
             let mut slot_ring_moduli = Vec::new();
@@ -423,30 +433,28 @@ impl<R> HypercubeIsomorphism<R>
             let mut values_it = values.into_iter();
             let wrap = LambdaHom::new(first_slot_ring.base_ring(), poly_ring.base_ring(), |from, to, x| to.get_ring().rev_delegate(from.clone_el(x)));
             let unwrap = LambdaHom::new(poly_ring.base_ring(), first_slot_ring.base_ring(), |from, _to, x| from.get_ring().delegate(from.clone_el(x)));
-            let remainders = values_it.by_ref().zip(self.hypercube_structure.element_iter()).enumerate().map(|(i, (a, g))| {
+
+            let remainders = record_time!(CREATE_LINEAR_TRANSFORM_TIME_RECORDER, "prepare_remainders", || values_it.by_ref().zip(self.hypercube_structure.element_iter()).enumerate().map(|(i, (a, g))| {
                 let f = first_slot_ring.poly_repr(&poly_ring, &a, &wrap);
                 let local_slot_ring = self.slot_ring_at(i);
                 let image_zeta = local_slot_ring.pow(local_slot_ring.canonical_gen(), self.galois_group().nonnegative_representative(g));
                 return local_slot_ring.poly_repr(&poly_ring, &poly_ring.evaluate(&f, &image_zeta, local_slot_ring.inclusion().compose(&unwrap)), &wrap);
-            }).collect::<Vec<_>>();
+            }).collect::<Vec<_>>());
             assert!(values_it.next().is_none(), "iterator should only have {} elements", self.slot_count());
 
             let unreduced_result = record_time!(CREATE_LINEAR_TRANSFORM_TIME_RECORDER, "interpolate_unreduced", || self.slot_to_ring_interpolation.interpolate_unreduced(remainders));
-            if poly_ring.is_zero(&unreduced_result) {
-                return self.ring.zero();
-            }
             let unreduced_result = (0..=poly_ring.degree(&unreduced_result).unwrap()).map(|i| poly_ring.base_ring().clone_el(poly_ring.coefficient_at(&unreduced_result, i))).collect::<Vec<_>>();
 
-            let canonical_gen_pow_rank = self.ring().pow(self.ring().canonical_gen(), self.ring().rank());
+            let canonical_gen_pow_rank = self.ring().mul(self.ring().canonical_gen(), self.ring().from_canonical_basis((1..self.ring().rank()).map(|_| self.ring().base_ring().zero()).chain([self.ring().base_ring().one()].into_iter())));
             let mut current = self.ring().one();
-            return self.ring.sum(unreduced_result.chunks(self.ring.rank()).map(|chunk| self.ring.from_canonical_basis(
+            return record_time!(CREATE_LINEAR_TRANSFORM_TIME_RECORDER, "sum_result", || <_ as RingStore>::sum(&self.ring, unreduced_result.chunks(self.ring.rank()).map(|chunk| self.ring.from_canonical_basis(
                 chunk.iter().map(|a| poly_ring.base_ring().clone_el(a)).chain((0..(self.ring.rank() - chunk.len())).map(|_| poly_ring.base_ring().zero()))
                     .map(|x| unwrap.map(x))
             )).map(|x| {
                 let result = self.ring().mul_ref_snd(x, &current);
                 self.ring().mul_assign_ref(&mut current, &canonical_gen_pow_rank);
                 return result;
-            }));
+            })));
         })
     }
 }
