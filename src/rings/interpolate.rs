@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use dense_poly::DensePolyRing;
-use extension_impl::invert_faster_over_local_zn;
+use feanor_math::algorithms::extension_invert::invert_over_local_zn;
 use feanor_math::algorithms::linsolve::LinSolveRing;
 use feanor_math::assert_el_eq;
 use feanor_math::divisibility::DivisibilityRingStore;
@@ -61,7 +61,7 @@ fn crt_unit_vectors<P>(poly_ring: P, f: &El<P>, g: &El<P>) -> El<P>
     let g_mod_f = poly_ring.div_rem_monic(poly_ring.clone_el(&g), &f).1;
     let g_mod_f = mod_f_ring.from_canonical_basis((0..deg_f).map(|i| poly_ring.base_ring().clone_el(poly_ring.coefficient_at(&g_mod_f, i))));
 
-    let normalization_factor = invert_faster_over_local_zn(RingRef::new(mod_f_ring.get_ring()), &g_mod_f);
+    let normalization_factor = invert_over_local_zn(RingRef::new(mod_f_ring.get_ring()), &g_mod_f);
     
     assert!(normalization_factor.is_some(), "crt unit vector modulo {} and {} does not exist", poly_ring.format(f), poly_ring.format(g));
     debug_assert!(mod_f_ring.is_one(&mod_f_ring.mul_ref(normalization_factor.as_ref().unwrap(), &g_mod_f)));
