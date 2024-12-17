@@ -9,6 +9,7 @@ use std::ops::Range;
 use std::cmp::max;
 
 use feanor_math::algorithms::int_factor::factor;
+use feanor_math::algorithms::int_factor::is_prime_power;
 use feanor_math::algorithms::miller_rabin::is_prime;
 use feanor_math::algorithms::unity_root::get_prim_root_of_unity;
 use feanor_math::algorithms::unity_root::get_prim_root_of_unity_pow2;
@@ -35,13 +36,15 @@ use crate::extend_sampled_primes;
 use crate::lintransform::HELinearTransform;
 use crate::rings::bxv::BXVCiphertextRing;
 use crate::rings::double_rns_managed::*;
+use crate::rings::hypercube::CyclotomicGaloisGroup;
+use crate::rings::hypercube::HypercubeIsomorphism;
+use crate::rings::hypercube::HypercubeStructure;
 use crate::rings::number_ring::*;
 use crate::rings::decomposition_ring::*;
 use crate::rings::odd_cyclotomic::*;
 use crate::rings::pow2_cyclotomic::*;
 use crate::profiling::*;
 use crate::rings::single_rns_ring::SingleRNSRingBase;
-use crate::rings::slots::HypercubeIsomorphism;
 use crate::rnsconv;
 use crate::sample_primes;
 
@@ -151,7 +154,9 @@ pub trait BFVParams {
     }
     
     fn dec_println_slots(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: &Ciphertext<Self>, sk: &SecretKey<Self>) {
-        let H = HypercubeIsomorphism::new::<false>(P.get_ring());
+        let (p, _e) = is_prime_power(ZZ, P.base_ring().modulus()).unwrap();
+        let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(P.n()), p);
+        let H = HypercubeIsomorphism::new::<false>(P, hypercube);
         let m = Self::dec(P, C, Self::clone_ct(C, ct), sk);
         println!("ciphertext (noise budget: {}):", Self::noise_budget(P, C, ct, sk));
         for a in H.get_slot_values(&m) {

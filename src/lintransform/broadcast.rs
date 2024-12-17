@@ -9,9 +9,9 @@ use feanor_math::assert_el_eq;
 use feanor_math::ring::*;
 
 use crate::rings::decomposition_ring::{DecompositionRing, DecompositionRingBase};
+use crate::rings::hypercube::{CyclotomicGaloisGroup, DefaultHypercube, HypercubeIsomorphism, HypercubeStructure};
 use crate::rings::number_ring::HECyclotomicNumberRing;
 use crate::rings::odd_cyclotomic::CompositeCyclotomicNumberRing;
-use crate::rings::slots::HypercubeIsomorphism;
 
 use super::HELinearTransform;
 
@@ -28,14 +28,14 @@ impl<NumberRing, A> Broadcast1d<NumberRing, A>
     where NumberRing: HECyclotomicNumberRing + Clone,
         A: Allocator + Clone
 {
-    pub fn new<'a>(H: &HypercubeIsomorphism<'a, NumberRing, A>, dim_index: usize) -> Self {
+    pub fn new(H: &DefaultHypercube<NumberRing, A>, dim_index: usize) -> Self {
         Self {
-            clear_slots_factor: H.from_slot_vec(H.slot_iter(|slot_index| if slot_index[dim_index] == 0 {
+            clear_slots_factor: H.from_slot_values(H.hypercube().hypercube_iter(|slot_index| if slot_index[dim_index] == 0 {
                 H.slot_ring().one()
             } else {
                 H.slot_ring().zero()
             })),
-            shift_elements: (0..H.len(dim_index)).map(|i| H.shift_galois_element(dim_index, i as i64)).collect::<Vec<_>>(),
+            shift_elements: (0..H.hypercube().m(dim_index)).map(|i| H.galois_group().to_ring_el(H.hypercube().map_1d(dim_index, i as i64))).collect::<Vec<_>>(),
             number_ring: H.ring().get_ring().number_ring().clone()
         }
     }
@@ -96,19 +96,20 @@ impl<NumberRing, A> HELinearTransform<NumberRing, A> for Broadcast1d<NumberRing,
 fn test_broadcast() {
     // F11[X]/Phi_35(X) ~ F_(11^3)^8
     let ring = DecompositionRingBase::new(CompositeCyclotomicNumberRing::new(5, 7), Zn::new(11));
-    let H = HypercubeIsomorphism::new::<false>(ring.get_ring());
-    assert_eq!(7, H.corresponding_factor_n(0));
-    assert_eq!(2, H.len(0));
-    assert_eq!(5, H.corresponding_factor_n(1));
-    assert_eq!(4, H.len(1));
+    let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(5 * 7), 11);
+    let H = HypercubeIsomorphism::new::<false>(&ring, hypercube);
+    assert_eq!(7, H.hypercube().factor_of_n(0).unwrap());
+    assert_eq!(2, H.hypercube().m(0));
+    assert_eq!(5, H.hypercube().factor_of_n(1).unwrap());
+    assert_eq!(4, H.hypercube().m(1));
 
-    let input = H.from_slot_vec((0..8).map(|n| H.slot_ring().int_hom().map(n)));
-    let expected = H.from_slot_vec((0..8).map(|n| H.slot_ring().int_hom().map(n % 4)));
+    let input = H.from_slot_values((0..8).map(|n| H.slot_ring().int_hom().map(n)));
+    let expected = H.from_slot_values((0..8).map(|n| H.slot_ring().int_hom().map(n % 4)));
     let broadcast = Broadcast1d::new(&H, 0);
     let actual = broadcast.evaluate(&ring, ring.clone_el(&input));
     assert_el_eq!(H.ring(), expected, actual);
 
-    let expected = H.from_slot_vec((0..8).map(|n| H.slot_ring().int_hom().map((n / 4) * 4)));
+    let expected = H.from_slot_values((0..8).map(|n| H.slot_ring().int_hom().map((n / 4) * 4)));
     let broadcast = Broadcast1d::new(&H, 1);
     let actual = broadcast.evaluate(&ring, input);
     assert_el_eq!(H.ring(), expected, actual);

@@ -35,6 +35,19 @@ pub struct DynConvolutionAlgorithmConvolution<R, C = Box<dyn DynConvolutionAlgor
     conv: C
 }
 
+impl<C, R> Clone for DynConvolutionAlgorithmConvolution<R, C>
+    where C: Deref + Clone,
+        C::Target: DynConvolutionAlgorithm<R>,
+        R: ?Sized + RingBase
+{
+    fn clone(&self) -> Self {
+        Self {
+            ring: self.ring,
+            conv: self.conv.clone()
+        }
+    }
+}
+
 impl<C, R> DynConvolutionAlgorithmConvolution<R, C>
     where C: Deref,
         C::Target: DynConvolutionAlgorithm<R>,

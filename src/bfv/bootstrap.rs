@@ -21,7 +21,6 @@ use crate::lintransform::HELinearTransform;
 use crate::digitextract::polys::digit_retain_poly;
 use crate::lintransform::composite;
 use crate::lintransform::matmul::CompiledLinearTransform;
-use crate::rings::slots::*;
 
 use super::*;
 
@@ -29,7 +28,7 @@ pub struct ThinBootstrapParams<Params: BFVParams> {
     params: Params,
     digit_extract: DigitExtract,
     slots_to_coeffs_thin: Vec<CompiledLinearTransform<NumberRing<Params>>>,
-    coeffs_to_slots_thin: (Vec<CompiledLinearTransform<NumberRing<Params>>>, Option<Trace<NumberRing<Params>, PlaintextAllocator>>)
+    coeffs_to_slots_thin: (Vec<CompiledLinearTransform<NumberRing<Params>>>, Option<Trace<NumberRing<Params>>>)
 }
 
 pub struct BootstrapperConfig {
@@ -77,8 +76,9 @@ impl ThinBootstrapParams<Pow2BFV> {
 
         let digit_extract = DigitExtract::new_default::<LOG>(plaintext_ring.base_ring(), r);
 
-        let H = HypercubeIsomorphism::new::<LOG>(plaintext_ring.get_ring());
-        let original_H = H.change_modulus(original_plaintext_ring.get_ring());
+        let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(plaintext_ring.n()), p);
+        let H = HypercubeIsomorphism::new::<LOG>(&plaintext_ring, hypercube);
+        let original_H = H.change_modulus(&original_plaintext_ring);
         let slots_to_coeffs = log_time::<_, _, LOG, _>("Creating Slots-to-Coeffs transform", |[]| pow2::slots_to_coeffs_thin(&original_H));
         let (coeffs_to_slots, trace) = log_time::<_, _, LOG, _>("Creating Coeffs-to-Slots transform", |[]| {
             let (transforms, trace) = pow2::coeffs_to_slots_thin(&H);
@@ -118,8 +118,9 @@ impl<Params: BFVParams> ThinBootstrapParams<Params>
 
         let digit_extract = DigitExtract::new_default::<LOG>(plaintext_ring.base_ring(), r);
 
-        let H = HypercubeIsomorphism::new::<LOG>(plaintext_ring.get_ring());
-        let original_H = H.change_modulus(original_plaintext_ring.get_ring());
+        let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(plaintext_ring.n()), p);
+        let H = HypercubeIsomorphism::new::<LOG>(&plaintext_ring, hypercube);
+        let original_H = H.change_modulus(&original_plaintext_ring);
         let slots_to_coeffs = log_time::<_, _, LOG, _>("Creating Slots-to-Coeffs transform", |[]| composite::slots_to_powcoeffs_thin(&original_H));
         let coeffs_to_slots = log_time::<_, _, LOG, _>("Creating Coeffs-to-Slots transform", |[]| composite::powcoeffs_to_slots_thin(&H));
 
@@ -143,7 +144,7 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
         params: Params,
         digit_extract: DigitExtract,
         slots_to_coeffs_thin: Vec<CompiledLinearTransform<NumberRing<Params>>>,
-        coeffs_to_slots_thin: (Vec<CompiledLinearTransform<NumberRing<Params>>>, Option<Trace<NumberRing<Params>, PlaintextAllocator>>)
+        coeffs_to_slots_thin: (Vec<CompiledLinearTransform<NumberRing<Params>>>, Option<Trace<NumberRing<Params>>>)
     ) -> Self {
         Self {
             params: params,
@@ -403,7 +404,7 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
         result.extend(self.slots_to_coeffs_thin.iter().flat_map(|T| T.required_galois_keys().into_iter()));
         result.extend(self.coeffs_to_slots_thin.0.iter().flat_map(|T| T.required_galois_keys().into_iter()));
         if let Some(trace) = &self.coeffs_to_slots_thin.1 {
-            result.extend(trace.required_galois_keys());
+            result.extend(<_ as HELinearTransform<_, Global>>::required_galois_keys(trace));
         }
         result.sort_by_key(|g| P.get_ring().cyclotomic_index_ring().smallest_positive_lift(*g));
         result.dedup_by(|g, s| P.get_ring().cyclotomic_index_ring().eq_el(g, s));

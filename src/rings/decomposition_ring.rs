@@ -69,7 +69,6 @@ impl<NumberRing, ZnTy> DecompositionRingBase<NumberRing, ZnTy>
         let required_bits = ZZbig.abs_log2_ceil(&max_product_size).unwrap();
         let rns_base_primes = sample_primes(required_bits, required_bits + 57, 57, |n| number_ring.largest_suitable_prime(int_cast(n, StaticRing::<i64>::RING, ZZbig)).map(|n| int_cast(n, ZZbig, StaticRing::<i64>::RING))).unwrap();
         let rns_base = zn_rns::Zn::new(rns_base_primes.into_iter().map(|p| zn_64::Zn::new(int_cast(p, StaticRing::<i64>::RING, ZZbig) as u64)).collect(), ZZbig);
-        println!("rns base len: {}", rns_base.len());
         return Self::new_with(number_ring, base_ring, rns_base, Global);
     }
 }

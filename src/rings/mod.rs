@@ -26,8 +26,6 @@ pub mod pow2_cyclotomic;
 
 pub mod odd_cyclotomic;
 
-pub mod slots;
-
 pub mod double_rns_managed;
 
 pub mod bxv;

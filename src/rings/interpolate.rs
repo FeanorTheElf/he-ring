@@ -6,6 +6,7 @@ use feanor_math::algorithms::linsolve::LinSolveRing;
 use feanor_math::assert_el_eq;
 use feanor_math::divisibility::DivisibilityRingStore;
 use feanor_math::homomorphism::CanIsoFromTo;
+use feanor_math::homomorphism::Homomorphism;
 use feanor_math::homomorphism::SelfIso;
 use feanor_math::local::PrincipalLocalRing;
 use feanor_math::primitive_int::StaticRing;
@@ -17,6 +18,7 @@ use feanor_math::rings::local::AsLocalPIR;
 use feanor_math::rings::poly::*;
 use feanor_math::rings::zn::zn_64::Zn;
 use feanor_math::rings::zn::FromModulusCreateableZnRing;
+use feanor_math::rings::zn::ZnReductionMap;
 use feanor_math::rings::zn::ZnRing;
 
 ///
@@ -35,6 +37,7 @@ pub struct FastPolyInterpolation<P>
         <<P::Type as RingExtension>::BaseRing as RingStore>::Type: LinSolveRing
 {
     poly_ring: P,
+    input_degree: usize,
     // input_moduli: Vec<El<P>>,
     unit_vectors: Vec<Vec<(El<P>, El<P>)>>,
     final_modulus: El<P>,
@@ -79,6 +82,7 @@ impl<P> FastPolyInterpolation<P>
 {
     pub fn new(poly_ring: P, moduli: Vec<El<P>>) -> Self {
         let n = moduli.len();
+        let input_degree = moduli.iter().map(|f| poly_ring.degree(f).unwrap_or(0)).max().unwrap();
         let mut current = moduli.iter().map(|f| poly_ring.clone_el(f)).collect::<Vec<_>>();
         let mut result = Vec::new();
         while current.len() > 1 {
@@ -101,8 +105,28 @@ impl<P> FastPolyInterpolation<P>
             final_modulus: current.pop().unwrap(),
             // input_moduli: moduli,
             n: n,
+            input_degree: input_degree,
             poly_ring: poly_ring,
             unit_vectors: result
+        };
+    }
+
+    pub fn change_modulus<PNew>(&self, new_poly_ring: PNew) -> FastPolyInterpolation<PNew>
+        where PNew: RingStore,
+            PNew::Type: PolyRing,
+            <<PNew::Type as RingExtension>::BaseRing as RingStore>::Type: LinSolveRing + FromModulusCreateableZnRing + ZnRing + PrincipalLocalRing,
+            AsFieldBase<RingValue<<<PNew::Type as RingExtension>::BaseRing as RingStore>::Type>>: CanIsoFromTo<<<PNew::Type as RingExtension>::BaseRing as RingStore>::Type> + SelfIso
+    {
+        let red_map = ZnReductionMap::new(self.poly_ring().base_ring(), new_poly_ring.base_ring()).unwrap();
+        let lifted_red_map = new_poly_ring.lifted_hom(self.poly_ring(), &red_map);
+        let unit_vectors = self.unit_vectors.iter().map(|list| list.iter().map(|(e0, e1)| (lifted_red_map.map_ref(e0), lifted_red_map.map_ref(e1))).collect()).collect();
+        let final_modulus = lifted_red_map.map_ref(&self.final_modulus);
+        return FastPolyInterpolation {
+            final_modulus: final_modulus,
+            input_degree: self.input_degree,
+            poly_ring: new_poly_ring,
+            n: self.n,
+            unit_vectors: unit_vectors
         };
     }
 
@@ -131,9 +155,9 @@ impl<P> FastPolyInterpolation<P>
     /// 
     pub fn interpolate_unreduced(&self, remainders: Vec<El<P>>) -> El<P> {
         assert_eq!(self.n, remainders.len());
-        // for i in 0..self.n {
-        //     assert!(self.poly_ring.degree(&remainders[i]).unwrap_or(0) < self.poly_ring.degree(&self.input_moduli()[i]).unwrap());
-        // }
+        for i in 0..self.n {
+            assert!(self.poly_ring.degree(&remainders[i]).unwrap_or(0) < self.input_degree);
+        }
         let mut current = remainders;
         for i in 0..self.unit_vectors.len() {
             let mut new = Vec::new();
@@ -151,7 +175,7 @@ impl<P> FastPolyInterpolation<P>
         }
         debug_assert_eq!(1, current.len());
         let result = current.pop().unwrap();
-        debug_assert!(self.poly_ring.degree(&result).unwrap_or(0) < 2 * self.poly_ring.degree(self.final_modulus()).unwrap());
+        debug_assert!(self.poly_ring.degree(&result).unwrap_or(0) < (self.input_degree << (self.unit_vectors.len() +  1)));
         return result;
     }
 }

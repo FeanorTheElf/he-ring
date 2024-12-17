@@ -1,7 +1,9 @@
 use std::alloc::*;
 use std::cell::RefCell;
 use std::marker::PhantomData;
+use std::rc::Rc;
 
+use feanor_math::algorithms::convolution::ConvolutionAlgorithm;
 use feanor_math::algorithms::convolution::STANDARD_CONVOLUTION;
 use feanor_math::algorithms::sqr_mul::generic_pow_shortest_chain_table;
 use feanor_math::homomorphism::*;
@@ -9,6 +11,8 @@ use feanor_math::integer::*;
 use feanor_math::matrix::OwnedMatrix;
 use feanor_math::rings::extension::FreeAlgebraStore;
 use feanor_math::rings::field::AsFieldBase;
+use feanor_math::rings::local::AsLocalPIR;
+use feanor_math::rings::local::AsLocalPIRBase;
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
 use feanor_math::rings::poly::PolyRingStore;
 use feanor_math::algorithms::sqr_mul;
@@ -20,37 +24,36 @@ use feanor_math::rings::zn::*;
 use feanor_math::seq::*;
 use feanor_math::algorithms::linsolve::LinSolveRingStore;
 
+use crate::rings::dynconv::DynConvolutionAlgorithm;
 use crate::rings::dynconv::DynConvolutionAlgorithmConvolution;
+use crate::rings::hypercube::SlotRingOver;
 use crate::rings::number_ring::HECyclotomicNumberRing;
 use crate::rings::odd_cyclotomic::OddCyclotomicNumberRing;
 use crate::rings::pow2_cyclotomic::Pow2CyclotomicNumberRing;
 use crate::StdZn;
 
 use crate::rings::decomposition_ring::*;
-use crate::rings::slots::*;
 use crate::cyclotomic::*;
 
-pub struct Trace<NumberRing, A>
-    where NumberRing: HECyclotomicNumberRing,
-        A: Allocator + Clone
+use super::HELinearTransform;
+
+pub struct Trace<NumberRing>
+    where NumberRing: HECyclotomicNumberRing
 {
     number_ring: NumberRing,
     frobenius: ZnEl,
-    trace_rank_quo: i64,
-    allocator: PhantomData<A>
+    trace_rank_quo: i64
 }
 
-impl<NumberRing, A> Trace<NumberRing, A>
-    where NumberRing: HECyclotomicNumberRing,
-        A: Allocator + Clone
+impl<NumberRing> Trace<NumberRing>
+    where NumberRing: HECyclotomicNumberRing
 {
     pub fn new(number_ring: NumberRing, p: i64, slot_rank: usize) -> Self {
         assert_eq!(0, number_ring.rank() % slot_rank);
         Trace {
             frobenius: number_ring.cyclotomic_index_ring().can_hom(&StaticRing::<i64>::RING).unwrap().map(p),
             number_ring: number_ring,
-            trace_rank_quo: slot_rank as i64,
-            allocator: PhantomData
+            trace_rank_quo: slot_rank as i64
         }
     }
 
@@ -61,8 +64,8 @@ impl<NumberRing, A> Trace<NumberRing, A>
     /// where `X` is its canonical generator. At the moment this always true, since we currently
     /// choose the canonical generator to be a root of unity.
     /// 
-    pub fn extract_linear_map<'a, G>(&self, slot_ring: &SlotRing<'a, A>, mut function: G) -> El<SlotRing<'a, A>>
-        where G: FnMut(El<SlotRing<'a, A>>) -> El<Zn>
+    pub fn extract_linear_map<G>(&self, slot_ring: &SlotRingOver<Zn>, mut function: G) -> El<SlotRingOver<Zn>>
+        where G: FnMut(El<SlotRingOver<Zn>>) -> El<Zn>
     {
         assert_eq!(self.trace_rank_quo as usize, slot_ring.rank());
 
@@ -72,11 +75,11 @@ impl<NumberRing, A> Trace<NumberRing, A>
 
         let Gal = self.number_ring.cyclotomic_index_ring();
         let poly_ring = DensePolyRing::new(slot_ring.base_ring(), "X");
-        let trace = |a: El<SlotRing<'a, A>>| {
+        let trace = |a: El<SlotRingOver<Zn>>| {
             let result = self.evaluate_generic(
                 a, 
                 |x, y| slot_ring.add_ref_snd(x, y), 
-                |_, _| unreachable!(),
+                |_, _: &El<DecompositionRing<_, _>>| unreachable!(),
                 |x, gs| gs.iter().map(|g| poly_ring.evaluate(&slot_ring.poly_repr(&poly_ring, &x, &slot_ring.base_ring().identity()), &slot_ring.pow(slot_ring.canonical_gen(), Gal.smallest_positive_lift(*g) as usize), &slot_ring.inclusion())).collect(), 
                 |x| slot_ring.clone_el(x)
             );
@@ -105,12 +108,12 @@ impl<NumberRing, A> Trace<NumberRing, A>
     /// where `X` is its canonical generator. At the moment this always true, since we currently
     /// choose the canonical generator to be a root of unity.
     /// 
-    pub fn extract_coefficient_map<'a>(&self, slot_ring: &SlotRing<'a, A>, coefficient_j: usize) -> El<SlotRing<'a, A>> {
+    pub fn extract_coefficient_map<'a>(&self, slot_ring: &SlotRingOver<Zn>, coefficient_j: usize) -> El<SlotRingOver<Zn>> {
         self.extract_linear_map(slot_ring, |a| slot_ring.wrt_canonical_basis(&a).at(coefficient_j))
     }
 }
 
-impl<NumberRing, A> HELinearTransform<NumberRing, A> for Trace<NumberRing, A>
+impl<NumberRing, A> HELinearTransform<NumberRing, A> for Trace<NumberRing>
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone
 {
@@ -177,50 +180,39 @@ use feanor_math::integer::BigIntRing;
 #[cfg(test)]
 use feanor_math::rings::extension::extension_impl::FreeAlgebraImpl;
 
-use super::HELinearTransform;
-
 #[test]
 fn test_extract_coefficient_map() {
 
-    let do_test_for_slot_ring = |slot_ring: &SlotRing, trace: &Trace<OddCyclotomicNumberRing, Global>, Gal: &Zn| {
-        let extract_constant_coeff = trace.extract_coefficient_map(slot_ring, 0);
-
-        let poly_ring = DensePolyRing::new(slot_ring.base_ring(), "X");
-        for i in 0..4 {
-            let b = slot_ring.pow(slot_ring.canonical_gen(), i);
-            let actual = trace.evaluate_generic(
-                slot_ring.mul_ref(&b, &extract_constant_coeff), 
-                |x, y| slot_ring.add_ref_snd(x, y), 
-                |_, _| unreachable!(),
-                |x, gs| gs.iter().map(|g| poly_ring.evaluate(&slot_ring.poly_repr(&poly_ring, &x, &slot_ring.base_ring().identity()), &slot_ring.pow(slot_ring.canonical_gen(), Gal.smallest_positive_lift(*g) as usize), &slot_ring.inclusion())).collect(),
-                |x| slot_ring.clone_el(x)
-            );
-            if i == 0 {
-                assert_el_eq!(&slot_ring, &slot_ring.one(), &actual);
-            } else {
-                assert_el_eq!(&slot_ring, &slot_ring.zero(), &actual);
-            }
-        }
-    };
-
-    let convolution = || DynConvolutionAlgorithmConvolution::<ZnBase>::new(Box::new(STANDARD_CONVOLUTION));
-
-    let base_ring = Zn::new(17).as_field().ok().unwrap();
-    let mut modulus = SparseMapVector::new(4, &base_ring);
-    for i in 0..4 {
-        *modulus.at_mut(i) = base_ring.neg_one();
-    }
-
-    let slot_ring = GaloisField::create(FreeAlgebraImpl::new(&base_ring, 4, modulus).as_field().ok().unwrap());
+    let convolution = DynConvolutionAlgorithmConvolution::<ZnBase, Rc<dyn DynConvolutionAlgorithm<ZnBase>>>::new(Rc::new(STANDARD_CONVOLUTION));
+    let base_ring = Zn::new(17 * 17);
+    let modulus = (0..4).map(|_| base_ring.neg_one()).collect::<Vec<_>>();
+    let slot_ring = FreeAlgebraImpl::new_with(base_ring, 4, modulus, "a", Global, convolution);
+    let max_ideal_gen = slot_ring.int_hom().map(17);
+    let slot_ring = AsLocalPIR::from(AsLocalPIRBase::promise_is_local_pir(slot_ring, max_ideal_gen, Some(2)));
     assert!(is_prim_root_of_unity(&slot_ring, &slot_ring.canonical_gen(), 5));
     let Gal = Zn::new(5);
     let trace = Trace::new(OddCyclotomicNumberRing::new(5), 17, 4);
 
-    let slot_ring_pir_base_ring = Zn::new(17);
-    let slot_ring_pir = slot_ring.clone().into().galois_ring_with(&slot_ring_pir_base_ring, Global, convolution());
-    do_test_for_slot_ring(&slot_ring_pir, &trace, &Gal);
-    
-    let slot_ring_pir_base_ring = Zn::new(17 * 17);
-    let slot_ring_pir = slot_ring.clone().into().galois_ring_with(&slot_ring_pir_base_ring, Global, convolution());
-    do_test_for_slot_ring(&slot_ring_pir, &trace, &Gal);
+    let extract_constant_coeff = trace.extract_coefficient_map(&slot_ring, 0);
+
+    let poly_ring = DensePolyRing::new(slot_ring.base_ring(), "X");
+    for i in 0..4 {
+        let b = slot_ring.pow(slot_ring.canonical_gen(), i);
+        let actual = trace.evaluate_generic(
+            slot_ring.mul_ref(&b, &extract_constant_coeff), 
+            |x, y| slot_ring.add_ref_snd(x, y), 
+            |_, _: &El<DecompositionRing<_, _>>| unreachable!(),
+            |x, gs| gs.iter().map(|g| poly_ring.evaluate(
+                &slot_ring.poly_repr(&poly_ring, &x, &slot_ring.base_ring().identity()), 
+                &slot_ring.pow(slot_ring.canonical_gen(), Gal.smallest_positive_lift(*g) as usize), 
+                &slot_ring.inclusion()
+            )).collect(),
+            |x| slot_ring.clone_el(x)
+        );
+        if i == 0 {
+            assert_el_eq!(&slot_ring, &slot_ring.one(), &actual);
+        } else {
+            assert_el_eq!(&slot_ring, &slot_ring.zero(), &actual);
+        }
+    }
 }
