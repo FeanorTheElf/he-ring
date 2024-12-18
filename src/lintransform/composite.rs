@@ -14,6 +14,7 @@ use feanor_math::primitive_int::*;
 use feanor_math::seq::VectorFn;
 use matmul::MatmulTransform;
 
+use crate::profiling::clear_all_timings;
 use crate::profiling::log_time;
 use crate::profiling::print_all_timings;
 use crate::rings::decomposition_ring::DecompositionRingBase;
@@ -71,17 +72,17 @@ fn dwt1d_inv<'a, NumberRing>(H: &DefaultHypercube<NumberRing>, dim_index: usize,
     assert!(H.hypercube().is_tensor_product_compatible());
 
     record_time!(CREATE_LINEAR_TRANSFORM_TIME_RECORDER, "dwt1d_inv", || {
-        let mut A = log_time::<_, _, true, _>("create_matrix", |[]| dwt1d_matrix(H.hypercube(), H.slot_ring(), dim_index, zeta_powertable));
+        let mut A = record_time!(CREATE_LINEAR_TRANSFORM_TIME_RECORDER, "create_matrix", || dwt1d_matrix(H.hypercube(), H.slot_ring(), dim_index, zeta_powertable));
         let mut rhs = OwnedMatrix::identity(H.hypercube().m(dim_index), H.hypercube().m(dim_index), H.slot_ring());
         let mut sol = OwnedMatrix::zero(H.hypercube().m(dim_index), H.hypercube().m(dim_index), H.slot_ring());
-        log_time::<_, _, true, _>("invert_matrix", |[]| <_ as LinSolveRingStore>::solve_right(H.slot_ring(), A.data_mut(), rhs.data_mut(), sol.data_mut()).assert_solved());
+        record_time!(CREATE_LINEAR_TRANSFORM_TIME_RECORDER, "invert_matrix", || <_ as LinSolveRingStore>::solve_right(H.slot_ring(), A.data_mut(), rhs.data_mut(), sol.data_mut()).assert_solved());
 
         // multiplication with the matrix `A(i, j) = 𝝵^(j * shift_element(-i))` if we consider an element as multiple vectors along the `dim_index`-th dimension
-        log_time::<_, _, true, _>("create_lin_transform", |[]| vec![MatmulTransform::matmul1d(
+        vec![MatmulTransform::matmul1d(
             H, 
             dim_index, 
             |i, j, _idxs| H.slot_ring().clone_el(sol.at(i, j))
-        )])
+        )]
     })
 }
 
@@ -150,7 +151,7 @@ pub fn slots_to_powcoeffs_fat<NumberRing>(H: &DefaultHypercube<NumberRing>) -> V
 
 ///
 /// Inverse of [`slots_to_powcoeffs_fat()`], i.e. moves the powerful-basis coefficient of `X1^(j * m1 + i1) X2^i2 ... Xr^ir`
-/// to the slot ``(i1, ..., ir)`.
+/// to the slot `(i1, ..., ir)`.
 /// 
 pub fn powcoeffs_to_slots_fat<NumberRing>(H: &DefaultHypercube<NumberRing>) -> Vec<MatmulTransform<NumberRing>>
     where NumberRing: HECyclotomicNumberRing + Clone
@@ -410,18 +411,22 @@ fn test_powcoeffs_to_slots_fat_large() {
     assert_eq!(127, H.hypercube().factor_of_n(1).unwrap());
     assert_eq!(126, H.hypercube().m(1));
 
+    clear_all_timings();
     let transform = powcoeffs_to_slots_fat(&H);
+    print_all_timings();
+
     let ring_ref = &ring;
     let mut current = ring.pow(ring_ref.canonical_gen(), 7 * 127 + 2 * 337);
-    for transform in powcoeffs_to_slots_fat(&H) {
+    for transform in &transform {
         current = ring.get_ring().compute_linear_transform(&H, &current, &transform);
     }
-    let expected = H.from_slot_values(H.hypercube().hypercube_iter(|idxs| if idxs[0] == 0 && idxs[1] == 2 {
+    let expected = H.from_slot_values(H.hypercube().hypercube_iter(|idxs| if idxs[0] == 7 && idxs[1] == 2 {
         H.slot_ring().pow(H.slot_ring().canonical_gen(), 7)
     } else {
         H.slot_ring().zero()
     }));
+    for x in H.get_slot_values(&current) {
+        H.slot_ring().println(&x);
+    }
     assert_el_eq!(ring, expected, current);
-
-    print_all_timings();
 }
