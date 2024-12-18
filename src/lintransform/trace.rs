@@ -2,6 +2,7 @@ use std::alloc::*;
 use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use feanor_math::algorithms::convolution::ConvolutionAlgorithm;
 use feanor_math::algorithms::convolution::STANDARD_CONVOLUTION;
@@ -183,7 +184,7 @@ use feanor_math::rings::extension::extension_impl::FreeAlgebraImpl;
 #[test]
 fn test_extract_coefficient_map() {
 
-    let convolution = DynConvolutionAlgorithmConvolution::<ZnBase, Rc<dyn DynConvolutionAlgorithm<ZnBase>>>::new(Rc::new(STANDARD_CONVOLUTION));
+    let convolution = DynConvolutionAlgorithmConvolution::<ZnBase, Arc<dyn Send + Sync + DynConvolutionAlgorithm<ZnBase>>>::new(Arc::new(STANDARD_CONVOLUTION));
     let base_ring = Zn::new(17 * 17);
     let modulus = (0..4).map(|_| base_ring.neg_one()).collect::<Vec<_>>();
     let slot_ring = FreeAlgebraImpl::new_with(base_ring, 4, modulus, "a", Global, convolution);

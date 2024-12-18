@@ -34,8 +34,6 @@ use crate::cyclotomic::CyclotomicRing;
 
 pub struct OddCyclotomicNumberRing {
     n_factorization_squarefree: Vec<i64>,
-    sparse_poly_ring: SparsePolyRing<StaticRing<i64>>,
-    cyclotomic_poly: El<SparsePolyRing<StaticRing<i64>>>
 }
 
 impl OddCyclotomicNumberRing {
@@ -54,8 +52,6 @@ impl OddCyclotomicNumberRing {
         let cyclotomic_poly = cyclotomic_polynomial(&poly_ring, n);
         Self {
             n_factorization_squarefree: factorization.iter().map(|(p, _)| *p).collect(),
-            sparse_poly_ring: poly_ring,
-            cyclotomic_poly: cyclotomic_poly
         }
     }
 
@@ -127,8 +123,6 @@ impl OddCyclotomicNumberRing {
 impl Clone for OddCyclotomicNumberRing {
     fn clone(&self) -> Self {
         Self {
-            cyclotomic_poly: self.sparse_poly_ring.clone_el(&self.cyclotomic_poly),
-            sparse_poly_ring: self.sparse_poly_ring.clone(),
             n_factorization_squarefree: self.n_factorization_squarefree.clone()
         }
     }
@@ -260,9 +254,10 @@ impl HENumberRing for CompositeCyclotomicNumberRing {
             let r1 = <_ as HENumberRing>::rank(&self.tensor_factor1) as i64;
             let r2 = <_ as HENumberRing>::rank(&self.tensor_factor2) as i64;
 
-            let poly_ring = &self.tensor_factor1.sparse_poly_ring;
-            let Phi_n1 = poly_ring.coerce(&self.tensor_factor1.sparse_poly_ring, self.tensor_factor1.sparse_poly_ring.clone_el(&self.tensor_factor1.cyclotomic_poly));
-            let Phi_n2 = poly_ring.coerce(&self.tensor_factor2.sparse_poly_ring, self.tensor_factor2.sparse_poly_ring.clone_el(&self.tensor_factor2.cyclotomic_poly));
+            let poly_ring = SparsePolyRing::new(StaticRing::<i64>::RING, "X");
+            let poly_ring = &poly_ring;
+            let Phi_n1 = self.tensor_factor1.generating_poly(&poly_ring);
+            let Phi_n2 = self.tensor_factor2.generating_poly(&poly_ring);
             let hom = Fp.can_hom(Fp.integer_ring()).unwrap().compose(Fp.integer_ring().can_hom(poly_ring.base_ring()).unwrap());
             let hom_ref = &hom;
 
@@ -439,8 +434,8 @@ impl<F, A> OddCyclotomicDecomposedNumberRing<F, A>
 }
 
 impl<F, A> HENumberRingMod for OddCyclotomicDecomposedNumberRing<F, A> 
-    where F: FFTAlgorithm<zn_64::ZnBase> + PartialEq,
-        A: Allocator + Clone
+    where F: Send + Sync + FFTAlgorithm<zn_64::ZnBase> + PartialEq,
+        A: Send + Sync + Allocator + Clone
 {
     fn mult_basis_to_small_basis<V>(&self, mut data: V)
         where V: VectorViewMut<zn_64::ZnEl>
@@ -504,8 +499,8 @@ impl<F, A> HENumberRingMod for OddCyclotomicDecomposedNumberRing<F, A>
 }
 
 impl<F, A> HECyclotomicNumberRingMod for OddCyclotomicDecomposedNumberRing<F, A> 
-    where F: FFTAlgorithm<zn_64::ZnBase> + PartialEq,
-        A: Allocator + Clone
+    where F: Send + Sync + FFTAlgorithm<zn_64::ZnBase> + PartialEq,
+        A: Send + Sync + Allocator + Clone
 {
     fn n(&self) -> u64 {
         self.fft_table.len() as u64
@@ -561,8 +556,8 @@ impl<F, A> PartialEq for CompositeCyclotomicDecomposedNumberRing<F, A>
 }
 
 impl<F, A> HENumberRingMod for CompositeCyclotomicDecomposedNumberRing<F, A> 
-    where F: FFTAlgorithm<zn_64::ZnBase> + PartialEq,
-        A: Allocator + Clone
+    where F: Send + Sync + FFTAlgorithm<zn_64::ZnBase> + PartialEq,
+        A: Send + Sync + Allocator + Clone
 {
     fn small_basis_to_mult_basis<V>(&self, mut data: V)
         where V: SwappableVectorViewMut<zn_64::ZnEl>
@@ -630,8 +625,8 @@ impl<F, A> HENumberRingMod for CompositeCyclotomicDecomposedNumberRing<F, A>
 }
 
 impl<F, A> HECyclotomicNumberRingMod for CompositeCyclotomicDecomposedNumberRing<F, A> 
-    where F: FFTAlgorithm<zn_64::ZnBase> + PartialEq,
-        A: Allocator + Clone
+    where F: Send + Sync + FFTAlgorithm<zn_64::ZnBase> + PartialEq,
+        A: Send + Sync + Allocator + Clone
 {
     fn n(&self) -> u64 {
         self.tensor_factor1.n() * self.tensor_factor2.n()

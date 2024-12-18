@@ -21,9 +21,12 @@ use feanor_math::rings::zn::*;
 use feanor_math::seq::*;
 use feanor_math::algorithms::linsolve::LinSolveRing;
 use feanor_math::homomorphism::*;
+
 use serde::de::DeserializeSeed;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 use crate::cyclotomic::*;
+use crate::lintransform::PowerTable;
 use crate::lintransform::CREATE_LINEAR_TRANSFORM_TIME_RECORDER;
 use crate::rings::hypercube::CyclotomicGaloisGroup;
 use crate::rings::hypercube::CyclotomicGaloisGroupEl;
@@ -151,12 +154,13 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
     /// entry of the matrix corresponding to the hypercolumn containing the slot `column_indices`.
     /// 
     pub fn matmul1d<G>(H: &DefaultHypercube<NumberRing, A>, dim_index: usize, matrix: G) -> MatmulTransform<NumberRing, A>
-        where G: Fn(usize, usize, &[usize]) -> El<SlotRingOver<Zn>>
+        where G: Sync + Fn(usize, usize, &[usize]) -> El<SlotRingOver<Zn>>,
+            A: Send + Sync
     {
         record_time!(CREATE_LINEAR_TRANSFORM_TIME_RECORDER, "matmul1d", || {
             let m = H.hypercube().m(dim_index) as i64;
             let mut result = MatmulTransform {
-                data: ((1 - m)..m).map(|s| {
+                data: ((1 - m)..m).into_par_iter().map(|s| {
                     let coeff = H.from_slot_values(H.hypercube().hypercube_iter(|idxs: &[usize]| if idxs[dim_index] as i64 >= s && idxs[dim_index] as i64 - s < m {
                         matrix(idxs[dim_index], (idxs[dim_index] as i64 - s) as usize, idxs)
                     } else {
@@ -224,7 +228,8 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
     /// when called on `((i, k), (j, l), U(<unspecified value>))`.
     /// 
     pub fn blockmatmul1d<'a, G>(H: &DefaultHypercube<NumberRing, A>, dim_index: usize, matrix: G) -> MatmulTransform<NumberRing, A>
-        where G: Fn((usize, usize), (usize, usize), &[usize]) -> El<Zn>
+        where G: Sync + Fn((usize, usize), (usize, usize), &[usize]) -> El<Zn>,
+            A: Send + Sync
     {
         record_time!(CREATE_LINEAR_TRANSFORM_TIME_RECORDER, "blockmatmul1d", || {
             let m = H.hypercube().m(dim_index) as i64;
@@ -234,12 +239,14 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
             let extract_coeff_factors = (0..d).map(|j| trace.extract_coefficient_map(H.slot_ring(), j)).collect::<Vec<_>>();
             
             let poly_ring = DensePolyRing::new(H.slot_ring().base_ring(), "X");
+            let canonical_gen_powertable = PowerTable::new(H.slot_ring(), H.slot_ring().canonical_gen(), H.ring().n() as usize);
             // this is the map `X -> X^p`, which is the frobenius in our case, since we choose the canonical generator of the slot ring as root of unity
-            let apply_frobenius = |x: &El<SlotRingOver<Zn>>, count: i64| poly_ring.evaluate(
-                &H.slot_ring().poly_repr(&poly_ring, x, &H.slot_ring().base_ring().identity()), 
-                &H.slot_ring().pow(H.slot_ring().canonical_gen(), Gal.nonnegative_representative(H.hypercube().frobenius(count))), 
-                &H.slot_ring().inclusion()
-            );
+            let apply_frobenius = |x: &El<SlotRingOver<Zn>>, count: i64| H.slot_ring().sum(
+                H.slot_ring().wrt_canonical_basis(x).iter().enumerate().map(|(i, c)| H.slot_ring().inclusion().mul_ref_map(
+                    &*canonical_gen_powertable.get_power(i as i64 * Gal.nonnegative_representative(H.hypercube().frobenius(count)) as i64),
+                    &c
+                )
+            ));
             
             // the approach is as follows:
             // We consider the matrix by block-diagonals as in [`matmul1d()`], which correspond to shifting slots within a hypercolumn.
@@ -249,14 +256,14 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
             // In other words, we compute the Frobenius-coefficients for the maps `sum a_k X^k -> a_l` for all `l`. Then we we take the
             // desired map as the linear combination of these extract-coefficient-maps.
             let mut result = MatmulTransform {
-                data: ((1 - m)..m).flat_map(|s| (0..d).map(move |frobenius_index| (s, frobenius_index))).map(|(s, frobenius_index)| {
+                data: ((1 - m)..m).into_par_iter().flat_map_iter(|s| (0..d).map(move |frobenius_index| (s, frobenius_index))).map(|(s, frobenius_index)| {
                     let coeff = H.from_slot_values(H.hypercube().hypercube_iter(|idxs| if idxs[dim_index] as i64 >= s && idxs[dim_index] as i64 - s < m {
                         let i = idxs[dim_index];
                         let j = (idxs[dim_index] as i64 - s) as usize;
-                        record_time!(CREATE_LINEAR_TRANSFORM_TIME_RECORDER, "inner_product", || <_ as ComputeInnerProduct>::inner_product(H.slot_ring().get_ring(), (0..d).map(|l| (
+                        <_ as ComputeInnerProduct>::inner_product(H.slot_ring().get_ring(), (0..d).map(|l| (
                             apply_frobenius(&extract_coeff_factors[l], frobenius_index as i64),
                             H.slot_ring().from_canonical_basis((0..d).map(|k| matrix((i, k), (j, l), idxs)))
-                        ))))
+                        )))
                     } else {
                         H.slot_ring().zero()
                     }));

@@ -30,7 +30,7 @@ use crate::IsEq;
 /// represent the same ring, and also all three basis should coincide (in case of the "mult basis",
 /// it should coincide for every prime `p`).
 /// 
-pub trait HENumberRing: PartialEq {
+pub trait HENumberRing: Send + Sync + PartialEq {
 
     type Decomposed: HENumberRingMod;
 
@@ -118,7 +118,7 @@ pub trait HECyclotomicNumberRing: HENumberRing {
 /// elements `𝝵^i` are all "small"), staying in "small basis" whenever possible has
 /// performance benefits, because of the tensor-decomposition.
 /// 
-pub trait HENumberRingMod: PartialEq {
+pub trait HENumberRingMod: Send + Sync + PartialEq {
 
     fn base_ring(&self) -> &zn_64::Zn;
 

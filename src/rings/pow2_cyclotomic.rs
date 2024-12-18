@@ -93,7 +93,7 @@ impl<N> PartialEq for Pow2CyclotomicNumberRing<N> {
 }
 
 impl<N> HENumberRing for Pow2CyclotomicNumberRing<N>
-    where N: Pow2NegacyclicNTT<zn_64::Zn>
+    where N: Send + Sync + Pow2NegacyclicNTT<zn_64::Zn>
 {
     type Decomposed = Pow2CyclotomicDecomposedNumberRing<N, Global>;
 
@@ -146,7 +146,7 @@ impl<N> HENumberRing for Pow2CyclotomicNumberRing<N>
 }
 
 impl<N> HECyclotomicNumberRing for Pow2CyclotomicNumberRing<N>
-    where N: Pow2NegacyclicNTT<zn_64::Zn>
+    where N: Send + Sync + Pow2NegacyclicNTT<zn_64::Zn>
 {
     type DecomposedAsCyclotomic = Pow2CyclotomicDecomposedNumberRing<N, Global>;
 
@@ -262,8 +262,8 @@ pub struct Pow2CyclotomicDecomposedNumberRing<N, A>
 }
 
 impl<N, A> HECyclotomicNumberRingMod for Pow2CyclotomicDecomposedNumberRing<N, A> 
-    where N: Pow2NegacyclicNTT<zn_64::Zn>,
-        A: Allocator
+    where N: Send + Sync + Pow2NegacyclicNTT<zn_64::Zn>,
+        A: Send + Sync + Allocator
 {
     fn n(&self) -> u64 {
         2 * self.ntt.len() as u64
@@ -302,8 +302,8 @@ impl<N, A> PartialEq for Pow2CyclotomicDecomposedNumberRing<N, A>
 }
 
 impl<N, A> HENumberRingMod for Pow2CyclotomicDecomposedNumberRing<N, A> 
-    where N: Pow2NegacyclicNTT<zn_64::Zn>,
-        A: Allocator
+    where N: Send + Sync + Pow2NegacyclicNTT<zn_64::Zn>,
+        A: Send + Sync + Allocator
 {
     fn mult_basis_to_small_basis<V>(&self, mut data: V)
         where V: SwappableVectorViewMut<zn_64::ZnEl>

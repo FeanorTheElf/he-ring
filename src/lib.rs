@@ -9,6 +9,7 @@
 #![feature(generic_arg_infer)]
 #![feature(min_specialization)]
 #![feature(array_chunks)]
+#![feature(mapped_lock_guards)]
 
 #![allow(non_snake_case)]
 #![allow(type_alias_bounds)]

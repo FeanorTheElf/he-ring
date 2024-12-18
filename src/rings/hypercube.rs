@@ -3,6 +3,7 @@ use std::fmt::Debug;
 use std::ptr::Alignment;
 use std::rc::Rc;
 use std::cmp::max;
+use std::sync::Arc;
 use std::time::Instant;
 
 use feanor_math::algorithms::convolution::fft::{FFTRNSBasedConvolution, FFTRNSBasedConvolutionZn};
@@ -47,8 +48,6 @@ use super::dynconv::DynConvolutionAlgorithmConvolution;
 use super::interpolate::FastPolyInterpolation;
 use super::odd_cyclotomic::CompositeCyclotomicNumberRing;
 use super::pow2_cyclotomic::Pow2CyclotomicNumberRing;
-
-const USE_RNS_BASED_CONVOLUTION_FOR_SLOT_RING_THRESHOLD: usize = 30;
 
 const ZZi64: StaticRing<i64> = StaticRing::RING;
 
@@ -471,7 +470,7 @@ fn get_prim_root_of_unity<R>(ring: R, m: usize) -> El<R>
     return result;
 }
 
-pub type SlotRingOver<R> = AsLocalPIR<FreeAlgebraImpl<R, Vec<El<R>>, Global, DynConvolutionAlgorithmConvolution<<R as RingStore>::Type, Rc<dyn DynConvolutionAlgorithm<<R as RingStore>::Type>>>>>;
+pub type SlotRingOver<R> = AsLocalPIR<FreeAlgebraImpl<R, Vec<El<R>>, Global, DynConvolutionAlgorithmConvolution<<R as RingStore>::Type, Arc<dyn Send + Sync + DynConvolutionAlgorithm<<R as RingStore>::Type>>>>>;
 pub type SlotRingOf<R> = SlotRingOver<RingValue<BaseRing<R>>>;
 
 pub type DefaultHypercube<'a, NumberRing, A = Global> = HypercubeIsomorphism<&'a DecompositionRing<NumberRing, Zn, A>>;
@@ -552,13 +551,7 @@ impl<R> HypercubeIsomorphism<R>
             slot_ring_moduli
         });
 
-        let slot_ring_convolution: DynConvolutionAlgorithmConvolution<_, Rc<dyn DynConvolutionAlgorithm<<<R::Type as RingExtension>::BaseRing as RingStore>::Type>>> = if d < USE_RNS_BASED_CONVOLUTION_FOR_SLOT_RING_THRESHOLD {
-            DynConvolutionAlgorithmConvolution::new(Rc::new(STANDARD_CONVOLUTION))
-        } else {
-            let convolution: FFTRNSBasedConvolutionZn = FFTRNSBasedConvolution::new_with(max_log2_len, BigIntRing::RING, Global).into();
-            DynConvolutionAlgorithmConvolution::new(Rc::new(convolution))
-        };
-
+        let slot_ring_convolution = Self::create_slot_ring_convolution(d);
         let slot_rings = log_time::<_, _, LOG, _>("[HypercubeIsomorphism::new] Computing slot rings", |[]| slot_ring_moduli.iter().map(|f| {
             let modulus = (0..d).map(|i| base_poly_ring.base_ring().get_ring().delegate(base_poly_ring.base_ring().negate(base_poly_ring.base_ring().clone_el(base_poly_ring.coefficient_at(f, i))))).collect::<Vec<_>>();
             let slot_ring = FreeAlgebraImpl::new_with(
@@ -594,13 +587,7 @@ impl<R> HypercubeIsomorphism<R>
     {
         let (p, e) = is_prime_power(&ZZi64, &new_ring.characteristic(&ZZi64).unwrap()).unwrap();
         let d = self.hypercube().d();
-        let max_log2_len = ZZi64.abs_log2_ceil(&(d as i64)).unwrap() + 1;
-        let slot_ring_convolution: DynConvolutionAlgorithmConvolution<_, Rc<dyn DynConvolutionAlgorithm<<<RNew::Type as RingExtension>::BaseRing as RingStore>::Type>>> = if d < USE_RNS_BASED_CONVOLUTION_FOR_SLOT_RING_THRESHOLD {
-            DynConvolutionAlgorithmConvolution::new(Rc::new(STANDARD_CONVOLUTION))
-        } else {
-            let convolution: FFTRNSBasedConvolutionZn = FFTRNSBasedConvolution::new_with(max_log2_len, BigIntRing::RING, Global).into();
-            DynConvolutionAlgorithmConvolution::new(Rc::new(convolution))
-        };
+        let slot_ring_convolution = HypercubeIsomorphism::<RNew>::create_slot_ring_convolution(d);
         let red_map = ZnReductionMap::new(self.ring().base_ring(), new_ring.base_ring()).unwrap();
         let poly_ring = DensePolyRing::new(new_ring.base_ring(), "X");
         let slot_rings = self.slot_rings.iter().map(|slot_ring| {
@@ -626,6 +613,11 @@ impl<R> HypercubeIsomorphism<R>
             ring: new_ring,
             slot_rings: slot_rings,
         };
+    }
+
+    fn create_slot_ring_convolution(d: usize) -> DynConvolutionAlgorithmConvolution<<<R::Type as RingExtension>::BaseRing as RingStore>::Type, Arc<dyn Send + Sync + DynConvolutionAlgorithm<<<R::Type as RingExtension>::BaseRing as RingStore>::Type>>> {
+        let max_log2_len = ZZi64.abs_log2_ceil(&(d as i64)).unwrap() + 1;
+        DynConvolutionAlgorithmConvolution::new(Arc::new(STANDARD_CONVOLUTION))
     }
 
     pub fn hypercube(&self) -> &HypercubeStructure {

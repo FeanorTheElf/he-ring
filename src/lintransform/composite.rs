@@ -420,13 +420,12 @@ fn test_powcoeffs_to_slots_fat_large() {
     for transform in &transform {
         current = ring.get_ring().compute_linear_transform(&H, &current, &transform);
     }
+
     let expected = H.from_slot_values(H.hypercube().hypercube_iter(|idxs| if idxs[0] == 7 && idxs[1] == 2 {
-        H.slot_ring().pow(H.slot_ring().canonical_gen(), 7)
+        H.slot_ring().one()
     } else {
         H.slot_ring().zero()
     }));
-    for x in H.get_slot_values(&current) {
-        H.slot_ring().println(&x);
-    }
+
     assert_el_eq!(ring, expected, current);
 }
