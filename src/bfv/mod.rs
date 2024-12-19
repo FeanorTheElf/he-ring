@@ -345,6 +345,39 @@ pub trait BFVParams {
             )
         }
     }
+    
+    fn hom_compute_linear_transform<'a, Transform, const LOG: bool>(
+        P: &PlaintextRing<Self>, 
+        C: &CiphertextRing<Self>, 
+        input: Ciphertext<Self>, 
+        transform: &[Transform], 
+        gk: &[(ZnEl, KeySwitchKey<'a, Self>)], 
+        key_switches: &mut usize
+    ) -> Ciphertext<Self>
+        where Self: 'a,
+            Transform: HELinearTransform<NumberRing<Self>, Global>
+    {
+        let Gal = P.get_ring().cyclotomic_index_ring();
+        let get_gk = |g: &ZnEl| &gk.iter().filter(|(s, _)| Gal.eq_el(g, s)).next().unwrap().1;
+    
+        return transform.iter().fold(input, |current, T| T.evaluate_generic(
+            current,
+            |lhs, rhs| {
+                Self::hom_add(C, lhs, rhs)
+            }, 
+            |value, factor| {
+                Self::hom_mul_plain(P, C, factor, value)
+            },
+            |value, gs| {
+                *key_switches += gs.len();
+                let result = log_time::<_, _, LOG, _>(format!("Computing {} galois automorphisms", gs.len()).as_str(), |[]| 
+                    Self::hom_galois_many(C, value, gs, gs.as_fn().map_fn(|g| get_gk(g)))
+                );
+                return result;
+            },
+            |value| Self::clone_ct(C, value)
+        ));
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -473,39 +506,6 @@ impl BFVParams for CompositeSingleRNSBFV {
         );
         return (C, Cmul);
     }
-}
-
-pub fn hom_compute_linear_transform<'a, Params, Transform, const LOG: bool>(
-    P: &PlaintextRing<Params>, 
-    C: &CiphertextRing<Params>, 
-    input: Ciphertext<Params>, 
-    transform: &[Transform], 
-    gk: &[(ZnEl, KeySwitchKey<'a, Params>)], 
-    key_switches: &mut usize
-) -> Ciphertext<Params>
-    where Params: 'a + BFVParams,
-        Transform: HELinearTransform<NumberRing<Params>, Global>
-{
-    let Gal = P.get_ring().cyclotomic_index_ring();
-    let get_gk = |g: &ZnEl| &gk.iter().filter(|(s, _)| Gal.eq_el(g, s)).next().unwrap().1;
-
-    return transform.iter().fold(input, |current, T| T.evaluate_generic(
-        current,
-        |lhs, rhs| {
-            Params::hom_add(C, lhs, rhs)
-        }, 
-        |value, factor| {
-            Params::hom_mul_plain(P, C, factor, value)
-        },
-        |value, gs| {
-            *key_switches += gs.len();
-            let result = log_time::<_, _, LOG, _>(format!("Computing {} galois automorphisms", gs.len()).as_str(), |[]| 
-                Params::hom_galois_many(C, value, gs, gs.as_fn().map_fn(|g| get_gk(g)))
-            );
-            return result;
-        },
-        |value| Params::clone_ct(C, value)
-    ));
 }
 
 pub fn hom_evaluate_circuit<'a, 'b, Params: BFVParams>(
@@ -874,7 +874,7 @@ fn print_timings_single_rns_composite_bfv_mul() {
 #[test]
 #[ignore]
 fn test_hom_eval_powcoeffs_to_slots_fat_large() {let mut rng = thread_rng();
-    let params = CompositeSingleRNSBFV {
+    let params = CompositeBFV {
         log2_q_min: 790,
         log2_q_max: 800,
         n1: 127,
@@ -891,7 +891,7 @@ fn test_hom_eval_powcoeffs_to_slots_fat_large() {let mut rng = thread_rng();
     );
 
     let sk = log_time::<_, _, true, _>("GenSK", |[]| 
-        CompositeSingleRNSBFV::gen_sk(&C, &mut rng)
+        CompositeBFV::gen_sk(&C, &mut rng)
     );
 
     let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(337 * 127), 2);
@@ -907,16 +907,16 @@ fn test_hom_eval_powcoeffs_to_slots_fat_large() {let mut rng = thread_rng();
 
     let m = P.int_hom().map(3);
     let ct = log_time::<_, _, true, _>("EncSym", |[]|
-        CompositeSingleRNSBFV::enc_sym(&P, &C, &mut rng, &m, &sk)
+        CompositeBFV::enc_sym(&P, &C, &mut rng, &m, &sk)
     );
 
     let gks = log_time::<_, _, true, _>("GenGK", |[]| 
-        transform.iter().flat_map(|t| t.required_galois_keys().into_iter()).map(|g| (g, CompositeSingleRNSBFV::gen_gk(&C, &mut rng, &sk, g, digits))).collect::<Vec<_>>()
+        transform.iter().flat_map(|t| t.required_galois_keys().into_iter()).map(|g| (g, CompositeBFV::gen_gk(&C, &mut rng, &sk, g, digits))).collect::<Vec<_>>()
     );
 
     clear_all_timings();
     let result = log_time::<_, _, true, _>("ApplyTransform", |[key_switches]| 
-        hom_compute_linear_transform::<CompositeSingleRNSBFV, _, true>(&P, &C, ct, &transform, &gks, key_switches)
+        CompositeBFV::hom_compute_linear_transform::<_, true>(&P, &C, ct, &transform, &gks, key_switches)
     );
     print_all_timings();
 }

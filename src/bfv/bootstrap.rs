@@ -438,7 +438,7 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
         debug_assert_eq!(ZZ.pow(self.p(), self.e()), *P_main.base_ring().modulus());
 
         let values_in_coefficients = log_time::<_, _, LOG, _>("1. Computing Slots-to-Coeffs transform", |[key_switches]| {
-            return hom_compute_linear_transform::<Params, _, false>(P_base, C, ct, &self.slots_to_coeffs_thin, gk, key_switches);
+            return Params::hom_compute_linear_transform::<_, false>(P_base, C, ct, &self.slots_to_coeffs_thin, gk, key_switches);
         });
         if let Some(sk) = debug_sk {
             Params::dec_println(P_base, C, &values_in_coefficients, sk);
@@ -455,9 +455,9 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
         }
 
         let noisy_decryption_in_slots = log_time::<_, _, LOG, _>("3. Computing Coeffs-to-Slots transform", |[key_switches]| {
-            let moved_to_slots = hom_compute_linear_transform::<Params, _, false>(P_main, C, noisy_decryption, &self.coeffs_to_slots_thin.0, gk, key_switches);
+            let moved_to_slots = Params::hom_compute_linear_transform::<_, false>(P_main, C, noisy_decryption, &self.coeffs_to_slots_thin.0, gk, key_switches);
             if let Some(trace) = &self.coeffs_to_slots_thin.1 {
-                return hom_compute_linear_transform::<Params, _, false>(P_main, C, moved_to_slots, std::slice::from_ref(trace), gk, key_switches);
+                return Params::hom_compute_linear_transform::<_, false>(P_main, C, moved_to_slots, std::slice::from_ref(trace), gk, key_switches);
             } else {
                 return moved_to_slots;
             };
