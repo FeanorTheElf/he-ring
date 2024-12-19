@@ -33,6 +33,8 @@ use crate::cyclotomic::*;
 use crate::digitextract::ArithCircuit;
 use crate::euler_phi;
 use crate::extend_sampled_primes;
+use crate::lintransform::composite::powcoeffs_to_slots_fat;
+use crate::lintransform::matmul::CompiledLinearTransform;
 use crate::lintransform::HELinearTransform;
 use crate::rings::bxv::BXVCiphertextRing;
 use crate::rings::double_rns_managed::*;
@@ -473,7 +475,7 @@ impl BFVParams for CompositeSingleRNSBFV {
     }
 }
 
-pub fn hom_compute_linear_transform<'a, Params: BFVParams, Transform: HELinearTransform<NumberRing<Params>, Global>>(
+pub fn hom_compute_linear_transform<'a, Params, Transform, const LOG: bool>(
     P: &PlaintextRing<Params>, 
     C: &CiphertextRing<Params>, 
     input: Ciphertext<Params>, 
@@ -481,7 +483,8 @@ pub fn hom_compute_linear_transform<'a, Params: BFVParams, Transform: HELinearTr
     gk: &[(ZnEl, KeySwitchKey<'a, Params>)], 
     key_switches: &mut usize
 ) -> Ciphertext<Params>
-    where Params: 'a
+    where Params: 'a + BFVParams,
+        Transform: HELinearTransform<NumberRing<Params>, Global>
 {
     let Gal = P.get_ring().cyclotomic_index_ring();
     let get_gk = |g: &ZnEl| &gk.iter().filter(|(s, _)| Gal.eq_el(g, s)).next().unwrap().1;
@@ -496,7 +499,10 @@ pub fn hom_compute_linear_transform<'a, Params: BFVParams, Transform: HELinearTr
         },
         |value, gs| {
             *key_switches += gs.len();
-            Params::hom_galois_many(C, value, gs, gs.as_fn().map_fn(|g| get_gk(g)))
+            let result = log_time::<_, _, LOG, _>(format!("Computing {} galois automorphisms", gs.len()).as_str(), |[]| 
+                Params::hom_galois_many(C, value, gs, gs.as_fn().map_fn(|g| get_gk(g)))
+            );
+            return result;
         },
         |value| Params::clone_ct(C, value)
     ));
@@ -863,4 +869,54 @@ fn print_timings_single_rns_composite_bfv_mul() {
     );
     print_all_timings();
     assert_el_eq!(&P, &P.int_hom().map(1), &CompositeSingleRNSBFV::dec(&P, &C, res, &sk));
+}
+
+#[test]
+#[ignore]
+fn test_hom_eval_powcoeffs_to_slots_fat_large() {let mut rng = thread_rng();
+    let params = CompositeSingleRNSBFV {
+        log2_q_min: 790,
+        log2_q_max: 800,
+        n1: 127,
+        n2: 337
+    };
+    let t = 65536;
+    let digits = 3;
+    
+    let P = log_time::<_, _, true, _>("CreatePtxtRing", |[]|
+        params.create_plaintext_ring(t)
+    );
+    let (C, C_mul) = log_time::<_, _, true, _>("CreateCtxtRing", |[]|
+        params.create_ciphertext_rings()
+    );
+
+    let sk = log_time::<_, _, true, _>("GenSK", |[]| 
+        CompositeSingleRNSBFV::gen_sk(&C, &mut rng)
+    );
+
+    let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(337 * 127), 2);
+    let H = HypercubeIsomorphism::new::<true>(&P, hypercube);
+    assert_eq!(337, H.hypercube().factor_of_n(0).unwrap());
+    assert_eq!(16, H.hypercube().m(0));
+    assert_eq!(127, H.hypercube().factor_of_n(1).unwrap());
+    assert_eq!(126, H.hypercube().m(1));
+
+    let transform = log_time::<_, _, true, _>("CreateTransform", |[]| 
+        powcoeffs_to_slots_fat(&H).into_iter().map(|t| CompiledLinearTransform::compile(&H, t)).collect::<Vec<_>>()
+    );
+
+    let m = P.int_hom().map(3);
+    let ct = log_time::<_, _, true, _>("EncSym", |[]|
+        CompositeSingleRNSBFV::enc_sym(&P, &C, &mut rng, &m, &sk)
+    );
+
+    let gks = log_time::<_, _, true, _>("GenGK", |[]| 
+        transform.iter().flat_map(|t| t.required_galois_keys().into_iter()).map(|g| (g, CompositeSingleRNSBFV::gen_gk(&C, &mut rng, &sk, g, digits))).collect::<Vec<_>>()
+    );
+
+    clear_all_timings();
+    let result = log_time::<_, _, true, _>("ApplyTransform", |[key_switches]| 
+        hom_compute_linear_transform::<CompositeSingleRNSBFV, _, true>(&P, &C, ct, &transform, &gks, key_switches)
+    );
+    print_all_timings();
 }

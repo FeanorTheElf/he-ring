@@ -19,7 +19,7 @@ use feanor_math::rings::poly::generic_impls::Isomorphism;
 use feanor_math::homomorphism::*;
 use feanor_math::assert_el_eq;
 use feanor_math::integer::{int_cast, BigIntRing, BigIntRingBase, IntegerRingStore};
-use feanor_math::iters::multi_cartesian_product;
+use feanor_math::iters::{clone_slice, multi_cartesian_product};
 use feanor_math::local::PrincipalLocalRing;
 use feanor_math::primitive_int::{StaticRing, StaticRingBase};
 use feanor_math::rings::extension::extension_impl::{FreeAlgebraImpl, FreeAlgebraImplBase};
@@ -206,6 +206,7 @@ pub struct HypercubeStructure {
     ms: Vec<usize>,
     ord_gs: Vec<usize>,
     gs: Vec<CyclotomicGaloisGroupEl>,
+    representations: Vec<(CyclotomicGaloisGroupEl, /* first element is frobenius */ Box<[usize]>)>,
     choice: HypercubeTypeData
 }
 
@@ -228,12 +229,12 @@ impl HypercubeStructure {
             assert!(!galois_group.is_identity(galois_group.pow(p, d as i64 / factor)));
         }
         // check whether the given values indeed define a bijection modulo `<p>`
-        let mut all_elements = multi_cartesian_product(ms.iter().map(|mi| 0..*mi), |idxs| galois_group.prod(idxs.iter().zip(gs.iter()).map(|(i, g)| galois_group.pow(*g, *i as i64))), |_, x| *x)
-            .flat_map(|g| (0..d).map(move |i| galois_group.mul(g, galois_group.pow(p, i as i64))))
-            .map(|g| galois_group.nonnegative_representative(g))
-            .collect::<Vec<_>>();
-        all_elements.sort_unstable();
-        assert!((1..all_elements.len()).all(|i| all_elements[i - 1] != all_elements[i]), "not a bijection");
+        let mut all_elements = multi_cartesian_product([(0..d)].into_iter().chain(ms.iter().map(|mi| 0..*mi)), |idxs| (
+            galois_group.prod(idxs.iter().zip([&p].into_iter().chain(gs.iter())).map(|(i, g)| galois_group.pow(*g, *i as i64))),
+            clone_slice(idxs)
+        ), |_, x| *x).collect::<Vec<_>>();
+        all_elements.sort_unstable_by_key(|(g, _)| galois_group.nonnegative_representative(*g));
+        assert!((1..all_elements.len()).all(|i| !galois_group.eq_el(all_elements[i - 1].0, all_elements[i].0)), "not a bijection");
         assert_eq!(galois_group.group_order(), all_elements.len());
 
         return Self {
@@ -243,7 +244,8 @@ impl HypercubeStructure {
             ms: ms,
             ord_gs: gs.iter().map(|g| galois_group.element_order(*g)).collect(),
             gs: gs,
-            choice: HypercubeTypeData::Generic
+            choice: HypercubeTypeData::Generic,
+            representations: all_elements
         };
     }
 
@@ -366,6 +368,11 @@ impl HypercubeStructure {
     pub fn map_usize(&self, idxs: &[usize]) -> CyclotomicGaloisGroupEl {
         assert_eq!(self.ms.len(), idxs.len());
         self.galois_group.prod(idxs.iter().zip(self.gs.iter()).map(|(i, g)| self.galois_group.pow(*g, *i as i64)))
+    }
+
+    pub fn std_preimage(&self, g: CyclotomicGaloisGroupEl) -> &[usize] {
+        let idx = self.representations.binary_search_by_key(&self.galois_group.nonnegative_representative(g), |(g, _)| self.galois_group.nonnegative_representative(*g)).unwrap();
+        return &self.representations[idx].1;
     }
 
     pub fn is_tensor_product_compatible(&self) -> bool {

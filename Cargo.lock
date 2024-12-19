@@ -150,9 +150,9 @@ dependencies = [
 
 [[package]]
 name = "feanor-math-hexl"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b6a4486f82fea68276ad6223a246a1aee95872ecccdf5001c5cefa731f86e1e"
+checksum = "5867a8c8152c3de5280f7af4862a67d74ea4101de9a95b4832a1729a03b88a78"
 dependencies = [
  "cpp",
  "cpp_build",
