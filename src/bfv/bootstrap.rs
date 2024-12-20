@@ -558,7 +558,7 @@ fn test_pow2_bfv_thin_bootstrapping_23() {
 }
 
 #[test]
-fn test_composite_bfv_thin_bootstrapping_2() {
+fn test_composite_bfv_thin_bootstrapping_2_takes_long() {
     let mut rng = thread_rng();
     
     let params = CompositeBFV {

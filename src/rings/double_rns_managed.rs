@@ -5,6 +5,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::atomic::AtomicU64;
 
+use feanor_math::algorithms::convolution::ConvolutionAlgorithm;
 use feanor_math::assert_el_eq;
 use feanor_math::delegate::DelegateRing;
 use feanor_math::homomorphism::*;
@@ -13,9 +14,11 @@ use feanor_math::ring::*;
 use feanor_math::rings::extension::*;
 use feanor_math::rings::finite::FiniteRing;
 use feanor_math::rings::zn::*;
+use feanor_math::seq::VectorView;
 use feanor_math::specialization::FiniteRingOperation;
 use feanor_math::specialization::FiniteRingSpecializable;
 use zn_64::Zn;
+use zn_64::ZnBase;
 
 use crate::cyclotomic::CyclotomicRing;
 use crate::rings::number_ring::HENumberRing;
@@ -27,7 +30,10 @@ use super::decomposition_ring::DecompositionRingBase;
 use super::double_rns_ring::*;
 use super::gadget_product;
 use super::number_ring::HECyclotomicNumberRing;
+use super::number_ring::HENumberRingMod;
 use super::pow2_cyclotomic::Pow2CyclotomicNumberRing;
+use super::single_rns_ring::SingleRNSRing;
+use super::single_rns_ring::SingleRNSRingBase;
 
 ///
 /// Like [`DoubleRNSRing`] but stores element in whatever representation they
@@ -136,7 +142,7 @@ impl<NumberRing, A> ManagedDoubleRNSRingBase<NumberRing, A>
     /// `force_coeff_repr()`.
     /// 
     pub fn force_small_basis_repr(&self, value: &ManagedDoubleRNSEl<NumberRing, A>) {
-        if let Some(coeff) = self.to_coeff(value) {
+        if let Some(coeff) = self.to_small_basis(value) {
             let new_value = self.base.clone_el_non_fft(&*coeff);
             drop(coeff);
             *value.internal.borrow_mut() = DoubleRNSElInternal::SmallBasis(new_value);
@@ -153,7 +159,7 @@ impl<NumberRing, A> ManagedDoubleRNSRingBase<NumberRing, A>
         }
     }
 
-    fn to_coeff<'a>(&self, value: &'a ManagedDoubleRNSEl<NumberRing, A>) -> Option<Ref<'a, SmallBasisEl<NumberRing, A>>> {
+    fn to_small_basis<'a>(&self, value: &'a ManagedDoubleRNSEl<NumberRing, A>) -> Option<Ref<'a, SmallBasisEl<NumberRing, A>>> {
         match self.get_repr(value) {
             ManagedDoubleRNSElRepresentation::Sum => {
                 let mut result = value.internal.borrow_mut();
@@ -385,7 +391,7 @@ impl<NumberRing, A> BXVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, A
         where NumberRing: HENumberRing,
             Op: RNSOperation<RingType = zn_64::ZnBase>
     {
-        let result = if let Some(value) = from.to_coeff(el) {
+        let result = if let Some(value) = from.to_small_basis(el) {
             self.base.perform_rns_op_from(&from.base, &*value, op)
         } else {
             self.base.perform_rns_op_from(&from.base, &from.zero, op)
@@ -416,7 +422,7 @@ impl<NumberRing, A> BXVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, A
             A2: Allocator + Clone,
             Op: RNSOperation<RingType = zn_64::ZnBase>
     {
-        if let Some(value) = self.to_coeff(element) {
+        if let Some(value) = self.to_small_basis(element) {
             return self.base.perform_rns_op_to_decompring(to, &*value, op);
         } else {
             return self.base.perform_rns_op_to_decompring(to, &self.zero, op);
@@ -439,7 +445,7 @@ impl<NumberRing, A> BXVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, A
     }
 
     fn to_gadget_product_lhs<'a>(&'a self, el: Self::Element, digits: usize) -> Self::GadgetProductLhsOperand<'a> {
-        if let Some(nonzero) = self.to_coeff(&el) {
+        if let Some(nonzero) = self.to_small_basis(&el) {
             GadgetProductLhsOperand {
                 base: gadget_product::double_rns::GadgetProductLhsOperand::create_from_element(&self.base, digits, self.base.clone_el_non_fft(&*nonzero))
             }
@@ -457,7 +463,7 @@ impl<NumberRing, A> BXVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, A
     fn set_rns_factor<'b>(&self, rhs_operand: &mut Self::GadgetProductRhsOperand<'b>, i: usize, el: Self::Element)
         where Self: 'b
     {
-        if let Some(nonzero) = self.to_coeff(&el) {
+        if let Some(nonzero) = self.to_small_basis(&el) {
             rhs_operand.base.set_rns_factor(i, self.base.clone_el_non_fft(&*nonzero))
         } else {
             rhs_operand.base.set_rns_factor(i, self.base.clone_el_non_fft(&self.zero))
@@ -511,7 +517,7 @@ impl<NumberRing, A> RingBase for ManagedDoubleRNSRingBase<NumberRing, A>
     fn eq_el(&self, lhs: &Self::Element, rhs: &Self::Element) -> bool {
         match (self.get_repr(lhs), self.get_repr(rhs)) {
             (ManagedDoubleRNSElRepresentation::Zero, _) | (_, ManagedDoubleRNSElRepresentation::Zero) => self.is_zero(lhs),
-            (ManagedDoubleRNSElRepresentation::SmallBasis, _) | (_, ManagedDoubleRNSElRepresentation::SmallBasis) => self.base.eq_el_non_fft(&*self.to_coeff(lhs).unwrap(), &*self.to_coeff(rhs).unwrap()),
+            (ManagedDoubleRNSElRepresentation::SmallBasis, _) | (_, ManagedDoubleRNSElRepresentation::SmallBasis) => self.base.eq_el_non_fft(&*self.to_small_basis(lhs).unwrap(), &*self.to_small_basis(rhs).unwrap()),
             _ => self.base.eq_el(&*self.to_doublerns(lhs).unwrap(), &*self.to_doublerns(rhs).unwrap())
         }
     }
@@ -519,7 +525,7 @@ impl<NumberRing, A> RingBase for ManagedDoubleRNSRingBase<NumberRing, A>
     fn is_zero(&self, value: &Self::Element) -> bool {
         match self.get_repr(value) {
             ManagedDoubleRNSElRepresentation::Zero => true,
-            ManagedDoubleRNSElRepresentation::Sum | ManagedDoubleRNSElRepresentation::SmallBasis | ManagedDoubleRNSElRepresentation::Both => self.base.eq_el_non_fft(&*self.to_coeff(value).unwrap(), &self.zero),
+            ManagedDoubleRNSElRepresentation::Sum | ManagedDoubleRNSElRepresentation::SmallBasis | ManagedDoubleRNSElRepresentation::Both => self.base.eq_el_non_fft(&*self.to_small_basis(value).unwrap(), &self.zero),
             ManagedDoubleRNSElRepresentation::DoubleRNS => self.base.is_zero(&*self.to_doublerns(value).unwrap())
         }
     }
@@ -743,7 +749,7 @@ impl<NumberRing, A> FreeAlgebra for ManagedDoubleRNSRingBase<NumberRing, A>
     }
 
     fn wrt_canonical_basis<'a>(&'a self, el: &'a Self::Element) -> Self::VectorRepresentation<'a> {
-        if let Some(result) = self.to_coeff(el) {
+        if let Some(result) = self.to_small_basis(el) {
             self.base.wrt_canonical_basis_non_fft(self.base.clone_el_non_fft(&result))
         } else {
             self.base.wrt_canonical_basis_non_fft(self.base.clone_el_non_fft(&self.zero))
@@ -796,12 +802,135 @@ impl<NumberRing, A> FiniteRing for ManagedDoubleRNSRingBase<NumberRing, A>
     }
 }
 
+impl<NumberRing, A1, A2, C> CanHomFrom<SingleRNSRingBase<NumberRing, A1, C>> for ManagedDoubleRNSRingBase<NumberRing, A2>
+    where NumberRing: HECyclotomicNumberRing,
+        A1: Allocator + Clone,
+        A2: Allocator + Clone,
+        C: ConvolutionAlgorithm<ZnBase>
+{
+    type Homomorphism = <DoubleRNSRingBase<NumberRing, A2> as CanHomFrom<SingleRNSRingBase<NumberRing, A1, C>>>::Homomorphism;
+
+    fn has_canonical_hom(&self, from: &SingleRNSRingBase<NumberRing, A1, C>) -> Option<Self::Homomorphism> {
+        self.base.has_canonical_hom(from)
+    }
+
+    fn map_in_ref(&self, from: &SingleRNSRingBase<NumberRing, A1, C>, el: &<SingleRNSRingBase<NumberRing, A1, C> as RingBase>::Element, hom: &Self::Homomorphism) -> Self::Element {
+        ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::SmallBasis(self.base.map_in_from_singlerns(from, el, hom)))) }
+    }
+
+    fn map_in(&self, from: &SingleRNSRingBase<NumberRing, A1, C>, el: <SingleRNSRingBase<NumberRing, A1, C> as RingBase>::Element, hom: &Self::Homomorphism) -> Self::Element {
+        if from.is_zero(&el) {
+            return self.zero();
+        }
+        self.map_in_ref(from, &el, hom)
+    }
+}
+
+impl<NumberRing, A1, A2> CanHomFrom<DoubleRNSRingBase<NumberRing, A1>> for ManagedDoubleRNSRingBase<NumberRing, A2>
+    where NumberRing: HECyclotomicNumberRing,
+        A1: Allocator + Clone,
+        A2: Allocator + Clone
+{
+    type Homomorphism = <DoubleRNSRingBase<NumberRing, A2> as CanHomFrom<DoubleRNSRingBase<NumberRing, A2>>>::Homomorphism;
+
+    fn has_canonical_hom(&self, from: &DoubleRNSRingBase<NumberRing, A1>) -> Option<Self::Homomorphism> {
+        self.base.has_canonical_hom(from)
+    }
+
+    fn map_in(&self, from: &DoubleRNSRingBase<NumberRing, A1>, el: <DoubleRNSRingBase<NumberRing, A1> as RingBase>::Element, hom: &Self::Homomorphism) -> Self::Element {
+        if from.is_zero(&el) {
+            return self.zero();
+        }
+        ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::DoubleRNS(self.base.map_in(from, el, hom)))) }
+    }
+}
+
+impl<NumberRing, A1, A2> CanHomFrom<ManagedDoubleRNSRingBase<NumberRing, A1>> for ManagedDoubleRNSRingBase<NumberRing, A2>
+    where NumberRing: HECyclotomicNumberRing,
+        A1: Allocator + Clone,
+        A2: Allocator + Clone
+{
+    type Homomorphism = <DoubleRNSRingBase<NumberRing, A2> as CanHomFrom<DoubleRNSRingBase<NumberRing, A2>>>::Homomorphism;
+
+    fn has_canonical_hom(&self, from: &ManagedDoubleRNSRingBase<NumberRing, A1>) -> Option<Self::Homomorphism> {
+        self.base.has_canonical_hom(&from.base)
+    }
+
+    fn map_in_ref(&self, from: &ManagedDoubleRNSRingBase<NumberRing, A1>, el: &<ManagedDoubleRNSRingBase<NumberRing, A1> as RingBase>::Element, hom: &Self::Homomorphism) -> Self::Element {
+        if let Some(el) = from.to_doublerns(el) {
+            ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::DoubleRNS(self.base.map_in_ref(&from.base, &*el, hom)))) }
+        } else {
+            self.zero()
+        }
+    }
+
+    fn map_in(&self, from: &ManagedDoubleRNSRingBase<NumberRing, A1>, el: <ManagedDoubleRNSRingBase<NumberRing, A1> as RingBase>::Element, hom: &Self::Homomorphism) -> Self::Element {
+        self.map_in_ref(from, &el, hom)
+    }
+}
+
+impl<NumberRing, A1, A2, C> CanIsoFromTo<SingleRNSRingBase<NumberRing, A1, C>> for ManagedDoubleRNSRingBase<NumberRing, A2>
+    where NumberRing: HECyclotomicNumberRing,
+        A1: Allocator + Clone,
+        A2: Allocator + Clone,
+        C: ConvolutionAlgorithm<ZnBase>
+{
+    type Isomorphism = <DoubleRNSRingBase<NumberRing, A2> as CanIsoFromTo<SingleRNSRingBase<NumberRing, A1, C>>>::Isomorphism;
+
+    fn has_canonical_iso(&self, to: &SingleRNSRingBase<NumberRing, A1, C>) -> Option<Self::Isomorphism> {
+        self.base.has_canonical_iso(to)
+    }
+
+    fn map_out(&self, to: &SingleRNSRingBase<NumberRing, A1, C>, el: Self::Element, iso: &Self::Isomorphism) -> <SingleRNSRingBase<NumberRing, A1, C> as RingBase>::Element {
+        if let Some(el) = self.to_small_basis(&el) {
+            self.base.map_out_to_singlerns(to, self.base.clone_el_non_fft(&*&el), iso)
+        } else {
+            to.zero()
+        }
+    }
+}
+
+impl<NumberRing, A1, A2> CanIsoFromTo<DoubleRNSRingBase<NumberRing, A1>> for ManagedDoubleRNSRingBase<NumberRing, A2>
+    where NumberRing: HECyclotomicNumberRing,
+        A1: Allocator + Clone,
+        A2: Allocator + Clone
+{
+    type Isomorphism = <DoubleRNSRingBase<NumberRing, A2> as CanIsoFromTo<DoubleRNSRingBase<NumberRing, A2>>>::Isomorphism;
+
+    fn has_canonical_iso(&self, to: &DoubleRNSRingBase<NumberRing, A1>) -> Option<Self::Isomorphism> {
+        self.base.has_canonical_iso(to)
+    }
+
+    fn map_out(&self, to: &DoubleRNSRingBase<NumberRing, A1>, el: Self::Element, iso: &Self::Isomorphism) -> <DoubleRNSRingBase<NumberRing, A1> as RingBase>::Element {
+        if let Some(el) = self.to_doublerns(&el) {
+            self.base.map_out(to, self.base.clone_el(&*&el), iso)
+        } else {
+            to.zero()
+        }
+    }
+}
+
+impl<NumberRing, A1, A2> CanIsoFromTo<ManagedDoubleRNSRingBase<NumberRing, A1>> for ManagedDoubleRNSRingBase<NumberRing, A2>
+    where NumberRing: HECyclotomicNumberRing,
+        A1: Allocator + Clone,
+        A2: Allocator + Clone
+{
+    type Isomorphism = <DoubleRNSRingBase<NumberRing, A1> as CanHomFrom<DoubleRNSRingBase<NumberRing, A2>>>::Homomorphism;
+
+    fn has_canonical_iso(&self, to: &ManagedDoubleRNSRingBase<NumberRing, A1>) -> Option<Self::Isomorphism> {
+        to.has_canonical_hom(self)
+    }
+
+    fn map_out(&self, to: &ManagedDoubleRNSRingBase<NumberRing, A1>, el: Self::Element, iso: &Self::Isomorphism) -> <ManagedDoubleRNSRingBase<NumberRing, A1> as RingBase>::Element {
+        to.map_in(self, el, iso)
+    }
+}
+
 #[test]
 fn test_ring_axioms() {
     let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
     let ring = ManagedDoubleRNSRingBase::new(Pow2CyclotomicNumberRing::new(16), rns_base);
     
-    let base_ring = ring.base_ring();
     let elements = vec![
         ring.zero(),
         ring.one(),
@@ -816,6 +945,51 @@ fn test_ring_axioms() {
     ];
 
     feanor_math::ring::generic_tests::test_ring_axioms(&ring, elements.iter().map(|x| ring.clone_el(x)));
+    feanor_math::ring::generic_tests::test_self_iso(&ring, elements.iter().map(|x| ring.clone_el(x)));
+}
+
+#[test]
+fn test_canonical_hom_from_doublerns() {
+    let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
+    let ring = ManagedDoubleRNSRingBase::new(Pow2CyclotomicNumberRing::new(16), rns_base);
+
+    let doublerns_ring = RingRef::new(&ring.get_ring().base);
+    let elements = vec![
+        doublerns_ring.zero(),
+        doublerns_ring.one(),
+        doublerns_ring.neg_one(),
+        doublerns_ring.int_hom().map(17),
+        doublerns_ring.int_hom().map(97),
+        doublerns_ring.canonical_gen(),
+        doublerns_ring.pow(doublerns_ring.canonical_gen(), 15),
+        doublerns_ring.int_hom().mul_map(doublerns_ring.canonical_gen(), 17),
+        doublerns_ring.int_hom().mul_map(doublerns_ring.pow(doublerns_ring.canonical_gen(), 15), 17),
+        doublerns_ring.add(doublerns_ring.canonical_gen(), doublerns_ring.one())
+    ];
+
+    feanor_math::ring::generic_tests::test_hom_axioms(doublerns_ring, &ring, elements.iter().map(|x| doublerns_ring.clone_el(x)));
+}
+
+#[test]
+fn test_canonical_hom_from_singlerns() {
+    let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
+    let ring = ManagedDoubleRNSRingBase::new(Pow2CyclotomicNumberRing::new(16), rns_base.clone());
+
+    let singlerns_ring = SingleRNSRingBase::new(Pow2CyclotomicNumberRing::new(16), rns_base);
+    let elements = vec![
+        singlerns_ring.zero(),
+        singlerns_ring.one(),
+        singlerns_ring.neg_one(),
+        singlerns_ring.int_hom().map(17),
+        singlerns_ring.int_hom().map(97),
+        singlerns_ring.canonical_gen(),
+        singlerns_ring.pow(singlerns_ring.canonical_gen(), 15),
+        singlerns_ring.int_hom().mul_map(singlerns_ring.canonical_gen(), 17),
+        singlerns_ring.int_hom().mul_map(singlerns_ring.pow(singlerns_ring.canonical_gen(), 15), 17),
+        singlerns_ring.add(singlerns_ring.canonical_gen(), singlerns_ring.one())
+    ];
+
+    feanor_math::ring::generic_tests::test_hom_axioms(&singlerns_ring, &ring, elements.iter().map(|x| singlerns_ring.clone_el(x)));
 }
 
 #[test]
@@ -846,7 +1020,7 @@ fn test_add_result_independent_of_repr() {
 
             let x = ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(a())) };
             let y = ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(b())) };
-            assert!(base.eq_el_non_fft(&base.from_non_fft(base.base_ring().int_hom().map(113)), &*ring.get_ring().to_coeff(&ring.add_ref(&x, &y)).unwrap()));
+            assert!(base.eq_el_non_fft(&base.from_non_fft(base.base_ring().int_hom().map(113)), &*ring.get_ring().to_small_basis(&ring.add_ref(&x, &y)).unwrap()));
 
             let x = ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(a())) };
             let y = ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(b())) };
@@ -854,7 +1028,7 @@ fn test_add_result_independent_of_repr() {
 
             let x = ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(a())) };
             let y = ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(b())) };
-            assert!(base.eq_el_non_fft(&base.from_non_fft(base.base_ring().int_hom().map(-91)), &*ring.get_ring().to_coeff(&ring.sub_ref(&x, &y)).unwrap()));
+            assert!(base.eq_el_non_fft(&base.from_non_fft(base.base_ring().int_hom().map(-91)), &*ring.get_ring().to_small_basis(&ring.sub_ref(&x, &y)).unwrap()));
 
             let x = ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(a())) };
             assert_el_eq!(RingRef::new(base), base.from_int(121), ring.get_ring().to_doublerns(&ring.mul_ref(&x, &x)).unwrap());
@@ -865,7 +1039,7 @@ fn test_add_result_independent_of_repr() {
 
             let x = ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(a())) };
             let y = ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(b())) };
-            assert!(base.eq_el_non_fft(&base.from_non_fft(base.base_ring().int_hom().map(1122)), &*ring.get_ring().to_coeff(&ring.mul_ref(&x, &y)).unwrap()));
+            assert!(base.eq_el_non_fft(&base.from_non_fft(base.base_ring().int_hom().map(1122)), &*ring.get_ring().to_small_basis(&ring.mul_ref(&x, &y)).unwrap()));
         }
     }
 }

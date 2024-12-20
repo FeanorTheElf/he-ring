@@ -20,6 +20,7 @@ use feanor_math::seq::*;
 use feanor_math::specialization::FiniteRingOperation;
 use feanor_math::specialization::FiniteRingSpecializable;
 use serde_json::Number;
+use zn_64::ZnBase;
 
 use crate::cyclotomic::CyclotomicRing;
 use crate::profiling::TimeRecorder;
@@ -28,6 +29,7 @@ use crate::rnsconv::*;
 use crate::IsEq;
 
 use super::decomposition_ring::*;
+use super::single_rns_ring::SingleRNSRing;
 use super::single_rns_ring::SingleRNSRingBase;
 // use super::single_rns_ring::SingleRNSRingBase;
 
@@ -388,6 +390,46 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
         })
     }
 
+    pub fn map_in_from_singlerns<A2, C>(&self, from: &SingleRNSRingBase<NumberRing, A2, C>, el: &El<SingleRNSRing<NumberRing, A2, C>>, hom: &<Self as CanHomFrom<SingleRNSRingBase<NumberRing, A2, C>>>::Homomorphism) -> SmallBasisEl<NumberRing, A>
+        where NumberRing: HECyclotomicNumberRing,
+            A2: Allocator + Clone,
+            C: ConvolutionAlgorithm<ZnBase>
+    {
+        let mut result = Vec::with_capacity_in(self.element_len(), self.allocator.clone());
+        let el_as_matrix = from.as_matrix(el);
+        for (i, Zp) in self.rns_base().as_iter().enumerate() {
+            for j in 0..self.rank() {
+                result.push(Zp.get_ring().map_in_ref(from.rns_base().at(i).get_ring(), el_as_matrix.at(i, j), &hom[i]));
+            }
+        }
+        for i in 0..self.rns_base().len() {
+            self.ring_decompositions().at(i).coeff_basis_to_small_basis(&mut result[(i * self.rank())..((i + 1) * self.rank())]);
+        }
+        SmallBasisEl {
+            el_wrt_small_basis: result,
+            number_ring: PhantomData,
+            allocator: PhantomData
+        }
+    }
+
+    pub fn map_out_to_singlerns<A2, C>(&self, to: &SingleRNSRingBase<NumberRing, A2, C>, el: SmallBasisEl<NumberRing, A>, iso: &<Self as CanIsoFromTo<SingleRNSRingBase<NumberRing, A2, C>>>::Isomorphism) -> El<SingleRNSRing<NumberRing, A2, C>>
+        where NumberRing: HECyclotomicNumberRing,
+            A2: Allocator + Clone,
+            C: ConvolutionAlgorithm<ZnBase>
+    {
+        let mut result = to.zero();
+        let mut result_matrix = to.as_matrix_mut(&mut result);
+        let mut el_coeff = el.el_wrt_small_basis;
+        for i in 0..self.rns_base().len() {
+            self.ring_decompositions().at(i).small_basis_to_coeff_basis(&mut el_coeff[(i * self.rank())..((i + 1) * self.rank())]);
+        }
+        for (i, Zp) in self.rns_base().as_iter().enumerate() {
+            for j in 0..self.rank() {
+                *result_matrix.at_mut(i, j) = Zp.get_ring().map_out(to.rns_base().at(i).get_ring(), Zp.clone_el(&el_coeff[i * self.rank() + j]), &iso[i]);
+            }
+        }
+        return result;
+    }
 }
 
 impl<NumberRing, A> PartialEq for DoubleRNSRingBase<NumberRing, A> 
@@ -805,21 +847,7 @@ impl<NumberRing, A1, A2, C2> CanHomFrom<SingleRNSRingBase<NumberRing, A2, C2>> f
     }
 
     fn map_in_ref(&self, from: &SingleRNSRingBase<NumberRing, A2, C2>, el: &<SingleRNSRingBase<NumberRing, A2, C2> as RingBase>::Element, hom: &Self::Homomorphism) -> Self::Element {
-        let mut result = Vec::with_capacity_in(self.element_len(), self.allocator.clone());
-        let el_as_matrix = from.as_matrix(el);
-        for (i, Zp) in self.rns_base().as_iter().enumerate() {
-            for j in 0..self.rank() {
-                result.push(Zp.get_ring().map_in_ref(from.rns_base().at(i).get_ring(), el_as_matrix.at(i, j), &hom[i]));
-            }
-        }
-        for i in 0..self.rns_base().len() {
-            self.ring_decompositions().at(i).coeff_basis_to_small_basis(&mut result[(i * self.rank())..((i + 1) * self.rank())]);
-        }
-        self.do_fft(SmallBasisEl {
-            el_wrt_small_basis: result,
-            number_ring: PhantomData,
-            allocator: PhantomData
-        })
+        self.do_fft(self.map_in_from_singlerns(from, el, hom))
     }
 }
 
@@ -840,18 +868,7 @@ impl<NumberRing, A1, A2, C2> CanIsoFromTo<SingleRNSRingBase<NumberRing, A2, C2>>
     }
 
     fn map_out(&self, from: &SingleRNSRingBase<NumberRing, A2, C2>, el: <Self as RingBase>::Element, iso: &Self::Isomorphism) -> <SingleRNSRingBase<NumberRing, A2, C2> as RingBase>::Element {
-        let mut result = from.zero();
-        let mut result_matrix = from.as_matrix_mut(&mut result);
-        let mut el_coeff = self.undo_fft(el).el_wrt_small_basis;
-        for i in 0..self.rns_base().len() {
-            self.ring_decompositions().at(i).small_basis_to_coeff_basis(&mut el_coeff[(i * self.rank())..((i + 1) * self.rank())]);
-        }
-        for (i, Zp) in self.rns_base().as_iter().enumerate() {
-            for j in 0..self.rank() {
-                *result_matrix.at_mut(i, j) = Zp.get_ring().map_out(from.rns_base().at(i).get_ring(), Zp.clone_el(&el_coeff[i * self.rank() + j]), &iso[i]);
-            }
-        }
-        return result;
+        self.map_out_to_singlerns(from, self.undo_fft(el), iso)
     }
 }
 

@@ -848,6 +848,23 @@ impl<NumberRing, A1, A2, C1> CanHomFrom<DoubleRNSRingBase<NumberRing, A2>> for S
     }
 }
 
+impl<NumberRing, A1, A2, C1> CanIsoFromTo<DoubleRNSRingBase<NumberRing, A2>> for SingleRNSRingBase<NumberRing, A1, C1>
+    where NumberRing: HECyclotomicNumberRing,
+        A1: Allocator + Clone,
+        A2: Allocator + Clone,
+        C1: ConvolutionAlgorithm<zn_64::ZnBase>
+{
+    type Isomorphism = <DoubleRNSRingBase<NumberRing, A2> as CanHomFrom<Self>>::Homomorphism;
+
+    fn has_canonical_iso(&self, from: &DoubleRNSRingBase<NumberRing, A2>) -> Option<Self::Isomorphism> {
+        from.has_canonical_hom(self)
+    }
+
+    fn map_out(&self, from: &DoubleRNSRingBase<NumberRing, A2>, el: Self::Element, iso: &Self::Isomorphism) -> <DoubleRNSRingBase<NumberRing, A2> as RingBase>::Element {
+        from.map_in(self, el, iso)
+    }
+}
+
 impl<NumberRing, A1, A2, C1, C2> CanIsoFromTo<SingleRNSRingBase<NumberRing, A2, C2>> for SingleRNSRingBase<NumberRing, A1, C1>
     where NumberRing: HECyclotomicNumberRing, 
         A1: Allocator + Clone,
