@@ -31,7 +31,7 @@ use crate::rnsconv::RNSOperation;
 
 use super::bxv::BXVCiphertextRing;
 use super::decomposition_ring::{DecompositionRing, DecompositionRingBase};
-use super::double_rns_ring::{CoeffEl, DoubleRNSRingBase};
+use super::double_rns_ring::{SmallBasisEl, DoubleRNSRingBase};
 use super::gadget_product;
 use super::ntt_conv::NTTConv;
 use super::number_ring::{HECyclotomicNumberRing, HENumberRing};

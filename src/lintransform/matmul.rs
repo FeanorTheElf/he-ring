@@ -550,7 +550,7 @@ impl<NumberRing, A> CompiledLinearTransform<NumberRing, A>
 
         let (_, _, _, sizes) = Self::compute_automorphisms_per_dimension(H, &lin_transform);
 
-        const UNHOISTED_AUTO_COUNT_OVERHEAD: usize = 2;
+        const UNHOISTED_AUTO_COUNT_OVERHEAD: usize = 3;
 
         let preferred_baby_steps = (1..=(sizes.iter().copied().product::<usize>() as usize)).min_by_key(|preferred_baby_steps| {
             let params = Self::baby_step_giant_step_params(sizes.as_fn().map_fn(|s| *s as usize), *preferred_baby_steps);

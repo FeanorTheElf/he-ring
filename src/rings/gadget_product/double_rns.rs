@@ -54,7 +54,7 @@ impl<'a, NumberRing, A> GadgetProductRhsOperand<'a, NumberRing, A>
         }
     }
 
-    pub fn set_rns_factor(&mut self, i: usize, el: CoeffEl<NumberRing, A>) {
+    pub fn set_rns_factor(&mut self, i: usize, el: SmallBasisEl<NumberRing, A>) {
         record_time!(GLOBAL_TIME_RECORDER, "double_rns::GadgetProductRhsOperand::set_rns_factor", || match self {
             GadgetProductRhsOperand::LKSSStyle(op) => op.set_rns_factor(i, el),
             GadgetProductRhsOperand::Naive(op) => op.set_rns_factor(i, el)
@@ -112,7 +112,7 @@ impl<'a, NumberRing, A> NaiveGadgetProductRhsOperand<'a, NumberRing, A>
         &self.digits
     }
 
-    fn set_rns_factor(&mut self, i: usize, el: CoeffEl<NumberRing, A>) {
+    fn set_rns_factor(&mut self, i: usize, el: SmallBasisEl<NumberRing, A>) {
         self.operands[i] = self.ring.do_fft(el);
     }
 }
@@ -173,7 +173,7 @@ impl<'a, NumberRing, A> LKSSGadgetProductRhsOperand<'a, NumberRing, A>
         &self.digits
     }
 
-    fn set_rns_factor(&mut self, i: usize, el: CoeffEl<NumberRing, A>) {
+    fn set_rns_factor(&mut self, i: usize, el: SmallBasisEl<NumberRing, A>) {
         self.operands[i] = self.ring.gadget_decompose(el, &self.digits, self.shortened_rns_base.get_ring().len());
     }
 }
@@ -196,7 +196,7 @@ impl<'a, NumberRing, A> GadgetProductLhsOperand<'a, NumberRing, A>
     where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
-    pub fn create_from_element(ring: &DoubleRNSRingBase<NumberRing, A>, digits: usize, el: CoeffEl<NumberRing, A>) -> Self {
+    pub fn create_from_element(ring: &DoubleRNSRingBase<NumberRing, A>, digits: usize, el: SmallBasisEl<NumberRing, A>) -> Self {
         record_time!(GLOBAL_TIME_RECORDER, "double_rns::GadgetProductLhsOperand::create_from_element", || {
             let output_moduli_count = ring.get_gadget_product_modulo_count(digits);
             if ring.use_lkss_gadget_product(digits) {
@@ -256,7 +256,7 @@ impl<'a, NumberRing, A> NaiveGadgetProductLhsOperand<'a, NumberRing, A>
     where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
-    fn new_from_element(ring: &DoubleRNSRingBase<NumberRing, A>, el: CoeffEl<NumberRing, A>, digits: usize) -> Self {
+    fn new_from_element(ring: &DoubleRNSRingBase<NumberRing, A>, el: SmallBasisEl<NumberRing, A>, digits: usize) -> Self {
         let digits = prime_factor_groups(ring.rns_base().len(), digits).iter().collect::<Vec<_>>();
         let mut data = Vec::with_capacity(ring.rns_base().len());
         for part in ring.gadget_decompose(el, &digits, ring.rns_base().len()).into_iter() {
@@ -295,7 +295,7 @@ impl<'a, NumberRing, A> LKSSGadgetProductLhsOperand<'a, NumberRing, A>
     where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
-    fn new_from_element(ring: &DoubleRNSRingBase<NumberRing, A>, el: CoeffEl<NumberRing, A>, digits: usize, output_moduli_count: usize) -> Self {
+    fn new_from_element(ring: &DoubleRNSRingBase<NumberRing, A>, el: SmallBasisEl<NumberRing, A>, digits: usize, output_moduli_count: usize) -> Self {
         let digits = prime_factor_groups(ring.rns_base().len(), digits).iter().collect::<Vec<_>>();
         LKSSGadgetProductLhsOperand {
             ring: PhantomData,
@@ -368,7 +368,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
     /// 
     /// The order of the fourier coefficients is the same as specified by the corresponding [`GeneralizedFFT`].
     /// 
-    fn gadget_decompose(&self, el: CoeffEl<NumberRing, A>, digits: &[Range<usize>], output_moduli_count: usize) -> Vec<Vec<ZnEl, A>> {
+    fn gadget_decompose(&self, el: SmallBasisEl<NumberRing, A>, digits: &[Range<usize>], output_moduli_count: usize) -> Vec<Vec<ZnEl, A>> {
         let ZZbig = BigIntRing::RING;
         let digit_bases = digits.iter().map(|range| zn_rns::Zn::new(range.clone().map(|i| self.rns_base().at(i)).collect::<Vec<_>>(), ZZbig)).collect::<Vec<_>>();
 
@@ -449,7 +449,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
         })
     }
 
-    fn gadget_product_lkss(&self, lhs: &LKSSGadgetProductLhsOperand<NumberRing, A>, rhs: &LKSSGadgetProductRhsOperand<NumberRing, A>) -> CoeffEl<NumberRing, A> {
+    fn gadget_product_lkss(&self, lhs: &LKSSGadgetProductLhsOperand<NumberRing, A>, rhs: &LKSSGadgetProductRhsOperand<NumberRing, A>) -> SmallBasisEl<NumberRing, A> {
         record_time!(GLOBAL_TIME_RECORDER, "DoubleRNSRing::gadget_product_lkss", || {
             assert_eq!(lhs.output_moduli_count, rhs.shortened_rns_base.get_ring().len());
             let digits = &rhs.digits;
@@ -504,7 +504,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
     /// 
     /// The implementation uses the KLSS-style algorithm [https://ia.cr/2023/413].
     /// 
-    pub fn gadget_product_coeff(&self, lhs: &GadgetProductLhsOperand<NumberRing, A>, rhs: &GadgetProductRhsOperand<NumberRing, A>) -> CoeffEl<NumberRing, A> {
+    pub fn gadget_product_coeff(&self, lhs: &GadgetProductLhsOperand<NumberRing, A>, rhs: &GadgetProductRhsOperand<NumberRing, A>) -> SmallBasisEl<NumberRing, A> {
         match (lhs, rhs) {
             (GadgetProductLhsOperand::LKSSStyle(lhs), GadgetProductRhsOperand::LKSSStyle(rhs)) => self.gadget_product_lkss(lhs, rhs),
             (GadgetProductLhsOperand::Naive(lhs), GadgetProductRhsOperand::Naive(rhs)) => self.undo_fft(self.gadget_product_naive(lhs, rhs)),
