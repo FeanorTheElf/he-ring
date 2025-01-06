@@ -83,9 +83,10 @@ impl<NumberRing, ZnTy, A> DecompositionRingBase<NumberRing, ZnTy, A>
         assert!(rns_base.len() > 0);
         let ZZbig = BigIntRing::RING;
         let max_product_expansion_factor = ZZbig.from_float_approx(number_ring.product_expansion_factor().ceil()).unwrap();
-        let max_lift_size = int_cast(base_ring.integer_ring().clone_el(base_ring.modulus()), ZZbig, base_ring.integer_ring());
+        let max_lift_size = ZZbig.ceil_div(int_cast(base_ring.integer_ring().clone_el(base_ring.modulus()), ZZbig, base_ring.integer_ring()), &ZZbig.int_hom().map(2));
         let max_product_size = ZZbig.mul(ZZbig.pow(max_lift_size, 2), max_product_expansion_factor);
-        assert!(ZZbig.is_gt(&ZZbig.prod(rns_base.as_iter().map(|rns_base_ring| int_cast(rns_base_ring.integer_ring().clone_el(rns_base_ring.modulus()), ZZbig, rns_base_ring.integer_ring()))), &max_product_size));
+        let modulus = ZZbig.prod(rns_base.as_iter().map(|rns_base_ring| int_cast(rns_base_ring.integer_ring().clone_el(rns_base_ring.modulus()), ZZbig, rns_base_ring.integer_ring())));
+        assert!(ZZbig.is_gt(&modulus, &ZZbig.int_hom().mul_map(max_product_size, 2)));
         RingValue::from(Self {
             base_ring: base_ring,
             ring_decompositions: rns_base.as_iter().map(|Fp| number_ring.mod_p(Fp.clone())).collect(),

@@ -25,7 +25,7 @@ use crate::lintransform::matmul::CompiledLinearTransform;
 use super::*;
 
 pub struct ThinBootstrapParams<Params: BFVParams> {
-    params: Params,
+    scheme_params: Params,
     digit_extract: DigitExtract,
     slots_to_coeffs_thin: Vec<CompiledLinearTransform<NumberRing<Params>>>,
     coeffs_to_slots_thin: (Vec<CompiledLinearTransform<NumberRing<Params>>>, Option<Trace<NumberRing<Params>>>)
@@ -147,7 +147,7 @@ impl<Params: BFVParams> ThinBootstrapParams<Params> {
         coeffs_to_slots_thin: (Vec<CompiledLinearTransform<NumberRing<Params>>>, Option<Trace<NumberRing<Params>>>)
     ) -> Self {
         Self {
-            params: params,
+            scheme_params: params,
             digit_extract,
             slots_to_coeffs_thin,
             coeffs_to_slots_thin
@@ -356,7 +356,7 @@ impl DigitExtract {
 impl<Params: BFVParams> ThinBootstrapParams<Params> {
 
     pub fn params(&self) -> &Params {
-        &self.params
+        &self.scheme_params
     }
 
     fn r(&self) -> usize {
