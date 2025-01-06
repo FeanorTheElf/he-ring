@@ -121,6 +121,11 @@ fn slots_to_powcoeffs_fat_fst_step<NumberRing>(H: &DefaultHypercube<NumberRing>,
 /// 
 /// If for the linear transform input, the slot `(i1, ..., ir)` contains `sum_j a_(j, i1, ..., ir) 𝝵^j`, this
 /// this transform "puts" `a_(j, i1, ..., ir)` into the powerful-basis coefficient of `X1^(j * m1 + i1) X2^i2 ... Xr^ir`.
+/// Formally, this is the `Z/p^eZ`-linear map that maps
+/// ```text
+///   a_(j, i1, ..., ir) 𝝵^j u_(i1, ..., ir)  ->  X1^(j * m1 + i1) X2^i2 ... Xr^ir = X^(j * m1 * n/n1 + i1 * n/n1 + i2 * n/n2 + ... + ir * n/nr)
+/// ```
+/// Here `u_(i1, ..., ir)` denotes the `(i1, ..., ir)`-th slot unit vector.
 /// 
 pub fn slots_to_powcoeffs_fat<NumberRing>(H: &DefaultHypercube<NumberRing>) -> Vec<MatmulTransform<NumberRing>>
     where NumberRing: HECyclotomicNumberRing + Clone
@@ -150,8 +155,15 @@ pub fn slots_to_powcoeffs_fat<NumberRing>(H: &DefaultHypercube<NumberRing>) -> V
 }
 
 ///
-/// Inverse of [`slots_to_powcoeffs_fat()`], i.e. moves the powerful-basis coefficient of `X1^(j * m1 + i1) X2^i2 ... Xr^ir`
-/// to the slot `(i1, ..., ir)`.
+/// Inverse of [`slots_to_powcoeffs_fat()`].
+/// 
+/// In other words, this moves the powerful-basis coefficient of `X1^(j * m1 + i1) X2^i2 ... Xr^ir`
+/// to the coefficient of `𝝵^j` within the slot `(i1, ..., ir)`.
+/// Formally, this is the `Z/p^eZ`-linear map that maps
+/// ```text
+///   X1^(j * m1 + i1) X2^i2 ... Xr^ir  ->  a_(j, i1, ..., ir) 𝝵^j u_(i1, ..., ir)
+/// ```
+/// Here `u_(i1, ..., ir)` denotes the `(i1, ..., ir)`-th slot unit vector.
 /// 
 pub fn powcoeffs_to_slots_fat<NumberRing>(H: &DefaultHypercube<NumberRing>) -> Vec<MatmulTransform<NumberRing>>
     where NumberRing: HECyclotomicNumberRing + Clone

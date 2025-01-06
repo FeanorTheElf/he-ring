@@ -491,6 +491,7 @@ pub type DecoratedBaseRing<R> = AsLocalPIR<RingValue<BaseRing<R>>>;
 ///   Fp[X]/(Phi_n(X)) -> F_(p^d)^((Z/nZ)*/<p>)
 /// ```
 /// where `d` is the order of `p` in `(Z/nZ)*`.
+/// The group `(Z/nZ)*/<p>` is represented by a [`HypercubeStructure`].
 /// 
 pub struct HypercubeIsomorphism<R>
     where R: RingStore,
