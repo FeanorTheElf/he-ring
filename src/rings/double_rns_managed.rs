@@ -20,6 +20,7 @@ use feanor_math::specialization::FiniteRingSpecializable;
 use zn_64::Zn;
 use zn_64::ZnBase;
 
+use crate::bfv::DefaultConvolution;
 use crate::cyclotomic::CyclotomicRing;
 use crate::rings::number_ring::HENumberRing;
 use crate::rnsconv::RNSOperation;
@@ -976,20 +977,20 @@ fn test_canonical_hom_from_doublerns() {
 
 #[test]
 fn test_canonical_hom_from_singlerns() {
-    let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
+    let rns_base = zn_rns::Zn::new(vec![Zn::new(97), Zn::new(193)], BigIntRing::RING);
     let ring = ManagedDoubleRNSRingBase::new(Pow2CyclotomicNumberRing::new(16), rns_base.clone());
 
-    let singlerns_ring = SingleRNSRingBase::new(Pow2CyclotomicNumberRing::new(16), rns_base);
+    let singlerns_ring = SingleRNSRingBase::<_, _, DefaultConvolution>::new(Pow2CyclotomicNumberRing::new(16), rns_base);
     let elements = vec![
         singlerns_ring.zero(),
         singlerns_ring.one(),
         singlerns_ring.neg_one(),
-        singlerns_ring.int_hom().map(17),
         singlerns_ring.int_hom().map(97),
+        singlerns_ring.int_hom().map(193),
         singlerns_ring.canonical_gen(),
         singlerns_ring.pow(singlerns_ring.canonical_gen(), 15),
-        singlerns_ring.int_hom().mul_map(singlerns_ring.canonical_gen(), 17),
-        singlerns_ring.int_hom().mul_map(singlerns_ring.pow(singlerns_ring.canonical_gen(), 15), 17),
+        singlerns_ring.int_hom().mul_map(singlerns_ring.canonical_gen(), 97),
+        singlerns_ring.int_hom().mul_map(singlerns_ring.pow(singlerns_ring.canonical_gen(), 15), 97),
         singlerns_ring.add(singlerns_ring.canonical_gen(), singlerns_ring.one())
     ];
 

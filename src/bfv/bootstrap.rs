@@ -462,7 +462,8 @@ fn test_pow2_bfv_thin_bootstrapping_17() {
         log2_q_min: 790,
         log2_q_max: 800,
         log2_N: 7,
-        ciphertext_allocator: DefaultCiphertextAllocator::default()
+        ciphertext_allocator: DefaultCiphertextAllocator::default(),
+        negacyclic_ntt: PhantomData::<DefaultNegacyclicNTT>
     };
     let t = 17;
     let digits = 3;
@@ -504,7 +505,8 @@ fn test_pow2_bfv_thin_bootstrapping_23() {
         log2_q_min: 790,
         log2_q_max: 800,
         log2_N: 7,
-        ciphertext_allocator: DefaultCiphertextAllocator::default()
+        ciphertext_allocator: DefaultCiphertextAllocator::default(),
+        negacyclic_ntt: PhantomData::<DefaultNegacyclicNTT>
     };
     let t = 23;
     let digits = 3;
@@ -635,7 +637,8 @@ fn test_evaluate_circuit() {
         log2_q_min: 780,
         n1: 11,
         n2: 31,
-        ciphertext_allocator: DefaultCiphertextAllocator::default()
+        ciphertext_allocator: DefaultCiphertextAllocator::default(),
+        convolution: PhantomData::<DefaultConvolution>
     };
     let t = ZZ.pow(2, 15);
     let digits = 4;

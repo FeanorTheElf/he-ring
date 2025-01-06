@@ -16,6 +16,8 @@ use feanor_math::algorithms::fft::FFTAlgorithm;
 use feanor_math::homomorphism::Homomorphism;
 use feanor_math::rings::zn::zn_64::{Zn, ZnEl};
 
+use super::convolution::FromRingCreateableConvolution;
+
 pub struct NTTConv<R, A = Global>
     where R: RingStore + Clone,
         R::Type: ZnRing,
@@ -32,6 +34,15 @@ impl<R> NTTConv<R>
         R::Type: ZnRing
 {
     pub fn new(ring: R, max_log2_n: usize) -> Self {
+        Self::create(ring, max_log2_n)
+    }
+}
+
+impl<R> FromRingCreateableConvolution<R> for NTTConv<R>
+    where R: RingStore + Clone,
+        R::Type: ZnRing
+{
+    fn create(ring: R, max_log2_n: usize) -> Self {
         Self::new_with(ring, max_log2_n, Global)
     }
 }

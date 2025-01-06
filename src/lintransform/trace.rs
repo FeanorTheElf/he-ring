@@ -25,8 +25,8 @@ use feanor_math::rings::zn::*;
 use feanor_math::seq::*;
 use feanor_math::algorithms::linsolve::LinSolveRingStore;
 
-use crate::rings::dynconv::DynConvolutionAlgorithm;
-use crate::rings::dynconv::DynConvolutionAlgorithmConvolution;
+use crate::rings::dyn_convolution::DynConvolutionAlgorithm;
+use crate::rings::dyn_convolution::DynConvolutionAlgorithmConvolution;
 use crate::rings::hypercube::SlotRingOver;
 use crate::rings::number_ring::HECyclotomicNumberRing;
 use crate::rings::odd_cyclotomic::OddCyclotomicNumberRing;

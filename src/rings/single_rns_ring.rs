@@ -22,6 +22,7 @@ use feanor_math::rings::zn::*;
 use feanor_math::seq::sparse::SparseMapVector;
 use feanor_math::seq::*;
 use feanor_math::matrix::*;
+use zn_64::Zn;
 use zn_static::Fp;
 
 use crate::profiling::TimeRecorder;
@@ -30,10 +31,11 @@ use crate::rings::double_rns_ring::DoubleRNSRing;
 use crate::rnsconv::RNSOperation;
 
 use super::bxv::BXVCiphertextRing;
+use super::convolution::FromRingCreateableConvolution;
 use super::decomposition_ring::{DecompositionRing, DecompositionRingBase};
 use super::double_rns_ring::{SmallBasisEl, DoubleRNSRingBase};
 use super::gadget_product;
-use super::ntt_conv::NTTConv;
+use super::ntt_convolution::NTTConv;
 use super::number_ring::{HECyclotomicNumberRing, HENumberRing};
 
 pub struct SingleRNSRingBase<NumberRing, A, C> 
@@ -71,23 +73,13 @@ pub struct SingleRNSRingPreparedMultiplicant<NumberRing, A, C>
     pub(super) data: Vec<C::PreparedConvolutionOperand, A>
 }
 
-#[cfg(feature = "use_hexl")]
-impl<NumberRing> SingleRNSRingBase<NumberRing, Global, feanor_math_hexl::conv::HEXLConvolution> 
-    where NumberRing: HECyclotomicNumberRing
-{
-    pub fn new(number_ring: NumberRing, rns_base: zn_rns::Zn<zn_64::Zn, BigIntRing>) -> RingValue<Self> {
-        let max_log2_n = StaticRing::<i64>::RING.abs_log2_ceil(&(number_ring.rank() as i64 * 2)).unwrap();
-        let convolutions = rns_base.as_iter().map(|Zp| feanor_math_hexl::conv::HEXLConvolution::new(Zp.clone(), max_log2_n)).collect();
-        Self::new_with(number_ring, rns_base, Global, convolutions)
-    }
-}
-
-impl<NumberRing> SingleRNSRingBase<NumberRing, Global, NTTConv<zn_64::Zn>> 
+impl<NumberRing, C> SingleRNSRingBase<NumberRing, Global, C> 
     where NumberRing: HECyclotomicNumberRing,
+        C: FromRingCreateableConvolution<Zn>
 {
     pub fn new(number_ring: NumberRing, rns_base: zn_rns::Zn<zn_64::Zn, BigIntRing>) -> RingValue<Self> {
         let max_log2_n = StaticRing::<i64>::RING.abs_log2_ceil(&(number_ring.rank() as i64 * 2)).unwrap();
-        let convolutions = rns_base.as_iter().map(|Zp| NTTConv::new(Zp.clone(), max_log2_n)).collect();
+        let convolutions = rns_base.as_iter().map(|Zp| C::create(Zp.clone(), max_log2_n)).collect();
         Self::new_with(number_ring, rns_base, Global, convolutions)
     }
 }

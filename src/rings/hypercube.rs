@@ -40,11 +40,11 @@ use feanor_math::wrapper::RingElementWrapper;
 use crate::cyclotomic::{CyclotomicRing, CyclotomicRingStore};
 use crate::euler_phi;
 use crate::profiling::{log_time, print_all_timings};
-use crate::rings::dynconv::DynConvolutionAlgorithm;
+use crate::rings::dyn_convolution::DynConvolutionAlgorithm;
 use crate::lintransform::CREATE_LINEAR_TRANSFORM_TIME_RECORDER;
 
 use super::decomposition_ring::{DecompositionRing, DecompositionRingBase};
-use super::dynconv::DynConvolutionAlgorithmConvolution;
+use super::dyn_convolution::DynConvolutionAlgorithmConvolution;
 use super::interpolate::FastPolyInterpolation;
 use super::odd_cyclotomic::CompositeCyclotomicNumberRing;
 use super::pow2_cyclotomic::Pow2CyclotomicNumberRing;

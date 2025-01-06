@@ -8,6 +8,7 @@ use std::time::Instant;
 use std::ops::Range;
 use std::cmp::max;
 
+use feanor_math::algorithms::convolution::PreparedConvolutionAlgorithm;
 use feanor_math::algorithms::int_factor::factor;
 use feanor_math::algorithms::int_factor::is_prime_power;
 use feanor_math::algorithms::miller_rabin::is_prime;
@@ -37,6 +38,7 @@ use crate::lintransform::composite::powcoeffs_to_slots_fat;
 use crate::lintransform::matmul::CompiledLinearTransform;
 use crate::lintransform::HELinearTransform;
 use crate::rings::bxv::BXVCiphertextRing;
+use crate::rings::convolution::FromRingCreateableConvolution;
 use crate::rings::double_rns_managed::*;
 use crate::rings::hypercube::CyclotomicGaloisGroup;
 use crate::rings::hypercube::HypercubeIsomorphism;
@@ -57,14 +59,14 @@ use rand_distr::StandardNormal;
 pub mod bootstrap;
 
 #[cfg(feature = "use_hexl")]
-pub type UsedConvolution = feanor_math_hexl::conv::HEXLConvolution;
+pub type DefaultConvolution = feanor_math_hexl::conv::HEXLConvolution;
 #[cfg(not(feature = "use_hexl"))]
-pub type UsedConvolution = crate::rings::ntt_conv::NTTConv<Zn>;
+pub type DefaultConvolution = crate::rings::ntt_convolution::NTTConv<Zn>;
 
 #[cfg(feature = "use_hexl")]
-pub type UsedNegacyclicNTT = feanor_math_hexl::hexl::HEXLNegacyclicNTT;
+pub type DefaultNegacyclicNTT = feanor_math_hexl::hexl::HEXLNegacyclicNTT;
 #[cfg(not(feature = "use_hexl"))]
-pub type UsedNegacyclicNTT = RustNegacyclicNTT<Zn>;
+pub type DefaultNegacyclicNTT = RustNegacyclicNTT<Zn>;
 
 #[cfg(feature = "log_allocations")]
 pub type DefaultCiphertextAllocator = LoggingAllocator;
@@ -393,19 +395,33 @@ pub trait BFVParams {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct Pow2BFV<A: Allocator + Clone + Send + Sync = DefaultCiphertextAllocator> {
+#[derive(Debug)]
+pub struct Pow2BFV<A: Allocator + Clone + Send + Sync = DefaultCiphertextAllocator, C: Send + Sync + Pow2NegacyclicNTT<Zn> = DefaultNegacyclicNTT> {
     pub log2_q_min: usize,
     pub log2_q_max: usize,
     pub log2_N: usize,
-    pub ciphertext_allocator: A
+    pub ciphertext_allocator: A,
+    pub negacyclic_ntt: PhantomData<C>
 }
 
-impl<A: Allocator + Clone + Send + Sync> BFVParams for Pow2BFV<A> {
+impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + Pow2NegacyclicNTT<Zn>> Clone for Pow2BFV<A, C> {
 
-    type CiphertextRing = ManagedDoubleRNSRingBase<Pow2CyclotomicNumberRing<UsedNegacyclicNTT>, A>;
+    fn clone(&self) -> Self {
+        Self {
+            log2_q_min: self.log2_q_min,
+            log2_q_max: self.log2_q_max,
+            log2_N: self.log2_N,
+            ciphertext_allocator: self.ciphertext_allocator.clone(),
+            negacyclic_ntt: PhantomData
+        }
+    }
+}
 
-    fn number_ring(&self) -> Pow2CyclotomicNumberRing<UsedNegacyclicNTT> {
+impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + Pow2NegacyclicNTT<Zn>> BFVParams for Pow2BFV<A, C> {
+
+    type CiphertextRing = ManagedDoubleRNSRingBase<Pow2CyclotomicNumberRing<C>, A>;
+
+    fn number_ring(&self) -> Pow2CyclotomicNumberRing<C> {
         Pow2CyclotomicNumberRing::new_with(2 << self.log2_N)
     }
 
@@ -485,17 +501,18 @@ impl<A: Allocator + Clone + Send + Sync> BFVParams for CompositeBFV<A> {
 }
 
 #[derive(Clone, Debug)]
-pub struct CompositeSingleRNSBFV<A: Allocator + Clone + Send + Sync = DefaultCiphertextAllocator> {
+pub struct CompositeSingleRNSBFV<A: Allocator + Clone + Send + Sync = DefaultCiphertextAllocator, C: Send + Sync + FromRingCreateableConvolution<Zn> = DefaultConvolution> {
     pub log2_q_min: usize,
     pub log2_q_max: usize,
     pub n1: usize,
     pub n2: usize,
-    pub ciphertext_allocator: A
+    pub ciphertext_allocator: A,
+    pub convolution: PhantomData<C>
 }
 
-impl<A: Allocator + Clone + Send + Sync> BFVParams for CompositeSingleRNSBFV<A> {
+impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + FromRingCreateableConvolution<Zn>> BFVParams for CompositeSingleRNSBFV<A, C> {
 
-    type CiphertextRing = SingleRNSRingBase<CompositeCyclotomicNumberRing, A, UsedConvolution>;
+    type CiphertextRing = SingleRNSRingBase<CompositeCyclotomicNumberRing, A, C>;
 
     fn ciphertext_modulus_bits(&self) -> Range<usize> {
         self.log2_q_min..self.log2_q_max
@@ -524,13 +541,13 @@ impl<A: Allocator + Clone + Send + Sync> BFVParams for CompositeSingleRNSBFV<A> 
             self.number_ring(),
             zn_rns::Zn::new(C_rns_base.clone(), ZZbig),
             self.ciphertext_allocator.clone(),
-            C_rns_base.iter().map(|Zp| UsedConvolution::new(*Zp, max_log2_n)).collect()
+            C_rns_base.iter().map(|Zp| C::create(*Zp, max_log2_n)).collect()
         );
         let Cmul = SingleRNSRingBase::new_with(
             number_ring,
             zn_rns::Zn::new(Cmul_rns_base.clone(), ZZbig),
             self.ciphertext_allocator.clone(),
-            Cmul_rns_base.iter().map(|Zp| UsedConvolution::new(*Zp, max_log2_n)).collect()
+            Cmul_rns_base.iter().map(|Zp| C::create(*Zp, max_log2_n)).collect()
         );
         return (C, Cmul);
     }
@@ -583,7 +600,8 @@ fn test_pow2_bfv_hom_galois() {
         log2_q_min: 500,
         log2_q_max: 520,
         log2_N: 7,
-        ciphertext_allocator: DefaultCiphertextAllocator::default()
+        ciphertext_allocator: DefaultCiphertextAllocator::default(),
+        negacyclic_ntt: PhantomData::<DefaultNegacyclicNTT>
     };
     let t = 3;
     let digits = 3;
@@ -609,7 +627,8 @@ fn test_pow2_bfv_mul() {
         log2_q_min: 500,
         log2_q_max: 520,
         log2_N: 10,
-        ciphertext_allocator: DefaultCiphertextAllocator::default()
+        ciphertext_allocator: DefaultCiphertextAllocator::default(),
+        negacyclic_ntt: PhantomData::<DefaultNegacyclicNTT>
     };
     let t = 257;
     let digits = 3;
@@ -675,7 +694,8 @@ fn print_timings_pow2_bfv_mul() {
         log2_q_min: 790,
         log2_q_max: 800,
         log2_N: 15,
-        ciphertext_allocator: DefaultCiphertextAllocator::default()
+        ciphertext_allocator: DefaultCiphertextAllocator::default(),
+        negacyclic_ntt: PhantomData::<DefaultNegacyclicNTT>
     };
     let t = 257;
     let digits = 3;
@@ -796,7 +816,8 @@ fn test_bfv_hom_galois() {
         log2_q_max: 520,
         n1: 7,
         n2: 11,
-        ciphertext_allocator: DefaultCiphertextAllocator::default()
+        ciphertext_allocator: DefaultCiphertextAllocator::default(),
+        convolution: PhantomData::<DefaultConvolution>
     };
     let t = 3;
     let digits = 3;
@@ -823,7 +844,8 @@ fn test_single_rns_composite_bfv_mul() {
         log2_q_max: 520,
         n1: 7,
         n2: 11,
-        ciphertext_allocator: DefaultCiphertextAllocator::default()
+        ciphertext_allocator: DefaultCiphertextAllocator::default(),
+        convolution: PhantomData::<DefaultConvolution>
     };
     let t = 3;
     let digits = 3;
@@ -857,7 +879,8 @@ fn print_timings_single_rns_composite_bfv_mul() {
         log2_q_max: 800,
         n1: 127,
         n2: 337,
-        ciphertext_allocator: DefaultCiphertextAllocator::default()
+        ciphertext_allocator: DefaultCiphertextAllocator::default(),
+        convolution: PhantomData::<DefaultConvolution>
     };
     let t = 4;
     let digits = 3;
