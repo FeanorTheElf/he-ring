@@ -66,11 +66,13 @@ pub type UsedNegacyclicNTT = feanor_math_hexl::hexl::HEXLNegacyclicNTT;
 #[cfg(not(feature = "use_hexl"))]
 pub type UsedNegacyclicNTT = RustNegacyclicNTT<Zn>;
 
-pub type PlaintextAllocator = Global;
-pub type CiphertextAllocator = Global;
-pub type RNSOperationAllocator = Global;
+#[cfg(feature = "log_allocations")]
+pub type DefaultCiphertextAllocator = LoggingAllocator;
+#[cfg(not(feature = "log_allocations"))]
+pub type DefaultCiphertextAllocator = Global;
+
 pub type NumberRing<Params: BFVParams> = <Params::CiphertextRing as BXVCiphertextRing>::NumberRing;
-pub type PlaintextRing<Params: BFVParams> = DecompositionRing<NumberRing<Params>, Zn, PlaintextAllocator>;
+pub type PlaintextRing<Params: BFVParams> = DecompositionRing<NumberRing<Params>, Zn, Global>;
 pub type SecretKey<Params: BFVParams> = El<CiphertextRing<Params>>;
 pub type KeySwitchKey<'a, Params: BFVParams> = (usize, (GadgetProductOperand<'a, Params>, GadgetProductOperand<'a, Params>));
 pub type RelinKey<'a, Params: BFVParams> = KeySwitchKey<'a, Params>;
@@ -82,14 +84,25 @@ const ZZbig: BigIntRing = BigIntRing::RING;
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
 
 pub struct MulConversionData {
-    pub lift_to_C_mul: rnsconv::shared_lift::AlmostExactSharedBaseConversion<RNSOperationAllocator>,
-    pub scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert<RNSOperationAllocator>
+    pub lift_to_C_mul: rnsconv::shared_lift::AlmostExactSharedBaseConversion<Global>,
+    pub scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert<Global>
 }
 
 pub struct ModSwitchData {
-    pub scale: rnsconv::bfv_rescale::AlmostExactRescaling<RNSOperationAllocator>
+    pub scale: rnsconv::bfv_rescale::AlmostExactRescaling<Global>
 }
 
+///
+/// Trait for types that represent an instantiation of BFV.
+/// 
+/// We consider the parameters for the ciphertext ring to be part
+/// of the instantiation of BFV, but not the plaintext modulus.
+/// The reason is that some applications (most notably bootstrapping)
+/// consider the "same" BFV instantiation with different plaintext
+/// moduli - since a BFV encryption of an element of `R/tR` is always
+/// also a valid BFV encryption of the derived element in `R/t'R`, for
+/// every `t'` with `t | t'`. 
+/// 
 pub trait BFVParams {
     
     type CiphertextRing: BXVCiphertextRing + CyclotomicRing;
@@ -381,15 +394,16 @@ pub trait BFVParams {
 }
 
 #[derive(Clone, Debug)]
-pub struct Pow2BFV {
+pub struct Pow2BFV<A: Allocator + Clone + Send + Sync = DefaultCiphertextAllocator> {
     pub log2_q_min: usize,
     pub log2_q_max: usize,
-    pub log2_N: usize
+    pub log2_N: usize,
+    pub ciphertext_allocator: A
 }
 
-impl BFVParams for Pow2BFV {
+impl<A: Allocator + Clone + Send + Sync> BFVParams for Pow2BFV<A> {
 
-    type CiphertextRing = ManagedDoubleRNSRingBase<Pow2CyclotomicNumberRing<UsedNegacyclicNTT>, CiphertextAllocator>;
+    type CiphertextRing = ManagedDoubleRNSRingBase<Pow2CyclotomicNumberRing<UsedNegacyclicNTT>, A>;
 
     fn number_ring(&self) -> Pow2CyclotomicNumberRing<UsedNegacyclicNTT> {
         Pow2CyclotomicNumberRing::new_with(2 << self.log2_N)
@@ -410,29 +424,32 @@ impl BFVParams for Pow2BFV {
         assert!(ZZbig.is_gt(&Cmul_rns_base[Cmul_rns_base.len() - 1], &C_rns_base[C_rns_base.len() - 1]));
         Cmul_rns_base.sort_unstable_by(|l, r| ZZbig.cmp(l, r));
 
-        let C = ManagedDoubleRNSRingBase::new(
+        let C = ManagedDoubleRNSRingBase::new_with(
             self.number_ring(),
-            zn_rns::Zn::new(C_rns_base.iter().map(|p| Zn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect(), ZZbig)
+            zn_rns::Zn::new(C_rns_base.iter().map(|p| Zn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect(), ZZbig),
+            self.ciphertext_allocator.clone()
         );
-        let Cmul = ManagedDoubleRNSRingBase::new(
+        let Cmul = ManagedDoubleRNSRingBase::new_with(
             number_ring,
-            zn_rns::Zn::new(Cmul_rns_base.iter().map(|p| Zn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect(), ZZbig)
+            zn_rns::Zn::new(Cmul_rns_base.iter().map(|p| Zn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect(), ZZbig),
+            self.ciphertext_allocator.clone()
         );
         return (C, Cmul);
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct CompositeBFV {
+pub struct CompositeBFV<A: Allocator + Clone + Send + Sync = DefaultCiphertextAllocator> {
     pub log2_q_min: usize,
     pub log2_q_max: usize,
     pub n1: usize,
-    pub n2: usize
+    pub n2: usize,
+    pub ciphertext_allocator: A
 }
 
-impl BFVParams for CompositeBFV {
+impl<A: Allocator + Clone + Send + Sync> BFVParams for CompositeBFV<A> {
 
-    type CiphertextRing = ManagedDoubleRNSRingBase<CompositeCyclotomicNumberRing, CiphertextAllocator>;
+    type CiphertextRing = ManagedDoubleRNSRingBase<CompositeCyclotomicNumberRing, A>;
 
     fn ciphertext_modulus_bits(&self) -> Range<usize> {
         self.log2_q_min..self.log2_q_max
@@ -453,29 +470,32 @@ impl BFVParams for CompositeBFV {
         assert!(ZZbig.is_gt(&Cmul_rns_base[Cmul_rns_base.len() - 1], &C_rns_base[C_rns_base.len() - 1]));
         Cmul_rns_base.sort_unstable_by(|l, r| ZZbig.cmp(l, r));
 
-        let C = ManagedDoubleRNSRingBase::new(
+        let C = ManagedDoubleRNSRingBase::new_with(
             self.number_ring(),
-            zn_rns::Zn::new(C_rns_base.iter().map(|p| Zn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect(), ZZbig)
+            zn_rns::Zn::new(C_rns_base.iter().map(|p| Zn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect(), ZZbig),
+            self.ciphertext_allocator.clone()
         );
-        let Cmul = ManagedDoubleRNSRingBase::new(
+        let Cmul = ManagedDoubleRNSRingBase::new_with(
             number_ring,
-            zn_rns::Zn::new(Cmul_rns_base.iter().map(|p| Zn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect(), ZZbig)
+            zn_rns::Zn::new(Cmul_rns_base.iter().map(|p| Zn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect(), ZZbig),
+            self.ciphertext_allocator.clone()
         );
         return (C, Cmul);
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct CompositeSingleRNSBFV {
+pub struct CompositeSingleRNSBFV<A: Allocator + Clone + Send + Sync = DefaultCiphertextAllocator> {
     pub log2_q_min: usize,
     pub log2_q_max: usize,
     pub n1: usize,
-    pub n2: usize
+    pub n2: usize,
+    pub ciphertext_allocator: A
 }
 
-impl BFVParams for CompositeSingleRNSBFV {
+impl<A: Allocator + Clone + Send + Sync> BFVParams for CompositeSingleRNSBFV<A> {
 
-    type CiphertextRing = SingleRNSRingBase<CompositeCyclotomicNumberRing, CiphertextAllocator, UsedConvolution>;
+    type CiphertextRing = SingleRNSRingBase<CompositeCyclotomicNumberRing, A, UsedConvolution>;
 
     fn ciphertext_modulus_bits(&self) -> Range<usize> {
         self.log2_q_min..self.log2_q_max
@@ -496,13 +516,21 @@ impl BFVParams for CompositeSingleRNSBFV {
         assert!(ZZbig.is_gt(&Cmul_rns_base[Cmul_rns_base.len() - 1], &C_rns_base[C_rns_base.len() - 1]));
         Cmul_rns_base.sort_unstable_by(|l, r| ZZbig.cmp(l, r));
 
-        let C = SingleRNSRingBase::<_, _, UsedConvolution>::new(
+        let max_log2_n = 1 + ZZ.abs_log2_ceil(&((self.n1 * self.n2) as i64)).unwrap();
+        let C_rns_base = C_rns_base.iter().map(|p| Zn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect::<Vec<_>>();
+        let Cmul_rns_base = Cmul_rns_base.iter().map(|p| Zn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect::<Vec<_>>();
+
+        let C = SingleRNSRingBase::new_with(
             self.number_ring(),
-            zn_rns::Zn::new(C_rns_base.iter().map(|p| Zn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect(), ZZbig)
+            zn_rns::Zn::new(C_rns_base.clone(), ZZbig),
+            self.ciphertext_allocator.clone(),
+            C_rns_base.iter().map(|Zp| UsedConvolution::new(*Zp, max_log2_n)).collect()
         );
-        let Cmul = SingleRNSRingBase::<_, _, UsedConvolution>::new(
+        let Cmul = SingleRNSRingBase::new_with(
             number_ring,
-            zn_rns::Zn::new(Cmul_rns_base.iter().map(|p| Zn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect(), ZZbig)
+            zn_rns::Zn::new(Cmul_rns_base.clone(), ZZbig),
+            self.ciphertext_allocator.clone(),
+            Cmul_rns_base.iter().map(|Zp| UsedConvolution::new(*Zp, max_log2_n)).collect()
         );
         return (C, Cmul);
     }
@@ -554,7 +582,8 @@ fn test_pow2_bfv_hom_galois() {
     let params = Pow2BFV {
         log2_q_min: 500,
         log2_q_max: 520,
-        log2_N: 7
+        log2_N: 7,
+        ciphertext_allocator: DefaultCiphertextAllocator::default()
     };
     let t = 3;
     let digits = 3;
@@ -579,7 +608,8 @@ fn test_pow2_bfv_mul() {
     let params = Pow2BFV {
         log2_q_min: 500,
         log2_q_max: 520,
-        log2_N: 10
+        log2_N: 10,
+        ciphertext_allocator: DefaultCiphertextAllocator::default()
     };
     let t = 257;
     let digits = 3;
@@ -611,7 +641,8 @@ fn test_composite_bfv_mul() {
         log2_q_min: 500,
         log2_q_max: 520,
         n1: 17,
-        n2: 97
+        n2: 97,
+        ciphertext_allocator: DefaultCiphertextAllocator::default()
     };
     let t = 8;
     let digits = 3;
@@ -643,7 +674,8 @@ fn print_timings_pow2_bfv_mul() {
     let params = Pow2BFV {
         log2_q_min: 790,
         log2_q_max: 800,
-        log2_N: 15
+        log2_N: 15,
+        ciphertext_allocator: DefaultCiphertextAllocator::default()
     };
     let t = 257;
     let digits = 3;
@@ -702,7 +734,8 @@ fn print_timings_double_rns_composite_bfv_mul() {
         log2_q_min: 790,
         log2_q_max: 800,
         n1: 127,
-        n2: 337
+        n2: 337,
+        ciphertext_allocator: DefaultCiphertextAllocator::default()
     };
     let t = 4;
     let digits = 3;
@@ -762,7 +795,8 @@ fn test_bfv_hom_galois() {
         log2_q_min: 500,
         log2_q_max: 520,
         n1: 7,
-        n2: 11
+        n2: 11,
+        ciphertext_allocator: DefaultCiphertextAllocator::default()
     };
     let t = 3;
     let digits = 3;
@@ -788,7 +822,8 @@ fn test_single_rns_composite_bfv_mul() {
         log2_q_min: 500,
         log2_q_max: 520,
         n1: 7,
-        n2: 11
+        n2: 11,
+        ciphertext_allocator: DefaultCiphertextAllocator::default()
     };
     let t = 3;
     let digits = 3;
@@ -821,7 +856,8 @@ fn print_timings_single_rns_composite_bfv_mul() {
         log2_q_min: 790,
         log2_q_max: 800,
         n1: 127,
-        n2: 337
+        n2: 337,
+        ciphertext_allocator: DefaultCiphertextAllocator::default()
     };
     let t = 4;
     let digits = 3;
@@ -878,7 +914,8 @@ fn test_hom_eval_powcoeffs_to_slots_fat_large() {let mut rng = thread_rng();
         log2_q_min: 790,
         log2_q_max: 800,
         n1: 127,
-        n2: 337
+        n2: 337,
+        ciphertext_allocator: DefaultCiphertextAllocator::default()
     };
     let t = 65536;
     let digits = 3;

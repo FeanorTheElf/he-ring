@@ -61,19 +61,20 @@ const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
 ///    `pow2_bitreversed_dwt_butterfly` to give nonsensical results. If you pass `row_autos = |_| H.cyclotomic_index_ring().one()` then this uses the same
 ///    roots of unity everywhere, i.e. results in the behavior as outlined above.
 /// u
-fn pow2_bitreversed_dwt_butterfly<G, N>(H: &DefaultHypercube<Pow2CyclotomicNumberRing<N>>, dim_index: usize, l: usize, root_of_unity_4l: El<SlotRingOver<Zn>>, row_autos: G) -> MatmulTransform<Pow2CyclotomicNumberRing<N>>
+fn pow2_bitreversed_dwt_butterfly<G, NumberRing>(H: &DefaultHypercube<NumberRing>, dim_index: usize, l: usize, root_of_unity_4l: El<SlotRingOver<Zn>>, row_autos: G) -> MatmulTransform<NumberRing>
     where G: Fn(&[usize]) -> CyclotomicGaloisGroupEl,
-        Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing
+        NumberRing: HECyclotomicNumberRing + Clone
 {
     let m = H.hypercube().m(dim_index);
+    let log2_m = ZZ.abs_log2_ceil(&(m as i64)).unwrap();
+    assert_eq!(m, 1 << log2_m);
+
     let g = H.hypercube().map_1d(dim_index, -1);
     let smaller_cyclotomic_index_ring = Zn::new(4 * l as u64);
     let Gal = H.galois_group();
     let red = ZnReductionMap::new(Gal.underlying_ring(), &smaller_cyclotomic_index_ring).unwrap();
     assert_el_eq!(&smaller_cyclotomic_index_ring, &smaller_cyclotomic_index_ring.one(), &smaller_cyclotomic_index_ring.pow(red.map(Gal.to_ring_el(g)), l));
 
-    let log2_m = ZZ.abs_log2_ceil(&(m as i64)).unwrap();
-    assert!(m == 1 << log2_m, "pow2_bitreversed_cooley_tuckey_butterfly() only valid for hypercube dimensions that have a power-of-2 length");
     let l = l;
     assert!(l > 1);
     assert!(m % l == 0);
@@ -136,19 +137,20 @@ fn pow2_bitreversed_dwt_butterfly<G, N>(H: &DefaultHypercube<Pow2CyclotomicNumbe
 ///
 /// Inverse of [`pow2_bitreversed_dwt_butterfly()`]
 /// 
-fn pow2_bitreversed_inv_dwt_butterfly<G, N>(H: &DefaultHypercube<Pow2CyclotomicNumberRing<N>>, dim_index: usize, l: usize, root_of_unity_4l: El<SlotRingOver<Zn>>, row_autos: G) -> MatmulTransform<Pow2CyclotomicNumberRing<N>>
+fn pow2_bitreversed_inv_dwt_butterfly<G, NumberRing>(H: &DefaultHypercube<NumberRing>, dim_index: usize, l: usize, root_of_unity_4l: El<SlotRingOver<Zn>>, row_autos: G) -> MatmulTransform<NumberRing>
     where G: Fn(&[usize]) -> CyclotomicGaloisGroupEl,
-        Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing
+        NumberRing: HECyclotomicNumberRing + Clone
 {
     let m = H.hypercube().m(dim_index);
+    let log2_m = ZZ.abs_log2_ceil(&(m as i64)).unwrap();
+    assert_eq!(m, 1 << log2_m);
+
     let g = H.hypercube().map_1d(dim_index, -1);
     let smaller_cyclotomic_index_ring = Zn::new(4 * l as u64);
     let Gal = H.galois_group();
     let red = ZnReductionMap::new(Gal.underlying_ring(), &smaller_cyclotomic_index_ring).unwrap();
     assert_el_eq!(&smaller_cyclotomic_index_ring, &smaller_cyclotomic_index_ring.one(), &smaller_cyclotomic_index_ring.pow(red.map(Gal.to_ring_el(g)), l));
 
-    let log2_m = ZZ.abs_log2_ceil(&(m as i64)).unwrap();
-    assert!(m == 1 << log2_m, "pow2_bitreversed_inv_dwt_butterfly() only valid for hypercube dimensions that have a power-of-2 length");
     let l = l;
     assert!(l > 1);
     assert!(m % l == 0);
@@ -230,13 +232,13 @@ fn pow2_bitreversed_inv_dwt_butterfly<G, N>(H: &DefaultHypercube<Pow2CyclotomicN
 /// for `j` from `0` to `m`.
 /// Here `𝝵` is the canonical generator of the slot ring, which is a primitive `n`-th root of unity.
 /// 
-fn pow2_bitreversed_dwt<G, N>(H: &DefaultHypercube<Pow2CyclotomicNumberRing<N>>, dim_index: usize, row_autos: G) -> Vec<MatmulTransform<Pow2CyclotomicNumberRing<N>>>
+fn pow2_bitreversed_dwt<G, NumberRing>(H: &DefaultHypercube<NumberRing>, dim_index: usize, row_autos: G) -> Vec<MatmulTransform<NumberRing>>
     where G: Fn(&[usize]) -> CyclotomicGaloisGroupEl,
-        Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing
+        NumberRing: HECyclotomicNumberRing + Clone
 {
     let m = H.hypercube().m(dim_index);
     let log2_m = ZZ.abs_log2_ceil(&(m as i64)).unwrap();
-    assert!(m == 1 << log2_m, "pow2_bitreversed_dwt() only valid for hypercube dimensions that have a power-of-2 length");
+    assert_eq!(m, 1 << log2_m);
     assert!((H.ring().n() / m as u64) % 4 == 0, "pow2_bitreversed_dwt() only possible if there is a 4m-th primitive root of unity");
 
     let zeta = H.slot_ring().pow(H.slot_ring().canonical_gen(), H.ring().n() as usize / m / 4);
@@ -261,13 +263,13 @@ fn pow2_bitreversed_dwt<G, N>(H: &DefaultHypercube<Pow2CyclotomicNumberRing<N>>,
 ///
 /// Inverse to [`pow2_bitreversed_dwt()`]
 /// 
-fn pow2_bitreversed_inv_dwt<G, N>(H: &DefaultHypercube<Pow2CyclotomicNumberRing<N>>, dim_index: usize, row_autos: G) -> Vec<MatmulTransform<Pow2CyclotomicNumberRing<N>>>
+fn pow2_bitreversed_inv_dwt<G, NumberRing>(H: &DefaultHypercube<NumberRing>, dim_index: usize, row_autos: G) -> Vec<MatmulTransform<NumberRing>>
     where G: Fn(&[usize]) -> CyclotomicGaloisGroupEl,
-        Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing
+        NumberRing: HECyclotomicNumberRing + Clone
 {
     let m = H.hypercube().m(dim_index);
     let log2_m = ZZ.abs_log2_ceil(&(m as i64)).unwrap();
-    assert!(m == 1 << log2_m, "pow2_bitreversed_dwt() only valid for hypercube dimensions that have a power-of-2 length");
+    assert_eq!(m, 1 << log2_m);
     assert!((H.ring().n() / m as u64) % 4 == 0, "pow2_bitreversed_dwt() only possible if there is a 4m-th primitive root of unity");
 
     let zeta = H.slot_ring().pow(H.slot_ring().canonical_gen(), H.ring().n() as usize / m / 4);
@@ -299,8 +301,8 @@ fn pow2_bitreversed_inv_dwt<G, N>(H: &DefaultHypercube<Pow2CyclotomicNumberRing<
 /// If `p = 3 mod 4`, the slots are enumerated by `i` with `0 <= i < m` and the transform will put the value of slot `i` into the coefficient
 /// of `X^(bitrev(i, m) * n/(4m))`
 /// 
-pub fn slots_to_coeffs_thin<N>(H: &DefaultHypercube<Pow2CyclotomicNumberRing<N>>) -> Vec<MatmulTransform<Pow2CyclotomicNumberRing<N>>>
-    where Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing
+pub fn slots_to_coeffs_thin<NumberRing>(H: &DefaultHypercube<NumberRing>) -> Vec<MatmulTransform<NumberRing>>
+    where NumberRing: HECyclotomicNumberRing + Clone
 {
     let n = H.ring().get_ring().n();
     let log2_n = ZZ.abs_log2_ceil(&(n as i64)).unwrap();
@@ -356,8 +358,8 @@ pub fn slots_to_coeffs_thin<N>(H: &DefaultHypercube<Pow2CyclotomicNumberRing<N>>
 /// "Coeffs-to-Slots" map, as it does not discard unused factors. However, it is not
 /// too hard to build the "coeffs-to-slots" map from this, see [`coeffs_to_slots_thin()`]. 
 /// 
-pub fn slots_to_coeffs_thin_inv<N>(H: &DefaultHypercube<Pow2CyclotomicNumberRing<N>>) -> Vec<MatmulTransform<Pow2CyclotomicNumberRing<N>>>
-    where Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing
+pub fn slots_to_coeffs_thin_inv<NumberRing>(H: &DefaultHypercube<NumberRing>) -> Vec<MatmulTransform<NumberRing>>
+    where NumberRing: HECyclotomicNumberRing + Clone
 {
     let n = H.ring().get_ring().n();
     let log2_n = ZZ.abs_log2_ceil(&(n as i64)).unwrap();
@@ -404,9 +406,12 @@ pub fn slots_to_coeffs_thin_inv<N>(H: &DefaultHypercube<Pow2CyclotomicNumberRing
     }
 }
 
-pub fn coeffs_to_slots_thin<N>(H: &DefaultHypercube<Pow2CyclotomicNumberRing<N>>) -> (Vec<MatmulTransform<Pow2CyclotomicNumberRing<N>>>, Trace<Pow2CyclotomicNumberRing<N>>)
-    where Pow2CyclotomicNumberRing<N>: HECyclotomicNumberRing + Clone
+pub fn coeffs_to_slots_thin<NumberRing>(H: &DefaultHypercube<NumberRing>) -> (Vec<MatmulTransform<NumberRing>>, Trace<NumberRing>)
+    where NumberRing: HECyclotomicNumberRing + Clone
 {
+    let log2_n = ZZ.abs_log2_ceil(&(H.hypercube().n() as i64)).unwrap();
+    assert_eq!(H.hypercube().n(), 1 << log2_n);
+
     let trace = Trace::new(H.ring().get_ring().number_ring().clone(), H.galois_group().nonnegative_representative(H.hypercube().frobenius(1)) as i64, H.slot_ring().rank());
     let mut result = slots_to_coeffs_thin_inv(H);
     let last = MatmulTransform::mult_scalar_slots(H, &H.slot_ring().inclusion().map(H.slot_ring().base_ring().invert(&H.slot_ring().base_ring().int_hom().map(H.slot_ring().rank() as i32)).unwrap()));

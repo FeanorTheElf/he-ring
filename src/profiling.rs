@@ -1,6 +1,9 @@
+use std::alloc::{AllocError, Allocator, Global, Layout};
+use std::backtrace::Backtrace;
 use std::borrow::Borrow;
 use std::fmt::Display;
 use std::ops::Deref;
+use std::ptr::NonNull;
 use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 use std::{cell::RefCell, collections::BTreeMap, sync::{atomic::{AtomicU64, AtomicUsize}, RwLock}, time::Instant};
@@ -267,4 +270,110 @@ pub fn log_time<F, T, const LOG: bool, const COUNTER_VAR_COUNT: usize>(descripti
         println!("done in {} ms, {:?}", (end - start).as_millis(), counters);
     }
     return result;
+}
+
+#[derive(Clone)]
+pub struct LoggingAllocator<A: Allocator = Global> {
+    base: A,
+    log_above: usize
+}
+
+impl<A: Allocator + Default> Default for LoggingAllocator<A> {
+
+    fn default() -> Self {
+        Self::new_with(A::default(), 1 << 20)
+    }
+} 
+
+impl LoggingAllocator {
+
+    pub const fn new() -> Self {
+        Self::new_with(Global, 1 << 20)
+    }
+}
+
+impl<A: Allocator> LoggingAllocator<A> {
+
+    pub const fn new_with(base: A, log_above: usize) -> Self {
+        Self {
+            base: base,
+            log_above: log_above
+        }
+    }
+}
+
+unsafe impl<A: Allocator> Allocator for LoggingAllocator<A> {
+
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        let result = self.base.allocate(layout);
+        if result.is_ok() && layout.size() >= self.log_above {
+            let allocation = result.as_ref().unwrap();
+            println!("Allocating {} bytes, starting at {:?}", allocation.len(), allocation.as_ptr());
+            println!("{}", Backtrace::force_capture());
+        }
+        return result;
+    }
+
+    fn allocate_zeroed(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        let result = self.base.allocate(layout);
+        if result.is_ok() && layout.size() >= self.log_above {
+            let allocation = result.as_ref().unwrap();
+            println!("Allocating {} bytes, starting at {:?}", allocation.len(), allocation.as_ptr());
+            println!("{}", Backtrace::force_capture());
+        }
+        return result;
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        if layout.size() >= self.log_above {
+            println!("Clearing allocation starting at {:?}", ptr.as_ptr());
+            println!("{}", Backtrace::force_capture());
+        }
+        self.base.deallocate(ptr, layout);
+    }
+
+    unsafe fn grow(
+        &self,
+        ptr: NonNull<u8>,
+        old_layout: Layout,
+        new_layout: Layout,
+    ) -> Result<NonNull<[u8]>, AllocError> {
+        let result = self.base.grow(ptr, old_layout, new_layout);
+        if result.is_ok() && (old_layout.size() >= self.log_above || new_layout.size() >= self.log_above) {
+            let allocation = result.as_ref().unwrap();
+            println!("Changing size from {} bytes to {} bytes of allocation starting at {:?}, now starts at {:?}", old_layout.size(), new_layout.size(), ptr, allocation.as_ptr());
+            println!("{}", Backtrace::force_capture());
+        }
+        return result;
+    }
+
+    unsafe fn grow_zeroed(
+        &self,
+        ptr: NonNull<u8>,
+        old_layout: Layout,
+        new_layout: Layout,
+    ) -> Result<NonNull<[u8]>, AllocError> {
+        let result = self.base.grow_zeroed(ptr, old_layout, new_layout);
+        if result.is_ok() && (old_layout.size() >= self.log_above || new_layout.size() >= self.log_above) {
+            let allocation = result.as_ref().unwrap();
+            println!("Changing size from {} bytes to {} bytes of allocation starting at {:?}, now starts at {:?}", old_layout.size(), new_layout.size(), ptr, allocation.as_ptr());
+            println!("{}", Backtrace::force_capture());
+        }
+        return result;
+    }
+
+    unsafe fn shrink(
+        &self,
+        ptr: NonNull<u8>,
+        old_layout: Layout,
+        new_layout: Layout,
+    ) -> Result<NonNull<[u8]>, AllocError> {
+        let result = self.base.shrink(ptr, old_layout, new_layout);
+        if result.is_ok() && (old_layout.size() >= self.log_above || new_layout.size() >= self.log_above) {
+            let allocation = result.as_ref().unwrap();
+            println!("Changing size from {} bytes to {} bytes of allocation starting at {:?}, now starts at {:?}", old_layout.size(), new_layout.size(), ptr, allocation.as_ptr());
+            println!("{}", Backtrace::force_capture());
+        }
+        return result;
+    }
 }

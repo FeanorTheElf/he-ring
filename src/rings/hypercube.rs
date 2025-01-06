@@ -249,6 +249,9 @@ impl HypercubeStructure {
         };
     }
 
+    ///
+    /// Computes the Halevi-Shoup hypercube as described in [https://ia.cr/2014/873].
+    /// 
     pub fn halevi_shoup_hypercube(galois_group: CyclotomicGaloisGroup, p: i64) -> Self {
 
         ///

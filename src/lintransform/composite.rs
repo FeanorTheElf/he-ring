@@ -155,7 +155,7 @@ pub fn slots_to_powcoeffs_fat<NumberRing>(H: &DefaultHypercube<NumberRing>) -> V
 }
 
 ///
-/// Inverse of [`slots_to_powcoeffs_fat()`].
+/// Inverse [https://ia.cr/2014/873]-style linear transform, i.e. the inverse of [`slots_to_powcoeffs_fat()`].
 /// 
 /// In other words, this moves the powerful-basis coefficient of `X1^(j * m1 + i1) X2^i2 ... Xr^ir`
 /// to the coefficient of `𝝵^j` within the slot `(i1, ..., ir)`.

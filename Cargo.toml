@@ -33,6 +33,7 @@ oorandom = "11.1.3"
 [features]
 use_hexl = ["dep:feanor-math-hexl"]
 record_timings = []
+log_allocations = []
 force_naive_gadget_product = []
 force_rns_conversion_full_reduction = []
 generic_tests = []
