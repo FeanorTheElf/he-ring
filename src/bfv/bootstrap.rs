@@ -63,7 +63,7 @@ impl<Params: BFVParams> ThinBootstrapParams<Params>
         let plaintext_ring = self.scheme_params.create_plaintext_ring(ZZ.pow(p, e));
         let original_plaintext_ring = self.scheme_params.create_plaintext_ring(ZZ.pow(p, r));
 
-        let digit_extract = DigitExtract::new_default::<LOG>(plaintext_ring.base_ring(), r);
+        let digit_extract = DigitExtract::new_default::<LOG>(p, e, r);
 
         let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(plaintext_ring.n()), p);
         let H = HypercubeIsomorphism::new::<LOG>(&plaintext_ring, hypercube);
@@ -103,7 +103,7 @@ impl<Params: BFVParams> ThinBootstrapParams<Params>
         let plaintext_ring = self.scheme_params.create_plaintext_ring(ZZ.pow(p, e));
         let original_plaintext_ring = self.scheme_params.create_plaintext_ring(ZZ.pow(p, r));
 
-        let digit_extract = DigitExtract::new_default::<LOG>(plaintext_ring.base_ring(), r);
+        let digit_extract = DigitExtract::new_default::<LOG>(p, e, r);
 
         let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(plaintext_ring.n()), p);
         let H = HypercubeIsomorphism::new::<LOG>(&plaintext_ring, hypercube);
@@ -138,6 +138,10 @@ impl<Params: BFVParams> ThinBootstrapParams<Params>
 /// for `v = e - r`. Here `x mod p^v` refers to the smallest positive element
 /// of `Z/p^eZ` that is congruent to `x` modulo `p^v`.
 /// 
+/// This function can also be applied to values in a ring `Z/p^e'Z` for
+/// `e' > e`, in which case the results are only specified modulo `p^e`, i.e.
+/// may be perturbed by an arbitrary value `p^e a`.
+/// 
 pub struct DigitExtract {
     extraction_circuits: Vec<(Vec<usize>, ArithCircuit)>,
     v: usize,
@@ -152,13 +156,13 @@ impl DigitExtract {
     /// 
     /// Uses the precomputed table of best digit extraction circuits for `e <= 23`.
     /// 
-    pub fn new_precomputed_p_is_2(scalar_ring: &Zn, r: usize) -> Self {
-        let (p, e) = is_prime_power(ZZ, scalar_ring.modulus()).unwrap();
+    pub fn new_precomputed_p_is_2(p: i64, e: usize, r: usize) -> Self {
         assert_eq!(2, p);
+        assert!(is_prime(&ZZ, &p, 10));
         return Self::new_with(
             p, 
-            r, 
             e, 
+            r, 
             [1, 2, 4, 8, 16, 23].into_iter().map(|e| (
                 [1, 2, 4, 8, 16, 23].into_iter().take_while(|i| *i <= e).collect(),
                 precomputed_p_2(e)
@@ -173,8 +177,8 @@ impl DigitExtract {
     /// a heuristic method to compile them into an arithmetic circuit, based on the
     /// Paterson-Stockmeyer method.
     /// 
-    pub fn new_default<const LOG: bool>(scalar_ring: &Zn, r: usize) -> Self {
-        let (p, e) = is_prime_power(ZZ, scalar_ring.modulus()).unwrap();
+    pub fn new_default<const LOG: bool>(p: i64, e: usize, r: usize) -> Self {
+        assert!(is_prime(&ZZ, &p, 10));
         assert!(e > r);
         let v = e - r;
         
@@ -188,7 +192,7 @@ impl DigitExtract {
         });
         assert!(digit_extraction_circuits.is_sorted_by_key(|(digits, _)| *digits.last().unwrap()));
         
-        return Self::new_with(p, r, e, digit_extraction_circuits);
+        return Self::new_with(p, e, r, digit_extraction_circuits);
     }
 
     ///
@@ -201,7 +205,8 @@ impl DigitExtract {
     /// 
     /// If you want to use the default choice of circuits, consider using [`DigitExtract::new_default()`].
     /// 
-    pub fn new_with(p: i64, r: usize, e: usize, extraction_circuits: Vec<(Vec<usize>, ArithCircuit)>) -> Self {
+    pub fn new_with(p: i64, e: usize, r: usize, extraction_circuits: Vec<(Vec<usize>, ArithCircuit)>) -> Self {
+        assert!(is_prime(&ZZ, &p, 10));
         assert!(e > r);
         for (digits, circuit) in &extraction_circuits {
             assert!(digits.is_sorted());
@@ -250,7 +255,7 @@ impl DigitExtract {
         let p = self.p;
         let e = self.e;
         let r = self.e - self.v;
-        assert_eq!(ZZ.pow(p, e), ring.characteristic(ZZ).unwrap());
+        assert!(ZZ.divides(&ring.characteristic(ZZ).unwrap(), &ZZ.pow(p, e)));
 
         let mut mod_result = ring.zero();
         let mut partial_floor_divs = (0..self.v).map(|_| ring.clone_el(&input)).collect::<Vec<_>>();
@@ -291,9 +296,14 @@ impl DigitExtract {
         let p = self.p;
         let e = self.e;
         let r = self.e - self.v;
-        assert_eq!(ZZ.pow(p, r), *P_base.base_ring().modulus());
-        for i in 0..self.v {
-            assert_eq!(ZZ.pow(p, i + r + 1), *P_bootstrap[i].base_ring().modulus());
+        let v = self.v;
+
+        let (check_p, base_ring_e) = is_prime_power(&ZZ, P_base.base_ring().modulus()).unwrap();
+        assert_eq!(check_p, p);
+        assert!(base_ring_e >= r);
+        assert_eq!(v, P_bootstrap.len());
+        for i in 0..v {
+            assert_eq!(ZZ.pow(p, base_ring_e + i + 1), *P_bootstrap[i].base_ring().modulus());
         }
         let P = |modulus_exponent: usize| if modulus_exponent <= r {
             assert_eq!(r, modulus_exponent);
@@ -582,9 +592,47 @@ fn test_composite_bfv_thin_bootstrapping_2_takes_long() {
 }
 
 #[test]
+fn test_digit_extract_homomorphic() {
+    let mut rng = thread_rng();
+    
+    let params = Pow2BFV {
+        log2_q_min: 500,
+        log2_q_max: 520,
+        log2_N: 6,
+        ciphertext_allocator: DefaultCiphertextAllocator::default(),
+        negacyclic_ntt: PhantomData::<DefaultNegacyclicNTT>
+    };
+    let digits = 3;
+    
+    let P1 = params.create_plaintext_ring(17 * 17);
+    let P2 = params.create_plaintext_ring(17 * 17 * 17);
+    let (C, C_mul) = params.create_ciphertext_rings();
+
+    let sk = Pow2BFV::gen_sk(&C, &mut rng);
+    let rk = Pow2BFV::gen_rk(&C, &mut rng, &sk, digits);
+
+    let m = P2.int_hom().map(17 * 17 + 2 * 17 + 5);
+    let ct = Pow2BFV::enc_sym(&P2, &C, &mut rng, &m, &sk);
+
+    let digitextract = DigitExtract::new_default::<false>(17, 2, 1);
+
+    let (ct_high, ct_low) = digitextract.evaluate_homomorphic::<Pow2BFV, true>(&P1, std::slice::from_ref(&P2), &C, &C_mul, ct, &rk, Some(&sk));
+
+    let m_high = Pow2BFV::dec(&P1, &C, Pow2BFV::clone_ct(&C, &ct_high), &sk);
+    assert!(P1.wrt_canonical_basis(&m_high).iter().skip(1).all(|x| P1.base_ring().is_zero(&x)));
+    let m_high = P1.base_ring().smallest_positive_lift(P1.wrt_canonical_basis(&m_high).at(0));
+    assert_eq!(2, m_high % 17);
+
+    let m_low = Pow2BFV::dec(&P2, &C, Pow2BFV::clone_ct(&C, &ct_low), &sk);
+    assert!(P1.wrt_canonical_basis(&m_low).iter().skip(1).all(|x| P2.base_ring().is_zero(&x)));
+    let m_low = P1.base_ring().smallest_positive_lift(P1.wrt_canonical_basis(&m_low).at(0));
+    assert_eq!(5, m_low % (17 * 17));
+}
+
+#[test]
 fn test_digit_extract_evaluate() {
     let ring = Zn::new(16);
-    let digit_extract = DigitExtract::new_default::<false>(&ring, 2);
+    let digit_extract = DigitExtract::new_default::<false>(2, 4, 2);
     for x in 0..16 {
         let (actual_high, actual_low) = digit_extract.evaluate(&ring, ring.int_hom().map(x));
         assert_eq!((x / 4) * 4, ring.smallest_positive_lift(actual_high) as i32);
@@ -592,7 +640,7 @@ fn test_digit_extract_evaluate() {
     }
 
     let ring = Zn::new(81);
-    let digit_extract = DigitExtract::new_default::<false>(&ring, 2);
+    let digit_extract = DigitExtract::new_default::<false>(3, 4, 2);
     for x in 0..81 {
         let (actual_high, actual_low) = digit_extract.evaluate(&ring, ring.int_hom().map(x));
         assert_eq!((x / 9) * 9, ring.smallest_positive_lift(actual_high) as i32);
@@ -600,11 +648,38 @@ fn test_digit_extract_evaluate() {
     }
 
     let ring = Zn::new(125);
-    let digit_extract = DigitExtract::new_default::<false>(&ring, 2);
+    let digit_extract = DigitExtract::new_default::<false>(5, 3, 2);
     for x in 0..125 {
         let (actual_high, actual_low) = digit_extract.evaluate(&ring, ring.int_hom().map(x));
         assert_eq!((x / 5) * 5, ring.smallest_positive_lift(actual_high) as i32);
         assert_eq!(x % 5, ring.smallest_positive_lift(actual_low) as i32);
+    }
+}
+
+#[test]
+fn test_digit_extract_evaluate_ignore_higher() {
+    let ring = Zn::new(64);
+    let digit_extract = DigitExtract::new_default::<false>(2, 4, 2);
+    for x in 0..64 {
+        let (actual_high, actual_low) = digit_extract.evaluate(&ring, ring.int_hom().map(x));
+        assert_eq!(((x / 4) * 4) % 16, ring.smallest_positive_lift(actual_high) as i32 % 16);
+        assert_eq!(x % 4, ring.smallest_positive_lift(actual_low) as i32 % 16);
+    }
+
+    let ring = Zn::new(243);
+    let digit_extract = DigitExtract::new_default::<false>(3, 4, 2);
+    for x in 0..243 {
+        let (actual_high, actual_low) = digit_extract.evaluate(&ring, ring.int_hom().map(x));
+        assert_eq!(((x / 9) * 9) % 81, ring.smallest_positive_lift(actual_high) as i32 % 81);
+        assert_eq!(x % 9, ring.smallest_positive_lift(actual_low) as i32 % 81);
+    }
+
+    let ring = Zn::new(625);
+    let digit_extract = DigitExtract::new_default::<false>(5, 3, 2);
+    for x in 0..625 {
+        let (actual_high, actual_low) = digit_extract.evaluate(&ring, ring.int_hom().map(x));
+        assert_eq!(((x / 5) * 5) % 125, ring.smallest_positive_lift(actual_high) as i32 % 125);
+        assert_eq!(x % 5, ring.smallest_positive_lift(actual_low) as i32 % 125);
     }
 }
 
