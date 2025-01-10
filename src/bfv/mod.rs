@@ -183,15 +183,19 @@ pub trait BFVParams {
     }
     
     fn hom_add(C: &CiphertextRing<Self>, lhs: Ciphertext<Self>, rhs: &Ciphertext<Self>) -> Ciphertext<Self> {
-        let (lhs0, lhs1) = lhs;
-        let (rhs0, rhs1) = rhs;
-        return (C.add_ref(&lhs0, &rhs0), C.add_ref(&lhs1, &rhs1));
+        record_time!(GLOBAL_TIME_RECORDER, "BFVParams::hom_add", || {
+            let (lhs0, lhs1) = lhs;
+            let (rhs0, rhs1) = rhs;
+            return (C.add_ref(&lhs0, &rhs0), C.add_ref(&lhs1, &rhs1));
+        })
     }
     
     fn hom_sub(C: &CiphertextRing<Self>, lhs: Ciphertext<Self>, rhs: &Ciphertext<Self>) -> Ciphertext<Self> {
-        let (lhs0, lhs1) = lhs;
-        let (rhs0, rhs1) = rhs;
-        return (C.sub_ref(&lhs0, rhs0), C.sub_ref(&lhs1, rhs1));
+        record_time!(GLOBAL_TIME_RECORDER, "BFVParams::hom_sub", || {
+            let (lhs0, lhs1) = lhs;
+            let (rhs0, rhs1) = rhs;
+            return (C.sub_ref(&lhs0, rhs0), C.sub_ref(&lhs1, rhs1));
+        })
     }
     
     fn clone_ct(C: &CiphertextRing<Self>, ct: &Ciphertext<Self>) -> Ciphertext<Self> {
@@ -199,19 +203,23 @@ pub trait BFVParams {
     }
     
     fn hom_add_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
-        let mut m = C.get_ring().exact_convert_from_decompring(P, m);
-        let Delta = C.base_ring().coerce(&ZZbig, ZZbig.rounded_div(
-            ZZbig.clone_el(C.base_ring().modulus()), 
-            &int_cast(*P.base_ring().modulus() as i32, &ZZbig, &StaticRing::<i32>::RING)
-        ));
-        C.inclusion().mul_assign_ref_map(&mut m, &Delta);
-        return (C.add(ct.0, m), ct.1);
+        record_time!(GLOBAL_TIME_RECORDER, "BFVParams::hom_add_plain", || {
+            let mut m = C.get_ring().exact_convert_from_decompring(P, m);
+            let Delta = C.base_ring().coerce(&ZZbig, ZZbig.rounded_div(
+                ZZbig.clone_el(C.base_ring().modulus()), 
+                &int_cast(*P.base_ring().modulus() as i32, &ZZbig, &StaticRing::<i32>::RING)
+            ));
+            C.inclusion().mul_assign_ref_map(&mut m, &Delta);
+            return (C.add(ct.0, m), ct.1);
+        })
     }
     
     fn hom_mul_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
-        let m = C.get_ring().exact_convert_from_decompring(P, m);
-        let (c0, c1) = ct;
-        return (C.mul_ref_snd(c0, &m), C.mul(c1, m));
+        record_time!(GLOBAL_TIME_RECORDER, "BFVParams::hom_mul_plain", || {
+            let m = C.get_ring().exact_convert_from_decompring(P, m);
+            let (c0, c1) = ct;
+            return (C.mul_ref_snd(c0, &m), C.mul(c1, m));
+        })
     }
     
     fn hom_mul_plain_i64(_P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: i64, ct: Ciphertext<Self>) -> Ciphertext<Self> {
@@ -242,27 +250,29 @@ pub trait BFVParams {
     fn hom_mul<'a>(C: &CiphertextRing<Self>, C_mul: &CiphertextRing<Self>, lhs: Ciphertext<Self>, rhs: Ciphertext<Self>, rk: &RelinKey<'a, Self>, conv_data: &MulConversionData) -> Ciphertext<Self>
         where Self: 'a
     {
-        let (c00, c01) = lhs;
-        let (c10, c11) = rhs;
-        let lift = |c| C_mul.get_ring().perform_rns_op_from(C.get_ring(), &c, &conv_data.lift_to_C_mul);
-    
-        let c00_lifted = lift(c00);
-        let c01_lifted = lift(c01);
-        let c10_lifted = lift(c10);
-        let c11_lifted = lift(c11);
-    
-        let [lifted0, lifted1, lifted2] = C_mul.get_ring().two_by_two_convolution([&c00_lifted, &c01_lifted], [&c10_lifted, &c11_lifted]);
-    
-        let scale_down = |c: El<CiphertextRing<Self>>| C.get_ring().perform_rns_op_from(C_mul.get_ring(), &c, &conv_data.scale_down_to_C);
-    
-        let res0 = scale_down(lifted0);
-        let res1 = scale_down(lifted1);
-        let res2 = scale_down(lifted2);
-    
-        let op = C.get_ring().to_gadget_product_lhs(res2, rk.0);
-        let (s0, s1) = &rk.1;
-    
-        return (C.add_ref(&res0, &C.get_ring().gadget_product(&op, s0)), C.add_ref(&res1, &C.get_ring().gadget_product(&op, s1)));
+        record_time!(GLOBAL_TIME_RECORDER, "BFVParams::hom_mul", || {
+            let (c00, c01) = lhs;
+            let (c10, c11) = rhs;
+            let lift = |c| C_mul.get_ring().perform_rns_op_from(C.get_ring(), &c, &conv_data.lift_to_C_mul);
+        
+            let c00_lifted = lift(c00);
+            let c01_lifted = lift(c01);
+            let c10_lifted = lift(c10);
+            let c11_lifted = lift(c11);
+        
+            let [lifted0, lifted1, lifted2] = C_mul.get_ring().two_by_two_convolution([&c00_lifted, &c01_lifted], [&c10_lifted, &c11_lifted]);
+        
+            let scale_down = |c: El<CiphertextRing<Self>>| C.get_ring().perform_rns_op_from(C_mul.get_ring(), &c, &conv_data.scale_down_to_C);
+        
+            let res0 = scale_down(lifted0);
+            let res1 = scale_down(lifted1);
+            let res2 = scale_down(lifted2);
+        
+            let op = C.get_ring().to_gadget_product_lhs(res2, rk.0);
+            let (s0, s1) = &rk.1;
+        
+            return (C.add_ref(&res0, &C.get_ring().gadget_product(&op, s0)), C.add_ref(&res1, &C.get_ring().gadget_product(&op, s1)));
+        })
     }
     
     fn gen_switch_key<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing<Self>, mut rng: R, old_sk: &SecretKey<Self>, new_sk: &SecretKey<Self>, digits: usize) -> KeySwitchKey<'a, Self>
@@ -315,10 +325,12 @@ pub trait BFVParams {
     fn hom_galois<'a>(C: &CiphertextRing<Self>, ct: Ciphertext<Self>, g: ZnEl, gk: &KeySwitchKey<'a, Self>) -> Ciphertext<Self>
         where Self: 'a
     {
-        Self::key_switch(C, (
-            C.get_ring().apply_galois_action(&ct.0, g),
-            C.get_ring().apply_galois_action(&ct.1, g)
-        ), gk)
+        record_time!(GLOBAL_TIME_RECORDER, "BFVParams::hom_galois", || {
+            Self::key_switch(C, (
+                C.get_ring().apply_galois_action(&ct.0, g),
+                C.get_ring().apply_galois_action(&ct.1, g)
+            ), gk)
+        })
     }
     
     fn hom_galois_many<'a, 'b, V>(C: &CiphertextRing<Self>, ct: Ciphertext<Self>, gs: &[ZnEl], gks: V) -> Vec<Ciphertext<Self>>
@@ -327,21 +339,23 @@ pub trait BFVParams {
             'a: 'b,
             Self: 'a
     {
-        let digits = gks.at(0).0;
-        assert!(gks.iter().all(|(d, _)| *d == digits));
-        let (c0, c1) = ct;
-        let c1_op = C.get_ring().to_gadget_product_lhs(c1, digits);
-        let c1_op_gs = C.get_ring().apply_galois_action_many_gadget_product_operand(&c1_op, gs);
-        let c0_gs = C.get_ring().apply_galois_action_many(&c0, gs);
-        assert_eq!(gks.len(), c1_op_gs.len());
-        assert_eq!(gks.len(), c0_gs.len());
-        return c0_gs.zip(c1_op_gs.iter()).enumerate().map(|(i, (c0_g, c1_g))| {
-            let (s0, s1) = &gks.at(i).1;
-            let r0 = C.get_ring().gadget_product(&c1_g, s0);
-            let r1 = C.get_ring().gadget_product(&c1_g, s1);
-            let c0_g = C.apply_galois_action(&c0, gs[i]);
-            return (C.add_ref(&r0, &c0_g), r1);
-        }).collect();
+        record_time!(GLOBAL_TIME_RECORDER, "BFVParams::hom_galois_many", || {
+            let digits = gks.at(0).0;
+            assert!(gks.iter().all(|(d, _)| *d == digits));
+            let (c0, c1) = ct;
+            let c1_op = C.get_ring().to_gadget_product_lhs(c1, digits);
+            let c1_op_gs = C.get_ring().apply_galois_action_many_gadget_product_operand(&c1_op, gs);
+            let c0_gs = C.get_ring().apply_galois_action_many(&c0, gs);
+            assert_eq!(gks.len(), c1_op_gs.len());
+            assert_eq!(gks.len(), c0_gs.len());
+            return c0_gs.zip(c1_op_gs.iter()).enumerate().map(|(i, (c0_g, c1_g))| {
+                let (s0, s1) = &gks.at(i).1;
+                let r0 = C.get_ring().gadget_product(&c1_g, s0);
+                let r1 = C.get_ring().gadget_product(&c1_g, s1);
+                let c0_g = C.apply_galois_action(&c0, gs[i]);
+                return (C.add_ref(&r0, &c0_g), r1);
+            }).collect();
+        })
     }
 
     fn create_multiplication_rescale(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, Cmul: &CiphertextRing<Self>) -> MulConversionData {
