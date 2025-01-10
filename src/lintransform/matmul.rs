@@ -575,11 +575,6 @@ impl<NumberRing, A> CompiledLinearTransform<NumberRing, A>
 
         let params = Self::baby_step_giant_step_params((0..sizes.len()).map_fn(|i| sizes[i] as usize), preferred_baby_steps);
 
-        println!("{:?}", sizes);
-        println!("{}", lin_transform.data.len());
-        println!("{}", params.unhoisted_automorphism_count);
-        println!("{}", params.hoisted_automorphism_count);
-
         let mixed_dim_i = params.mixed_step_dimension;
         let mixed_dim_baby_steps = params.mixed_step_dimension_baby_steps;
 

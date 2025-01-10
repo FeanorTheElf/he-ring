@@ -509,6 +509,16 @@ impl<NumberRing, A> RingBase for DoubleRNSRingBase<NumberRing, A>
         self.from(self.base_ring().get_ring().from_int(value))
     }
 
+    fn mul_assign_int(&self, lhs: &mut Self::Element, rhs: i32) {
+        assert_eq!(self.element_len(), lhs.el_wrt_mult_basis.len());
+        for i in 0..self.rns_base().len() {
+            let rhs_mod_p = self.rns_base().at(i).get_ring().from_int(rhs);
+            for j in 0..self.rank() {
+                self.rns_base().at(i).mul_assign_ref(&mut lhs.el_wrt_mult_basis[i * self.rank() + j], &rhs_mod_p);
+            }
+        }
+    }
+
     fn zero(&self) -> Self::Element {
         let mut result = Vec::with_capacity_in(self.element_len(), self.allocator.clone());
         result.extend(self.rns_base().as_iter().flat_map(|Zp| (0..self.rank()).map(|_| Zp.zero())));
