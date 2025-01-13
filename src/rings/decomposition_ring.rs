@@ -20,7 +20,7 @@ use feanor_math::specialization::{FiniteRingOperation, FiniteRingSpecializable};
 use serde::{de, Deserializer, Serializer};
 use serde_json::Number;
 
-use crate::cyclotomic::CyclotomicRing;
+use crate::cyclotomic::{CyclotomicGaloisGroupEl, CyclotomicRing};
 use crate::sample_primes;
 use crate::IsEq;
 use crate::rings::number_ring::*;
@@ -138,7 +138,7 @@ impl<NumberRing, ZnTy, A> DecompositionRingBase<NumberRing, ZnTy, A>
     /// 
     pub fn sum_galois_transforms<I>(&self, els: I) -> <Self as RingBase>::Element
         where NumberRing: HECyclotomicNumberRing,
-            I: Iterator<Item = (<Self as RingBase>::Element, zn_64::ZnEl)>
+            I: Iterator<Item = (<Self as RingBase>::Element, CyclotomicGaloisGroupEl)>
     {
         let mut unreduced_result = Vec::with_capacity_in(self.rank() * self.rns_base.len(), &self.allocator);
         unreduced_result.resize_with(self.rank() * self.rns_base.len(), || self.rns_base.at(0).zero());
@@ -201,7 +201,7 @@ impl<NumberRing, ZnTy, A> CyclotomicRing for DecompositionRingBase<NumberRing, Z
         <NumberRing::DecomposedAsCyclotomic>::from_ref(&self.ring_decompositions()[0]).n()
     }
 
-    fn apply_galois_action(&self, el: &<Self as RingBase>::Element, g: zn_64::ZnEl) -> <Self as RingBase>::Element {
+    fn apply_galois_action(&self, el: &<Self as RingBase>::Element, g: CyclotomicGaloisGroupEl) -> <Self as RingBase>::Element {
         assert_eq!(el.data.len(), self.rank());
 
         let mut unreduced_result = Vec::with_capacity_in(self.rank() * self.rns_base.len(), &self.allocator);

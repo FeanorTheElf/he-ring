@@ -8,6 +8,7 @@ use feanor_math::rings::extension::FreeAlgebra;
 use feanor_math::rings::finite::FiniteRing;
 use feanor_math::rings::zn::{zn_64, zn_rns, ZnRing};
 
+use crate::cyclotomic::CyclotomicGaloisGroupEl;
 use crate::rnsconv::RNSOperation;
 
 use super::decomposition_ring::{DecompositionRing, DecompositionRingBase};
@@ -275,7 +276,7 @@ pub trait BXVCiphertextRing: FreeAlgebra<BaseRing = zn_rns::Zn<zn_64::Zn, BigInt
     /// assert_el_eq!(&ring, ring.get_ring().gadget_product(&galois_x_op[0], &some_rhs_operand), ring.get_ring().gadget_product(&galois_x_op_prev[0], &some_rhs_operand));
     /// ```
     /// 
-    fn apply_galois_action_many_gadget_product_operand<'a>(&'a self, x: &Self::GadgetProductLhsOperand<'a>, gs: &[zn_64::ZnEl]) -> Vec<Self::GadgetProductLhsOperand<'a>>;
+    fn apply_galois_action_many_gadget_product_operand<'a>(&'a self, x: &Self::GadgetProductLhsOperand<'a>, gs: &[CyclotomicGaloisGroupEl]) -> Vec<Self::GadgetProductLhsOperand<'a>>;
 
     ///
     /// Computes `[lhs[0] * rhs[0], lhs[0] * rhs[1] + lhs[1] * rhs[0], lhs[1] * rhs[1]]`, but might be

@@ -30,7 +30,7 @@ use crate::rings::number_ring::*;
 use super::single_rns_ring;
 use super::{decomposition_ring::{self, *}, double_rns_ring};
 use crate::{euler_phi, euler_phi_squarefree, sample_primes, StdZn};
-use crate::cyclotomic::CyclotomicRing;
+use crate::cyclotomic::{CyclotomicGaloisGroupEl, CyclotomicRing, CyclotomicRingStore};
 
 pub struct OddCyclotomicNumberRing {
     n_factorization_squarefree: Vec<i64>,
@@ -506,19 +506,20 @@ impl<F, A> HECyclotomicNumberRingMod for OddCyclotomicDecomposedNumberRing<F, A>
         self.fft_table.len() as u64
     }
 
-    fn permute_galois_action<V1, V2>(&self, src: V1, mut dst: V2, galois_element: zn_64::ZnEl)
+    fn permute_galois_action<V1, V2>(&self, src: V1, mut dst: V2, galois_element: CyclotomicGaloisGroupEl)
         where V1: VectorView<zn_64::ZnEl>,
             V2: SwappableVectorViewMut<zn_64::ZnEl>
     {
         assert_eq!(self.rank(), src.len());
         assert_eq!(self.rank(), dst.len());
         let ring = self.base_ring();
-        let index_ring = self.cyclotomic_index_ring();
+        let galois_group = self.galois_group();
+        let index_ring = galois_group.underlying_ring();
         let hom = index_ring.can_hom(&StaticRing::<i64>::RING).unwrap();
         
         for (j, i) in self.fft_output_indices() {
             *dst.at_mut(j) = ring.clone_el(src.at(self.fft_output_indices_to_indices[self.fft_table.unordered_fft_permutation_inv(
-                index_ring.smallest_positive_lift(index_ring.mul(galois_element, hom.map(self.fft_table.unordered_fft_permutation(i) as i64))) as usize
+                index_ring.smallest_positive_lift(index_ring.mul(galois_group.to_ring_el(galois_element), hom.map(self.fft_table.unordered_fft_permutation(i) as i64))) as usize
             )]));
         }
     }
@@ -632,16 +633,16 @@ impl<F, A> HECyclotomicNumberRingMod for CompositeCyclotomicDecomposedNumberRing
         self.tensor_factor1.n() * self.tensor_factor2.n()
     }
 
-    fn permute_galois_action<V1, V2>(&self, src: V1, mut dst: V2, galois_element: zn_64::ZnEl)
+    fn permute_galois_action<V1, V2>(&self, src: V1, mut dst: V2, galois_element: CyclotomicGaloisGroupEl)
         where V1: VectorView<zn_64::ZnEl>,
             V2: SwappableVectorViewMut<zn_64::ZnEl>
     {
-        let index_ring = self.cyclotomic_index_ring();
-        let ring_factor1 = self.tensor_factor1.cyclotomic_index_ring();
-        let ring_factor2 = self.tensor_factor2.cyclotomic_index_ring();
+        let index_ring = self.galois_group();
+        let ring_factor1 = self.tensor_factor1.galois_group();
+        let ring_factor2 = self.tensor_factor2.galois_group();
 
-        let g1 = ring_factor1.can_hom(ring_factor1.integer_ring()).unwrap().map(index_ring.smallest_lift(galois_element));
-        let g2 = ring_factor2.can_hom(ring_factor2.integer_ring()).unwrap().map(index_ring.smallest_lift(galois_element));
+        let g1 = ring_factor1.from_representative(index_ring.representative(galois_element) as i64);
+        let g2 = ring_factor2.from_representative(index_ring.representative(galois_element) as i64);
         let mut tmp = Vec::with_capacity_in(self.rank(), &self.tensor_factor1.allocator);
         tmp.resize_with(self.rank(), || self.base_ring().zero());
         for i in 0..self.tensor_factor2.rank() {
@@ -757,18 +758,18 @@ fn test_small_coeff_basis_conversion() {
 fn test_permute_galois_automorphism() {
     let Fp = zn_64::Zn::new(257);
     let R = DecompositionRingBase::new(OddCyclotomicNumberRing::new(7), Fp);
-    let hom = R.get_ring().cyclotomic_index_ring().into_int_hom();
+    let gal_el = |x: i64| R.galois_group().from_representative(x);
 
-    assert_el_eq!(R, ring_literal!(&R, [0, 0, 1, 0, 0, 0]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 1, 0, 0, 0, 0]), hom.map(2)));
-    assert_el_eq!(R, ring_literal!(&R, [0, 0, 0, 1, 0, 0]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 1, 0, 0, 0, 0]), hom.map(3)));
-    assert_el_eq!(R, ring_literal!(&R, [0, 0, 0, 0, 1, 0]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 0, 1, 0, 0, 0]), hom.map(2)));
-    assert_el_eq!(R, ring_literal!(&R, [-1, -1, -1, -1, -1, -1]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 0, 1, 0, 0, 0]), hom.map(3)));
+    assert_el_eq!(R, ring_literal!(&R, [0, 0, 1, 0, 0, 0]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 1, 0, 0, 0, 0]), gal_el(2)));
+    assert_el_eq!(R, ring_literal!(&R, [0, 0, 0, 1, 0, 0]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 1, 0, 0, 0, 0]), gal_el(3)));
+    assert_el_eq!(R, ring_literal!(&R, [0, 0, 0, 0, 1, 0]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 0, 1, 0, 0, 0]), gal_el(2)));
+    assert_el_eq!(R, ring_literal!(&R, [-1, -1, -1, -1, -1, -1]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 0, 1, 0, 0, 0]), gal_el(3)));
 
     let R = DecompositionRingBase::new(CompositeCyclotomicNumberRing::new(5, 3), Fp);
-    let hom = R.get_ring().cyclotomic_index_ring().into_int_hom();
+    let gal_el = |x: i64| R.galois_group().from_representative(x);
 
-    assert_el_eq!(R, ring_literal!(&R, [0, 0, 1, 0, 0, 0, 0, 0]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 1, 0, 0, 0, 0, 0, 0]), hom.map(2)));
-    assert_el_eq!(R, ring_literal!(&R, [0, 0, 0, 0, 1, 0, 0, 0]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 1, 0, 0, 0, 0, 0, 0]), hom.map(4)));
-    assert_el_eq!(R, ring_literal!(&R, [-1, 1, 0, -1, 1, -1, 0, 1]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 1, 0, 0, 0, 0, 0, 0]), hom.map(8)));
-    assert_el_eq!(R, ring_literal!(&R, [-1, 1, 0, -1, 1, -1, 0, 1]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 0, 0, 0, 1, 0, 0, 0]), hom.map(2)));
+    assert_el_eq!(R, ring_literal!(&R, [0, 0, 1, 0, 0, 0, 0, 0]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 1, 0, 0, 0, 0, 0, 0]), gal_el(2)));
+    assert_el_eq!(R, ring_literal!(&R, [0, 0, 0, 0, 1, 0, 0, 0]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 1, 0, 0, 0, 0, 0, 0]), gal_el(4)));
+    assert_el_eq!(R, ring_literal!(&R, [-1, 1, 0, -1, 1, -1, 0, 1]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 1, 0, 0, 0, 0, 0, 0]), gal_el(8)));
+    assert_el_eq!(R, ring_literal!(&R, [-1, 1, 0, -1, 1, -1, 0, 1]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 0, 0, 0, 1, 0, 0, 0]), gal_el(2)));
 }

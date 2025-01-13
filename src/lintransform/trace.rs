@@ -42,7 +42,7 @@ pub struct Trace<NumberRing>
     where NumberRing: HECyclotomicNumberRing
 {
     number_ring: NumberRing,
-    frobenius: ZnEl,
+    frobenius: CyclotomicGaloisGroupEl,
     trace_rank_quo: i64
 }
 
@@ -52,7 +52,7 @@ impl<NumberRing> Trace<NumberRing>
     pub fn new(number_ring: NumberRing, p: i64, slot_rank: usize) -> Self {
         assert_eq!(0, number_ring.rank() % slot_rank);
         Trace {
-            frobenius: number_ring.cyclotomic_index_ring().can_hom(&StaticRing::<i64>::RING).unwrap().map(p),
+            frobenius: number_ring.galois_group().from_representative(p),
             number_ring: number_ring,
             trace_rank_quo: slot_rank as i64
         }
@@ -74,14 +74,18 @@ impl<NumberRing> Trace<NumberRing>
         let mut rhs = OwnedMatrix::zero(slot_ring.rank(), 1, slot_ring.base_ring());
         let mut sol = OwnedMatrix::zero(slot_ring.rank(), 1, slot_ring.base_ring());
 
-        let Gal = self.number_ring.cyclotomic_index_ring();
+        let Gal = self.number_ring.galois_group();
         let poly_ring = DensePolyRing::new(slot_ring.base_ring(), "X");
         let trace = |a: El<SlotRingOver<Zn>>| {
             let result = self.evaluate_generic(
                 a, 
                 |x, y| slot_ring.add_ref_snd(x, y), 
                 |_, _: &El<DecompositionRing<_, _>>| unreachable!(),
-                |x, gs| gs.iter().map(|g| poly_ring.evaluate(&slot_ring.poly_repr(&poly_ring, &x, &slot_ring.base_ring().identity()), &slot_ring.pow(slot_ring.canonical_gen(), Gal.smallest_positive_lift(*g) as usize), &slot_ring.inclusion())).collect(), 
+                |x, gs| gs.iter().map(|g| poly_ring.evaluate(
+                    &slot_ring.poly_repr(&poly_ring, &x, &slot_ring.base_ring().identity()), 
+                    &slot_ring.pow(slot_ring.canonical_gen(), Gal.representative(*g) as usize), 
+                    &slot_ring.inclusion())
+                ).collect(), 
                 |x| slot_ring.clone_el(x)
             );
             let result_wrt_basis = slot_ring.wrt_canonical_basis(&result);
@@ -132,10 +136,10 @@ impl<NumberRing, A> HELinearTransform<NumberRing, A> for Trace<NumberRing>
     ) -> T
         where AddFn: FnMut(T, &T) -> T,
             ScaleFn: FnMut(T, &El<DecompositionRing<NumberRing, Zn, A>>) -> T,
-            ApplyGaloisFn: FnMut(T, &[ZnEl]) -> Vec<T>,
+            ApplyGaloisFn: FnMut(T, &[CyclotomicGaloisGroupEl]) -> Vec<T>,
             CloneFn: FnMut(&T) -> T
     {
-        let Gal = self.number_ring.cyclotomic_index_ring();
+        let Gal = self.number_ring.galois_group();
         let add_fn = RefCell::new(add_fn);
         let apply_galois_fn = RefCell::new(apply_galois_fn);
         let clone_fn = RefCell::new(clone_fn);
@@ -191,7 +195,7 @@ fn test_extract_coefficient_map() {
     let max_ideal_gen = slot_ring.int_hom().map(17);
     let slot_ring = AsLocalPIR::from(AsLocalPIRBase::promise_is_local_pir(slot_ring, max_ideal_gen, Some(2)));
     assert!(is_prim_root_of_unity(&slot_ring, &slot_ring.canonical_gen(), 5));
-    let Gal = Zn::new(5);
+    let Gal = CyclotomicGaloisGroup::new(5);
     let trace = Trace::new(OddCyclotomicNumberRing::new(5), 17, 4);
 
     let extract_constant_coeff = trace.extract_coefficient_map(&slot_ring, 0);
@@ -205,7 +209,7 @@ fn test_extract_coefficient_map() {
             |_, _: &El<DecompositionRing<_, _>>| unreachable!(),
             |x, gs| gs.iter().map(|g| poly_ring.evaluate(
                 &slot_ring.poly_repr(&poly_ring, &x, &slot_ring.base_ring().identity()), 
-                &slot_ring.pow(slot_ring.canonical_gen(), Gal.smallest_positive_lift(*g) as usize), 
+                &slot_ring.pow(slot_ring.canonical_gen(), Gal.representative(*g) as usize), 
                 &slot_ring.inclusion()
             )).collect(),
             |x| slot_ring.clone_el(x)

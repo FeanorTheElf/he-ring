@@ -22,6 +22,7 @@ use feanor_math::specialization::FiniteRingSpecializable;
 use serde_json::Number;
 use zn_64::ZnBase;
 
+use crate::cyclotomic::CyclotomicGaloisGroupEl;
 use crate::cyclotomic::CyclotomicRing;
 use crate::profiling::TimeRecorder;
 use crate::rings::number_ring::*;
@@ -579,7 +580,7 @@ impl<NumberRing, A> CyclotomicRing for DoubleRNSRingBase<NumberRing, A>
         self.number_ring.n()
     }
 
-    fn apply_galois_action(&self, el: &Self::Element, g: zn_64::ZnEl) -> Self::Element {
+    fn apply_galois_action(&self, el: &Self::Element, g: CyclotomicGaloisGroupEl) -> Self::Element {
         record_time!(GLOBAL_TIME_RECORDER, "DoubleRNSRing::apply_galois_action", || {
             let mut result = self.zero();
             for (i, _) in self.rns_base().as_iter().enumerate() {

@@ -336,8 +336,8 @@ impl<NumberRing, A, C> BXVCiphertextRing for SingleRNSRingBase<NumberRing, A, C>
         })
     }
 
-    fn apply_galois_action_many_gadget_product_operand<'a>(&'a self, x: &Self::GadgetProductLhsOperand<'a>, gs: &[zn_64::ZnEl]) -> Vec<Self::GadgetProductLhsOperand<'a>> {
-        self.apply_galois_action_many(x.element(), gs).map(|res| self.to_gadget_product_lhs(res, x.digits())).collect::<Vec<_>>()
+    fn apply_galois_action_many_gadget_product_operand<'a>(&'a self, x: &Self::GadgetProductLhsOperand<'a>, gs: &[CyclotomicGaloisGroupEl]) -> Vec<Self::GadgetProductLhsOperand<'a>> {
+        self.apply_galois_action_many(x.element(), gs).into_iter().map(|res| self.to_gadget_product_lhs(res, x.digits())).collect::<Vec<_>>()
     }
 
     fn two_by_two_convolution(&self, lhs: [&Self::Element; 2], rhs: [&Self::Element; 2]) -> [Self::Element; 3] {
@@ -679,11 +679,11 @@ impl<NumberRing, A, C> CyclotomicRing for SingleRNSRingBase<NumberRing, A, C>
         self.base.n()
     }
 
-    fn cyclotomic_index_ring(&self) -> zn_64::Zn {
-        self.base.cyclotomic_index_ring()
+    fn galois_group(&self) -> CyclotomicGaloisGroup {
+        self.base.galois_group()
     }
 
-    fn apply_galois_action(&self, el: &Self::Element, s: zn_64::ZnEl) -> Self::Element {
+    fn apply_galois_action(&self, el: &Self::Element, s: CyclotomicGaloisGroupEl) -> Self::Element {
         let self_ref = RingRef::new(self);
         let iso = self.base.can_iso(&self_ref).unwrap();
         let el_double_rns = iso.inv().map_ref(el);
@@ -691,12 +691,12 @@ impl<NumberRing, A, C> CyclotomicRing for SingleRNSRingBase<NumberRing, A, C>
         return iso.map(result_double_rns);
     }
     
-    fn apply_galois_action_many<'a>(&'a self, el: &'a Self::Element, gs: &'a [zn_64::ZnEl]) -> impl 'a + ExactSizeIterator<Item = Self::Element> {
+    fn apply_galois_action_many<'a>(&'a self, el: &Self::Element, gs: &'a [CyclotomicGaloisGroupEl]) -> Vec<Self::Element> {
         let self_ref = RingRef::new(self);
         let iso = (&self.base).into_can_iso(self_ref).ok().unwrap();
         let el_double_rns = iso.inv().map_ref(el);
         let result_double_rns = self.base.apply_galois_action_many(&el_double_rns, gs);
-        return result_double_rns.map(|x| iso.map(x)).collect::<Vec<_>>().into_iter();
+        return result_double_rns.into_iter().map(|x| iso.map(x)).collect::<Vec<_>>();
     }
 }
 

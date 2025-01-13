@@ -386,15 +386,15 @@ impl<Params: BFVParams> ThinBootstrapData<Params> {
         }
     }
 
-    pub fn required_galois_keys(&self, P: &PlaintextRing<Params>) -> Vec<ZnEl> {
+    pub fn required_galois_keys(&self, P: &PlaintextRing<Params>) -> Vec<CyclotomicGaloisGroupEl> {
         let mut result = Vec::new();
         result.extend(self.slots_to_coeffs_thin.iter().flat_map(|T| T.required_galois_keys().into_iter()));
         result.extend(self.coeffs_to_slots_thin.0.iter().flat_map(|T| T.required_galois_keys().into_iter()));
         if let Some(trace) = &self.coeffs_to_slots_thin.1 {
             result.extend(<_ as HELinearTransform<_, Global>>::required_galois_keys(trace));
         }
-        result.sort_by_key(|g| P.get_ring().cyclotomic_index_ring().smallest_positive_lift(*g));
-        result.dedup_by(|g, s| P.get_ring().cyclotomic_index_ring().eq_el(g, s));
+        result.sort_by_key(|g| P.galois_group().representative(*g));
+        result.dedup_by(|g, s| P.galois_group().eq_el(*g, *s));
         return result;
     }
 
@@ -405,7 +405,7 @@ impl<Params: BFVParams> ThinBootstrapData<Params> {
         P_base: &PlaintextRing<Params>,
         ct: Ciphertext<Params>,
         rk: &RelinKey<'a, Params>,
-        gk: &[(ZnEl, KeySwitchKey<'a, Params>)],
+        gk: &[(CyclotomicGaloisGroupEl, KeySwitchKey<'a, Params>)],
         debug_sk: Option<&SecretKey<Params>>
     ) -> Ciphertext<Params>
         where Params: 'a

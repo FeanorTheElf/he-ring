@@ -17,12 +17,7 @@ use crate::cyclotomic::*;
 use crate::lintransform::matmul::*;
 use crate::lintransform::HELinearTransform;
 use crate::lintransform::PowerTable;
-use crate::rings::hypercube::CyclotomicGaloisGroup;
-use crate::rings::hypercube::CyclotomicGaloisGroupEl;
-use crate::rings::hypercube::DefaultHypercube;
-use crate::rings::hypercube::HypercubeIsomorphism;
-use crate::rings::hypercube::HypercubeStructure;
-use crate::rings::hypercube::SlotRingOver;
+use crate::rings::hypercube::*;
 use crate::rings::number_ring::*;
 use crate::rings::decomposition_ring::*;
 use crate::rings::pow2_cyclotomic::*;
@@ -412,7 +407,7 @@ pub fn coeffs_to_slots_thin<NumberRing>(H: &DefaultHypercube<NumberRing>) -> (Ve
     let log2_n = ZZ.abs_log2_ceil(&(H.hypercube().n() as i64)).unwrap();
     assert_eq!(H.hypercube().n(), 1 << log2_n);
 
-    let trace = Trace::new(H.ring().get_ring().number_ring().clone(), H.galois_group().nonnegative_representative(H.hypercube().frobenius(1)) as i64, H.slot_ring().rank());
+    let trace = Trace::new(H.ring().get_ring().number_ring().clone(), H.galois_group().representative(H.hypercube().frobenius(1)) as i64, H.slot_ring().rank());
     let mut result = slots_to_coeffs_thin_inv(H);
     let last = MatmulTransform::mult_scalar_slots(H, &H.slot_ring().inclusion().map(H.slot_ring().base_ring().invert(&H.slot_ring().base_ring().int_hom().map(H.slot_ring().rank() as i32)).unwrap()));
     *result.last_mut().unwrap() = result.last().unwrap().compose(&last, H);

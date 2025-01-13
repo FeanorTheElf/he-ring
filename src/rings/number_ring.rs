@@ -8,7 +8,7 @@ use feanor_math::rings::zn::zn_64::{self, Zn, ZnEl};
 use feanor_math::rings::zn::ZnRing;
 use feanor_math::seq::{SwappableVectorViewMut, VectorView, VectorViewMut};
 
-use crate::cyclotomic::CyclotomicRing;
+use crate::cyclotomic::{CyclotomicGaloisGroup, CyclotomicGaloisGroupEl, CyclotomicRing};
 use crate::IsEq;
 
 ///
@@ -86,8 +86,8 @@ pub trait HECyclotomicNumberRing: HENumberRing {
 
     fn n(&self) -> u64;
 
-    fn cyclotomic_index_ring(&self) -> zn_64::Zn {
-        zn_64::Zn::new(self.n())
+    fn galois_group(&self) -> CyclotomicGaloisGroup {
+        CyclotomicGaloisGroup::new(self.n())
     }
 }
 
@@ -141,15 +141,15 @@ pub trait HECyclotomicNumberRingMod: HENumberRingMod {
 
     fn n(&self) -> u64;
 
-    fn cyclotomic_index_ring(&self) -> zn_64::Zn {
-        zn_64::Zn::new(self.n())
+    fn galois_group(&self) -> CyclotomicGaloisGroup {
+        CyclotomicGaloisGroup::new(self.n())
     }
 
     ///
     /// Permutes the components of an element w.r.t. the mult basis to
     /// obtain its image under the given Galois action.
     /// 
-    fn permute_galois_action<V1, V2>(&self, src: V1, dst: V2, galois_element: zn_64::ZnEl)
+    fn permute_galois_action<V1, V2>(&self, src: V1, dst: V2, galois_element: CyclotomicGaloisGroupEl)
         where V1: VectorView<zn_64::ZnEl>,
             V2: SwappableVectorViewMut<zn_64::ZnEl>;
 }

@@ -29,6 +29,7 @@ use super::double_rns_ring;
 use super::double_rns_ring::*;
 use super::decomposition_ring::*;
 use super::single_rns_ring;
+use crate::cyclotomic::CyclotomicGaloisGroupEl;
 use crate::rings::number_ring::*;
 use crate::sample_primes;
 use crate::StdZn;
@@ -269,7 +270,7 @@ impl<N, A> HECyclotomicNumberRingMod for Pow2CyclotomicDecomposedNumberRing<N, A
         2 * self.ntt.len() as u64
     }
 
-    fn permute_galois_action<V1, V2>(&self, src: V1, mut dst: V2, galois_element: zn_64::ZnEl)
+    fn permute_galois_action<V1, V2>(&self, src: V1, mut dst: V2, galois_element: CyclotomicGaloisGroupEl)
         where V1: VectorView<zn_64::ZnEl>,
             V2: SwappableVectorViewMut<zn_64::ZnEl>
     {
@@ -277,17 +278,16 @@ impl<N, A> HECyclotomicNumberRingMod for Pow2CyclotomicDecomposedNumberRing<N, A
         assert_eq!(self.rank(), dst.len());
 
         let ring = self.base_ring();
-        let index_ring = self.cyclotomic_index_ring();
-        let hom = index_ring.can_hom(&StaticRing::<i64>::RING).unwrap();
+        let galois_group = self.galois_group();
         let bitlength = StaticRing::<i64>::RING.abs_log2_ceil(&(self.rank() as i64)).unwrap();
         debug_assert_eq!(1 << bitlength, self.rank());
 
         // the elements of src resp. dst follow an order derived from the bitreversing order of the underlying FFT
-        let index_to_galois_el = |i: usize| hom.map(2 * bitreverse(i, bitlength) as i64 + 1);
-        let galois_el_to_index = |s: ZnEl| bitreverse((index_ring.smallest_positive_lift(s) as usize - 1) / 2, bitlength);
+        let index_to_galois_el = |i: usize| galois_group.from_representative(2 * bitreverse(i, bitlength) as i64 + 1);
+        let galois_el_to_index = |s: CyclotomicGaloisGroupEl| bitreverse((galois_group.representative(s) as usize - 1) / 2, bitlength);
 
         for i in 0..self.rank() {
-            *dst.at_mut(i) = ring.clone_el(src.at(galois_el_to_index(index_ring.mul(galois_element, index_to_galois_el(i)))));
+            *dst.at_mut(i) = ring.clone_el(src.at(galois_el_to_index(galois_group.mul(galois_element, index_to_galois_el(i)))));
         }
     }
 }
@@ -374,6 +374,6 @@ fn test_pow2_cyclotomic_decomposition_ring() {
 fn test_permute_galois_automorphism() {
     let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
     let R = DoubleRNSRingBase::new_with(Pow2CyclotomicNumberRing::new(16), rns_base, Global);
-    assert_el_eq!(R, R.pow(R.canonical_gen(), 3), R.get_ring().apply_galois_action(&R.canonical_gen(), R.get_ring().cyclotomic_index_ring().int_hom().map(3)));
-    assert_el_eq!(R, R.pow(R.canonical_gen(), 6), R.get_ring().apply_galois_action(&R.pow(R.canonical_gen(), 2), R.get_ring().cyclotomic_index_ring().int_hom().map(3)));
+    assert_el_eq!(R, R.pow(R.canonical_gen(), 3), R.get_ring().apply_galois_action(&R.canonical_gen(), R.get_ring().galois_group().from_representative(3)));
+    assert_el_eq!(R, R.pow(R.canonical_gen(), 6), R.get_ring().apply_galois_action(&R.pow(R.canonical_gen(), 2), R.get_ring().galois_group().from_representative(3)));
 }

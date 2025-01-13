@@ -29,12 +29,7 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use crate::cyclotomic::*;
 use crate::lintransform::PowerTable;
 use crate::lintransform::CREATE_LINEAR_TRANSFORM_TIME_RECORDER;
-use crate::rings::hypercube::CyclotomicGaloisGroup;
-use crate::rings::hypercube::CyclotomicGaloisGroupEl;
-use crate::rings::hypercube::DefaultHypercube;
-use crate::rings::hypercube::HypercubeIsomorphism;
-use crate::rings::hypercube::HypercubeStructure;
-use crate::rings::hypercube::SlotRingOver;
+use crate::rings::hypercube::*;
 use crate::rings::number_ring::*;
 use crate::rings::decomposition_ring::*;
 use crate::rings::odd_cyclotomic::*;
@@ -107,14 +102,14 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
     {
         let d = H.slot_ring().rank();
         let Gal = H.galois_group();
-        let trace = Trace::new(H.ring().get_ring().number_ring().clone(), Gal.nonnegative_representative(H.hypercube().p()) as i64, d);
+        let trace = Trace::new(H.ring().get_ring().number_ring().clone(), Gal.representative(H.hypercube().p()) as i64, d);
         let extract_coeff_factors = (0..d).map(|j| trace.extract_coefficient_map(H.slot_ring(), j)).collect::<Vec<_>>();
         
         let poly_ring = DensePolyRing::new(H.slot_ring().base_ring(), "X");
         // this is the map `X -> X^p`, which is the frobenius in our case, since we choose the canonical generator of the slot ring as root of unity
         let apply_frobenius = |x: &El<SlotRingOver<Zn>>, count: i64| poly_ring.evaluate(
             &H.slot_ring().poly_repr(&poly_ring, x, &H.slot_ring().base_ring().identity()), 
-            &H.slot_ring().pow(H.slot_ring().canonical_gen(), Gal.nonnegative_representative(H.hypercube().frobenius(count))), 
+            &H.slot_ring().pow(H.slot_ring().canonical_gen(), Gal.representative(H.hypercube().frobenius(count))), 
             &H.slot_ring().inclusion()
         );
         
@@ -156,7 +151,7 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
             let m = H.hypercube().m(dim_index) as i64;
             let d = H.slot_ring().rank();
             let Gal = H.galois_group();
-            let trace = Trace::new(H.ring().get_ring().number_ring().clone(), Gal.nonnegative_representative(H.hypercube().p()) as i64, d);
+            let trace = Trace::new(H.ring().get_ring().number_ring().clone(), Gal.representative(H.hypercube().p()) as i64, d);
             let extract_coeff_factors = (0..d).map(|j| trace.extract_coefficient_map(H.slot_ring(), j)).collect::<Vec<_>>();
             
             let poly_ring = DensePolyRing::new(H.slot_ring().base_ring(), "X");
@@ -164,7 +159,7 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
             // this is the map `X -> X^p`, which is the frobenius in our case, since we choose the canonical generator of the slot ring as root of unity
             let apply_frobenius = |x: &El<SlotRingOver<Zn>>, count: i64| H.slot_ring().sum(
                 H.slot_ring().wrt_canonical_basis(x).iter().enumerate().map(|(i, c)| H.slot_ring().inclusion().mul_ref_map(
-                    &*canonical_gen_powertable.get_power(i as i64 * Gal.nonnegative_representative(H.hypercube().frobenius(count)) as i64),
+                    &*canonical_gen_powertable.get_power(i as i64 * Gal.representative(H.hypercube().frobenius(count)) as i64),
                     &c
                 )
             ));
@@ -216,17 +211,17 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
         let original_automorphisms = self.data.iter().map(|(g, _)| *g);
         let inverse_automorphisms = original_automorphisms.clone().map(|g| Gal.invert(g)).collect::<Vec<_>>();
         let mut composed_automorphisms = original_automorphisms.clone().flat_map(|g| inverse_automorphisms.iter().map(move |s| Gal.mul(g, *s))).collect::<Vec<_>>();
-        composed_automorphisms.sort_unstable_by_key(|g| Gal.nonnegative_representative(*g));
+        composed_automorphisms.sort_unstable_by_key(|g| Gal.representative(*g));
         composed_automorphisms.dedup_by(|a, b| Gal.eq_el(*a, *b));
 
         let mut matrix: OwnedMatrix<_> = OwnedMatrix::zero(composed_automorphisms.len(), inverse_automorphisms.len(), H.ring());
         for (i, g) in original_automorphisms.enumerate() {
             for (j, s) in inverse_automorphisms.iter().enumerate() {
                 let row_index = composed_automorphisms.binary_search_by_key(
-                    &Gal.nonnegative_representative(Gal.mul(g, *s)), 
-                    |g| Gal.nonnegative_representative(*g)
+                    &Gal.representative(Gal.mul(g, *s)), 
+                    |g| Gal.representative(*g)
                 ).unwrap();
-                let entry = H.ring().get_ring().apply_galois_action(&self.data[i].1, Gal.to_ring_el(*s));
+                let entry = H.ring().get_ring().apply_galois_action(&self.data[i].1, *s);
                 *matrix.at_mut(row_index, j) = entry;
             }
         }
@@ -276,7 +271,7 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
 
     fn check_valid(&self, H: &DefaultHypercube<NumberRing, A>) {
         let Gal = H.galois_group();
-        assert!(self.data.is_sorted_by_key(|(g, _)| Gal.nonnegative_representative(*g)));
+        assert!(self.data.is_sorted_by_key(|(g, _)| Gal.representative(*g)));
         for (i, (g, _)) in self.data.iter().enumerate() {
             for (j, (s, _)) in self.data.iter().enumerate() {
                 assert!(i == j || !Gal.eq_el(*g, *s));
@@ -291,7 +286,7 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
         let mut result = Self {
             data: self.data.iter().flat_map(|(self_g, self_coeff)| run_first.data.iter().map(|(first_g, first_coeff)| (
                 Gal.mul(*self_g, *first_g), 
-                H.ring().mul_ref_snd(H.ring().get_ring().apply_galois_action(first_coeff, Gal.to_ring_el(*self_g)), self_coeff)
+                H.ring().mul_ref_snd(H.ring().get_ring().apply_galois_action(first_coeff, *self_g), self_coeff)
             ))).collect()
         };
         result.canonicalize(&H);
@@ -350,7 +345,7 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
     }
 
     fn canonicalize(&mut self, H: &DefaultHypercube<NumberRing, A>) {
-        self.data.sort_unstable_by_key(|(g, _)| H.galois_group().nonnegative_representative(*g));
+        self.data.sort_unstable_by_key(|(g, _)| H.galois_group().representative(*g));
         self.data.dedup_by(|second, first| {
             if H.galois_group().eq_el(second.0, first.0) {
                 H.ring().add_assign_ref(&mut first.1, &second.1);
@@ -369,7 +364,7 @@ impl<NumberRing, A> DecompositionRingBase<NumberRing, Zn, A>
 {
     pub fn compute_linear_transform(&self, H: &DefaultHypercube<NumberRing, A>, el: &<Self as RingBase>::Element, transform: &MatmulTransform<NumberRing, A>) -> <Self as RingBase>::Element {
         assert!(H.ring().get_ring() == self);
-        <_ as RingBase>::sum(self, transform.data.iter().map(|(s, c)| self.mul_ref_fst(c, self.apply_galois_action(el, H.galois_group().to_ring_el(*s)))))
+        <_ as RingBase>::sum(self, transform.data.iter().map(|(s, c)| self.mul_ref_fst(c, self.apply_galois_action(el, *s))))
     }
 }
 
@@ -377,8 +372,8 @@ pub struct CompiledLinearTransform<NumberRing, A = Global>
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone
 {
-    baby_step_galois_elements: Vec<ZnEl>,
-    giant_step_galois_elements: Vec<Option<ZnEl>>,
+    baby_step_galois_elements: Vec<CyclotomicGaloisGroupEl>,
+    giant_step_galois_elements: Vec<Option<CyclotomicGaloisGroupEl>>,
     coeffs: Vec<Vec<Option<El<DecompositionRing<NumberRing, Zn, A>>>>>,
     number_ring: NumberRing
 }
@@ -411,7 +406,7 @@ impl<NumberRing, A> HELinearTransform<NumberRing, A> for CompiledLinearTransform
         ) -> T
             where AddFn: FnMut(T, &T) -> T,
                 ScaleFn: FnMut(T, &El<DecompositionRing<NumberRing, Zn, A>>) -> T,
-                ApplyGaloisFn: FnMut(T, &[ZnEl]) -> Vec<T>,
+                ApplyGaloisFn: FnMut(T, &[CyclotomicGaloisGroupEl]) -> Vec<T>,
                 CloneFn: FnMut(&T) -> T
     {
         let baby_steps = apply_galois_fn(input, &self.baby_step_galois_elements);
@@ -452,30 +447,6 @@ impl<NumberRing, A> CompiledLinearTransform<NumberRing, A>
     where NumberRing: HECyclotomicNumberRing + Clone,
         A: Allocator + Clone
 {
-    pub fn save(&self, filename: &str, ring: &DecompositionRing<NumberRing, Zn, A>, cyclotomic_index_ring: &Zn) {
-        serde_json::to_writer_pretty(
-            BufWriter::new(File::create(filename).unwrap()), 
-            &serialization::CompiledLinearTransformSerializable::from(ring, cyclotomic_index_ring, self)
-        ).unwrap()
-    }
-
-    pub fn load(filename: &str, ring: &DecompositionRing<NumberRing, Zn, A>, cyclotomic_index_ring: &Zn) -> Self {
-        let mut deserializer = serde_json::Deserializer::from_reader(BufReader::new(File::open(filename).unwrap()));
-        return <_ as DeserializeSeed>::deserialize(serialization::DeserializeLinearTransformSeed { cyclotomic_index_ring: cyclotomic_index_ring, ring: ring.get_ring() }, &mut deserializer).unwrap().into();
-    }
-
-    pub fn save_seq(data: &[Self], filename: &str, ring: &DecompositionRing<NumberRing, Zn, A>, cyclotomic_index_ring: &Zn) {
-        serde_json::to_writer_pretty(
-            BufWriter::new(File::create(filename).unwrap()), 
-            &data.iter().map(|t| serialization::CompiledLinearTransformSerializable::from(ring, cyclotomic_index_ring, t)).collect::<Vec<_>>()
-        ).unwrap()
-    }
-
-    pub fn load_seq(filename: &str, ring: &DecompositionRing<NumberRing, Zn, A>, cyclotomic_index_ring: &Zn) -> Vec<Self> {
-        let mut deserializer = serde_json::Deserializer::from_reader(BufReader::new(File::open(filename).unwrap()));
-        return <_ as DeserializeSeed>::deserialize(serialization::VecDeserializeSeed { base_seed: serialization::DeserializeLinearTransformSeed { cyclotomic_index_ring: cyclotomic_index_ring, ring: ring.get_ring() } }, &mut deserializer).unwrap().into();
-    }
-
     /// 
     /// In the returned lists, we use the first entry for the "frobenius-dimension";
     /// 
@@ -597,7 +568,6 @@ impl<NumberRing, A> CompiledLinearTransform<NumberRing, A>
                 .fold(shift_or_frobenius(mixed_dim_i, indices[0]), |a, b| H.galois_group().mul(a, b))
         }, |_, x| *x)
             .map(|g_el| if H.galois_group().is_identity(g_el) { None } else { Some(g_el) })
-            .map(|g| g.map(|g| H.galois_group().to_ring_el(g)))
             .collect::<Vec<_>>();
 
         let baby_steps_galois_els = multi_cartesian_product(baby_step_range_iters, move |indices| {
@@ -606,7 +576,6 @@ impl<NumberRing, A> CompiledLinearTransform<NumberRing, A>
                 .map(|(i, s)| shift_or_frobenius(i, *s))
                 .fold(shift_or_frobenius(0, 0), |a, b| H.galois_group().mul(a, b))
         }, |_, x| *x)
-            .map(|g| H.galois_group().to_ring_el(g))
             .collect::<Vec<_>>();
 
         assert_eq!(params.hoisted_automorphism_count, baby_steps_galois_els.len() - 1);
@@ -614,8 +583,8 @@ impl<NumberRing, A> CompiledLinearTransform<NumberRing, A>
 
         let mut lin_transform_data = lin_transform.data;
         let compiled_coeffs = giant_steps_galois_els.iter().map(|gs_el| baby_steps_galois_els.iter().map(|bs_el| {
-            let gs_el = gs_el.unwrap_or(H.galois_group().to_ring_el(H.galois_group().identity()));
-            let total_el = H.galois_group().mul(H.galois_group().from_ring_el(gs_el), H.galois_group().from_ring_el(*bs_el));
+            let gs_el = gs_el.unwrap_or(H.galois_group().identity());
+            let total_el = H.galois_group().mul(gs_el, *bs_el);
             let mut coeff = None;
             lin_transform_data.retain(|(g, c)| if H.galois_group().eq_el(*g, total_el) {
                 coeff = Some(H.ring().clone_el(c));
@@ -624,7 +593,7 @@ impl<NumberRing, A> CompiledLinearTransform<NumberRing, A>
                 true
             });
             coeff = coeff.and_then(|c| if H.ring().is_zero(&c) { None } else { Some(c) });
-            let result = coeff.map(|c| H.ring().get_ring().apply_galois_action(&c, H.galois_group().to_ring_el(H.galois_group().invert(H.galois_group().from_ring_el(gs_el)))));
+            let result = coeff.map(|c| H.ring().get_ring().apply_galois_action(&c, H.galois_group().invert(gs_el)));
             return result;
         }).collect::<Vec<_>>()).collect::<Vec<_>>();
 
@@ -634,258 +603,6 @@ impl<NumberRing, A> CompiledLinearTransform<NumberRing, A>
             coeffs: compiled_coeffs,
             number_ring: H.ring().get_ring().number_ring().clone()
         };
-    }
-}
-
-mod serialization {
-    use feanor_math::serialization::{DeserializeWithRing, SerializeWithRing};
-    use serde::{de::{self, DeserializeSeed, Visitor}, ser::SerializeStruct, Deserialize, Serialize};
-    use crate::rings::decomposition_ring::DecompositionRingBase;
-
-    use super::*;
-
-    pub struct CompiledLinearTransformSerializable<'a, NumberRing, A>
-        where NumberRing: HECyclotomicNumberRing,
-            A: Allocator + Clone
-    {
-        baby_step_galois_elements: Vec<SerializeWithRing<'a, &'a Zn>>,
-        giant_step_galois_elements: Vec<Option<SerializeWithRing<'a, &'a Zn>>>,
-        coeffs: Vec<Vec<Option<SerializeWithRing<'a, &'a DecompositionRing<NumberRing, Zn, A>>>>>,
-    }
-
-    impl<'a, NumberRing, A> Serialize for CompiledLinearTransformSerializable<'a, NumberRing, A>
-        where NumberRing: HECyclotomicNumberRing,
-            A: Allocator + Clone
-    {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-            where S: serde::Serializer
-        {
-            let mut out = serializer.serialize_struct("CompiledLinearTransform", 7)?;
-            out.serialize_field("baby_step_galois_elements", &self.baby_step_galois_elements)?;
-            out.serialize_field("giant_step_galois_elements", &self.giant_step_galois_elements)?;
-            out.serialize_field("coeffs", &self.coeffs)?;
-            return out.end();
-        }
-    }
-
-    impl<'a, NumberRing, A> CompiledLinearTransformSerializable<'a, NumberRing, A>
-        where NumberRing: HECyclotomicNumberRing,
-            A: Allocator + Clone
-    {
-        pub fn from(ring: &'a DecompositionRing<NumberRing, Zn, A>, galois_group_ring: &'a Zn, transform: &'a CompiledLinearTransform<NumberRing, A>) -> Self {
-            Self {
-                baby_step_galois_elements: transform.baby_step_galois_elements.iter().map(|x| SerializeWithRing::new(x, galois_group_ring)).collect(),
-                giant_step_galois_elements: transform.giant_step_galois_elements.iter().map(|x| x.as_ref().map(|x| SerializeWithRing::new(x, galois_group_ring))).collect(),
-                coeffs: transform.coeffs.iter().map(|cs| cs.iter().map(|c| c.as_ref().map(|c| SerializeWithRing::new(c, ring))).collect()).collect()
-            }
-        }
-    }
-
-    #[derive(Clone)]
-    pub struct VecDeserializeSeed<S: Clone> {
-        pub base_seed: S
-    }
-
-    impl<'de, S> DeserializeSeed<'de> for VecDeserializeSeed<S>
-        where S: Clone + DeserializeSeed<'de>
-    {
-        type Value = Vec<S::Value>;
-
-        fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-            where D: de::Deserializer<'de>
-        {
-            struct ElementsVisitor<S: Clone> {
-                seed: S
-            }
-            impl<'de, S> Visitor<'de> for ElementsVisitor<S>
-                where S: Clone + DeserializeSeed<'de>
-            {
-                type Value = Vec<S::Value>;
-
-                fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                    write!(formatter, "sequence of value")
-                }
-
-                fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-                    where A: de::SeqAccess<'de>
-                {
-                    let mut result = Vec::new();
-                    while let Some(el) = seq.next_element_seed(self.seed.clone())? {
-                        result.push(el);
-                    }
-                    return Ok(result);
-                }
-            }
-            deserializer.deserialize_seq(ElementsVisitor { seed: self.base_seed })
-        }
-    }
-    
-    #[derive(Clone)]
-    pub struct OptionDeserializeSeed<S> {
-        pub base_seed: S
-    }
-
-    impl<'de, S> DeserializeSeed<'de> for OptionDeserializeSeed<S>
-        where S: DeserializeSeed<'de>
-    {
-        type Value = Option<S::Value>;
-
-        fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-            where D: de::Deserializer<'de>
-        {
-            struct ElementVisitor<S> {
-                seed: S
-            }
-
-            impl<'de, S> Visitor<'de> for ElementVisitor<S>
-                where S: DeserializeSeed<'de>
-            {
-                type Value = Option<S::Value>;
-
-                fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                    write!(formatter, "an optional value")
-                }
-                
-                fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-                    where D: de::Deserializer<'de>
-                {
-                    Ok(Some(self.seed.deserialize(deserializer)?))                    
-                }
-
-                fn visit_none<E>(self) -> Result<Self::Value, E>
-                    where E: de::Error
-                {
-                    Ok(None)
-                }
-
-                fn visit_unit<E>(self) -> Result<Self::Value, E>
-                    where E: de::Error
-                {
-                    Ok(None)
-                }
-            }
-
-            deserializer.deserialize_option(ElementVisitor {
-                seed: self.base_seed
-            })
-        }
-    }
-
-    pub struct DeserializeLinearTransformSeed<'a, NumberRing, A>
-        where NumberRing: HECyclotomicNumberRing,
-            A: Allocator + Clone
-    {
-        pub cyclotomic_index_ring: &'a Zn,
-        pub ring: &'a DecompositionRingBase<NumberRing, Zn, A>
-    }
-    
-    impl<'a, NumberRing, A> Clone for DeserializeLinearTransformSeed<'a, NumberRing, A>
-        where NumberRing: HECyclotomicNumberRing,
-            A: Allocator + Clone
-    {
-        fn clone(&self) -> Self {
-            *self
-        }
-    }
-
-    impl<'a, NumberRing, A> Copy for DeserializeLinearTransformSeed<'a, NumberRing, A>
-        where NumberRing: HECyclotomicNumberRing,
-            A: Allocator + Clone
-    {}
-
-    impl<'a, 'de, NumberRing, A> DeserializeSeed<'de> for DeserializeLinearTransformSeed<'a, NumberRing, A>
-        where NumberRing: HECyclotomicNumberRing + Clone,
-            A: Allocator + Clone
-    {
-        type Value = CompiledLinearTransform<NumberRing, A>;
-
-        fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-            where D: serde::Deserializer<'de>
-        {
-            struct FieldsVisitor<'a, NumberRing, A>
-                where NumberRing: HECyclotomicNumberRing + Clone,
-                    A: Allocator + Clone
-            {
-                cyclotomic_index_ring: &'a Zn,
-                ring: &'a DecompositionRingBase<NumberRing, Zn, A>
-            }
-            
-            impl<'a, 'de, NumberRing, A> Visitor<'de> for FieldsVisitor<'a, NumberRing, A>
-                where NumberRing: HECyclotomicNumberRing + Clone,
-                    A: Allocator + Clone
-            {
-                type Value = CompiledLinearTransform<NumberRing, A>;
-
-                fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                    write!(formatter, "struct `CompiledLinearTransform` with fields `baby_step_galois_elements`, `giant_step_galois_elements`, `coeffs`")
-                }
-
-                fn visit_seq<S>(self, mut seq: S) -> Result<Self::Value, S::Error>
-                    where S: serde::de::SeqAccess<'de>
-                {
-                    let baby_step_galois_elements = seq.next_element_seed(VecDeserializeSeed { base_seed: DeserializeWithRing::new(self.cyclotomic_index_ring) })?.ok_or_else(|| de::Error::invalid_length(0, &self))?;
-                    let giant_step_galois_elements = seq.next_element_seed(VecDeserializeSeed { base_seed: OptionDeserializeSeed { base_seed: DeserializeWithRing::new(self.cyclotomic_index_ring) } })?.ok_or_else(|| de::Error::invalid_length(1, &self))?;
-                    let coeffs = seq.next_element_seed(VecDeserializeSeed { base_seed: VecDeserializeSeed { base_seed: OptionDeserializeSeed { base_seed: DeserializeWithRing::new(RingRef::new(self.ring)) } } })?.ok_or_else(|| de::Error::invalid_length(1, &self))?;
-                    return Ok(CompiledLinearTransform {
-                        baby_step_galois_elements,
-                        giant_step_galois_elements,
-                        coeffs,
-                        number_ring: self.ring.number_ring().clone()
-                    });
-                }
-                
-                fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
-                    where M: de::MapAccess<'de>
-                {
-                    #[allow(non_camel_case_types)]
-                    #[derive(Deserialize)]
-                    enum Field {
-                        baby_step_galois_elements,
-                        giant_step_galois_elements,
-                        coeffs
-                    }
-                    let mut baby_step_galois_elements = None;
-                    let mut giant_step_galois_elements = None;
-                    let mut coeffs = None;
-                    while let Some(key) = map.next_key()? {
-                        match key {
-                            Field::baby_step_galois_elements => {
-                                if baby_step_galois_elements.is_some() {
-                                    return Err(de::Error::duplicate_field("baby_step_galois_elements"));
-                                }
-                                baby_step_galois_elements = Some(map.next_value_seed(VecDeserializeSeed { base_seed: DeserializeWithRing::new(self.cyclotomic_index_ring) })?);
-                            },
-                            Field::giant_step_galois_elements => {
-                                if giant_step_galois_elements.is_some() {
-                                    return Err(de::Error::duplicate_field("giant_step_galois_elements"));
-                                }
-                                giant_step_galois_elements = Some(map.next_value_seed(VecDeserializeSeed { base_seed: OptionDeserializeSeed { base_seed: DeserializeWithRing::new(self.cyclotomic_index_ring) } })?);
-                            },
-                            Field::coeffs => {
-                                if coeffs.is_some() {
-                                    return Err(de::Error::duplicate_field("coeffs"));
-                                }
-                                coeffs = Some(map.next_value_seed(VecDeserializeSeed { base_seed: VecDeserializeSeed { base_seed: OptionDeserializeSeed { base_seed: DeserializeWithRing::new(RingRef::new(self.ring)) } } })?);
-                            },
-                        }
-                    }
-                    let baby_step_galois_elements = baby_step_galois_elements.ok_or_else(|| de::Error::missing_field("baby_step_galois_elements"))?;
-                    let giant_step_galois_elements = giant_step_galois_elements.ok_or_else(|| de::Error::missing_field("giant_step_galois_elements"))?;
-                    let coeffs = coeffs.ok_or_else(|| de::Error::missing_field("coeffs"))?;
-                    return Ok(CompiledLinearTransform {
-                        baby_step_galois_elements,
-                        giant_step_galois_elements,
-                        coeffs,
-                        number_ring: self.ring.number_ring().clone()
-                    });
-                }
-            }
-
-            deserializer.deserialize_struct("CompiledLinearTransform", &["baby_step_galois_elements", "giant_step_galois_elements", "coeffs"], FieldsVisitor {
-                ring: self.ring,
-                cyclotomic_index_ring: self.cyclotomic_index_ring
-            })
-        }
     }
 }
 

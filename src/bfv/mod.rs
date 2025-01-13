@@ -40,9 +40,7 @@ use crate::lintransform::HELinearTransform;
 use crate::rings::bxv::BXVCiphertextRing;
 use crate::rings::convolution::FromRingCreateableConvolution;
 use crate::rings::double_rns_managed::*;
-use crate::rings::hypercube::CyclotomicGaloisGroup;
-use crate::rings::hypercube::HypercubeIsomorphism;
-use crate::rings::hypercube::HypercubeStructure;
+use crate::rings::hypercube::*;
 use crate::rings::number_ring::*;
 use crate::rings::decomposition_ring::*;
 use crate::rings::odd_cyclotomic::*;
@@ -316,13 +314,13 @@ pub trait BFVParams {
         );
     }
     
-    fn gen_gk<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing<Self>, rng: R, sk: &SecretKey<Self>, g: ZnEl, digits: usize) -> KeySwitchKey<'a, Self>
+    fn gen_gk<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing<Self>, rng: R, sk: &SecretKey<Self>, g: CyclotomicGaloisGroupEl, digits: usize) -> KeySwitchKey<'a, Self>
         where Self: 'a
     {
         Self::gen_switch_key(C, rng, &C.get_ring().apply_galois_action(sk, g), sk, digits)
     }
     
-    fn hom_galois<'a>(C: &CiphertextRing<Self>, ct: Ciphertext<Self>, g: ZnEl, gk: &KeySwitchKey<'a, Self>) -> Ciphertext<Self>
+    fn hom_galois<'a>(C: &CiphertextRing<Self>, ct: Ciphertext<Self>, g: CyclotomicGaloisGroupEl, gk: &KeySwitchKey<'a, Self>) -> Ciphertext<Self>
         where Self: 'a
     {
         record_time!(GLOBAL_TIME_RECORDER, "BFVParams::hom_galois", || {
@@ -333,7 +331,7 @@ pub trait BFVParams {
         })
     }
     
-    fn hom_galois_many<'a, 'b, V>(C: &CiphertextRing<Self>, ct: Ciphertext<Self>, gs: &[ZnEl], gks: V) -> Vec<Ciphertext<Self>>
+    fn hom_galois_many<'a, 'b, V>(C: &CiphertextRing<Self>, ct: Ciphertext<Self>, gs: &[CyclotomicGaloisGroupEl], gks: V) -> Vec<Ciphertext<Self>>
         where V: VectorFn<&'b KeySwitchKey<'a, Self>>,
             KeySwitchKey<'a, Self>: 'b,
             'a: 'b,
@@ -345,7 +343,7 @@ pub trait BFVParams {
             let (c0, c1) = ct;
             let c1_op = C.get_ring().to_gadget_product_lhs(c1, digits);
             let c1_op_gs = C.get_ring().apply_galois_action_many_gadget_product_operand(&c1_op, gs);
-            let c0_gs = C.get_ring().apply_galois_action_many(&c0, gs);
+            let c0_gs = C.get_ring().apply_galois_action_many(&c0, gs).into_iter();
             assert_eq!(gks.len(), c1_op_gs.len());
             assert_eq!(gks.len(), c0_gs.len());
             return c0_gs.zip(c1_op_gs.iter()).enumerate().map(|(i, (c0_g, c1_g))| {
@@ -380,14 +378,14 @@ pub trait BFVParams {
         C: &CiphertextRing<Self>, 
         input: Ciphertext<Self>, 
         transform: &[Transform], 
-        gk: &[(ZnEl, KeySwitchKey<'a, Self>)], 
+        gk: &[(CyclotomicGaloisGroupEl, KeySwitchKey<'a, Self>)], 
         key_switches: &mut usize
     ) -> Ciphertext<Self>
         where Self: 'a,
             Transform: HELinearTransform<NumberRing<Self>, Global>
     {
-        let Gal = P.get_ring().cyclotomic_index_ring();
-        let get_gk = |g: &ZnEl| &gk.iter().filter(|(s, _)| Gal.eq_el(g, s)).next().unwrap().1;
+        let Gal = P.galois_group();
+        let get_gk = |g: &CyclotomicGaloisGroupEl| &gk.iter().filter(|(s, _)| Gal.eq_el(*g, *s)).next().unwrap().1;
     
         return transform.iter().fold(input, |current, T| T.evaluate_generic(
             current,
@@ -623,11 +621,11 @@ fn test_pow2_bfv_hom_galois() {
     let P = params.create_plaintext_ring(t);
     let (C, _C_mul) = params.create_ciphertext_rings();    
     let sk = Pow2BFV::gen_sk(&C, &mut rng);
-    let gk = Pow2BFV::gen_gk(&C, &mut rng, &sk, P.get_ring().cyclotomic_index_ring().int_hom().map(3), digits);
+    let gk = Pow2BFV::gen_gk(&C, &mut rng, &sk, P.galois_group().from_representative(3), digits);
     
     let m = P.canonical_gen();
     let ct = Pow2BFV::enc_sym(&P, &C, &mut rng, &m, &sk);
-    let ct_res = Pow2BFV::hom_galois(&C, ct, P.get_ring().cyclotomic_index_ring().int_hom().map(3), &gk);
+    let ct_res = Pow2BFV::hom_galois(&C, ct, P.galois_group().from_representative(3), &gk);
     let res = Pow2BFV::dec(&P, &C, ct_res, &sk);
 
     assert_el_eq!(&P, &P.pow(P.canonical_gen(), 3), &res);
@@ -839,11 +837,11 @@ fn test_bfv_hom_galois() {
     let P = params.create_plaintext_ring(t);
     let (C, _C_mul) = params.create_ciphertext_rings();    
     let sk = CompositeSingleRNSBFV::gen_sk(&C, &mut rng);
-    let gk = CompositeSingleRNSBFV::gen_gk(&C, &mut rng, &sk, P.get_ring().cyclotomic_index_ring().int_hom().map(3), digits);
+    let gk = CompositeSingleRNSBFV::gen_gk(&C, &mut rng, &sk, P.galois_group().from_representative(3), digits);
     
     let m = P.canonical_gen();
     let ct = CompositeSingleRNSBFV::enc_sym(&P, &C, &mut rng, &m, &sk);
-    let ct_res = CompositeSingleRNSBFV::hom_galois(&C, ct, P.get_ring().cyclotomic_index_ring().int_hom().map(3), &gk);
+    let ct_res = CompositeSingleRNSBFV::hom_galois(&C, ct, P.galois_group().from_representative(3), &gk);
     let res = CompositeSingleRNSBFV::dec(&P, &C, ct_res, &sk);
 
     assert_el_eq!(&P, &P.pow(P.canonical_gen(), 3), &res);

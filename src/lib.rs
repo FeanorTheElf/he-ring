@@ -189,6 +189,8 @@ pub mod digitextract;
 
 pub mod bfv;
 
+pub mod circuit;
+
 #[cfg(test)]
 use feanor_math::integer::int_cast;
 

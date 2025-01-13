@@ -21,6 +21,7 @@ use zn_64::Zn;
 use zn_64::ZnBase;
 
 use crate::bfv::DefaultConvolution;
+use crate::cyclotomic::CyclotomicGaloisGroupEl;
 use crate::cyclotomic::CyclotomicRing;
 use crate::rings::number_ring::HENumberRing;
 use crate::rnsconv::RNSOperation;
@@ -475,7 +476,7 @@ impl<NumberRing, A> BXVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, A
         }
     }
 
-    fn apply_galois_action_many_gadget_product_operand<'a>(&'a self, x: &Self::GadgetProductLhsOperand<'a>, gs: &[zn_64::ZnEl]) -> Vec<Self::GadgetProductLhsOperand<'a>> {
+    fn apply_galois_action_many_gadget_product_operand<'a>(&'a self, x: &Self::GadgetProductLhsOperand<'a>, gs: &[CyclotomicGaloisGroupEl]) -> Vec<Self::GadgetProductLhsOperand<'a>> {
         gs.iter().map(|g| GadgetProductLhsOperand {
             base: x.base.apply_galois_action(&self.base, *g)
         }).collect()
@@ -490,7 +491,7 @@ impl<NumberRing, A> CyclotomicRing for ManagedDoubleRNSRingBase<NumberRing, A>
         self.base.n()
     }
 
-    fn apply_galois_action(&self, el: &Self::Element, g: zn_64::ZnEl) -> Self::Element {
+    fn apply_galois_action(&self, el: &Self::Element, g: CyclotomicGaloisGroupEl) -> Self::Element {
         let result = if let Some(value) = self.to_doublerns(el) {
             self.base.apply_galois_action(&*value, g)
         } else {

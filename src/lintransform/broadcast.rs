@@ -8,8 +8,9 @@ use feanor_math::rings::zn::zn_64::{Zn, ZnEl};
 use feanor_math::assert_el_eq;
 use feanor_math::ring::*;
 
+use crate::cyclotomic::{CyclotomicGaloisGroup, CyclotomicGaloisGroupEl};
 use crate::rings::decomposition_ring::{DecompositionRing, DecompositionRingBase};
-use crate::rings::hypercube::{CyclotomicGaloisGroup, DefaultHypercube, HypercubeIsomorphism, HypercubeStructure};
+use crate::rings::hypercube::{DefaultHypercube, HypercubeIsomorphism, HypercubeStructure};
 use crate::rings::number_ring::HECyclotomicNumberRing;
 use crate::rings::odd_cyclotomic::CompositeCyclotomicNumberRing;
 
@@ -19,7 +20,7 @@ pub struct Broadcast1d<NumberRing, A>
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone
 {
-    shift_elements: Vec<ZnEl>,
+    shift_elements: Vec<CyclotomicGaloisGroupEl>,
     clear_slots_factor: El<DecompositionRing<NumberRing, Zn, A>>,
     number_ring: NumberRing
 }
@@ -35,7 +36,7 @@ impl<NumberRing, A> Broadcast1d<NumberRing, A>
             } else {
                 H.slot_ring().zero()
             })),
-            shift_elements: (0..H.hypercube().m(dim_index)).map(|i| H.galois_group().to_ring_el(H.hypercube().map_1d(dim_index, i as i64))).collect::<Vec<_>>(),
+            shift_elements: (0..H.hypercube().m(dim_index)).map(|i| H.hypercube().map_1d(dim_index, i as i64)).collect::<Vec<_>>(),
             number_ring: H.ring().get_ring().number_ring().clone()
         }
     }
@@ -59,7 +60,7 @@ impl<NumberRing, A> HELinearTransform<NumberRing, A> for Broadcast1d<NumberRing,
         ) -> T
             where AddFn: FnMut(T, &T) -> T,
                 ScaleFn: FnMut(T, &El<DecompositionRing<NumberRing, Zn, A>>) -> T,
-                ApplyGaloisFn: FnMut(T, &[ZnEl]) -> Vec<T>,
+                ApplyGaloisFn: FnMut(T, &[CyclotomicGaloisGroupEl]) -> Vec<T>,
                 CloneFn: FnMut(&T) -> T
     {
         let add_fn = RefCell::new(add_fn);

@@ -17,6 +17,7 @@ use std::alloc::Global;
 use std::marker::PhantomData;
 use std::ops::Range;
 
+use crate::cyclotomic::CyclotomicGaloisGroupEl;
 use crate::rings::double_rns_ring::*;
 use crate::cyclotomic::CyclotomicRing;
 use crate::rings::pow2_cyclotomic::Pow2CyclotomicNumberRing;
@@ -213,7 +214,7 @@ impl<'a, NumberRing, A> GadgetProductLhsOperand<'a, NumberRing, A>
         DoubleRNSRingBase<NumberRing, A>: CyclotomicRing,
         A: Allocator + Clone
 {
-    pub fn apply_galois_action(&self, ring: &DoubleRNSRingBase<NumberRing, A>, g: ZnEl) -> Self {
+    pub fn apply_galois_action(&self, ring: &DoubleRNSRingBase<NumberRing, A>, g: CyclotomicGaloisGroupEl) -> Self {
         record_time!(GLOBAL_TIME_RECORDER, "double_rns::GadgetProductLhsOperand::apply_galois_action", || {
             match self {
                 GadgetProductLhsOperand::LKSSStyle(lkss_lhs_op) => GadgetProductLhsOperand::LKSSStyle(lkss_lhs_op.apply_galois_action(ring, g)),
@@ -242,7 +243,7 @@ impl<'a, NumberRing, A> NaiveGadgetProductLhsOperand<'a, NumberRing, A>
         DoubleRNSRingBase<NumberRing, A>: CyclotomicRing,
         A: Allocator + Clone
 {
-    fn apply_galois_action(&self, ring: &DoubleRNSRingBase<NumberRing, A>, g: ZnEl) -> Self {
+    fn apply_galois_action(&self, ring: &DoubleRNSRingBase<NumberRing, A>, g: CyclotomicGaloisGroupEl) -> Self {
         let mut result = Vec::with_capacity_in(self.operands.len(), self.operands.allocator().clone());
         result.extend(self.operands.iter().map(|el| ring.apply_galois_action(el, g)));
         return NaiveGadgetProductLhsOperand {
@@ -310,7 +311,7 @@ impl<'a, NumberRing, A> LKSSGadgetProductLhsOperand<'a, NumberRing, A>
         DoubleRNSRingBase<NumberRing, A>: CyclotomicRing,
         A: Allocator + Clone
 {
-    fn apply_galois_action(&self, ring: &DoubleRNSRingBase<NumberRing, A>, g: ZnEl) -> Self {
+    fn apply_galois_action(&self, ring: &DoubleRNSRingBase<NumberRing, A>, g: CyclotomicGaloisGroupEl) -> Self {
         let mut result_operands = Vec::with_capacity(self.operands.len());
         for operand in self.operands.iter() {
             let mut result_op = Vec::with_capacity_in(operand.len(), operand.allocator().clone());
