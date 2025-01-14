@@ -22,7 +22,7 @@ use feanor_math::rings::zn::*;
 use feanor_math::seq::sparse::SparseMapVector;
 use feanor_math::seq::*;
 use feanor_math::matrix::*;
-use zn_64::Zn;
+use zn_64::{Zn, ZnEl};
 use zn_static::Fp;
 
 use crate::profiling::{TimeRecorder, GLOBAL_TIME_RECORDER};

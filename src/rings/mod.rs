@@ -2,6 +2,8 @@
 
 pub mod interpolate;
 
+pub mod poly_remainder;
+
 pub mod number_ring;
 
 ///
