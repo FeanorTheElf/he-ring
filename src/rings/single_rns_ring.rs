@@ -1,6 +1,7 @@
 use std::alloc::{Allocator, Global};
 use std::marker::PhantomData;
 use std::ops::Range;
+use std::rc::Rc;
 
 use feanor_math::algorithms::convolution::{ConvolutionAlgorithm, KaratsubaAlgorithm, PreparedConvolutionAlgorithm, STANDARD_CONVOLUTION};
 use feanor_math::algorithms::cyclotomic::cyclotomic_polynomial;
@@ -26,6 +27,7 @@ use zn_64::{Zn, ZnEl};
 use zn_static::Fp;
 
 use crate::profiling::{TimeRecorder, GLOBAL_TIME_RECORDER};
+use crate::rings::poly_remainder::CyclotomicPolyReducer;
 use crate::{cyclotomic::*, euler_phi};
 use crate::rings::double_rns_ring::DoubleRNSRing;
 use crate::rnsconv::RNSOperation;
@@ -41,14 +43,14 @@ use super::number_ring::{HECyclotomicNumberRing, HENumberRing};
 pub struct SingleRNSRingBase<NumberRing, A, C> 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: ConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
 {
     // we have to store the double-RNS ring as well, since we need double-RNS representation
     // for computing Galois operations. This is because I don't think there is any good way
     // of efficiently computing the galois action image using only coefficient representation
     base: DoubleRNSRing<NumberRing, A>,
-    convolutions: Vec<C>,
-    poly_moduli: CyclotomicReducer
+    convolutions: Vec<Rc<C>>,
+    poly_moduli: Vec<CyclotomicPolyReducer<zn_64::Zn, Rc<C>>>
 }
 
 pub type SingleRNSRing<NumberRing, A, C> = RingValue<SingleRNSRingBase<NumberRing, A, C>>;
@@ -84,60 +86,10 @@ impl<NumberRing, C> SingleRNSRingBase<NumberRing, Global, C>
     }
 }
 
-struct CyclotomicReducer {
-    data: Vec<(usize, Vec<Vec<(zn_64::ZnEl, usize)>>)>
-} 
-
-impl CyclotomicReducer {
-
-    fn new(n: i64, rns_base: &zn_rns::Zn<zn_64::Zn, BigIntRing>) -> Self {
-        let homs = rns_base.as_iter().map(|Zn| Zn.can_hom(&BigIntRing::RING).unwrap().compose(BigIntRing::RING.can_hom(&StaticRing::<i64>::RING).unwrap())).collect::<Vec<_>>();
-        let sparse_poly_ring = SparsePolyRing::new(StaticRing::<i64>::RING, "X");
-        let mut poly_moduli = Vec::new();
-        let mut current_power = n as usize;
-        let mut current_m = 1;
-        let factorization = factor(StaticRing::<i64>::RING, n as i64);
-        for (p, e) in factorization.iter().chain([(1, 1)].iter()) {
-            let Phi_m = cyclotomic_polynomial(&sparse_poly_ring, current_m);
-            let degree = sparse_poly_ring.degree(&Phi_m).unwrap() * current_power;
-
-            let mut poly_modulus = (0..rns_base.len()).map(|_| Vec::new()).collect::<Vec<_>>();
-            for (c, i) in sparse_poly_ring.terms(&Phi_m) {
-                if i * current_power != degree {
-                    for j in 0..rns_base.len() {
-                        poly_modulus[j].push((homs[j].codomain().negate(homs[j].map_ref(c)), i * current_power));
-                    }
-                }
-            }
-
-            poly_moduli.push((degree, poly_modulus));
-
-            current_power /= StaticRing::<i64>::RING.pow(*p, *e) as usize;
-            current_m *= StaticRing::<i64>::RING.pow(*p, *e) as usize;
-        }
-        return Self {
-            data: poly_moduli
-        };
-    }
-
-    fn reduce(&self, Zp_idx: usize, Zp: &zn_64::Zn, data: &mut [zn_64::ZnEl]) {
-        let mut current_index = data.len();
-        for (degree, modulus) in &self.data {
-            for i in ((*degree)..current_index).rev() {
-                let lc = Zp.clone_el(data.at(i));
-                for (c, j) in &modulus[Zp_idx] {
-                    Zp.add_assign(data.at_mut(i - degree + j), Zp.mul_ref(&lc, c));
-                }
-            }
-            current_index = *degree;
-        }
-    }
-}
-
 impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, A, C> 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: ConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
 {
     pub fn new_with(number_ring: NumberRing, rns_base: zn_rns::Zn<zn_64::Zn, BigIntRing>, allocator: A, convolutions: Vec<C>) -> RingValue<Self> {
         assert!(rns_base.len() > 0);
@@ -146,9 +98,10 @@ impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, A, C>
         let base = DoubleRNSRingBase::new_with(number_ring, rns_base, allocator);
         let number_ring = base.get_ring().number_ring();
         let rns_base = base.get_ring().rns_base();
+        let convolutions = convolutions.into_iter().map(|conv| Rc::new(conv)).collect::<Vec<_>>();
         
         RingValue::from(Self {
-            poly_moduli: CyclotomicReducer::new(number_ring.n() as i64, rns_base),
+            poly_moduli: rns_base.as_iter().zip(convolutions.iter()).map(|(Zp, conv)| CyclotomicPolyReducer::new(*Zp, number_ring.n() as i64, conv.clone())).collect::<Vec<_>>(),
             base: base,
             convolutions: convolutions,
         })
@@ -159,8 +112,8 @@ impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, A, C>
             assert_eq!(2 * self.rank(), buffer.len());
             assert_eq!(self.rank(), output.len());
             let Zp = self.rns_base().at(k);
-
-            self.poly_moduli.reduce(k, Zp, buffer);
+        
+            self.poly_moduli[k].remainder(buffer);
             for i in 0..self.rank() {
                 output[i] = Zp.clone_el(&buffer[i]);
             }
@@ -191,7 +144,7 @@ impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, A, C>
         self.base.get_ring().allocator()
     }
 
-    pub fn convolutions(&self) -> &[C] {
+    pub fn convolutions(&self) -> &[Rc<C>] {
         &self.convolutions
     }
 }
@@ -435,7 +388,7 @@ impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, A, C>
 pub struct SingleRNSRingBaseElVectorRepresentation<'a, NumberRing, A, C> 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: ConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
 {
     element: &'a SingleRNSRingEl<NumberRing, A, C>,
     ring: &'a SingleRNSRingBase<NumberRing, A, C>
@@ -444,7 +397,7 @@ pub struct SingleRNSRingBaseElVectorRepresentation<'a, NumberRing, A, C>
 impl<'a, NumberRing, A, C> VectorFn<El<zn_rns::Zn<zn_64::Zn, BigIntRing>>> for SingleRNSRingBaseElVectorRepresentation<'a, NumberRing, A, C> 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: ConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
 {
     fn len(&self) -> usize {
         self.ring.rank()
@@ -458,7 +411,7 @@ impl<'a, NumberRing, A, C> VectorFn<El<zn_rns::Zn<zn_64::Zn, BigIntRing>>> for S
 impl<NumberRing, A, C> PartialEq for SingleRNSRingBase<NumberRing, A, C> 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: ConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
 {
     fn eq(&self, other: &Self) -> bool {
         self.number_ring() == other.number_ring() && self.rns_base().get_ring() == other.rns_base().get_ring()
@@ -468,7 +421,7 @@ impl<NumberRing, A, C> PartialEq for SingleRNSRingBase<NumberRing, A, C>
 impl<NumberRing, A, C> RingBase for SingleRNSRingBase<NumberRing, A, C> 
     where NumberRing: HECyclotomicNumberRing, 
         A: Allocator + Clone,
-        C: ConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
 {
     type Element = SingleRNSRingEl<NumberRing, A, C>;
 
@@ -598,7 +551,7 @@ impl<NumberRing, A, C> RingBase for SingleRNSRingBase<NumberRing, A, C>
 impl<NumberRing, A, C> RingExtension for SingleRNSRingBase<NumberRing, A, C> 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: ConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
 {
     type BaseRing = zn_rns::Zn<zn_64::Zn, BigIntRing>;
 
@@ -630,7 +583,7 @@ impl<NumberRing, A, C> RingExtension for SingleRNSRingBase<NumberRing, A, C>
 impl<NumberRing, A, C> FreeAlgebra for SingleRNSRingBase<NumberRing, A, C> 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: ConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
 {
     type VectorRepresentation<'a> = SingleRNSRingBaseElVectorRepresentation<'a, NumberRing, A, C> 
         where Self: 'a;
@@ -673,7 +626,7 @@ impl<NumberRing, A, C> FreeAlgebra for SingleRNSRingBase<NumberRing, A, C>
 impl<NumberRing, A, C> CyclotomicRing for SingleRNSRingBase<NumberRing, A, C> 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: ConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
 {
     fn n(&self) -> u64 {
         self.base.n()
@@ -703,7 +656,7 @@ impl<NumberRing, A, C> CyclotomicRing for SingleRNSRingBase<NumberRing, A, C>
 pub struct WRTCanonicalBasisElementCreator<'a, NumberRing, A, C>
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: ConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
 {
     ring: &'a SingleRNSRingBase<NumberRing, A, C>
 }
@@ -711,7 +664,7 @@ pub struct WRTCanonicalBasisElementCreator<'a, NumberRing, A, C>
 impl<'a, 'b, NumberRing, A, C> Clone for WRTCanonicalBasisElementCreator<'a, NumberRing, A, C>
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: ConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
 {
     fn clone(&self) -> Self {
         Self { ring: self.ring }
@@ -721,7 +674,7 @@ impl<'a, 'b, NumberRing, A, C> Clone for WRTCanonicalBasisElementCreator<'a, Num
 impl<'a, 'b, NumberRing, A, C> Fn<(&'b [El<zn_rns::Zn<zn_64::Zn, BigIntRing>>],)> for WRTCanonicalBasisElementCreator<'a, NumberRing, A, C>
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: ConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
 {
     extern "rust-call" fn call(&self, args: (&'b [El<zn_rns::Zn<zn_64::Zn, BigIntRing>>],)) -> Self::Output {
         self.ring.from_canonical_basis(args.0.iter().map(|x| self.ring.base_ring().clone_el(x)))
@@ -731,7 +684,7 @@ impl<'a, 'b, NumberRing, A, C> Fn<(&'b [El<zn_rns::Zn<zn_64::Zn, BigIntRing>>],)
 impl<'a, 'b, NumberRing, A, C> FnMut<(&'b [El<zn_rns::Zn<zn_64::Zn, BigIntRing>>],)> for WRTCanonicalBasisElementCreator<'a, NumberRing, A, C>
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: ConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
 {
     extern "rust-call" fn call_mut(&mut self, args: (&'b [El<zn_rns::Zn<zn_64::Zn, BigIntRing>>],)) -> Self::Output {
         self.call(args)
@@ -741,7 +694,7 @@ impl<'a, 'b, NumberRing, A, C> FnMut<(&'b [El<zn_rns::Zn<zn_64::Zn, BigIntRing>>
 impl<'a, 'b, NumberRing, A, C> FnOnce<(&'b [El<zn_rns::Zn<zn_64::Zn, BigIntRing>>],)> for WRTCanonicalBasisElementCreator<'a, NumberRing, A, C>
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: ConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
 {
     type Output = SingleRNSRingEl<NumberRing, A, C>;
 
@@ -753,7 +706,7 @@ impl<'a, 'b, NumberRing, A, C> FnOnce<(&'b [El<zn_rns::Zn<zn_64::Zn, BigIntRing>
 impl<NumberRing, A, C> FiniteRingSpecializable for SingleRNSRingBase<NumberRing, A, C> 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: ConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
 {
     fn specialize<O: FiniteRingOperation<Self>>(op: O) -> Result<O::Output, ()> {
         Ok(op.execute())
@@ -763,7 +716,7 @@ impl<NumberRing, A, C> FiniteRingSpecializable for SingleRNSRingBase<NumberRing,
 impl<NumberRing, A, C> FiniteRing for SingleRNSRingBase<NumberRing, A, C> 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: ConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
 {
     type ElementsIter<'a> = MultiProduct<
         <zn_rns::ZnBase<zn_64::Zn, BigIntRing> as FiniteRing>::ElementsIter<'a>, 
@@ -803,8 +756,8 @@ impl<NumberRing, A1, A2, C1, C2> CanHomFrom<SingleRNSRingBase<NumberRing, A2, C2
     where NumberRing: HECyclotomicNumberRing,
         A1: Allocator + Clone,
         A2: Allocator + Clone,
-        C1: ConvolutionAlgorithm<zn_64::ZnBase>,
-        C2: ConvolutionAlgorithm<zn_64::ZnBase>
+        C1: PreparedConvolutionAlgorithm<zn_64::ZnBase>,
+        C2: PreparedConvolutionAlgorithm<zn_64::ZnBase>
 {
     type Homomorphism = Vec<<zn_64::ZnBase as CanHomFrom<zn_64::ZnBase>>::Homomorphism>;
 
@@ -837,7 +790,7 @@ impl<NumberRing, A1, A2, C1> CanHomFrom<DoubleRNSRingBase<NumberRing, A2>> for S
     where NumberRing: HECyclotomicNumberRing,
         A1: Allocator + Clone,
         A2: Allocator + Clone,
-        C1: ConvolutionAlgorithm<zn_64::ZnBase>
+        C1: PreparedConvolutionAlgorithm<zn_64::ZnBase>
 {
     type Homomorphism = <DoubleRNSRingBase<NumberRing, A2> as CanIsoFromTo<Self>>::Isomorphism;
 
@@ -854,7 +807,7 @@ impl<NumberRing, A1, A2, C1> CanIsoFromTo<DoubleRNSRingBase<NumberRing, A2>> for
     where NumberRing: HECyclotomicNumberRing,
         A1: Allocator + Clone,
         A2: Allocator + Clone,
-        C1: ConvolutionAlgorithm<zn_64::ZnBase>
+        C1: PreparedConvolutionAlgorithm<zn_64::ZnBase>
 {
     type Isomorphism = <DoubleRNSRingBase<NumberRing, A2> as CanHomFrom<Self>>::Homomorphism;
 
@@ -871,8 +824,8 @@ impl<NumberRing, A1, A2, C1, C2> CanIsoFromTo<SingleRNSRingBase<NumberRing, A2, 
     where NumberRing: HECyclotomicNumberRing, 
         A1: Allocator + Clone,
         A2: Allocator + Clone,
-        C1: ConvolutionAlgorithm<zn_64::ZnBase>,
-        C2: ConvolutionAlgorithm<zn_64::ZnBase>
+        C1: PreparedConvolutionAlgorithm<zn_64::ZnBase>,
+        C2: PreparedConvolutionAlgorithm<zn_64::ZnBase>
 {
     type Isomorphism = Vec<<zn_64::ZnBase as CanIsoFromTo<zn_64::ZnBase>>::Isomorphism>;
 
@@ -894,26 +847,6 @@ impl<NumberRing, A1, A2, C1, C2> CanIsoFromTo<SingleRNSRingBase<NumberRing, A2, 
             }
         }
         return result;
-    }
-}
-
-#[test]
-fn test_modulo_cylotomic_polynomial() {
-    let rns_base = zn_rns::Zn::new(vec![zn_64::Zn::new(7), zn_64::Zn::new(11)], BigIntRing::RING);
-    let reducer = CyclotomicReducer::new(15, &rns_base);
-    assert_eq!(3, reducer.data.len());
-
-    let poly_ring = SparsePolyRing::new(StaticRing::<i64>::RING, "X");
-    let Phi_15 = cyclotomic_polynomial(&poly_ring, 15);
-    for i in 0..16 {
-        let Zp = rns_base.at(0);
-        let mut actual = (0..16).map(|j| if i == j { Zp.one() } else { Zp.zero() }).collect::<Vec<_>>();
-        reducer.reduce(0, rns_base.at(0), &mut actual);
-        let expected = poly_ring.div_rem_monic(poly_ring.pow(poly_ring.indeterminate(), i), &Phi_15).1;
-
-        for j in 0..8 {
-            assert_el_eq!(Zp, Zp.coerce(&StaticRing::<i64>::RING, *poly_ring.coefficient_at(&expected, j)), actual[j]);
-        }
     }
 }
 

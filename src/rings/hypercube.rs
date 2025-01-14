@@ -146,7 +146,10 @@ impl HypercubeStructure {
     }
 
     ///
-    /// Computes the Halevi-Shoup hypercube as described in [https://ia.cr/2014/873].
+    /// Computes "the" Halevi-Shoup hypercube as described in [https://ia.cr/2014/873].
+    /// 
+    /// Note that the Halevi-Shoup hypercube is unique except for the ordering of prime
+    /// factors of `n`. This function uses a deterministic but unspecified ordering.
     /// 
     pub fn halevi_shoup_hypercube(galois_group: CyclotomicGaloisGroup, p: i64) -> Self {
 

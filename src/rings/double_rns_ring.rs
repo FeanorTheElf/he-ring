@@ -3,6 +3,7 @@ use std::alloc::Global;
 use std::marker::PhantomData;
 
 use feanor_math::algorithms::convolution::ConvolutionAlgorithm;
+use feanor_math::algorithms::convolution::PreparedConvolutionAlgorithm;
 use feanor_math::divisibility::*;
 use feanor_math::integer::*;
 use feanor_math::iters::multi_cartesian_product;
@@ -394,7 +395,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
     pub fn map_in_from_singlerns<A2, C>(&self, from: &SingleRNSRingBase<NumberRing, A2, C>, el: &El<SingleRNSRing<NumberRing, A2, C>>, hom: &<Self as CanHomFrom<SingleRNSRingBase<NumberRing, A2, C>>>::Homomorphism) -> SmallBasisEl<NumberRing, A>
         where NumberRing: HECyclotomicNumberRing,
             A2: Allocator + Clone,
-            C: ConvolutionAlgorithm<ZnBase>
+            C: PreparedConvolutionAlgorithm<ZnBase>
     {
         let mut result = Vec::with_capacity_in(self.element_len(), self.allocator.clone());
         let el_as_matrix = from.as_matrix(el);
@@ -416,7 +417,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
     pub fn map_out_to_singlerns<A2, C>(&self, to: &SingleRNSRingBase<NumberRing, A2, C>, el: SmallBasisEl<NumberRing, A>, iso: &<Self as CanIsoFromTo<SingleRNSRingBase<NumberRing, A2, C>>>::Isomorphism) -> El<SingleRNSRing<NumberRing, A2, C>>
         where NumberRing: HECyclotomicNumberRing,
             A2: Allocator + Clone,
-            C: ConvolutionAlgorithm<ZnBase>
+            C: PreparedConvolutionAlgorithm<ZnBase>
     {
         let mut result = to.zero();
         let mut result_matrix = to.as_matrix_mut(&mut result);
@@ -841,7 +842,7 @@ impl<NumberRing, A1, A2, C2> CanHomFrom<SingleRNSRingBase<NumberRing, A2, C2>> f
     where NumberRing: HECyclotomicNumberRing,
         A1: Allocator + Clone,
         A2: Allocator + Clone,
-        C2: ConvolutionAlgorithm<zn_64::ZnBase>
+        C2: PreparedConvolutionAlgorithm<zn_64::ZnBase>
 {
     type Homomorphism = Vec<<zn_64::ZnBase as CanHomFrom<zn_64::ZnBase>>::Homomorphism>;
 
@@ -866,7 +867,7 @@ impl<NumberRing, A1, A2, C2> CanIsoFromTo<SingleRNSRingBase<NumberRing, A2, C2>>
     where NumberRing: HECyclotomicNumberRing,
         A1: Allocator + Clone,
         A2: Allocator + Clone,
-        C2: ConvolutionAlgorithm<zn_64::ZnBase>
+        C2: PreparedConvolutionAlgorithm<zn_64::ZnBase>
 {
     type Isomorphism = Vec<<zn_64::ZnBase as CanIsoFromTo<zn_64::ZnBase>>::Isomorphism>;
 

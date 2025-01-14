@@ -6,6 +6,7 @@ use std::rc::Rc;
 use std::sync::atomic::AtomicU64;
 
 use feanor_math::algorithms::convolution::ConvolutionAlgorithm;
+use feanor_math::algorithms::convolution::PreparedConvolutionAlgorithm;
 use feanor_math::assert_el_eq;
 use feanor_math::delegate::DelegateRing;
 use feanor_math::homomorphism::*;
@@ -812,7 +813,7 @@ impl<NumberRing, A1, A2, C> CanHomFrom<SingleRNSRingBase<NumberRing, A1, C>> for
     where NumberRing: HECyclotomicNumberRing,
         A1: Allocator + Clone,
         A2: Allocator + Clone,
-        C: ConvolutionAlgorithm<ZnBase>
+        C: PreparedConvolutionAlgorithm<ZnBase>
 {
     type Homomorphism = <DoubleRNSRingBase<NumberRing, A2> as CanHomFrom<SingleRNSRingBase<NumberRing, A1, C>>>::Homomorphism;
 
@@ -879,7 +880,7 @@ impl<NumberRing, A1, A2, C> CanIsoFromTo<SingleRNSRingBase<NumberRing, A1, C>> f
     where NumberRing: HECyclotomicNumberRing,
         A1: Allocator + Clone,
         A2: Allocator + Clone,
-        C: ConvolutionAlgorithm<ZnBase>
+        C: PreparedConvolutionAlgorithm<ZnBase>
 {
     type Isomorphism = <DoubleRNSRingBase<NumberRing, A2> as CanIsoFromTo<SingleRNSRingBase<NumberRing, A1, C>>>::Isomorphism;
 
