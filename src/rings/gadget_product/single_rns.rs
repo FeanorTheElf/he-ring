@@ -160,11 +160,11 @@ impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, A, C>
             unreduced_result.clear();
             unreduced_result.resize_with(self.rank() * 2, || Zp.zero());
             
-            for j in 0..digits.len() {
-                if let Some(rhs_part) = &rhs.data.at(j) {
-                    self.convolutions()[self.rns_base().len() - local_rns_base_len + i].compute_convolution_prepared(&lhs.data[j][i], &rhs_part[i], &mut unreduced_result, Zp);
-                }
-            }
+            self.convolutions()[self.rns_base().len() - local_rns_base_len + i].compute_convolution_inner_product_prepared(
+                (0..digits.len()).filter_map(|j| rhs.data.at(j).as_ref().map(|rhs_part| (&lhs.data[j][i], &rhs_part[i]))), 
+                &mut unreduced_result, 
+                Zp
+            );
             self.reduce_modulus(i, &mut unreduced_result, self.as_matrix_mut(&mut result).row_mut_at(i));
         }
         return result;

@@ -915,7 +915,8 @@ impl<NumberRing, A1, A2> CanIsoFromTo<DoubleRNSRingBase<NumberRing, A2>> for Dou
 
 #[cfg(any(test, feature = "generic_tests"))]
 pub fn test_with_number_ring<NumberRing: Clone + HECyclotomicNumberRing>(number_ring: NumberRing) {
-    use crate::{profiling::{clear_all_timings, print_all_timings}, rings::ntt_convolution::NTTConv};
+    use crate::profiling::{clear_all_timings, print_all_timings};
+    use crate::ntt::ntt_convolution::NTTConv;
 
     let p1 = number_ring.largest_suitable_prime(20000).unwrap();
     let p2 = number_ring.largest_suitable_prime(p1 - 1).unwrap();

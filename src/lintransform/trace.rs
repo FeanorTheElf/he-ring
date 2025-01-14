@@ -25,8 +25,6 @@ use feanor_math::rings::zn::*;
 use feanor_math::seq::*;
 use feanor_math::algorithms::linsolve::LinSolveRingStore;
 
-use crate::rings::dyn_convolution::DynConvolutionAlgorithm;
-use crate::rings::dyn_convolution::DynConvolutionAlgorithmConvolution;
 use crate::rings::hypercube::SlotRingOver;
 use crate::rings::number_ring::HECyclotomicNumberRing;
 use crate::rings::odd_cyclotomic::OddCyclotomicNumberRing;
@@ -184,6 +182,8 @@ use feanor_math::algorithms::unity_root::is_prim_root_of_unity;
 use feanor_math::integer::BigIntRing;
 #[cfg(test)]
 use feanor_math::rings::extension::extension_impl::FreeAlgebraImpl;
+#[cfg(test)]
+use crate::ntt::dyn_convolution::*;
 
 #[test]
 fn test_extract_coefficient_map() {

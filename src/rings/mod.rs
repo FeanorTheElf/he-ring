@@ -2,12 +2,6 @@
 
 pub mod interpolate;
 
-pub mod convolution;
-
-pub mod dyn_convolution;
-
-pub mod ntt_convolution;
-
 pub mod number_ring;
 
 ///

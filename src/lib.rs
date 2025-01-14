@@ -168,6 +168,8 @@ fn euler_phi_squarefree(factorization: &[i64]) -> i64 {
 #[macro_use]
 pub mod profiling;
 
+pub mod ntt;
+
 ///
 /// Defines the trait [`cyclotomic::CyclotomicRing`] for rings of the form `R[X]/(Phi_n)`, where `R` is any base ring.
 /// 

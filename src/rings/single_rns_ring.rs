@@ -25,17 +25,17 @@ use feanor_math::matrix::*;
 use zn_64::Zn;
 use zn_static::Fp;
 
-use crate::profiling::TimeRecorder;
+use crate::profiling::{TimeRecorder, GLOBAL_TIME_RECORDER};
 use crate::{cyclotomic::*, euler_phi};
 use crate::rings::double_rns_ring::DoubleRNSRing;
 use crate::rnsconv::RNSOperation;
+use crate::ntt::HERingConvolution;
+use crate::ntt::ntt_convolution::NTTConv;
 
 use super::bxv::BXVCiphertextRing;
-use super::convolution::FromRingCreateableConvolution;
 use super::decomposition_ring::{DecompositionRing, DecompositionRingBase};
 use super::double_rns_ring::{SmallBasisEl, DoubleRNSRingBase};
 use super::gadget_product;
-use super::ntt_convolution::NTTConv;
 use super::number_ring::{HECyclotomicNumberRing, HENumberRing};
 
 pub struct SingleRNSRingBase<NumberRing, A, C> 
@@ -75,11 +75,11 @@ pub struct SingleRNSRingPreparedMultiplicant<NumberRing, A, C>
 
 impl<NumberRing, C> SingleRNSRingBase<NumberRing, Global, C> 
     where NumberRing: HECyclotomicNumberRing,
-        C: FromRingCreateableConvolution<Zn>
+        C: HERingConvolution<Zn>
 {
     pub fn new(number_ring: NumberRing, rns_base: zn_rns::Zn<zn_64::Zn, BigIntRing>) -> RingValue<Self> {
         let max_log2_n = StaticRing::<i64>::RING.abs_log2_ceil(&(number_ring.rank() as i64 * 2)).unwrap();
-        let convolutions = rns_base.as_iter().map(|Zp| C::create(Zp.clone(), max_log2_n)).collect();
+        let convolutions = rns_base.as_iter().map(|Zp| C::new(Zp.clone(), max_log2_n)).collect();
         Self::new_with(number_ring, rns_base, Global, convolutions)
     }
 }
@@ -350,19 +350,19 @@ impl<NumberRing, A, C> BXVCiphertextRing for SingleRNSRingBase<NumberRing, A, C>
             for k in 0..self.rns_base().len() {
                 let Zp = self.rns_base().at(k);
 
-                unreduced_result.clear();
-                unreduced_result.resize_with(self.rank() * 2, || Zp.zero());
-                self.convolutions[k].compute_convolution_prepared(lhs[0].data.at(k), rhs[0].data.at(k), &mut unreduced_result, Zp);
+                let sum_convolutions = |summands: &[(&C::PreparedConvolutionOperand, &C::PreparedConvolutionOperand)], unreduced_result: &mut Vec<_, _>| record_time!(GLOBAL_TIME_RECORDER, "SingleRNSRing::two_by_two_convolution::compute_convolution", || {
+                    unreduced_result.clear();
+                    unreduced_result.resize_with(self.rank() * 2, || Zp.zero());
+                    self.convolutions[k].compute_convolution_inner_product_prepared(summands.into_iter().copied(), unreduced_result, Zp)
+                });
+
+                sum_convolutions(&[(lhs[0].data.at(k), rhs[0].data.at(k))], &mut unreduced_result);
                 self.reduce_modulus(k, &mut unreduced_result, self.as_matrix_mut(&mut result[0]).row_mut_at(k));
 
-                unreduced_result.clear();
-                unreduced_result.resize_with(self.rank() * 2, || Zp.zero());
-                self.convolutions[k].compute_convolution_inner_product_prepared([(lhs[1].data.at(k), rhs[0].data.at(k)), (lhs[0].data.at(k), rhs[1].data.at(k))].into_iter(), &mut unreduced_result, Zp);
+                sum_convolutions(&[(lhs[0].data.at(k), rhs[1].data.at(k)), (lhs[1].data.at(k), rhs[0].data.at(k))], &mut unreduced_result);
                 self.reduce_modulus(k, &mut unreduced_result, self.as_matrix_mut(&mut result[1]).row_mut_at(k));
                 
-                unreduced_result.clear();
-                unreduced_result.resize_with(self.rank() * 2, || Zp.zero());
-                self.convolutions[k].compute_convolution_prepared(lhs[1].data.at(k), rhs[1].data.at(k), &mut unreduced_result, Zp);
+                sum_convolutions(&[(lhs[1].data.at(k), rhs[1].data.at(k))], &mut unreduced_result);
                 self.reduce_modulus(k, &mut unreduced_result, self.as_matrix_mut(&mut result[2]).row_mut_at(k));
             }
             return result;

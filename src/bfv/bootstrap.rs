@@ -317,7 +317,6 @@ impl DigitExtract {
         let mut floor_div_result = ct;
         for i in 0..self.v {
             let remaining_digits = e - i;
-            let mul_rescale = Params::create_multiplication_rescale(P(remaining_digits), C, &C_mul);
             debug_assert!(self.extraction_circuits.is_sorted_by_key(|(digits, _)| *digits.last().unwrap()));
             let (use_circuit_digits, use_circuit) = self.extraction_circuits.iter().filter(|(digits, _)| *digits.last().unwrap() >= remaining_digits).next().unwrap();
             debug_assert!(use_circuit_digits.is_sorted());
@@ -329,7 +328,7 @@ impl DigitExtract {
                     Params::dec_println_slots(P(remaining_digits), C, current, sk);
                 }
 
-                let digit_extracted = hom_evaluate_circuit::<Params>(P(remaining_digits), C, C_mul, current, use_circuit, rk, &mul_rescale, key_switches).collect::<Vec<_>>();
+                let digit_extracted = hom_evaluate_circuit::<Params>(P(remaining_digits), C, C_mul, current, use_circuit, rk, key_switches).collect::<Vec<_>>();
                 
                 for (res, modulo_exponent) in digit_extracted.iter().zip(use_circuit_digits.iter()) {
                     if let Some(sk) = debug_sk {
@@ -730,7 +729,7 @@ fn test_evaluate_circuit() {
 
     let circuit = test_circuit();
     let mut key_switches = 0;
-    let result = hom_evaluate_circuit::<CompositeSingleRNSBFV>(&P, &C, &C_mul, &ct, &circuit, &rk, &mul_rescale, &mut key_switches);
+    let result = hom_evaluate_circuit::<CompositeSingleRNSBFV>(&P, &C, &C_mul, &ct, &circuit, &rk, &mut key_switches);
 
     let result_dec = result.map(|ct| CompositeSingleRNSBFV::dec(&P, &C, ct, &sk)).collect::<Vec<_>>();
     assert_el_eq!(&P, P.zero(), &result_dec[0]);

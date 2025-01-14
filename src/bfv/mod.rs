@@ -4,6 +4,9 @@
 use std::alloc::Allocator;
 use std::alloc::Global;
 use std::marker::PhantomData;
+use std::ptr::Alignment;
+use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Instant;
 use std::ops::Range;
 use std::cmp::max;
@@ -29,6 +32,9 @@ use feanor_math::seq::*;
 use feanor_math::ordered::OrderedRingStore;
 use feanor_math::pid::EuclideanRingStore;
 use feanor_math::rings::finite::FiniteRingStore;
+use feanor_mempool::dynsize::DynLayoutMempool;
+use feanor_mempool::AllocArc;
+use feanor_mempool::AllocRc;
 
 use crate::cyclotomic::*;
 use crate::digitextract::ArithCircuit;
@@ -37,8 +43,9 @@ use crate::extend_sampled_primes;
 use crate::lintransform::composite::powcoeffs_to_slots_fat;
 use crate::lintransform::matmul::CompiledLinearTransform;
 use crate::lintransform::HELinearTransform;
+use crate::ntt::HERingNegacyclicNTT;
 use crate::rings::bxv::BXVCiphertextRing;
-use crate::rings::convolution::FromRingCreateableConvolution;
+use crate::ntt::HERingConvolution;
 use crate::rings::double_rns_managed::*;
 use crate::rings::hypercube::*;
 use crate::rings::number_ring::*;
@@ -59,7 +66,7 @@ pub mod bootstrap;
 #[cfg(feature = "use_hexl")]
 pub type DefaultConvolution = feanor_math_hexl::conv::HEXLConvolution;
 #[cfg(not(feature = "use_hexl"))]
-pub type DefaultConvolution = crate::rings::ntt_convolution::NTTConv<Zn>;
+pub type DefaultConvolution = crate::ntt::ntt_convolution::NTTConv<Zn>;
 
 #[cfg(feature = "use_hexl")]
 pub type DefaultNegacyclicNTT = feanor_math_hexl::hexl::HEXLNegacyclicNTT;
@@ -245,10 +252,12 @@ pub trait BFVParams {
         Self::gen_switch_key(C, rng, &C.pow(C.clone_el(sk), 2), sk, digits)
     }
     
-    fn hom_mul<'a>(C: &CiphertextRing<Self>, C_mul: &CiphertextRing<Self>, lhs: Ciphertext<Self>, rhs: Ciphertext<Self>, rk: &RelinKey<'a, Self>, conv_data: &MulConversionData) -> Ciphertext<Self>
+    fn hom_mul<'a>(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, C_mul: &CiphertextRing<Self>, lhs: Ciphertext<Self>, rhs: Ciphertext<Self>, rk: &RelinKey<'a, Self>) -> Ciphertext<Self>
         where Self: 'a
     {
         record_time!(GLOBAL_TIME_RECORDER, "BFVParams::hom_mul", || {
+            let conv_data = Self::create_multiplication_rescale(P, C, C_mul);
+
             let (c00, c01) = lhs;
             let (c10, c11) = rhs;
             let lift = |c| C_mul.get_ring().perform_rns_op_from(C.get_ring(), &c, &conv_data.lift_to_C_mul);
@@ -408,7 +417,7 @@ pub trait BFVParams {
 }
 
 #[derive(Debug)]
-pub struct Pow2BFV<A: Allocator + Clone + Send + Sync = DefaultCiphertextAllocator, C: Send + Sync + Pow2NegacyclicNTT<Zn> = DefaultNegacyclicNTT> {
+pub struct Pow2BFV<A: Allocator + Clone + Send + Sync = DefaultCiphertextAllocator, C: Send + Sync + HERingNegacyclicNTT<Zn> = DefaultNegacyclicNTT> {
     pub log2_q_min: usize,
     pub log2_q_max: usize,
     pub log2_N: usize,
@@ -416,7 +425,7 @@ pub struct Pow2BFV<A: Allocator + Clone + Send + Sync = DefaultCiphertextAllocat
     pub negacyclic_ntt: PhantomData<C>
 }
 
-impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + Pow2NegacyclicNTT<Zn>> Clone for Pow2BFV<A, C> {
+impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingNegacyclicNTT<Zn>> Clone for Pow2BFV<A, C> {
 
     fn clone(&self) -> Self {
         Self {
@@ -429,7 +438,7 @@ impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + Pow2NegacyclicNTT<Zn>>
     }
 }
 
-impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + Pow2NegacyclicNTT<Zn>> BFVParams for Pow2BFV<A, C> {
+impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingNegacyclicNTT<Zn>> BFVParams for Pow2BFV<A, C> {
 
     type CiphertextRing = ManagedDoubleRNSRingBase<Pow2CyclotomicNumberRing<C>, A>;
 
@@ -513,7 +522,7 @@ impl<A: Allocator + Clone + Send + Sync> BFVParams for CompositeBFV<A> {
 }
 
 #[derive(Clone, Debug)]
-pub struct CompositeSingleRNSBFV<A: Allocator + Clone + Send + Sync = DefaultCiphertextAllocator, C: Send + Sync + FromRingCreateableConvolution<Zn> = DefaultConvolution> {
+pub struct CompositeSingleRNSBFV<A: Allocator + Clone + Send + Sync = DefaultCiphertextAllocator, C: Send + Sync + HERingConvolution<Zn> = DefaultConvolution> {
     pub log2_q_min: usize,
     pub log2_q_max: usize,
     pub n1: usize,
@@ -522,7 +531,7 @@ pub struct CompositeSingleRNSBFV<A: Allocator + Clone + Send + Sync = DefaultCip
     pub convolution: PhantomData<C>
 }
 
-impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + FromRingCreateableConvolution<Zn>> BFVParams for CompositeSingleRNSBFV<A, C> {
+impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingConvolution<Zn>> BFVParams for CompositeSingleRNSBFV<A, C> {
 
     type CiphertextRing = SingleRNSRingBase<CompositeCyclotomicNumberRing, A, C>;
 
@@ -553,13 +562,13 @@ impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + FromRingCreateableConv
             self.number_ring(),
             zn_rns::Zn::new(C_rns_base.clone(), ZZbig),
             self.ciphertext_allocator.clone(),
-            C_rns_base.iter().map(|Zp| C::create(*Zp, max_log2_n)).collect()
+            C_rns_base.iter().map(|Zp| C::new(*Zp, max_log2_n)).collect()
         );
         let Cmul = SingleRNSRingBase::new_with(
             number_ring,
             zn_rns::Zn::new(Cmul_rns_base.clone(), ZZbig),
             self.ciphertext_allocator.clone(),
-            Cmul_rns_base.iter().map(|Zp| C::create(*Zp, max_log2_n)).collect()
+            Cmul_rns_base.iter().map(|Zp| C::new(*Zp, max_log2_n)).collect()
         );
         return (C, Cmul);
     }
@@ -572,7 +581,6 @@ pub fn hom_evaluate_circuit<'a, 'b, Params: BFVParams>(
     input: &'a Ciphertext<Params>, 
     circuit: &'a ArithCircuit, 
     rk: &'a RelinKey<'b, Params>, 
-    mul_rescale: &'a MulConversionData, 
     key_switches: &'a mut usize
 ) -> impl ExactSizeIterator<Item = Ciphertext<Params>> + use<'a, 'b, Params> 
     where Params: 'b
@@ -585,7 +593,7 @@ pub fn hom_evaluate_circuit<'a, 'b, Params: BFVParams>(
         }, 
         |lhs, rhs| {
             *key_switches += 1;
-            let result =  Params::hom_mul(C, C_mul, lhs, rhs, rk, mul_rescale);
+            let result =  Params::hom_mul(P, C, C_mul, lhs, rhs, rk);
             return result;
         }, 
         move |x| {
@@ -649,7 +657,6 @@ fn test_pow2_bfv_mul() {
     let (C, C_mul) = params.create_ciphertext_rings();
 
     let sk = Pow2BFV::gen_sk(&C, &mut rng);
-    let mul_rescale_data = Pow2BFV::create_multiplication_rescale(&P, &C, &C_mul);
     let rk = Pow2BFV::gen_rk(&C, &mut rng, &sk, digits);
 
     let m = P.int_hom().map(2);
@@ -658,7 +665,7 @@ fn test_pow2_bfv_mul() {
     let m = Pow2BFV::dec(&P, &C, Pow2BFV::clone_ct(&C, &ct), &sk);
     assert_el_eq!(&P, &P.int_hom().map(2), &m);
 
-    let ct_sqr = Pow2BFV::hom_mul(&C, &C_mul, Pow2BFV::clone_ct(&C, &ct), Pow2BFV::clone_ct(&C, &ct), &rk, &mul_rescale_data);
+    let ct_sqr = Pow2BFV::hom_mul(&P, &C, &C_mul, Pow2BFV::clone_ct(&C, &ct), Pow2BFV::clone_ct(&C, &ct), &rk);
     let m_sqr = Pow2BFV::dec(&P, &C, ct_sqr, &sk);
 
     assert_el_eq!(&P, &P.int_hom().map(4), &m_sqr);
@@ -682,7 +689,6 @@ fn test_composite_bfv_mul() {
     let (C, C_mul) = params.create_ciphertext_rings();
 
     let sk = CompositeBFV::gen_sk(&C, &mut rng);
-    let mul_rescale_data = CompositeBFV::create_multiplication_rescale(&P, &C, &C_mul);
     let rk = CompositeBFV::gen_rk(&C, &mut rng, &sk, digits);
 
     let m = P.int_hom().map(2);
@@ -691,7 +697,7 @@ fn test_composite_bfv_mul() {
     let m = CompositeBFV::dec(&P, &C, CompositeBFV::clone_ct(&C, &ct), &sk);
     assert_el_eq!(&P, &P.int_hom().map(2), &m);
     
-    let ct_sqr = CompositeBFV::hom_mul(&C, &C_mul, CompositeBFV::clone_ct(&C, &ct), CompositeBFV::clone_ct(&C, &ct), &rk, &mul_rescale_data);
+    let ct_sqr = CompositeBFV::hom_mul(&P, &C, &C_mul, CompositeBFV::clone_ct(&C, &ct), CompositeBFV::clone_ct(&C, &ct), &rk);
     let m_sqr = CompositeBFV::dec(&P, &C, ct_sqr, &sk);
 
     assert_el_eq!(&P, &P.int_hom().map(4), &m_sqr);
@@ -722,9 +728,6 @@ fn print_timings_pow2_bfv_mul() {
     let sk = log_time::<_, _, true, _>("GenSK", |[]| 
         Pow2BFV::gen_sk(&C, &mut rng)
     );
-    let mul_rescale_data = log_time::<_, _, true, _>("CreateMulRescale", |[]|
-        Pow2BFV::create_multiplication_rescale(&P, &C, &C_mul)
-    );
 
     let m = P.int_hom().map(2);
     let ct = log_time::<_, _, true, _>("EncSym", |[]|
@@ -751,7 +754,7 @@ fn print_timings_pow2_bfv_mul() {
     );
     clear_all_timings();
     let res = log_time::<_, _, true, _>("HomMul", |[]| 
-        small_basis_repr::<Pow2BFV, _, _>(&C, Pow2BFV::hom_mul(&C, &C_mul, Pow2BFV::clone_ct(&C, &ct), Pow2BFV::clone_ct(&C, &ct), &rk, &mul_rescale_data))
+        small_basis_repr::<Pow2BFV, _, _>(&C, Pow2BFV::hom_mul(&P, &C, &C_mul, Pow2BFV::clone_ct(&C, &ct), Pow2BFV::clone_ct(&C, &ct), &rk))
     );
     print_all_timings();
     assert_el_eq!(&P, &P.int_hom().map(4), &Pow2BFV::dec(&P, &C, res, &sk));
@@ -782,10 +785,7 @@ fn print_timings_double_rns_composite_bfv_mul() {
     let sk = log_time::<_, _, true, _>("GenSK", |[]| 
         CompositeBFV::gen_sk(&C, &mut rng)
     );
-    let mul_rescale_data = log_time::<_, _, true, _>("CreateMulRescale", |[]|
-        CompositeBFV::create_multiplication_rescale(&P, &C, &C_mul)
-    );
-
+    
     let m = P.int_hom().map(3);
     let ct = log_time::<_, _, true, _>("EncSym", |[]|
         small_basis_repr::<CompositeBFV, _, _>(&C, CompositeBFV::enc_sym(&P, &C, &mut rng, &m, &sk))
@@ -812,7 +812,7 @@ fn print_timings_double_rns_composite_bfv_mul() {
     );
     clear_all_timings();
     let res = log_time::<_, _, true, _>("HomMul", |[]| 
-        small_basis_repr::<CompositeBFV, _, _>(&C, CompositeBFV::hom_mul(&C, &C_mul, CompositeBFV::clone_ct(&C, &ct), CompositeBFV::clone_ct(&C, &ct), &rk, &mul_rescale_data))
+        small_basis_repr::<CompositeBFV, _, _>(&C, CompositeBFV::hom_mul(&P, &C, &C_mul, CompositeBFV::clone_ct(&C, &ct), CompositeBFV::clone_ct(&C, &ct), &rk))
     );
     print_all_timings();
     assert_el_eq!(&P, &P.int_hom().map(1), &CompositeBFV::dec(&P, &C, res, &sk));
@@ -866,7 +866,6 @@ fn test_single_rns_composite_bfv_mul() {
     let (C, C_mul) = params.create_ciphertext_rings();
 
     let sk = CompositeSingleRNSBFV::gen_sk(&C, &mut rng);
-    let mul_rescale_data = CompositeSingleRNSBFV::create_multiplication_rescale(&P, &C, &C_mul);
     let rk = CompositeSingleRNSBFV::gen_rk(&C, &mut rng, &sk, digits);
 
     let m = P.int_hom().map(2);
@@ -875,7 +874,7 @@ fn test_single_rns_composite_bfv_mul() {
     let m = CompositeSingleRNSBFV::dec(&P, &C, CompositeSingleRNSBFV::clone_ct(&C, &ct), &sk);
     assert_el_eq!(&P, &P.int_hom().map(2), &m);
 
-    let ct_sqr = CompositeSingleRNSBFV::hom_mul(&C, &C_mul, CompositeSingleRNSBFV::clone_ct(&C, &ct), CompositeSingleRNSBFV::clone_ct(&C, &ct), &rk, &mul_rescale_data);
+    let ct_sqr = CompositeSingleRNSBFV::hom_mul(&P, &C, &C_mul, CompositeSingleRNSBFV::clone_ct(&C, &ct), CompositeSingleRNSBFV::clone_ct(&C, &ct), &rk);
     let m_sqr = CompositeSingleRNSBFV::dec(&P, &C, ct_sqr, &sk);
 
     assert_el_eq!(&P, &P.int_hom().map(4), &m_sqr);
@@ -887,11 +886,11 @@ fn print_timings_single_rns_composite_bfv_mul() {
     let mut rng = thread_rng();
     
     let params = CompositeSingleRNSBFV {
-        log2_q_min: 790,
-        log2_q_max: 800,
+        log2_q_min: 1090,
+        log2_q_max: 1100,
         n1: 127,
         n2: 337,
-        ciphertext_allocator: DefaultCiphertextAllocator::default(),
+        ciphertext_allocator: AllocArc(Arc::new(DynLayoutMempool::<Global>::new(Alignment::of::<u64>()))),
         convolution: PhantomData::<DefaultConvolution>
     };
     let t = 4;
@@ -906,9 +905,6 @@ fn print_timings_single_rns_composite_bfv_mul() {
 
     let sk = log_time::<_, _, true, _>("GenSK", |[]| 
         CompositeSingleRNSBFV::gen_sk(&C, &mut rng)
-    );
-    let mul_rescale_data = log_time::<_, _, true, _>("CreateMulRescale", |[]|
-        CompositeSingleRNSBFV::create_multiplication_rescale(&P, &C, &C_mul)
     );
 
     let m = P.int_hom().map(3);
@@ -936,7 +932,7 @@ fn print_timings_single_rns_composite_bfv_mul() {
     );
     clear_all_timings();
     let res = log_time::<_, _, true, _>("HomMul", |[]| 
-        CompositeSingleRNSBFV::hom_mul(&C, &C_mul, CompositeSingleRNSBFV::clone_ct(&C, &ct), CompositeSingleRNSBFV::clone_ct(&C, &ct), &rk, &mul_rescale_data)
+        CompositeSingleRNSBFV::hom_mul(&P, &C, &C_mul, CompositeSingleRNSBFV::clone_ct(&C, &ct), CompositeSingleRNSBFV::clone_ct(&C, &ct), &rk)
     );
     print_all_timings();
     assert_el_eq!(&P, &P.int_hom().map(1), &CompositeSingleRNSBFV::dec(&P, &C, res, &sk));

@@ -30,30 +30,11 @@ use super::double_rns_ring::*;
 use super::decomposition_ring::*;
 use super::single_rns_ring;
 use crate::cyclotomic::CyclotomicGaloisGroupEl;
+use crate::ntt::HERingNegacyclicNTT;
 use crate::rings::number_ring::*;
 use crate::sample_primes;
 use crate::StdZn;
 use crate::cyclotomic::CyclotomicRing;
-
-pub trait Pow2NegacyclicNTT<R>: PartialEq
-    where R: RingStore,
-        R::Type: ZnRing
-{
-    ///
-    /// Should assign to `output` the bitreversed and negacyclic NTT of `input`, i.e. the evaluation
-    /// at all primitive `(2 * self.len())`-th roots of unity.
-    /// 
-    /// Concretely, the `i`-th element of `output` should store the evaluation of `input` (interpreted
-    /// as a polynomial) at `𝝵^(bitrev(i) * 2 + 1)`.
-    /// 
-    fn bitreversed_negacyclic_fft_base<const INV: bool>(&self, input: &mut [El<R>], output: &mut [El<R>]);
-
-    fn ring(&self) -> &R;
-
-    fn len(&self) -> usize;
-
-    fn new(ring: R, log2_rank: usize) -> Self;
-}
 
 pub struct Pow2CyclotomicNumberRing<N = RustNegacyclicNTT<Zn>> {
     log2_n: usize,
@@ -94,7 +75,7 @@ impl<N> PartialEq for Pow2CyclotomicNumberRing<N> {
 }
 
 impl<N> HENumberRing for Pow2CyclotomicNumberRing<N>
-    where N: Send + Sync + Pow2NegacyclicNTT<zn_64::Zn>
+    where N: Send + Sync + HERingNegacyclicNTT<zn_64::Zn>
 {
     type Decomposed = Pow2CyclotomicDecomposedNumberRing<N, Global>;
 
@@ -147,7 +128,7 @@ impl<N> HENumberRing for Pow2CyclotomicNumberRing<N>
 }
 
 impl<N> HECyclotomicNumberRing for Pow2CyclotomicNumberRing<N>
-    where N: Send + Sync + Pow2NegacyclicNTT<zn_64::Zn>
+    where N: Send + Sync + HERingNegacyclicNTT<zn_64::Zn>
 {
     type DecomposedAsCyclotomic = Pow2CyclotomicDecomposedNumberRing<N, Global>;
 
@@ -175,7 +156,7 @@ impl<R> PartialEq for RustNegacyclicNTT<R>
     }
 }
 
-impl<R> Pow2NegacyclicNTT<R> for RustNegacyclicNTT<R> 
+impl<R> HERingNegacyclicNTT<R> for RustNegacyclicNTT<R> 
     where R: RingStore + Clone,
         R::Type: ZnRing
 {
@@ -235,7 +216,7 @@ impl<R> Pow2NegacyclicNTT<R> for RustNegacyclicNTT<R>
 }
 
 #[cfg(feature = "use_hexl")]
-impl Pow2NegacyclicNTT<Zn> for feanor_math_hexl::hexl::HEXLNegacyclicNTT {
+impl HERingNegacyclicNTT<Zn> for feanor_math_hexl::hexl::HEXLNegacyclicNTT {
 
     fn bitreversed_negacyclic_fft_base<const INV: bool>(&self, input: &mut [El<Zn>], output: &mut [El<Zn>]) {
         feanor_math_hexl::hexl::HEXLNegacyclicNTT::unordered_negacyclic_fft_base::<INV>(self, input, output)
@@ -255,7 +236,7 @@ impl Pow2NegacyclicNTT<Zn> for feanor_math_hexl::hexl::HEXLNegacyclicNTT {
 }
 
 pub struct Pow2CyclotomicDecomposedNumberRing<N, A> 
-    where N: Pow2NegacyclicNTT<zn_64::Zn>,
+    where N: HERingNegacyclicNTT<zn_64::Zn>,
         A: Allocator
 {
     ntt: N,
@@ -263,7 +244,7 @@ pub struct Pow2CyclotomicDecomposedNumberRing<N, A>
 }
 
 impl<N, A> HECyclotomicNumberRingMod for Pow2CyclotomicDecomposedNumberRing<N, A> 
-    where N: Send + Sync + Pow2NegacyclicNTT<zn_64::Zn>,
+    where N: Send + Sync + HERingNegacyclicNTT<zn_64::Zn>,
         A: Send + Sync + Allocator
 {
     fn n(&self) -> u64 {
@@ -293,7 +274,7 @@ impl<N, A> HECyclotomicNumberRingMod for Pow2CyclotomicDecomposedNumberRing<N, A
 }
 
 impl<N, A> PartialEq for Pow2CyclotomicDecomposedNumberRing<N, A> 
-    where N: Pow2NegacyclicNTT<zn_64::Zn>,
+    where N: HERingNegacyclicNTT<zn_64::Zn>,
         A: Allocator
 {
     fn eq(&self, other: &Self) -> bool {
@@ -302,7 +283,7 @@ impl<N, A> PartialEq for Pow2CyclotomicDecomposedNumberRing<N, A>
 }
 
 impl<N, A> HENumberRingMod for Pow2CyclotomicDecomposedNumberRing<N, A> 
-    where N: Send + Sync + Pow2NegacyclicNTT<zn_64::Zn>,
+    where N: Send + Sync + HERingNegacyclicNTT<zn_64::Zn>,
         A: Send + Sync + Allocator
 {
     fn mult_basis_to_small_basis<V>(&self, mut data: V)
