@@ -18,6 +18,9 @@ use feanor_math::rings::zn::zn_64::{Zn, ZnEl};
 
 use super::HERingConvolution;
 
+///
+/// A [`ConvolutionAlgorithm`] based on NTTs.
+/// 
 pub struct NTTConv<R, A = Global>
     where R: RingStore + Clone,
         R::Type: ZnRing,

@@ -35,23 +35,34 @@ use super::single_rns_ring::SingleRNSRing;
 use super::single_rns_ring::SingleRNSRingBase;
 
 ///
-/// The ring `R/qR` specified by a collection of [`RingDecomposition`] for all prime factors `p | q`. 
+/// The ring `R/qR` specified by a collection of [`HENumberRingMod`] for all prime factors `p | q`. 
 /// Elements are (by default) stored in double-RNS-representation for efficient arithmetic.
 /// 
 /// When necessary, it is also possible by using [`DoubleRNSRingBase::do_fft()`] and
 /// [`DoubleRNSRingBase::undo_fft()`] to work with ring elements not in double-RNS-representation,
-/// but note that multiplication is not available for those.
+/// but note that multiplication is not available for those. These elements are then stored w.r.t.
+/// the small basis (as defined by [`HENumberRingMod`], usually the powerful basis), which does
+/// not have to be the coefficient basis. Of course, the coefficient basis is used for functions that
+/// operate on the coefficients, e.g. [`FreeAlgebra::from_canonical_basis()`] and
+/// [`FreeAlgebra::wrt_canonical_basis()`].
 /// 
 pub struct DoubleRNSRingBase<NumberRing, A = Global> 
     where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
+    /// The number ring whose quotient we represent
     number_ring: NumberRing,
+    /// The number ring modulo each RNS factor `pi`, use for conversion between small and multiplicative basis
     ring_decompositions: Vec<<NumberRing as HENumberRing>::Decomposed>,
+    /// The current RNS base
     rns_base: zn_rns::Zn<zn_64::Zn, BigIntRing>,
+    /// Use to allocate memory for ring elements
     allocator: A
 }
 
+///
+/// [`RingStore`] for [`DoubleRNSRingBase`].
+/// 
 pub type DoubleRNSRing<NumberRing, A = Global> = RingValue<DoubleRNSRingBase<NumberRing, A>>;
 
 ///

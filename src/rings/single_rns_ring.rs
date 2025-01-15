@@ -42,6 +42,19 @@ use super::gadget_product;
 use super::number_ring::{HECyclotomicNumberRing, HENumberRing};
 use super::odd_cyclotomic::OddCyclotomicNumberRing;
 
+///
+/// Implementation of the ring `Z[𝝵_n]/(q)`, where `q = p1 ... pr` is a product of "RNS factors".
+/// 
+/// Elements are stored as polynomials, with coefficients represented w.r.t. this RNS base.
+/// In other words, the coefficients are stored by their cosets modulo each `pi`. Multiplication
+/// is done by computing the convolution of coefficients with the configured convolution algorithm,
+/// followed by a reduction modulo `Phi_n` (or rather `X^n - 1`, see below).
+/// 
+/// Furthermore, we currently store polynomials of degree `< n` (instead of degree `< phi(n) = deg(Phi_n)`) 
+/// to avoid expensive polynomial division by `Phi_n` (polynomial division by `X^n - 1` is very cheap).
+/// The reduction modulo `Phi_n` is only done when necessary, e.g. in [`RingBase::eq_el()`] or
+/// in [`SingleRNSRingBase::to_matrix()`].
+/// 
 pub struct SingleRNSRingBase<NumberRing, A, C> 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
@@ -51,12 +64,20 @@ pub struct SingleRNSRingBase<NumberRing, A, C>
     // for computing Galois operations. This is because I don't think there is any good way
     // of efficiently computing the galois action image using only coefficient representation
     base: DoubleRNSRing<NumberRing, A>,
+    /// Convolution algorithms to use to compute convolutions over each `Fp` in the RNS base
     convolutions: Vec<Rc<C>>,
+    /// Used to compute the polynomial division by `Phi_n` when necessary
     poly_moduli: Vec<CyclotomicPolyReducer<zn_64::Zn, Rc<C>>>
 }
 
+///
+/// [`RingStore`] for [`SingleRNSRingBase`]
+/// 
 pub type SingleRNSRing<NumberRing, A = Global, C = NTTConv<zn_64::Zn, Global>> = RingValue<SingleRNSRingBase<NumberRing, A, C>>;
 
+///
+/// Type of elements of [`SingleRNSRingBase`]
+/// 
 pub struct SingleRNSRingEl<NumberRing, A, C>
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
