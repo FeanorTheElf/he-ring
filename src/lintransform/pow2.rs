@@ -234,7 +234,7 @@ fn pow2_bitreversed_dwt<G, NumberRing>(H: &DefaultHypercube<NumberRing>, dim_ind
     let m = H.hypercube().m(dim_index);
     let log2_m = ZZ.abs_log2_ceil(&(m as i64)).unwrap();
     assert_eq!(m, 1 << log2_m);
-    assert!((H.ring().n() / m as u64) % 4 == 0, "pow2_bitreversed_dwt() only possible if there is a 4m-th primitive root of unity");
+    assert!((H.ring().n() / m) % 4 == 0, "pow2_bitreversed_dwt() only possible if there is a 4m-th primitive root of unity");
 
     let zeta = H.slot_ring().pow(H.slot_ring().canonical_gen(), H.ring().n() as usize / m / 4);
 
@@ -265,7 +265,7 @@ fn pow2_bitreversed_inv_dwt<G, NumberRing>(H: &DefaultHypercube<NumberRing>, dim
     let m = H.hypercube().m(dim_index);
     let log2_m = ZZ.abs_log2_ceil(&(m as i64)).unwrap();
     assert_eq!(m, 1 << log2_m);
-    assert!((H.ring().n() / m as u64) % 4 == 0, "pow2_bitreversed_dwt() only possible if there is a 4m-th primitive root of unity");
+    assert!((H.ring().n() / m) % 4 == 0, "pow2_bitreversed_dwt() only possible if there is a 4m-th primitive root of unity");
 
     let zeta = H.slot_ring().pow(H.slot_ring().canonical_gen(), H.ring().n() as usize / m / 4);
     debug_assert!(is_prim_root_of_unity(H.slot_ring(), &H.slot_ring().canonical_gen(), H.ring().n() as usize));

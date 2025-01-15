@@ -65,7 +65,7 @@ impl<Params: BFVParams> ThinBootstrapParams<Params>
 
         let digit_extract = DigitExtract::new_default::<LOG>(p, e, r);
 
-        let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(plaintext_ring.n()), p);
+        let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(plaintext_ring.n() as u64), p);
         let H = HypercubeIsomorphism::new::<LOG>(&plaintext_ring, hypercube);
         let original_H = H.change_modulus(&original_plaintext_ring);
         let slots_to_coeffs = log_time::<_, _, LOG, _>("Creating Slots-to-Coeffs transform", |[]| pow2::slots_to_coeffs_thin(&original_H));
@@ -105,7 +105,7 @@ impl<Params: BFVParams> ThinBootstrapParams<Params>
 
         let digit_extract = DigitExtract::new_default::<LOG>(p, e, r);
 
-        let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(plaintext_ring.n()), p);
+        let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(plaintext_ring.n() as u64), p);
         let H = HypercubeIsomorphism::new::<LOG>(&plaintext_ring, hypercube);
         let original_H = H.change_modulus(&original_plaintext_ring);
         let slots_to_coeffs = log_time::<_, _, LOG, _>("Creating Slots-to-Coeffs transform", |[]| composite::slots_to_powcoeffs_thin(&original_H));

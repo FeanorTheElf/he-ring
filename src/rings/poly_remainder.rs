@@ -175,9 +175,10 @@ impl<R, C> CyclotomicPolyReducer<R, C>
         let ring_poly_ring = DensePolyRing::new(&ring, "X");
         let hom = ring_poly_ring.lifted_hom(&poly_ring, ring.int_hom());
 
-        if factorization.len() == 1 && factorization[0].0 == 2 {
+        if factorization.len() == 1 {
+            let (p, e) = factorization[0];
             return Self {
-                sparse_reducers: vec![SparsePolyReducer::new(&ring_poly_ring, &ring_poly_ring.from_terms([(ring.one(), 0), (ring.one(), 1)]), ring.clone(), n as usize / 2)],
+                sparse_reducers: vec![SparsePolyReducer::new(&ring_poly_ring, &hom.map(cyclotomic_polynomial(&poly_ring, p as usize)), ring.clone(), StaticRing::<i64>::RING.pow(p, e - 1) as usize)],
                 final_reducer: None
             };
         }
@@ -272,7 +273,31 @@ fn test_cyclotomic_poly_remainder() {
     let ring = Zn::new(65537).as_field().ok().unwrap();
     let convolution = NTTConv::new(ring.clone(), 10);
     let poly_ring = DensePolyRing::new(ring.clone(), "X");
+    let poly = cyclotomic_polynomial(&poly_ring, 3);
+    let reducer = CyclotomicPolyReducer::new(ring.clone(), 3, convolution);
+    let expected = [ring.zero(), ring.zero()];
+
+    let mut actual = [ring.one(), ring.one(), ring.one()];
+    reducer.remainder(&mut actual);
+
+    for i in 0..2 {
+        assert_el_eq!(&ring, &expected[i], &actual[i]);
+    }
+
+    let convolution = NTTConv::new(ring.clone(), 10);
+    let poly = cyclotomic_polynomial(&poly_ring, 5);
+    let reducer = CyclotomicPolyReducer::new(ring.clone(), 5, convolution);
+    let expected = poly_ring.div_rem_monic(poly_ring.from_terms((1..6).enumerate().map(|(i, x)| (ring.int_hom().map(x), i))), &poly).1;
+
+    let mut actual = (1..6).map(|x| ring.int_hom().map(x)).collect::<Vec<_>>();
+    reducer.remainder(&mut actual);
+
+    for i in 0..4 {
+        assert_el_eq!(&ring, poly_ring.coefficient_at(&expected, i), &actual[i]);
+    }
+
     let poly = cyclotomic_polynomial(&poly_ring, 4 * 5 * 7);
+    let convolution = NTTConv::new(ring.clone(), 10);
     let reducer = CyclotomicPolyReducer::new(ring.clone(), 4 * 5 * 7, convolution);
     let expected = poly_ring.div_rem_monic(poly_ring.from_terms((1..200).enumerate().map(|(i, x)| (ring.int_hom().map(x), i))), &poly).1;
 

@@ -488,7 +488,7 @@ impl<NumberRing, A> CyclotomicRing for ManagedDoubleRNSRingBase<NumberRing, A>
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone
 {
-    fn n(&self) -> u64 {
+    fn n(&self) -> usize {
         self.base.n()
     }
 
@@ -821,15 +821,11 @@ impl<NumberRing, A1, A2, C> CanHomFrom<SingleRNSRingBase<NumberRing, A1, C>> for
         self.base.has_canonical_hom(from)
     }
 
-    fn map_in_ref(&self, from: &SingleRNSRingBase<NumberRing, A1, C>, el: &<SingleRNSRingBase<NumberRing, A1, C> as RingBase>::Element, hom: &Self::Homomorphism) -> Self::Element {
-        ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::SmallBasis(self.base.map_in_from_singlerns(from, el, hom)))) }
-    }
-
     fn map_in(&self, from: &SingleRNSRingBase<NumberRing, A1, C>, el: <SingleRNSRingBase<NumberRing, A1, C> as RingBase>::Element, hom: &Self::Homomorphism) -> Self::Element {
         if from.is_zero(&el) {
             return self.zero();
         }
-        self.map_in_ref(from, &el, hom)
+        ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::SmallBasis(self.base.map_in_from_singlerns(from, el, hom)))) }
     }
 }
 

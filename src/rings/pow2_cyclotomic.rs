@@ -101,7 +101,7 @@ impl<N> HENumberRing for Pow2CyclotomicNumberRing<N>
     }
 
     fn largest_suitable_prime(&self, leq_than: i64) -> Option<i64> {
-        let modulus = 1 << self.log2_n;
+        let modulus = 1 << (self.log2_n + 1);
         let mut current = (leq_than - 1) - ((leq_than - 1) % modulus) + 1;
         while current > 0 && !is_prime(StaticRing::<i64>::RING, &current, 10) {
             current -= modulus;

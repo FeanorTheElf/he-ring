@@ -177,7 +177,7 @@ pub trait BFVParams {
     
     fn dec_println_slots(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: &Ciphertext<Self>, sk: &SecretKey<Self>) {
         let (p, _e) = is_prime_power(ZZ, P.base_ring().modulus()).unwrap();
-        let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(P.n()), p);
+        let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(P.n() as u64), p);
         let H = HypercubeIsomorphism::new::<false>(P, hypercube);
         let m = Self::dec(P, C, Self::clone_ct(C, ct), sk);
         println!("ciphertext (noise budget: {}):", Self::noise_budget(P, C, ct, sk));

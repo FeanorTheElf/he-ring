@@ -36,6 +36,15 @@ pub trait HENumberRing: Send + Sync + PartialEq {
 
     fn mod_p(&self, Fp: zn_64::Zn) -> Self::Decomposed;
 
+    ///
+    /// Returns the largest prime `<= leq_than` that is "suitable" for this
+    /// number ring. TODO: refactor to get rid of this fuzzy notion of suitable.
+    /// 
+    /// Originally, "suitable" was supposed to mean that `p` splits completely
+    /// in the number ring, but since then a lot of additional constraints have been
+    /// introduced, so that now it means "works well with the single-RNS and double-RNS
+    /// implementation".
+    /// 
     fn largest_suitable_prime(&self, leq_than: i64) -> Option<i64>;
 
     ///

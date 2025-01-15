@@ -30,6 +30,16 @@ pub trait BXVCiphertextRing: FreeAlgebra<BaseRing = zn_rns::Zn<zn_64::Zn, BigInt
 
     fn sample_from_coefficient_distribution<G: FnMut() -> i32>(&self, distribution: G) -> Self::Element;
 
+    ///
+    /// Maps a ring element from the given RNS base to the RNS base of this ring,
+    /// by applying the given RNS operation to each coefficient w.r.t. some internal
+    /// representation. TODO: Refactor to get rid of (or at least define) the internal
+    /// representation.
+    /// 
+    /// Currently, the internal representation is the powerful basis (for a double-RNS
+    /// implementation) or the coefficients of some representative in the cyclant ring
+    /// (for the single-RNS representation).
+    /// 
     fn perform_rns_op_from<Op>(
         &self, 
         from: &Self, 
@@ -37,7 +47,6 @@ pub trait BXVCiphertextRing: FreeAlgebra<BaseRing = zn_rns::Zn<zn_64::Zn, BigInt
         op: &Op
     ) -> Self::Element
         where Op: RNSOperation<RingType = zn_64::ZnBase>;
-    
     
     fn exact_convert_from_decompring<ZnTy, A2>(
         &self, 

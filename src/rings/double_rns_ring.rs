@@ -392,13 +392,13 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
         })
     }
 
-    pub fn map_in_from_singlerns<A2, C>(&self, from: &SingleRNSRingBase<NumberRing, A2, C>, el: &El<SingleRNSRing<NumberRing, A2, C>>, hom: &<Self as CanHomFrom<SingleRNSRingBase<NumberRing, A2, C>>>::Homomorphism) -> SmallBasisEl<NumberRing, A>
+    pub fn map_in_from_singlerns<A2, C>(&self, from: &SingleRNSRingBase<NumberRing, A2, C>, mut el: El<SingleRNSRing<NumberRing, A2, C>>, hom: &<Self as CanHomFrom<SingleRNSRingBase<NumberRing, A2, C>>>::Homomorphism) -> SmallBasisEl<NumberRing, A>
         where NumberRing: HECyclotomicNumberRing,
             A2: Allocator + Clone,
             C: PreparedConvolutionAlgorithm<ZnBase>
     {
         let mut result = Vec::with_capacity_in(self.element_len(), self.allocator.clone());
-        let el_as_matrix = from.as_matrix(el);
+        let el_as_matrix = from.to_matrix(&mut el);
         for (i, Zp) in self.rns_base().as_iter().enumerate() {
             for j in 0..self.rank() {
                 result.push(Zp.get_ring().map_in_ref(from.rns_base().at(i).get_ring(), el_as_matrix.at(i, j), &hom[i]));
@@ -420,7 +420,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
             C: PreparedConvolutionAlgorithm<ZnBase>
     {
         let mut result = to.zero();
-        let mut result_matrix = to.as_matrix_mut(&mut result);
+        let mut result_matrix = to.coefficients_as_matrix_mut(&mut result);
         let mut el_coeff = el.el_wrt_small_basis;
         for i in 0..self.rns_base().len() {
             self.ring_decompositions().at(i).small_basis_to_coeff_basis(&mut el_coeff[(i * self.rank())..((i + 1) * self.rank())]);
@@ -577,8 +577,8 @@ impl<NumberRing, A> CyclotomicRing for DoubleRNSRingBase<NumberRing, A>
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone
 {
-    fn n(&self) -> u64 {
-        self.number_ring.n()
+    fn n(&self) -> usize {
+        self.number_ring.n() as usize
     }
 
     fn apply_galois_action(&self, el: &Self::Element, g: CyclotomicGaloisGroupEl) -> Self::Element {
@@ -855,10 +855,6 @@ impl<NumberRing, A1, A2, C2> CanHomFrom<SingleRNSRingBase<NumberRing, A2, C2>> f
     }
 
     fn map_in(&self, from: &SingleRNSRingBase<NumberRing, A2, C2>, el: <SingleRNSRingBase<NumberRing, A2, C2> as RingBase>::Element, hom: &Self::Homomorphism) -> Self::Element {
-        self.map_in_ref(from, &el, hom)
-    }
-
-    fn map_in_ref(&self, from: &SingleRNSRingBase<NumberRing, A2, C2>, el: &<SingleRNSRingBase<NumberRing, A2, C2> as RingBase>::Element, hom: &Self::Homomorphism) -> Self::Element {
         self.do_fft(self.map_in_from_singlerns(from, el, hom))
     }
 }

@@ -146,10 +146,10 @@ pub trait CyclotomicRing: FreeAlgebra {
     /// The degree of this ring extension is `phi(self.n())` where `phi` is Euler's totient
     /// function.
     ///
-    fn n(&self) -> u64;
+    fn n(&self) -> usize;
 
     fn galois_group(&self) -> CyclotomicGaloisGroup {
-        CyclotomicGaloisGroup::new(self.n())
+        CyclotomicGaloisGroup::new(self.n() as u64)
     }
 
     fn apply_galois_action(&self, x: &Self::Element, g: CyclotomicGaloisGroupEl) -> Self::Element;
@@ -165,7 +165,7 @@ pub trait CyclotomicRing: FreeAlgebra {
 pub trait CyclotomicRingStore: RingStore
     where Self::Type: CyclotomicRing
 {
-    delegate!{ CyclotomicRing, fn n(&self) -> u64 }
+    delegate!{ CyclotomicRing, fn n(&self) -> usize }
     delegate!{ CyclotomicRing, fn galois_group(&self) -> CyclotomicGaloisGroup }
     delegate!{ CyclotomicRing, fn apply_galois_action(&self, el: &El<Self>, s: CyclotomicGaloisGroupEl) -> El<Self> }
     delegate!{ CyclotomicRing, fn apply_galois_action_many(&self, el: &El<Self>, gs: &[CyclotomicGaloisGroupEl]) -> Vec<El<Self>> }

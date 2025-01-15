@@ -197,8 +197,8 @@ impl<NumberRing, ZnTy, A> CyclotomicRing for DecompositionRingBase<NumberRing, Z
         ZnTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
         A: Allocator + Clone
 {
-    fn n(&self) -> u64 {
-        <NumberRing::DecomposedAsCyclotomic>::from_ref(&self.ring_decompositions()[0]).n()
+    fn n(&self) -> usize {
+        <NumberRing::DecomposedAsCyclotomic>::from_ref(&self.ring_decompositions()[0]).n() as usize
     }
 
     fn apply_galois_action(&self, el: &<Self as RingBase>::Element, g: CyclotomicGaloisGroupEl) -> <Self as RingBase>::Element {

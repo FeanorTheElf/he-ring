@@ -67,11 +67,12 @@ impl<R, A> NTTConv<R, A>
             assert_eq!(lhs.data.len(), 1 << log2_n);
             assert_eq!(rhs.data.len(), 1 << log2_n);
             assert!(lhs.len + rhs.len <= 1 << log2_n);
+            assert!(out.len() >= lhs.len + rhs.len);
             for i in 0..(1 << log2_n) {
                 self.ring.mul_assign_ref(&mut lhs.data[i], &rhs.data[i]);
             }
             self.get_fft(log2_n).unordered_inv_fft(&mut lhs.data[..], &self.ring);
-            for i in 0..min(out.len(), 1 << log2_n) {
+            for i in 0..(lhs.len + rhs.len) {
                 self.ring.add_assign_ref(&mut out[i], &lhs.data[i]);
             }
         })

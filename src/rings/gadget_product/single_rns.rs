@@ -111,11 +111,11 @@ impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, A, C>
         let digit_bases = digits.iter().map(|range| zn_rns::Zn::new(range.clone().map(|i| self.rns_base().at(i)).collect::<Vec<_>>(), ZZbig)).collect::<Vec<_>>();
 
         let mut result = Vec::new();
-        let el_as_matrix = self.as_matrix(el);
+        let el_as_matrix = self.coefficients_as_matrix(el);
 
         let homs = (0..output_moduli_count).map(|k| self.rns_base().at(self.rns_base().len() - output_moduli_count + k).can_hom::<StaticRing<i64>>(&StaticRing::<i64>::RING).unwrap()).collect::<Vec<_>>();
-        let mut current_row = Vec::with_capacity(self.rank() * output_moduli_count);
-        current_row.resize_with(self.rank() * output_moduli_count, || self.base_ring().at(0).zero());
+        let mut current_row = Vec::with_capacity(self.n() * output_moduli_count);
+        current_row.resize_with(self.n() * output_moduli_count, || self.base_ring().at(0).zero());
         
         for (digit, base) in digits.iter().zip(digit_bases.iter()) {
             
@@ -126,14 +126,14 @@ impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, A, C>
             );
             
             conversion.apply(
-                self.as_matrix(&el).restrict_rows(digit.clone()),
-                SubmatrixMut::from_1d(&mut current_row[..], output_moduli_count, self.rank())
+                el_as_matrix.restrict_rows(digit.clone()),
+                SubmatrixMut::from_1d(&mut current_row[..], output_moduli_count, self.n())
             );
 
             let mut part = Vec::with_capacity(output_moduli_count);
             part.extend((0..output_moduli_count).map(|k| {
                 self.convolutions().at(self.rns_base().len() - output_moduli_count + k).prepare_convolution_operand(
-                    &current_row[(k * self.rank())..((k + 1) * self.rank())],
+                    &current_row[(k * self.n())..((k + 1) * self.n())],
                     homs[k].codomain()
                 )
             }));
@@ -153,19 +153,19 @@ impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, A, C>
         // currently this is the only case we use
         assert!(self.rns_base().len() == local_rns_base_len);
 
-        let mut unreduced_result = Vec::with_capacity_in(self.rank() * 2, self.allocator());
+        let mut unreduced_result = Vec::with_capacity_in(self.n() * 2, self.allocator());
         let mut result = self.zero();
         for i in 0..local_rns_base_len {
             let Zp = self.rns_base().at(self.rns_base().len() - local_rns_base_len + i);
             unreduced_result.clear();
-            unreduced_result.resize_with(self.rank() * 2, || Zp.zero());
+            unreduced_result.resize_with(self.n() * 2, || Zp.zero());
             
             self.convolutions()[self.rns_base().len() - local_rns_base_len + i].compute_convolution_inner_product_prepared(
                 (0..digits.len()).filter_map(|j| rhs.data.at(j).as_ref().map(|rhs_part| (&lhs.data[j][i], &rhs_part[i]))), 
                 &mut unreduced_result, 
                 Zp
             );
-            self.reduce_modulus(i, &mut unreduced_result, self.as_matrix_mut(&mut result).row_mut_at(i));
+            self.reduce_modulus_partly(i, &mut unreduced_result, self.coefficients_as_matrix_mut(&mut result).row_mut_at(i));
         }
         return result;
     }

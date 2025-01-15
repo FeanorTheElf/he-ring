@@ -41,9 +41,9 @@ const ZZbig: BigIntRing = BigIntRing::RING;
 pub struct AlmostExactRescalingConvert<A = Global>
     where A: Allocator + Clone
 {
-    // rescale `Z/qZ -> Z/(aq/b)Z`
+    /// rescale `Z/qZ -> Z/(aq/b)Z`
     rescaling: AlmostExactRescaling<A>,
-    // convert `Z/(aq/b)Z -> Z/bZ`
+    /// convert `Z/(aq/b)Z -> Z/bZ`
     convert: UsedBaseConversion<A>
 }
 
