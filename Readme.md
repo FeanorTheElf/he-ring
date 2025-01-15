@@ -74,6 +74,13 @@ This in particular contains:
  - Table of precomputed, optimal digit extraction polynomials for `p = 2`
  - General operations like the algebraic trace, or a "broadcast" across slots
 
+## Performance
+
+When optimizing for performance, please use the Intel HEXL library (by enabling the feature `use_hexl` and providing a build of HEXL, as described in more detail in the documentation of [`feanor-math-hexl`](https://github.com/FeanorTheElf/feanor-math-hexl)), since the default NTT does not provide SOTA performance. Also note that `he-ring` is currently single-threaded.
+
+Note that while this library is already quite optimized, it may not be fully competitive with other HE libraries that have existed for longer and thus received more optimization effort.
+Also, our goal of providing a modular toolkit of building blocks makes some kinds of optimizations more difficult, since components cannot always make as many assumptions on the input as they could if they only support a single HE scheme.
+
 ## Disclaimer
 
 This library has been designed for research on homomorphic encryption.
