@@ -33,7 +33,6 @@ use crate::cyclotomic::CyclotomicGaloisGroupEl;
 use crate::ntt::HERingNegacyclicNTT;
 use crate::rings::number_ring::*;
 use crate::sample_primes;
-use crate::StdZn;
 use crate::cyclotomic::CyclotomicRing;
 
 pub struct Pow2CyclotomicNumberRing<N = RustNegacyclicNTT<Zn>> {

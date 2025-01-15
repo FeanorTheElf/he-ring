@@ -37,7 +37,6 @@ use crate::rings::decomposition_ring::*;
 use crate::rings::odd_cyclotomic::*;
 use crate::lintransform::trace::*;
 use crate::lintransform::HELinearTransform;
-use crate::StdZn;
 
 pub struct MatmulTransform<NumberRing, A = Global>
     where NumberRing: HECyclotomicNumberRing,
@@ -68,8 +67,23 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
     }
 
     ///
-    /// `matrix` is called on `output_index, input_index, column_indices` to give the `(output_index, input_index)`-th
-    /// entry of the matrix corresponding to the hypercolumn containing the slot `column_indices`.
+    /// This is the `MatMul1d`-function known from HElib.
+    /// 
+    /// More concretely, it creates the linear transform that operates on each "slice" of the hypercube
+    /// along the given dimension.
+    /// 
+    /// # Details
+    /// 
+    /// For each hypercolumn along the `dim_index`-th dimension containing the slots of index 
+    /// `U(i) = (u1, ..., u(dim_index - 1), i, u(dim_index + 1), ..., ur)` for all `i`, 
+    /// we can consider the `F_(p^d)`-basis given by the slot unit vectors `e_U(i)`.
+    /// An `F_(p^d)`-linear transform that operates on each set `{ e_U(i) | i }` separately, 
+    /// for all `U`, is said to be of `matmul1d`-type, and can be created using this function.
+    /// 
+    /// More concretely, this computes the linear transform that maps
+    /// ```text
+    ///   e_U(j) -> sum_i matrix(i, j, U(i)) e_U(i)
+    /// ```
     /// 
     pub fn matmul1d<G>(H: &DefaultHypercube<NumberRing, A>, dim_index: usize, matrix: G) -> MatmulTransform<NumberRing, A>
         where G: Sync + Fn(usize, usize, &[usize]) -> El<SlotRingOver<Zn>>,
@@ -135,15 +149,23 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
     }
 
     ///
+    /// This is the `BlockMatMul1d`-function known from HElib.
+    /// 
+    /// More concretely, it creates the linear transform that operates on each "slice" of the hypercube
+    /// along the given dimension.
+    /// 
+    /// # Details
+    /// 
     /// For each hypercolumn along the `dim_index`-th dimension containing the slots of index 
     /// `U(i) = (u1, ..., u(dim_index - 1), i, u(dim_index + 1), ..., ur)` for all `i`, 
     /// we can consider the `Fp`-basis given by `X^k e_U(i)`. An `Fp`-linear transform that operates on 
     /// each set `{ X^k e_U(i) | k, k }` separately, for all `U`, is said to be of `blockmatmul1d`-type, 
     /// and can be created using this function.
     /// 
-    /// More concretely, for each hypercolumn (represented by `U(.)`), the given function `matrix` 
-    /// should return the `(i, k), (j, l)`-th entry of the matrix of the linear transform (w.r.t. basis `X^k e_U(i)`) 
-    /// when called on `((i, k), (j, l), U(<unspecified value>))`.
+    /// More concretely, this computes the map
+    /// ```text
+    ///   X^l e_U(j) -> sum_(i, k) matrix((i, k), (j, l), U(i)) X^k e_U(i)
+    /// ```
     /// 
     pub fn blockmatmul1d<'a, G>(H: &DefaultHypercube<NumberRing, A>, dim_index: usize, matrix: G) -> MatmulTransform<NumberRing, A>
         where G: Sync + Fn((usize, usize), (usize, usize), &[usize]) -> El<Zn>,

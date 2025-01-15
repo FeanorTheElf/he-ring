@@ -14,10 +14,32 @@ use crate::rings::{decomposition_ring::DecompositionRing, number_ring::HENumberR
 
 pub static CREATE_LINEAR_TRANSFORM_TIME_RECORDER: TimeRecorder = TimeRecorder::new("CreateLinTransform");
 
+///
+/// Contains algorithms for computing linear transforms and representing them
+/// as linear combination of Galois automorphisms.
+/// 
 pub mod matmul;
+
+///
+/// Contains an implementation of the homomorphic trace.
+/// 
 pub mod trace;
+
+///
+/// Contains an implementation of the Slots-to-Coefficients transform and its inverse
+/// for odd, composite cyclotomic number rings.
+/// 
 pub mod composite;
+
+///
+/// Contains an implementation of the Slots-to-Coefficients transform and its inverse
+/// for power-of-two cyclotomic number rings.
+/// 
 pub mod pow2;
+
+///
+/// Contains an implementation of the slot-broadcast transform.
+/// 
 pub mod broadcast;
 
 pub trait HELinearTransform<NumberRing, A>

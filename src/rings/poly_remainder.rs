@@ -157,6 +157,11 @@ impl<R, C> BarettPolyReducer<R, C>
     }
 }
 
+///
+/// Precomputed data to speed up polynomial division by a fixed cyclotomic polynomial.
+/// 
+/// Used by [`crate::rings::single_rns_ring::SingleRNSRing`].
+/// 
 pub struct CyclotomicPolyReducer<R, C>
     where R: RingStore + Clone,
         C: PreparedConvolutionAlgorithm<R::Type>

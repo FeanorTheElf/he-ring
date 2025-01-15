@@ -38,7 +38,6 @@ pub struct FastPolyInterpolation<P>
 {
     poly_ring: P,
     input_degree: usize,
-    // input_moduli: Vec<El<P>>,
     unit_vectors: Vec<Vec<(El<P>, El<P>)>>,
     final_modulus: El<P>,
     n: usize
@@ -103,7 +102,6 @@ impl<P> FastPolyInterpolation<P>
         }
         return Self {
             final_modulus: current.pop().unwrap(),
-            // input_moduli: moduli,
             n: n,
             input_degree: input_degree,
             poly_ring: poly_ring,
@@ -133,10 +131,6 @@ impl<P> FastPolyInterpolation<P>
     pub fn poly_ring(&self) -> &P {
         &self.poly_ring
     }
-
-    // pub fn input_moduli(&self) -> &[El<P>] {
-    //     &self.input_moduli
-    // }
 
     pub fn final_modulus(&self) -> &El<P> {
         &self.final_modulus

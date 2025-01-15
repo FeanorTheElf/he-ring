@@ -69,31 +69,6 @@ impl<T: ?Sized> IsEq<T> for T {
     fn to_ref<'a>(&'a self) -> &'a T { self }
 }
 
-pub trait StdZn: ZnRing 
-    + FromModulusCreateableZnRing 
-    + CanHomFrom<<<<GaloisField as RingStore>::Type as RingExtension>::BaseRing as RingStore>::Type> 
-    + CanHomFrom<AsLocalPIRBase<zn_64::Zn>>
-    + CanHomFrom<StaticRingBase<i64>>
-    + CanHomFrom<StaticRingBase<i128>>
-    + for<'a> CanHomFrom<AsFieldBase<RingRef<'a, Self>>>
-    + for<'a> CanHomFrom<AsLocalPIRBase<RingRef<'a, Self>>>
-    + CanHomFrom<BigIntRingBase>
-    + SerializableElementRing
-{}
-
-impl<R> StdZn for R
-    where R: ZnRing 
-    + FromModulusCreateableZnRing 
-    + CanHomFrom<<<<GaloisField as RingStore>::Type as RingExtension>::BaseRing as RingStore>::Type> 
-    + CanHomFrom<AsLocalPIRBase<zn_64::Zn>>
-    + CanHomFrom<StaticRingBase<i64>>
-    + CanHomFrom<StaticRingBase<i128>>
-    + for<'a> CanHomFrom<AsFieldBase<RingRef<'a, Self>>>
-    + for<'a> CanHomFrom<AsLocalPIRBase<RingRef<'a, Self>>>
-    + CanHomFrom<BigIntRingBase>
-    + SerializableElementRing
-{}
-
 pub fn largest_prime_congruent_one(modulus: El<BigIntRing>) -> impl Fn(El<BigIntRing>) -> Option<El<BigIntRing>> {
     move |leq_than| {
         let ZZbig = BigIntRing::RING;
@@ -165,9 +140,17 @@ fn euler_phi_squarefree(factorization: &[i64]) -> i64 {
     StaticRing::<i64>::RING.prod(factorization.iter().map(|p| p - 1))
 }
 
+///
+/// Contains various tools for profiling this library.
+/// At some point, I will move these into their own crate.
+/// 
 #[macro_use]
 pub mod profiling;
 
+///
+/// Contains an abstraction for NTTs and convolutions, which can then be
+/// used to configure the ring implementations in this crate.
+/// 
 pub mod ntt;
 
 ///
@@ -185,12 +168,29 @@ pub mod rnsconv;
 /// 
 pub mod rings;
 
+///
+/// Contains algorithms to compute linear transformations and represent
+/// them as linear combination of Galois automorphisms, as required for
+/// (second-generation) HE schemes.
+/// 
 pub mod lintransform;
 
+///
+/// Contains algorithms to build arithmetic circuits, with a focus on
+/// digit extraction polynomials.
+/// 
 pub mod digitextract;
 
+///
+/// Contains an implementation of the BFV scheme.
+/// 
 pub mod bfv;
 
+///
+/// The new implementation of arithmetic-galois circuits (i.e. circuits built
+/// from linear combination, multiplication and galois gates) that will soon
+/// replace [`digitextract::ArithCircuit`] and [`lintransform::matmul::CompiledLinearTransform`].
+/// 
 pub mod circuit;
 
 #[cfg(test)]

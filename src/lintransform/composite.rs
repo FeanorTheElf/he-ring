@@ -21,7 +21,6 @@ use crate::rings::decomposition_ring::DecompositionRingBase;
 use crate::rings::hypercube::*;
 use crate::rings::odd_cyclotomic::CompositeCyclotomicNumberRing;
 use crate::cyclotomic::*;
-use crate::StdZn;
 use crate::lintransform::*;
 
 fn dwt1d_matrix(H: &HypercubeStructure, slot_ring: &SlotRingOver<Zn>, dim_index: usize, zeta_powertable: &PowerTable<&SlotRingOver<Zn>>) -> OwnedMatrix<El<SlotRingOver<Zn>>> {

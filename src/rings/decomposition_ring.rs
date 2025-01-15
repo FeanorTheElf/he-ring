@@ -27,6 +27,15 @@ use crate::rings::number_ring::*;
 
 use super::pow2_cyclotomic::Pow2CyclotomicNumberRing;
 
+///
+/// Implementation of `R/tR` for any modulus `t` (without restriction on the
+/// splitting behaviour of `t` over `R`).
+/// 
+/// The arithmetic is currently implemented by temporary lifting values and
+/// using an NTT over a larger modulus `q >> t` that has nice splitting behavior
+/// over `R`. I might change in the future to a single-RNS method, since that
+/// is probably faster in most cases.
+/// 
 pub struct DecompositionRingBase<NumberRing, ZnTy, A = Global> 
     where NumberRing: HENumberRing,
         ZnTy: RingStore,

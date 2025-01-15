@@ -102,7 +102,13 @@ pub struct ModSwitchData {
 ///
 /// Trait for types that represent an instantiation of BFV.
 /// 
-/// We consider the parameters for the ciphertext ring to be part
+/// For example, the implementation [`Pow2BFV`] stores
+///  - the binary logarithm `log(N)` of the ring degree `N`
+///  - the length of the ciphertext modulus `q`
+///  - the type of ciphertext ring to be used - in this case [`ManagedDoubleRNSRing`] with 
+///    [`Pow2CyclotomicNumberRing`]
+/// 
+/// In particular, we consider the parameters for the ciphertext ring to be part
 /// of the instantiation of BFV, but not the plaintext modulus.
 /// The reason is that some applications (most notably bootstrapping)
 /// consider the "same" BFV instantiation with different plaintext
@@ -110,24 +116,65 @@ pub struct ModSwitchData {
 /// also a valid BFV encryption of the derived element in `R/t'R`, for
 /// every `t'` with `t | t'`. 
 /// 
+/// Most functionality of BFV is provided using default functions,
+/// but can be overloaded in case a specific instantiation allows for
+/// a more efficient implementation.
+/// 
+/// ## Combining different ring implementations
+/// 
+/// I'm not yet completely sure what is the best way to handle this.
+/// Currently, each implementor of [`BFVParams`] fixes the type of the
+/// ciphertext ring to be used. However, since the different possible
+/// ciphertext ring implementations have different performance characteristics,
+/// it may be sensible to switch the implementation during working with the
+/// scheme. Currently, this requires either creating two different `BFVParams`-
+/// instantiations (recommended), or manually creating the ciphertext ring.
+/// Note that mapping the ring elements between the implementations can be
+/// done using [`feanor_math::homomorphism::CanIso`].
+///  
 pub trait BFVParams {
     
+    ///
+    /// Implementation of the ciphertext ring to use.
+    /// 
     type CiphertextRing: BXVCiphertextRing + CyclotomicRing;
 
+    ///
+    /// Returns the allowed lengths of the ciphertext modulus.
+    /// 
     fn ciphertext_modulus_bits(&self) -> Range<usize>;
+
+    ///
+    /// The number ring `R` we work in, i.e. the ciphertext ring is `R/qR` and
+    /// the plaintext ring is `R/tR`.
+    /// 
     fn number_ring(&self) -> NumberRing<Self>;
+
+    ///
+    /// Creates the ciphertext ring `R/qR` and the extended-modulus ciphertext ring
+    /// `R/qq'R` that is necessary for homomorphic multiplication.
+    /// 
     fn create_ciphertext_rings(&self) -> (CiphertextRing<Self>, CiphertextRing<Self>);
 
+    ///
+    /// Creates the plaintext ring `R/tR` for the given plaintext modulus `t`.
+    /// 
     fn create_plaintext_ring(&self, modulus: i64) -> PlaintextRing<Self> {
         DecompositionRingBase::new(self.number_ring(), Zn::new(modulus as u64))
     }
 
+    ///
+    /// Generates a secret key, using the randomness of the given rng.
+    /// 
     fn gen_sk<R: Rng + CryptoRng>(C: &CiphertextRing<Self>, mut rng: R) -> SecretKey<Self> {
         // we sample uniform ternary secrets 
         let result = C.get_ring().sample_from_coefficient_distribution(|| (rng.next_u32() % 3) as i32 - 1);
         return result;
     }
     
+    ///
+    /// Generates a new encryption of zero using the secret key and the randomness of the given rng.
+    /// 
     fn enc_sym_zero<R: Rng + CryptoRng>(C: &CiphertextRing<Self>, mut rng: R, sk: &SecretKey<Self>) -> Ciphertext<Self> {
         let a = C.random_element(|| rng.next_u64());
         let mut b = C.negate(C.mul_ref(&a, &sk));
@@ -136,14 +183,26 @@ pub trait BFVParams {
         return (b, a);
     }
     
+    ///
+    /// Creates a transparent encryption of zero, i.e. a noiseless encryption that does not hide
+    /// the encrypted value - everyone can read it, even without access to the secret key.
+    /// 
+    /// Often used to initialize an accumulator (or similar) during algorithms. 
+    /// 
     fn transparent_zero(C: &CiphertextRing<Self>) -> Ciphertext<Self> {
         (C.zero(), C.zero())
     }
 
+    ///
+    /// Encrypts the given value, using the randomness of the given rng.
+    /// 
     fn enc_sym<R: Rng + CryptoRng>(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, rng: R, m: &El<PlaintextRing<Self>>, sk: &SecretKey<Self>) -> Ciphertext<Self> {
         Self::hom_add_plain(P, C, m, Self::enc_sym_zero(C, rng, sk))
     }
 
+    ///
+    /// Creates an encryption of the secret key - this is always easily possible in BFV.
+    /// 
     fn enc_sk(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>) -> Ciphertext<Self> {
         let Delta = ZZbig.rounded_div(
             ZZbig.clone_el(C.base_ring().modulus()), 
@@ -152,6 +211,10 @@ pub trait BFVParams {
         (C.zero(), C.inclusion().map(C.base_ring().coerce(&ZZbig, Delta)))
     }
     
+    ///
+    /// Given `q/t m + e`, removes the noise term `e`, thus returns `q/t m`.
+    /// Used during [`BFVParams::dec()`] and [`BFVParams::noise_budget()`].
+    /// 
     fn remove_noise(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, c: &El<CiphertextRing<Self>>) -> El<PlaintextRing<Self>> {
         let coefficients = C.wrt_canonical_basis(c);
         let Delta = ZZbig.rounded_div(
@@ -162,12 +225,19 @@ pub trait BFVParams {
         return P.from_canonical_basis((0..coefficients.len()).map(|i| modulo.map(ZZbig.rounded_div(C.base_ring().smallest_lift(coefficients.at(i)), &Delta))));
     }
     
+    ///
+    /// Decrypts a given ciphertext.
+    /// 
     fn dec(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: Ciphertext<Self>, sk: &SecretKey<Self>) -> El<PlaintextRing<Self>> {
         let (c0, c1) = ct;
         let noisy_m = C.add(c0, C.mul_ref_snd(c1, sk));
         return Self::remove_noise(P, C, &noisy_m);
     }
     
+    ///
+    /// Decrypts a given ciphertext and prints its value to stdout.
+    /// Designed for debugging purposes.
+    /// 
     fn dec_println(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: &Ciphertext<Self>, sk: &SecretKey<Self>) {
         let m = Self::dec(P, C, Self::clone_ct(C, ct), sk);
         println!("ciphertext (noise budget: {}):", Self::noise_budget(P, C, ct, sk));
@@ -175,6 +245,10 @@ pub trait BFVParams {
         println!();
     }
     
+    ///
+    /// Decrypts a given ciphertext and prints the values in its slots to stdout.
+    /// Designed for debugging purposes.
+    /// 
     fn dec_println_slots(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: &Ciphertext<Self>, sk: &SecretKey<Self>) {
         let (p, _e) = is_prime_power(ZZ, P.base_ring().modulus()).unwrap();
         let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(P.n() as u64), p);
@@ -187,6 +261,9 @@ pub trait BFVParams {
         println!();
     }
     
+    ///
+    /// Computes an encryption of the sum of two encrypted messages.
+    /// 
     fn hom_add(C: &CiphertextRing<Self>, lhs: Ciphertext<Self>, rhs: &Ciphertext<Self>) -> Ciphertext<Self> {
         record_time!(GLOBAL_TIME_RECORDER, "BFVParams::hom_add", || {
             let (lhs0, lhs1) = lhs;
@@ -195,6 +272,9 @@ pub trait BFVParams {
         })
     }
     
+    ///
+    /// Computes an encryption of the difference of two encrypted messages.
+    /// 
     fn hom_sub(C: &CiphertextRing<Self>, lhs: Ciphertext<Self>, rhs: &Ciphertext<Self>) -> Ciphertext<Self> {
         record_time!(GLOBAL_TIME_RECORDER, "BFVParams::hom_sub", || {
             let (lhs0, lhs1) = lhs;
@@ -203,10 +283,16 @@ pub trait BFVParams {
         })
     }
     
+    ///
+    /// Copies a ciphertext.
+    /// 
     fn clone_ct(C: &CiphertextRing<Self>, ct: &Ciphertext<Self>) -> Ciphertext<Self> {
         (C.clone_el(&ct.0), C.clone_el(&ct.1))
     }
     
+    ///
+    /// Computes an encryption of the sum of an encrypted message and a plaintext.
+    /// 
     fn hom_add_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
         record_time!(GLOBAL_TIME_RECORDER, "BFVParams::hom_add_plain", || {
             let mut m = C.get_ring().exact_convert_from_decompring(P, m);
@@ -219,6 +305,9 @@ pub trait BFVParams {
         })
     }
     
+    ///
+    /// Computes an encryption of the product of an encrypted message and a plaintext.
+    /// 
     fn hom_mul_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
         record_time!(GLOBAL_TIME_RECORDER, "BFVParams::hom_mul_plain", || {
             let m = C.get_ring().exact_convert_from_decompring(P, m);
@@ -227,10 +316,20 @@ pub trait BFVParams {
         })
     }
     
+    ///
+    /// Computes an encryption of the product of an encrypted message and an integer plaintext.
+    /// 
     fn hom_mul_plain_i64(_P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: i64, ct: Ciphertext<Self>) -> Ciphertext<Self> {
         (C.int_hom().mul_map(ct.0, m as i32), C.int_hom().mul_map(ct.1, m as i32))
     }
     
+    ///
+    /// Computes the "noise budget" of a given ciphertext.
+    /// 
+    /// Concretely, the noise budget is `log(q/(t|e|))`, where `t` is the plaintext modulus
+    /// and `|e|` is the `l_inf`-norm of the noise term. This will decrease during homomorphic
+    /// operations, and if it reaches zero, decryption may yield incorrect results.
+    /// 
     fn noise_budget(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: &Ciphertext<Self>, sk: &SecretKey<Self>) -> usize {
         let (c0, c1) = Self::clone_ct(C, ct);
         let noisy_m = C.add(c0, C.mul_ref_snd(c1, sk));
@@ -246,12 +345,18 @@ pub trait BFVParams {
         }).max().unwrap() + P.base_ring().integer_ring().abs_log2_ceil(P.base_ring().modulus()).unwrap() + 1);
     }
     
+    ///
+    /// Generates a relinearization key, necessary to compute homomorphic multiplications.
+    /// 
     fn gen_rk<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing<Self>, rng: R, sk: &SecretKey<Self>, digits: usize) -> RelinKey<'a, Self>
         where Self: 'a
     {
         Self::gen_switch_key(C, rng, &C.pow(C.clone_el(sk), 2), sk, digits)
     }
     
+    ///
+    /// Computes an encryption of the product of two encrypted messages.
+    /// 
     fn hom_mul<'a>(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, C_mul: &CiphertextRing<Self>, lhs: Ciphertext<Self>, rhs: Ciphertext<Self>, rk: &RelinKey<'a, Self>) -> Ciphertext<Self>
         where Self: 'a
     {
@@ -282,6 +387,12 @@ pub trait BFVParams {
         })
     }
     
+    ///
+    /// Generates a key-switch key. 
+    /// 
+    /// In particular, this is used to generate relinearization keys (via [`BFVParams::gen_rk()`])
+    /// or Galois keys (via [`BFVParams::gen_gk()`]).
+    /// 
     fn gen_switch_key<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing<Self>, mut rng: R, old_sk: &SecretKey<Self>, new_sk: &SecretKey<Self>, digits: usize) -> KeySwitchKey<'a, Self>
         where Self: 'a
     {
@@ -303,6 +414,10 @@ pub trait BFVParams {
         return (digits, (res0, res1));
     }
     
+    ///
+    /// Using a key-switch key, computes an encryption encrypting the same message as the given ciphertext
+    /// under a different secret key.
+    /// 
     fn key_switch<'a>(C: &CiphertextRing<Self>, ct: Ciphertext<Self>, switch_key: &KeySwitchKey<'a, Self>) -> Ciphertext<Self>
         where Self: 'a
     {
@@ -315,6 +430,10 @@ pub trait BFVParams {
         );
     }
     
+    ///
+    /// Modulus-switches from `R/qR` to `R/tR`, where the latter one is given as a plaintext ring.
+    /// In particular, this is necessary during bootstrapping.
+    /// 
     fn mod_switch_to_plaintext(target: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: Ciphertext<Self>, switch_data: &ModSwitchData) -> (El<PlaintextRing<Self>>, El<PlaintextRing<Self>>) {
         let (c0, c1) = ct;
         return (
@@ -323,12 +442,19 @@ pub trait BFVParams {
         );
     }
     
+    ///
+    /// Generates a Galois key, usable for homomorphically applying Galois automorphisms.
+    /// 
     fn gen_gk<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing<Self>, rng: R, sk: &SecretKey<Self>, g: CyclotomicGaloisGroupEl, digits: usize) -> KeySwitchKey<'a, Self>
         where Self: 'a
     {
         Self::gen_switch_key(C, rng, &C.get_ring().apply_galois_action(sk, g), sk, digits)
     }
     
+    ///
+    /// Computes an encryption of `sigma(x)`, where `x` is the message encrypted by the given ciphertext
+    /// and `sigma` is the given Galois automorphism.
+    /// 
     fn hom_galois<'a>(C: &CiphertextRing<Self>, ct: Ciphertext<Self>, g: CyclotomicGaloisGroupEl, gk: &KeySwitchKey<'a, Self>) -> Ciphertext<Self>
         where Self: 'a
     {
@@ -340,6 +466,11 @@ pub trait BFVParams {
         })
     }
     
+    ///
+    /// Homomorphically applies multiple Galois automorphisms at once.
+    /// Functionally, this is equivalent to calling [`BFVParams::hom_galois()`]
+    /// multiple times, but can be faster.
+    /// 
     fn hom_galois_many<'a, 'b, V>(C: &CiphertextRing<Self>, ct: Ciphertext<Self>, gs: &[CyclotomicGaloisGroupEl], gks: V) -> Vec<Ciphertext<Self>>
         where V: VectorFn<&'b KeySwitchKey<'a, Self>>,
             KeySwitchKey<'a, Self>: 'b,
@@ -382,6 +513,10 @@ pub trait BFVParams {
         }
     }
     
+    ///
+    /// Computes an encryption of the image of the given encrypted message under the given
+    /// linear transform. Assumes all necessary galois keys are given.
+    /// 
     fn hom_compute_linear_transform<'a, Transform, const LOG: bool>(
         P: &PlaintextRing<Self>, 
         C: &CiphertextRing<Self>, 
@@ -416,6 +551,13 @@ pub trait BFVParams {
     }
 }
 
+///
+/// Instantiation of BFV in power-of-two cyclotomic rings `Z[X]/(X^N + 1)` for `N`
+/// a power of two.
+/// 
+/// For these rings, using a `DoubleRNSRing` as ciphertext ring is always the best
+/// (i.e. fastest) solution.
+/// 
 #[derive(Debug)]
 pub struct Pow2BFV<A: Allocator + Clone + Send + Sync = DefaultCiphertextAllocator, C: Send + Sync + HERingNegacyclicNTT<Zn> = DefaultNegacyclicNTT> {
     pub log2_q_min: usize,
@@ -475,6 +617,11 @@ impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingNegacyclicNTT<Zn
     }
 }
 
+///
+/// Instantiation of BFV over odd, composite cyclotomic rings `Z[X]/(Phi_n(X))`
+/// with `n = n1 n2` and `n2, n2` odd coprime integers. Ciphertexts are represented
+/// in double-RNS form. If single-RNS form is instead requires, use [`CompositeSingleRNSBFV`].
+/// 
 #[derive(Clone, Debug)]
 pub struct CompositeBFV<A: Allocator + Clone + Send + Sync = DefaultCiphertextAllocator> {
     pub log2_q_min: usize,
@@ -521,6 +668,15 @@ impl<A: Allocator + Clone + Send + Sync> BFVParams for CompositeBFV<A> {
     }
 }
 
+///
+/// Instantiation of BFV over odd, composite cyclotomic rings `Z[X]/(Phi_n(X))`
+/// with `n = n1 n2` and `n2, n2` odd coprime integers. Ciphertexts are represented
+/// in single-RNS form. If double-RNS form is instead requires, use [`CompositeBFV`].
+/// 
+/// This takes a type `C` as last generic argument, which is the type of the convolution
+/// algorithm to use to instantiate the ciphertext ring. This has a major impact on 
+/// performance.
+/// 
 #[derive(Clone, Debug)]
 pub struct CompositeSingleRNSBFV<A: Allocator + Clone + Send + Sync = DefaultCiphertextAllocator, C: Send + Sync + HERingConvolution<Zn> = DefaultConvolution> {
     pub log2_q_min: usize,

@@ -33,7 +33,6 @@ use crate::IsEq;
 use super::decomposition_ring::*;
 use super::single_rns_ring::SingleRNSRing;
 use super::single_rns_ring::SingleRNSRingBase;
-// use super::single_rns_ring::SingleRNSRingBase;
 
 ///
 /// The ring `R/qR` specified by a collection of [`RingDecomposition`] for all prime factors `p | q`. 

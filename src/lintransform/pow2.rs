@@ -21,7 +21,6 @@ use crate::rings::hypercube::*;
 use crate::rings::number_ring::*;
 use crate::rings::decomposition_ring::*;
 use crate::rings::pow2_cyclotomic::*;
-use crate::StdZn;
 use crate::lintransform::trace::Trace;
 
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;

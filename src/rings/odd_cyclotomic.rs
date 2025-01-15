@@ -29,7 +29,7 @@ use crate::rings::double_rns_ring::*;
 use crate::rings::number_ring::*;
 use super::single_rns_ring;
 use super::{decomposition_ring::{self, *}, double_rns_ring};
-use crate::{euler_phi, euler_phi_squarefree, sample_primes, StdZn};
+use crate::{euler_phi, euler_phi_squarefree, sample_primes};
 use crate::cyclotomic::{CyclotomicGaloisGroupEl, CyclotomicRing, CyclotomicRingStore};
 
 pub struct OddCyclotomicNumberRing {

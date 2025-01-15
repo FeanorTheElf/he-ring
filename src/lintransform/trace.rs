@@ -29,7 +29,6 @@ use crate::rings::hypercube::SlotRingOver;
 use crate::rings::number_ring::HECyclotomicNumberRing;
 use crate::rings::odd_cyclotomic::OddCyclotomicNumberRing;
 use crate::rings::pow2_cyclotomic::Pow2CyclotomicNumberRing;
-use crate::StdZn;
 
 use crate::rings::decomposition_ring::*;
 use crate::cyclotomic::*;

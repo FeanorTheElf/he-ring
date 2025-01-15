@@ -67,7 +67,7 @@ impl<'a, NumberRing, A> GadgetProductRhsOperand<'a, NumberRing, A>
         // if the RNS base is very short, we don't want to do LKSS style gadget products, mainly
         // since this avoids the treatment of complicated edge cases, but we also don't expect much 
         // performance improvement
-        if ring.use_lkss_gadget_product(digits) {
+        if ring.should_use_lkss_gadget_product(digits) {
             if LOG {
                 println!("Use LKSS for gadget product, digits = {}, len(short RNS base) = {}, len(full RNS base) = {}", digits, output_moduli_count, ring.rns_base().len());
             }
@@ -200,7 +200,7 @@ impl<'a, NumberRing, A> GadgetProductLhsOperand<'a, NumberRing, A>
     pub fn create_from_element(ring: &DoubleRNSRingBase<NumberRing, A>, digits: usize, el: SmallBasisEl<NumberRing, A>) -> Self {
         record_time!(GLOBAL_TIME_RECORDER, "double_rns::GadgetProductLhsOperand::create_from_element", || {
             let output_moduli_count = ring.get_gadget_product_modulo_count(digits);
-            if ring.use_lkss_gadget_product(digits) {
+            if ring.should_use_lkss_gadget_product(digits) {
                 GadgetProductLhsOperand::LKSSStyle(LKSSGadgetProductLhsOperand::new_from_element(ring, el, digits, output_moduli_count))
             } else {
                 GadgetProductLhsOperand::Naive(NaiveGadgetProductLhsOperand::new_from_element(ring, el, digits))
@@ -426,7 +426,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
         }).count()
     }
 
-    fn use_lkss_gadget_product(&self, digits: usize) -> bool {
+    fn should_use_lkss_gadget_product(&self, digits: usize) -> bool {
         self.get_gadget_product_modulo_count(digits) + 1 < digits && !cfg!(feature = "force_naive_gadget_product")
     }
     

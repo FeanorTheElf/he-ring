@@ -35,7 +35,7 @@ Note that in most HE-related situations, you will want the "Ring factorization"-
 This code is contained in the modules [`crate::ntt`] and [`crate::rings`].
 In detail, the following is available:
  - The above implementations of rings
- - Description of the ring factorization `R/(p^e) = GR(p, e, d)` into copies of Galois rings via a "hypercube structure", as introduced by [Bootstrapping for HElib](https://ia.cr/2014/873).
+ - Description of the ring factorization `R/(p^e) = GR(p, e, d)^l` into copies of Galois rings via a "hypercube structure", as introduced by [Bootstrapping for HElib](https://ia.cr/2014/873).
  - Implementation of power-of-two cyclotomic number rings and odd cyclotomic number rings
  - A `ManagedDoubleRNSRing`, which is uses a `DoubleRNSRing` for arithmetic operations, but automatically switches between coefficient and double-RNS representation as needed
  - Efficient implementations of "gadget products", which are used in HE to limit the noise growth when multiplying noisy ring elements
