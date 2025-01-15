@@ -1,8 +1,8 @@
 # he-ring
+# A toolkit library to build Homomorphic Encryption
 
-Building on [feanor-math](https://crates.io/crates/feanor-math), this library provides efficient implementations of rings that are commonly used in homomorphic encryption (HE).
-Our focus lies on providing the building blocks for second-generation HE schemes like BGV or BFV, however most building blocks are also used in other schemes like FHEW/TFHE.
-In particular, the core component are cyclotomic rings modulo an integer `R_q = Z[X]/(Phi_n(X), q)`.
+Building on [feanor-math](https://crates.io/crates/feanor-math), this library provides efficient implementations of various building blocks for Homomorphic Encryption (HE).
+The focus is on implementations of the ring `R_q = Z[X]/(Phi_n(X), q)` as required for second-generation HE schemes (like BGV, BFV), but also contains many other components and schemes.
 
 ## Features
 
@@ -12,11 +12,11 @@ The number ring `R` is abstractly represented via the trait `HENumberRing`.
 However, there are multiple ways of, based on the abstract specification, implement the ring arithmetic.
 Three of them are implemented in this library, while one is already present in `feanor-math`.
 
-| Representation of `q` | Computation of convolution       |                                      |
+| Representation of `q` | Multiplication implemented via   |                                      |
 |-----------------------|----------------------------------|--------------------------------------|
 | Single integer        | Convolution & explicit reduction | `FreeAlgebraImpl` from `feanor_math` |
 | Single integer        | Ring factorization               | `DecompositionRing`                  |
-| RNS basis             | Convolution & explicit reduction | `SingleRNSRing` *                    |
+| RNS basis             | Convolution & explicit reduction | `SingleRNSRing`                      |
 | RNS basis             | Ring factorization               | `DoubleRNSRing`                      |
 
  - "Convolution & explicit reduction" means that two elements of `R_q` are multiplied by first multiplying them as polynomials over `Z_q[X]` and then explicitly performing reduction modulo `Phi_n(X)`
@@ -32,16 +32,44 @@ Three of them are implemented in this library, while one is already present in `
 
 Note that in most HE-related situations, you will want the "Ring factorization"-based methods, i.e. use `DoubleRNSRing` for the ciphertext ring and `DecompositionRing` for the plaintext ring.
 
-* I am considering removing this implementation again, since it does not seem to never have any performance benefits over `DoubleRNSRing`...
+This code is contained in the modules [`crate::ntt`] and [`crate::rings`].
+In detail, the following is available:
+ - The above implementations of rings
+ - Description of the ring factorization `R/(p^e) = GR(p, e, d)` into copies of Galois rings via a "hypercube structure", as introduced by [Bootstrapping for HElib](https://ia.cr/2014/873).
+ - Implementation of power-of-two cyclotomic number rings and odd cyclotomic number rings
+ - A `ManagedDoubleRNSRing`, which is uses a `DoubleRNSRing` for arithmetic operations, but automatically switches between coefficient and double-RNS representation as needed
+ - Efficient implementations of "gadget products", which are used in HE to limit the noise growth when multiplying noisy ring elements
 
 ### Provided RNS operations
 
 In order to perform non-arithmetic operations (e.g. rounding, reduction modulo `t`, ...) on `R_q` when `q = p1 ... pr` is represented as an RNS basis, one has to use algorithms specifically designed for this setting.
 Such algorithms are provided in `rnsconv` as implementations of the trait `RNSOperation`.
 
-### Bootstrapping operations
+This code is contained in the modules [`crate::rnsconv`].
+In detail, the following is available:
+ - `AlmostExactBaseConversion` and `AlmostExactSharedBaseConversion` to compute the map `Z_q -> Z_q',  x -> lift(x) mod q'` in RNS form
+ - `AlmostExactRescalingConvert` to compute the map `Z_q -> Z_q',  x -> round(a lift(x) / b) mod q'` (as required during BFV) in RNS form
+ - `CongruencePreservingRescaling` to compute the special variant of rescaling that is needed during modulus-switching in the BGV scheme
 
-TODO
+### Homomorphic Encryption schemes
+
+This library currently contains an implementation of the BFV scheme, and I hope to soon add an implementation of the CLPX scheme for large integers.
+Note that using the well-abstracted building blocks mentioned before, these implementations are actually a straightforward adaption of the mathematical description of the schemes, so it should be very simple to implement another/custom HE scheme.
+
+This code is contained in the modules [`crate::bfv`].
+
+### Arithmetization and Bootstrapping
+
+We include an implementation of bootstrapping for BFV.
+Again, while the actual implementation is of course scheme-specific, components are, where possible, designed in a generic way.
+In particular, this includes tools for arithmetization and computing arithmetic circuits.
+
+This code is contained in the modules [`crate::bfv::bootstrap`], [`crate::lintransform`] and [`crate::digitextract`].
+This in particular contains:
+ - Methods for computing linear transforms and representing them as sum of Galois automorphisms (including HElib-style `matmul1d()` and `blockmatmul1d()`)
+ - Low-depth Paterson-Stockmeyer to convert polynomials into arithmetic circuits
+ - Table of precomputed, optimal digit extraction polynomials for `p = 2`
+ - General operations like the algebraic trace, or a "broadcast" across slots
 
 ## Disclaimer
 
