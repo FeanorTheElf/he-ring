@@ -348,6 +348,12 @@ pub trait BFVParams {
     ///
     /// Generates a relinearization key, necessary to compute homomorphic multiplications.
     /// 
+    /// The parameter `digits` refers to the number of "digits" to use for the gadget product
+    /// during relinearization. More concretely, when performing relinearization, the ciphertext
+    /// will be decomposed into multiple small parts, which are then multiplied with the components
+    /// of the relinearization key. Thus, a larger value for `digits` will result in lower (additive)
+    /// noise growth during relinearization, at the cost of higher performance.
+    /// 
     fn gen_rk<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing<Self>, rng: R, sk: &SecretKey<Self>, digits: usize) -> RelinKey<'a, Self>
         where Self: 'a
     {
@@ -392,6 +398,12 @@ pub trait BFVParams {
     /// 
     /// In particular, this is used to generate relinearization keys (via [`BFVParams::gen_rk()`])
     /// or Galois keys (via [`BFVParams::gen_gk()`]).
+    /// 
+    /// The parameter `digits` refers to the number of "digits" to use for the gadget product
+    /// during key-switching. More concretely, when performing key-switching, the ciphertext
+    /// will be decomposed into multiple small parts, which are then multiplied with the components
+    /// of the key-switching key. Thus, a larger value for `digits` will result in lower (additive)
+    /// noise growth during key-switching, at the cost of higher performance.
     /// 
     fn gen_switch_key<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing<Self>, mut rng: R, old_sk: &SecretKey<Self>, new_sk: &SecretKey<Self>, digits: usize) -> KeySwitchKey<'a, Self>
         where Self: 'a
@@ -444,6 +456,12 @@ pub trait BFVParams {
     
     ///
     /// Generates a Galois key, usable for homomorphically applying Galois automorphisms.
+    /// 
+    /// The parameter `digits` refers to the number of "digits" to use for the gadget product
+    /// during key-switching. More concretely, when performing key-switching, the ciphertext
+    /// will be decomposed into multiple small parts, which are then multiplied with the components
+    /// of the key-switching key. Thus, a larger value for `digits` will result in lower (additive)
+    /// noise growth during key-switching, at the cost of higher performance.
     /// 
     fn gen_gk<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing<Self>, rng: R, sk: &SecretKey<Self>, g: CyclotomicGaloisGroupEl, digits: usize) -> KeySwitchKey<'a, Self>
         where Self: 'a

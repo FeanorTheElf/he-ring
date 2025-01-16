@@ -17,6 +17,14 @@ use feanor_math::seq::VectorView;
 pub trait DynConvolutionAlgorithm<R>
     where R: ?Sized + RingBase
 {
+    ///
+    /// Computes `dst[i] += sum_j lhs[j] * rhs[i - j]`, where the sum runs over
+    /// these indices that do not cause an out-of-bounds. 
+    /// 
+    /// For implementation purposes, we requrie `dst.len() >= lhs.len() + rhs.len()` 
+    /// (not only `dst.len() >= lhs.len() + rhs.len() - 1`, which would be enough to
+    /// include `lhs[lhs.len() - 1] * rhs[rhs.len() - 1]`).
+    /// 
     fn compute_convolution_dyn(&self, lhs: &[R::Element], rhs: &[R::Element], dst: &mut [R::Element], ring: &R);
     fn supports_ring_dyn(&self, ring: &R) -> bool;
 }

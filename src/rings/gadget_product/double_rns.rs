@@ -119,7 +119,8 @@ impl<'a, NumberRing, A> NaiveGadgetProductRhsOperand<'a, NumberRing, A>
 }
 
 ///
-/// LKSS-style lhs gadget product operand; 
+/// LKSS-style lhs gadget product operand; Note that this is almost never used currently,
+/// as it only makes sense for a large number of gadget product digits.
 /// 
 /// For each gadget vector entry `i`, we have a ring element `ai` that represents
 /// a noisy approximation to `g[i]`. Instead of storing this element `ai` directly,
@@ -275,7 +276,8 @@ impl<'a, NumberRing, A> NaiveGadgetProductLhsOperand<'a, NumberRing, A>
 }
 
 ///
-/// LKSS-style lhs gadget product operand.
+/// LKSS-style lhs gadget product operand; Note that this is almost never used currently,
+/// as it only makes sense for a large number of gadget product digits.
 /// 
 /// Stores the gadget decomposition of a ring element `x`, i.e. small elements `xi`
 /// such that `x = sum_i g[i] xi`. However, we store `xi` only modulo a "shortened

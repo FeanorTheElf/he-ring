@@ -109,7 +109,11 @@ pub fn poly_to_circuit<P>(poly_ring: P, polys: &[El<P>]) -> ArithCircuit
     return low_depth_paterson_stockmeyer(&poly_ring, polys, baby_steps);
 }
 
-pub fn low_depth_paterson_stockmeyer_cost<V>(degrees: V, baby_steps: usize) -> (/* mul depth */ impl VectorFn<usize>, /* mul count */ usize)
+///
+/// Computes the cost of the circuit [`low_depth_paterson_stockmeyer()`] would return, without
+/// actually building the circuit.
+/// 
+pub fn low_depth_paterson_stockmeyer_cost<V>(degrees: V, baby_steps: usize) -> (/* mul depths */ impl VectorFn<usize>, /* mul count */ usize)
     where V: VectorFn<usize>
 {
     let ZZ = StaticRing::<i64>::RING;
@@ -135,7 +139,20 @@ pub fn low_depth_paterson_stockmeyer_cost<V>(degrees: V, baby_steps: usize) -> (
 }
 
 ///
-/// A low-depth variant of Paterson-Stockmeyer evaluation of polynomials
+/// A low-depth variant of Paterson-Stockmeyer evaluation of polynomials.
+/// 
+/// # Algorithm
+/// 
+/// Currently, the circuit is built according to the following strategy:
+///  - First, the first consecutive `baby_steps` powers of the input are computed, i.e.
+///    `1, x, x^2, ..., x^baby_steps`
+///  - Then the powers `1, x^baby_steps, x^(2 baby_steps), ...` are computed (the "giant steps")
+///  - For each giant step and desired polynomial, a suitable linear combination of the baby steps 
+///    is taken, and then multiplied with the giant step
+///  - The results are summed up
+/// 
+/// In other words, to compute a single polynomial, the required number of multiplications is `baby_steps + 2 * giant_steps`.
+/// The multiplicative depth is minimal (except possibly `+ 1` if divisions are not exact).
 /// 
 pub fn low_depth_paterson_stockmeyer<P>(poly_ring: P, polys: &[El<P>], baby_steps: usize) -> ArithCircuit
     where P: RingStore,
@@ -170,7 +187,7 @@ pub fn low_depth_paterson_stockmeyer<P>(poly_ring: P, polys: &[El<P>], baby_step
     assert!((giant_steps - 1) * baby_steps + baby_steps > max_deg);
     assert!((giant_steps - 1) * baby_steps <= max_deg);
 
-    // now baby_step_circuit computes (1, x, x^2, ..., x^(baby_steps - 1))
+    // now baby_step_circuit computes (1, x, x^2, ..., x^baby_steps)
     let baby_step_circuit = compute_power_circuit(baby_steps + 1);
     assert_eq!(baby_steps - 1, baby_step_circuit.mul_count());
     assert_eq!(ZZ.abs_log2_ceil(&(baby_steps as i64)).unwrap() as usize, baby_step_circuit.max_mul_depth());
@@ -295,6 +312,9 @@ pub fn mu(k: i64) -> i64 {
     return n;
 }
 
+///
+/// Computes `prod_(i < m) (X - i)`.
+/// 
 pub fn falling_factorial_poly<P>(poly_ring: P, m: usize) -> El<P>
     where P: RingStore,
         P::Type: PolyRing

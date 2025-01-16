@@ -394,6 +394,24 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
         return result;
     }
 
+    ///
+    /// "Puts" two circuits "next to each other", i.e. given
+    /// ```text
+    ///    | | | |                  |
+    ///   |‾‾‾‾‾‾‾|             |‾‾‾‾‾‾|
+    ///   |   C1  |     and     |  C2  |
+    ///   |_______|             |______|
+    ///     | | |                 |  |
+    /// ```
+    /// this function computes the circuit
+    /// ```text
+    ///    | | | |  |
+    ///   |‾‾‾‾‾‾‾|‾‾‾‾‾‾|
+    ///   |   C1  |  C2  |
+    ///   |_______|______|
+    ///      | | |  | |
+    /// ```
+    /// 
     pub fn tensor<S: RingStore<Type = R>>(self, rhs: Self, ring: S) -> Self {
         let add_zeros = |vec: &[Coefficient<R>], index: usize, count: usize| 
             vec[0..index].iter().map(|c| c.clone(&ring))
@@ -448,6 +466,31 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
         return result;
     }
 
+    ///
+    /// "Concatentates" two circuits, i.e. connects the output wires of the given circuit
+    /// to the inputs of this circuit.
+    /// 
+    /// In other words, given
+    /// ```text
+    ///     |   |                  |
+    ///   |‾‾‾‾‾‾‾|             |‾‾‾‾‾‾|
+    ///   |   C1  |     and     |  C2  |
+    ///   |_______|             |______|
+    ///     | | |                 |  |
+    /// ```
+    /// this function computes the circuit
+    /// ```text
+    ///      |
+    ///   |‾‾‾‾‾‾|
+    ///   |  C2  |
+    ///   |______|
+    ///     |  |
+    ///   |‾‾‾‾‾‾|
+    ///   |  C1  |
+    ///   |______|
+    ///     | | |  
+    /// ```
+    /// 
     pub fn compose<S: RingStore<Type = R> + Copy>(self, first: Self, ring: S) -> Self {
         assert_eq!(first.output_count(), self.input_count());
 
