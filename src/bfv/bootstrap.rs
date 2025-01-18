@@ -373,18 +373,6 @@ impl<Params: BFVParams> ThinBootstrapData<Params> {
         self.digit_extract.p
     }
 
-    fn create_modulus_switch(&self, P_bootstrap: &[PlaintextRing<Params>], C: &CiphertextRing<Params>) -> ModSwitchData {
-        let allocator = Global;
-        ModSwitchData {
-            scale: rnsconv::bfv_rescale::AlmostExactRescaling::new_with(
-                C.base_ring().as_iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
-                vec![ Zn::new(*P_bootstrap.last().unwrap().base_ring().modulus() as u64) ], 
-                C.base_ring().len(), 
-                allocator.clone()
-            )
-        }
-    }
-
     pub fn required_galois_keys(&self, P: &PlaintextRing<Params>) -> Vec<CyclotomicGaloisGroupEl> {
         let mut result = Vec::new();
         result.extend(self.slots_to_coeffs_thin.iter().flat_map(|T| T.required_galois_keys().into_iter()));
@@ -420,7 +408,6 @@ impl<Params: BFVParams> ThinBootstrapData<Params> {
 
         let P_main = self.plaintext_ring_hierarchy.last().unwrap();
         debug_assert_eq!(ZZ.pow(self.p(), self.e()), *P_main.base_ring().modulus());
-        let mod_switch = self.create_modulus_switch(&self.plaintext_ring_hierarchy, C);
 
         let values_in_coefficients = log_time::<_, _, LOG, _>("1. Computing Slots-to-Coeffs transform", |[key_switches]| {
             return Params::hom_compute_linear_transform::<_, false>(P_base, C, ct, &self.slots_to_coeffs_thin, gk, key_switches);
@@ -430,7 +417,7 @@ impl<Params: BFVParams> ThinBootstrapData<Params> {
         }
 
         let noisy_decryption = log_time::<_, _, LOG, _>("2. Computing noisy decryption c0 + c1 * s", |[key_switches]| {
-            let (c0, c1) = Params::mod_switch_to_plaintext(P_main, C, values_in_coefficients, &mod_switch);
+            let (c0, c1) = Params::mod_switch_to_plaintext(P_main, C, values_in_coefficients);
             let enc_sk = Params::enc_sk(P_main, C);
             *key_switches += 1;
             return Params::hom_add_plain(P_main, C, &c0, Params::hom_mul_plain(P_main, C, &c1, enc_sk));

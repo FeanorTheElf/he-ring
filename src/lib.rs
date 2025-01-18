@@ -186,6 +186,8 @@ pub mod digitextract;
 /// 
 pub mod bfv;
 
+pub mod bgv;
+
 ///
 /// The new implementation of arithmetic-galois circuits (i.e. circuits built
 /// from linear combination, multiplication and galois gates) that will soon

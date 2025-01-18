@@ -55,6 +55,7 @@ use crate::rings::pow2_cyclotomic::*;
 use crate::profiling::*;
 use crate::rings::single_rns_ring::SingleRNSRingBase;
 use crate::rnsconv;
+use crate::rnsconv::bfv_rescale::AlmostExactRescaling;
 use crate::sample_primes;
 
 use rand::thread_rng;
@@ -93,10 +94,6 @@ const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
 pub struct MulConversionData {
     pub lift_to_C_mul: rnsconv::shared_lift::AlmostExactSharedBaseConversion<Global>,
     pub scale_down_to_C: rnsconv::bfv_rescale::AlmostExactRescalingConvert<Global>
-}
-
-pub struct ModSwitchData {
-    pub scale: rnsconv::bfv_rescale::AlmostExactRescaling<Global>
 }
 
 ///
@@ -228,6 +225,10 @@ pub trait BFVParams {
     ///
     /// Decrypts a given ciphertext.
     /// 
+    /// This function does perform any semantic checks. In particular, it is up to the
+    /// caller to ensure that the ciphertext is defined over the given ring, and is a valid
+    /// BFV encryption w.r.t. the given plaintext modulus.
+    /// 
     fn dec(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: Ciphertext<Self>, sk: &SecretKey<Self>) -> El<PlaintextRing<Self>> {
         let (c0, c1) = ct;
         let noisy_m = C.add(c0, C.mul_ref_snd(c1, sk));
@@ -264,6 +265,10 @@ pub trait BFVParams {
     ///
     /// Computes an encryption of the sum of two encrypted messages.
     /// 
+    /// This function does perform any semantic checks. In particular, it is up to the
+    /// caller to ensure that the ciphertexts are defined over the given ring, and are
+    /// BFV encryptions w.r.t. compatible plaintext moduli.
+    /// 
     fn hom_add(C: &CiphertextRing<Self>, lhs: Ciphertext<Self>, rhs: &Ciphertext<Self>) -> Ciphertext<Self> {
         record_time!(GLOBAL_TIME_RECORDER, "BFVParams::hom_add", || {
             let (lhs0, lhs1) = lhs;
@@ -274,6 +279,10 @@ pub trait BFVParams {
     
     ///
     /// Computes an encryption of the difference of two encrypted messages.
+    /// 
+    /// This function does perform any semantic checks. In particular, it is up to the
+    /// caller to ensure that the ciphertexts are defined over the given ring, and are
+    /// BFV encryptions w.r.t. compatible plaintext moduli.
     /// 
     fn hom_sub(C: &CiphertextRing<Self>, lhs: Ciphertext<Self>, rhs: &Ciphertext<Self>) -> Ciphertext<Self> {
         record_time!(GLOBAL_TIME_RECORDER, "BFVParams::hom_sub", || {
@@ -293,6 +302,10 @@ pub trait BFVParams {
     ///
     /// Computes an encryption of the sum of an encrypted message and a plaintext.
     /// 
+    /// This function does perform any semantic checks. In particular, it is up to the
+    /// caller to ensure that the ciphertext is defined over the given ring, and is
+    /// BFV encryption w.r.t. the given plaintext modulus.
+    /// 
     fn hom_add_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
         record_time!(GLOBAL_TIME_RECORDER, "BFVParams::hom_add_plain", || {
             let mut m = C.get_ring().exact_convert_from_decompring(P, m);
@@ -308,6 +321,10 @@ pub trait BFVParams {
     ///
     /// Computes an encryption of the product of an encrypted message and a plaintext.
     /// 
+    /// This function does perform any semantic checks. In particular, it is up to the
+    /// caller to ensure that the ciphertext is defined over the given ring, and is
+    /// BFV encryption w.r.t. the given plaintext modulus.
+    /// 
     fn hom_mul_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
         record_time!(GLOBAL_TIME_RECORDER, "BFVParams::hom_mul_plain", || {
             let m = C.get_ring().exact_convert_from_decompring(P, m);
@@ -318,6 +335,10 @@ pub trait BFVParams {
     
     ///
     /// Computes an encryption of the product of an encrypted message and an integer plaintext.
+    /// 
+    /// This function does perform any semantic checks. In particular, it is up to the
+    /// caller to ensure that the ciphertext is defined over the given ring, and is
+    /// BFV encryption w.r.t. the given plaintext modulus.
     /// 
     fn hom_mul_plain_i64(_P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: i64, ct: Ciphertext<Self>) -> Ciphertext<Self> {
         (C.int_hom().mul_map(ct.0, m as i32), C.int_hom().mul_map(ct.1, m as i32))
@@ -362,6 +383,10 @@ pub trait BFVParams {
     
     ///
     /// Computes an encryption of the product of two encrypted messages.
+    /// 
+    /// This function does perform any semantic checks. In particular, it is up to the
+    /// caller to ensure that the ciphertexts are defined over the given ring, and are
+    /// BFV encryptions w.r.t. the given plaintext modulus.
     /// 
     fn hom_mul<'a>(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, C_mul: &CiphertextRing<Self>, lhs: Ciphertext<Self>, rhs: Ciphertext<Self>, rk: &RelinKey<'a, Self>) -> Ciphertext<Self>
         where Self: 'a
@@ -446,11 +471,17 @@ pub trait BFVParams {
     /// Modulus-switches from `R/qR` to `R/tR`, where the latter one is given as a plaintext ring.
     /// In particular, this is necessary during bootstrapping.
     /// 
-    fn mod_switch_to_plaintext(target: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: Ciphertext<Self>, switch_data: &ModSwitchData) -> (El<PlaintextRing<Self>>, El<PlaintextRing<Self>>) {
+    fn mod_switch_to_plaintext(target: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: Ciphertext<Self>) -> (El<PlaintextRing<Self>>, El<PlaintextRing<Self>>) {
+        let mod_switch = rnsconv::bfv_rescale::AlmostExactRescaling::new_with(
+            C.base_ring().as_iter().map(|Zp| *Zp).collect(),
+            vec![*target.base_ring()],
+            C.base_ring().len(),
+            Global
+        );
         let (c0, c1) = ct;
         return (
-            C.get_ring().perform_rns_op_to_decompring(target, &c0, &switch_data.scale),
-            C.get_ring().perform_rns_op_to_decompring(target, &c1, &switch_data.scale)
+            C.get_ring().perform_rns_op_to_decompring(target, &c0, &mod_switch),
+            C.get_ring().perform_rns_op_to_decompring(target, &c1, &mod_switch)
         );
     }
     
