@@ -23,16 +23,12 @@ use feanor_math::specialization::FiniteRingSpecializable;
 use serde_json::Number;
 use zn_64::ZnBase;
 
-use crate::cyclotomic::CyclotomicGaloisGroupEl;
-use crate::cyclotomic::CyclotomicRing;
+use crate::cyclotomic::{CyclotomicGaloisGroupEl, CyclotomicRing};
 use crate::profiling::TimeRecorder;
-use crate::rings::number_ring::*;
+use crate::number_ring::*;
 use crate::rnsconv::*;
 use crate::IsEq;
-
-use super::decomposition_ring::*;
-use super::single_rns_ring::SingleRNSRing;
-use super::single_rns_ring::SingleRNSRingBase;
+use super::single_rns_ring::*;
 
 ///
 /// The ring `R/qR` specified by a collection of [`HENumberRingMod`] for all prime factors `p | q`. 
@@ -309,97 +305,6 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
             ring: self,
             el_wrt_coeff_basis: result
         };
-    }
-
-    pub fn perform_rns_op_from<A2, Op>(
-        &self, 
-        from: &DoubleRNSRingBase<NumberRing, A2>, 
-        el: &SmallBasisEl<NumberRing, A2>, 
-        op: &Op
-    ) -> SmallBasisEl<NumberRing, A> 
-        where NumberRing: HENumberRing,
-            A2: Allocator + Clone,
-            Op: RNSOperation<RingType = zn_64::ZnBase>
-    {
-        record_time!(GLOBAL_TIME_RECORDER, "DoubleRNSRing::perform_rns_op_from", || {
-            assert!(self.number_ring == from.number_ring);
-            assert_eq!(self.rns_base().len(), op.output_rings().len());
-            assert_eq!(from.rns_base().len(), op.input_rings().len());
-
-            for i in 0..from.rns_base().len() {
-                assert!(from.rns_base().at(i).get_ring() == op.input_rings().at(i).get_ring());
-            }
-            for i in 0..self.rns_base().len() {
-                assert!(self.rns_base().at(i).get_ring() == op.output_rings().at(i).get_ring());
-            }
-            let mut result = self.zero_non_fft();
-            op.apply(from.as_matrix_wrt_small_basis(el), self.as_matrix_wrt_small_basis_mut(&mut result));
-            return result;
-        })
-    }
-
-    pub fn exact_convert_from_decompring<ZnTy, A2>(
-        &self, 
-        from: &DecompositionRing<NumberRing, ZnTy, A2>, 
-        element: &<DecompositionRingBase<NumberRing, ZnTy, A2> as RingBase>::Element
-    ) -> SmallBasisEl<NumberRing, A> 
-        where NumberRing: HENumberRing,
-            ZnTy: RingStore,
-            ZnTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
-            A2: Allocator + Clone
-    {
-        assert!(&self.number_ring == from.get_ring().number_ring());
-
-        let mut result = self.zero_non_fft().el_wrt_small_basis;
-        let el_wrt_coeff_basis = from.wrt_canonical_basis(element);
-        for j in 0..self.rank() {
-            let x = int_cast(from.base_ring().smallest_lift(el_wrt_coeff_basis.at(j)), &StaticRing::<i32>::RING, from.base_ring().integer_ring());
-            for i in 0..self.rns_base().len() {
-                result[j + i * self.rank()] = self.rns_base().at(i).int_hom().map(x);
-            }
-        }
-        for i in 0..self.rns_base().len() {
-            self.ring_decompositions[i].coeff_basis_to_small_basis(&mut result[(i * self.rank())..((i + 1) * self.rank())]);
-        }
-        return SmallBasisEl {
-            el_wrt_small_basis: result,
-            allocator: PhantomData,
-            number_ring: PhantomData
-        };
-    }
-
-    pub fn perform_rns_op_to_decompring<ZnTy, A2, Op>(
-        &self, 
-        to: &DecompositionRing<NumberRing, ZnTy, A2>, 
-        element: &SmallBasisEl<NumberRing, A>, 
-        op: &Op
-    ) -> <DecompositionRingBase<NumberRing, ZnTy, A2> as RingBase>::Element 
-        where NumberRing: HENumberRing,
-            A2: Allocator + Clone,
-            ZnTy: RingStore<Type = zn_64::ZnBase>,
-            Op: RNSOperation<RingType = zn_64::ZnBase>
-    {
-        record_time!(GLOBAL_TIME_RECORDER, "DoubleRNSRing::perform_rns_op_to_decompring", || {
-            assert!(&self.number_ring == to.get_ring().number_ring());
-            assert_eq!(self.rns_base().len(), op.input_rings().len());
-            assert_eq!(1, op.output_rings().len());
-            
-            for i in 0..self.rns_base().len() {
-                assert!(self.rns_base().at(i).get_ring() == op.input_rings().at(i).get_ring());
-            }
-            assert!(to.base_ring().get_ring() == op.output_rings().at(0).get_ring());
-
-            let mut el_wrt_coeff_basis = self.clone_el_non_fft(element).el_wrt_small_basis;
-            for i in 0..self.rns_base().len() {
-                self.ring_decompositions[i].small_basis_to_coeff_basis(&mut el_wrt_coeff_basis[(i * self.rank())..((i + 1) * self.rank())]);
-            }
-            let el_matrix = Submatrix::from_1d(&el_wrt_coeff_basis[..], self.rns_base().len(), self.rank());
-
-            let mut result = to.zero();
-            let result_matrix = SubmatrixMut::from_1d(to.get_ring().wrt_canonical_basis_mut(&mut result), 1, to.rank());
-            op.apply(el_matrix, result_matrix);
-            return result;
-        })
     }
 
     pub fn map_in_from_singlerns<A2, C>(&self, from: &SingleRNSRingBase<NumberRing, A2, C>, mut el: El<SingleRNSRing<NumberRing, A2, C>>, hom: &<Self as CanHomFrom<SingleRNSRingBase<NumberRing, A2, C>>>::Homomorphism) -> SmallBasisEl<NumberRing, A>
@@ -922,11 +827,18 @@ impl<NumberRing, A1, A2> CanIsoFromTo<DoubleRNSRingBase<NumberRing, A2>> for Dou
 
 #[cfg(any(test, feature = "generic_tests"))]
 pub fn test_with_number_ring<NumberRing: Clone + HECyclotomicNumberRing>(number_ring: NumberRing) {
+    use feanor_math::algorithms::eea::signed_lcm;
+
     use crate::profiling::{clear_all_timings, print_all_timings};
     use crate::ntt::ntt_convolution::NTTConv;
 
-    let p1 = number_ring.largest_suitable_prime(20000).unwrap();
-    let p2 = number_ring.largest_suitable_prime(p1 - 1).unwrap();
+    let required_root_of_unity = signed_lcm(
+        number_ring.mod_p_required_root_of_unity() as i64, 
+        1 << StaticRing::<i64>::RING.abs_log2_ceil(&(number_ring.n() as i64)).unwrap() + 2, 
+        StaticRing::<i64>::RING
+    );
+    let p1 = largest_prime_leq_congruent_to_one(20000, required_root_of_unity).unwrap();
+    let p2 = largest_prime_leq_congruent_to_one(p1 - 1, required_root_of_unity).unwrap();
     assert!(p1 != p2);
     let rank = number_ring.rank();
     let base_ring = zn_rns::Zn::new(vec![zn_64::Zn::new(p1 as u64), zn_64::Zn::new(p2 as u64)], BigIntRing::RING);

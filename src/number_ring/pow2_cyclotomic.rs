@@ -24,16 +24,13 @@ use std::alloc::Allocator;
 use std::alloc::Global;
 use std::marker::PhantomData;
 
-use super::decomposition_ring;
-use super::double_rns_ring;
-use super::double_rns_ring::*;
-use super::decomposition_ring::*;
-use super::single_rns_ring;
 use crate::cyclotomic::CyclotomicGaloisGroupEl;
 use crate::ntt::HERingNegacyclicNTT;
-use crate::rings::number_ring::*;
 use crate::sample_primes;
 use crate::cyclotomic::CyclotomicRing;
+
+use super::quotient;
+use super::{HECyclotomicNumberRing, HECyclotomicNumberRingMod, HENumberRing, HENumberRingMod};
 
 pub struct Pow2CyclotomicNumberRing<N = RustNegacyclicNTT<Zn>> {
     log2_n: usize,
@@ -99,18 +96,8 @@ impl<N> HENumberRing for Pow2CyclotomicNumberRing<N>
         };
     }
 
-    fn largest_suitable_prime(&self, leq_than: i64) -> Option<i64> {
-        let modulus = 1 << (self.log2_n + 1);
-        let mut current = (leq_than - 1) - ((leq_than - 1) % modulus) + 1;
-        while current > 0 && !is_prime(StaticRing::<i64>::RING, &current, 10) {
-            current -= modulus;
-        }
-        if current <= 0 {
-            return None;
-        } else {
-            assert!(current <= leq_than);
-            return Some(current);
-        }
+    fn mod_p_required_root_of_unity(&self) -> usize {
+        return 1 << self.log2_n;
     }
     
     fn generating_poly<P>(&self, poly_ring: P) -> El<P>
@@ -131,7 +118,7 @@ impl<N> HECyclotomicNumberRing for Pow2CyclotomicNumberRing<N>
 {
     type DecomposedAsCyclotomic = Pow2CyclotomicDecomposedNumberRing<N, Global>;
 
-    fn n(&self) -> u64 {
+    fn n(&self) -> usize {
         1 << self.log2_n
     }
 }
@@ -246,8 +233,8 @@ impl<N, A> HECyclotomicNumberRingMod for Pow2CyclotomicDecomposedNumberRing<N, A
     where N: Send + Sync + HERingNegacyclicNTT<zn_64::Zn>,
         A: Send + Sync + Allocator
 {
-    fn n(&self) -> u64 {
-        2 * self.ntt.len() as u64
+    fn n(&self) -> usize {
+        2 * self.ntt.len()
     }
 
     fn permute_galois_action<V1, V2>(&self, src: V1, mut dst: V2, galois_element: CyclotomicGaloisGroupEl)
@@ -332,6 +319,9 @@ impl<N, A> HENumberRingMod for Pow2CyclotomicDecomposedNumberRing<N, A>
     }
 }
 
+use crate::ciphertext_ring::double_rns_ring;
+use crate::ciphertext_ring::single_rns_ring;
+
 #[test]
 fn test_pow2_cyclotomic_double_rns_ring() {
     double_rns_ring::test_with_number_ring(Pow2CyclotomicNumberRing::new(8));
@@ -346,14 +336,14 @@ fn test_pow2_cyclotomic_single_rns_ring() {
 
 #[test]
 fn test_pow2_cyclotomic_decomposition_ring() {
-    decomposition_ring::test_with_number_ring(Pow2CyclotomicNumberRing::new(8));
-    decomposition_ring::test_with_number_ring(Pow2CyclotomicNumberRing::new(16));
+    quotient::test_with_number_ring(Pow2CyclotomicNumberRing::new(8));
+    quotient::test_with_number_ring(Pow2CyclotomicNumberRing::new(16));
 }
 
 #[test]
 fn test_permute_galois_automorphism() {
     let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
-    let R = DoubleRNSRingBase::new_with(Pow2CyclotomicNumberRing::new(16), rns_base, Global);
+    let R = double_rns_ring::DoubleRNSRingBase::new_with(Pow2CyclotomicNumberRing::new(16), rns_base, Global);
     assert_el_eq!(R, R.pow(R.canonical_gen(), 3), R.get_ring().apply_galois_action(&R.canonical_gen(), R.get_ring().galois_group().from_representative(3)));
     assert_el_eq!(R, R.pow(R.canonical_gen(), 6), R.get_ring().apply_galois_action(&R.pow(R.canonical_gen(), 2), R.get_ring().galois_group().from_representative(3)));
 }

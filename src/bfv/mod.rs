@@ -44,16 +44,16 @@ use crate::lintransform::composite::powcoeffs_to_slots_fat;
 use crate::lintransform::matmul::CompiledLinearTransform;
 use crate::lintransform::HELinearTransform;
 use crate::ntt::HERingNegacyclicNTT;
-use crate::rings::bxv::BXVCiphertextRing;
+use crate::ciphertext_ring::bxv::BXVCiphertextRing;
 use crate::ntt::HERingConvolution;
-use crate::rings::double_rns_managed::*;
-use crate::rings::hypercube::*;
-use crate::rings::number_ring::*;
-use crate::rings::decomposition_ring::*;
-use crate::rings::odd_cyclotomic::*;
-use crate::rings::pow2_cyclotomic::*;
+use crate::ciphertext_ring::double_rns_managed::*;
+use crate::ciphertext_ring::hypercube::*;
+use crate::ciphertext_ring::number_ring::*;
+use crate::ciphertext_ring::decomposition_ring::*;
+use crate::ciphertext_ring::odd_cyclotomic::*;
+use crate::ciphertext_ring::pow2_cyclotomic::*;
 use crate::profiling::*;
-use crate::rings::single_rns_ring::SingleRNSRingBase;
+use crate::ciphertext_ring::single_rns_ring::SingleRNSRingBase;
 use crate::rnsconv;
 use crate::rnsconv::bfv_rescale::AlmostExactRescaling;
 use crate::sample_primes;
@@ -80,7 +80,7 @@ pub type DefaultCiphertextAllocator = LoggingAllocator;
 pub type DefaultCiphertextAllocator = Global;
 
 pub type NumberRing<Params: BFVParams> = <Params::CiphertextRing as BXVCiphertextRing>::NumberRing;
-pub type PlaintextRing<Params: BFVParams> = DecompositionRing<NumberRing<Params>, Zn, Global>;
+pub type PlaintextRing<Params: BFVParams> = NumberRingQuotient<NumberRing<Params>, Zn, Global>;
 pub type SecretKey<Params: BFVParams> = El<CiphertextRing<Params>>;
 pub type KeySwitchKey<'a, Params: BFVParams> = (usize, (GadgetProductOperand<'a, Params>, GadgetProductOperand<'a, Params>));
 pub type RelinKey<'a, Params: BFVParams> = KeySwitchKey<'a, Params>;
@@ -157,7 +157,7 @@ pub trait BFVParams {
     /// Creates the plaintext ring `R/tR` for the given plaintext modulus `t`.
     /// 
     fn create_plaintext_ring(&self, modulus: i64) -> PlaintextRing<Self> {
-        DecompositionRingBase::new(self.number_ring(), Zn::new(modulus as u64))
+        NumberRingQuotientBase::new(self.number_ring(), Zn::new(modulus as u64))
     }
 
     ///

@@ -25,12 +25,9 @@ use zn_static::Fp;
 use crate::feanor_math::rings::extension::*;
 use feanor_math::seq::*;
 
-use crate::rings::double_rns_ring::*;
-use crate::rings::number_ring::*;
-use super::single_rns_ring;
-use super::{decomposition_ring::{self, *}, double_rns_ring};
 use crate::{euler_phi, euler_phi_squarefree, sample_primes};
 use crate::cyclotomic::{CyclotomicGaloisGroupEl, CyclotomicRing, CyclotomicRingStore};
+use super::{quotient, HECyclotomicNumberRing, HECyclotomicNumberRingMod, HENumberRing, HENumberRingMod};
 
 pub struct OddCyclotomicNumberRing {
     n_factorization_squarefree: Vec<i64>,
@@ -168,19 +165,10 @@ impl HENumberRing for OddCyclotomicNumberRing {
         }
     }
 
-    fn largest_suitable_prime(&self, leq_than: i64) -> Option<i64> {
-        let n = <_ as HECyclotomicNumberRing>::n(self) as i64;
-        let log2_m = StaticRing::<i64>::RING.abs_log2_ceil(&n).unwrap() + 2;
-        let modulus = n << log2_m;
-        let mut current = (leq_than - 1) - ((leq_than - 1) % modulus) + 1;
-        while current > 0 && !is_prime(StaticRing::<i64>::RING, &current, 10) {
-            current -= modulus;
-        }
-        if current <= 0 {
-            return None;
-        } else {
-            return Some(current);
-        }
+    fn mod_p_required_root_of_unity(&self) -> usize {
+        let n = <_ as HECyclotomicNumberRing>::n(self);
+        let log2_m = StaticRing::<i64>::RING.abs_log2_ceil(&(n as i64)).unwrap() + 2;
+        return n << log2_m;
     }
 
     fn generating_poly<P>(&self, poly_ring: P) -> El<P>
@@ -200,8 +188,8 @@ impl HECyclotomicNumberRing for OddCyclotomicNumberRing {
 
     type DecomposedAsCyclotomic = OddCyclotomicDecomposedNumberRing<BluesteinFFT<zn_64::ZnBase, zn_64::ZnBase, Identity<zn_64::Zn>>>;
 
-    fn n(&self) -> u64 {
-        self.n_factorization_squarefree.iter().copied().product::<i64>() as u64
+    fn n(&self) -> usize {
+        self.n_factorization_squarefree.iter().copied().product::<i64>() as usize
     }
 }
 
@@ -237,7 +225,7 @@ impl HECyclotomicNumberRing for CompositeCyclotomicNumberRing {
 
     type DecomposedAsCyclotomic = CompositeCyclotomicDecomposedNumberRing<BluesteinFFT<zn_64::ZnBase, zn_64::ZnBase, Identity<zn_64::Zn>>>;
 
-    fn n(&self) -> u64 {
+    fn n(&self) -> usize {
         <_ as HECyclotomicNumberRing>::n(&self.tensor_factor1) * <_ as HECyclotomicNumberRing>::n(&self.tensor_factor2)
     }
 }
@@ -326,23 +314,14 @@ impl HENumberRing for CompositeCyclotomicNumberRing {
         }
     }
 
-    fn largest_suitable_prime(&self, leq_than: i64) -> Option<i64> {
-        let n = <_ as HECyclotomicNumberRing>::n(self) as i64;
+    fn mod_p_required_root_of_unity(&self) -> usize {
+        let n = <_ as HECyclotomicNumberRing>::n(self);
         let log2_m = max(
             StaticRing::<i64>::RING.abs_log2_ceil(&(<_ as HECyclotomicNumberRing>::n(&self.tensor_factor1) as i64)).unwrap() + 2,
             StaticRing::<i64>::RING.abs_log2_ceil(&(<_ as HECyclotomicNumberRing>::n(&self.tensor_factor2) as i64)).unwrap() + 2
         );
-        let log2_m = StaticRing::<i64>::RING.abs_log2_ceil(&n).unwrap() + 2;
-        let modulus = n << log2_m;
-        let mut current = (leq_than - 1) - ((leq_than - 1) % modulus) + 1;
-        while current > 0 && !is_prime(StaticRing::<i64>::RING, &current, 10) {
-            current -= modulus;
-        }
-        if current <= 0 {
-            return None;
-        } else {
-            return Some(current);
-        }
+        let log2_m = StaticRing::<i64>::RING.abs_log2_ceil(&(n as i64)).unwrap() + 2;
+        return n << log2_m;
     }
 
     fn inf_to_can_norm_expansion_factor(&self) -> f64 {
@@ -502,8 +481,8 @@ impl<F, A> HECyclotomicNumberRingMod for OddCyclotomicDecomposedNumberRing<F, A>
     where F: Send + Sync + FFTAlgorithm<zn_64::ZnBase> + PartialEq,
         A: Send + Sync + Allocator + Clone
 {
-    fn n(&self) -> u64 {
-        self.fft_table.len() as u64
+    fn n(&self) -> usize {
+        self.fft_table.len()
     }
 
     fn permute_galois_action<V1, V2>(&self, src: V1, mut dst: V2, galois_element: CyclotomicGaloisGroupEl)
@@ -629,7 +608,7 @@ impl<F, A> HECyclotomicNumberRingMod for CompositeCyclotomicDecomposedNumberRing
     where F: Send + Sync + FFTAlgorithm<zn_64::ZnBase> + PartialEq,
         A: Send + Sync + Allocator + Clone
 {
-    fn n(&self) -> u64 {
+    fn n(&self) -> usize {
         self.tensor_factor1.n() * self.tensor_factor2.n()
     }
 
@@ -664,6 +643,8 @@ impl<F, A> HECyclotomicNumberRingMod for CompositeCyclotomicDecomposedNumberRing
 
 #[cfg(test)]
 use feanor_math::assert_el_eq;
+use crate::ciphertext_ring::double_rns_ring;
+use crate::ciphertext_ring::single_rns_ring;
 
 #[test]
 fn test_odd_cyclotomic_double_rns_ring() {
@@ -683,11 +664,11 @@ fn test_odd_cyclotomic_single_rns_ring() {
 
 #[test]
 fn test_odd_cyclotomic_decomposition_ring() {
-    decomposition_ring::test_with_number_ring(OddCyclotomicNumberRing::new(5));
-    decomposition_ring::test_with_number_ring(OddCyclotomicNumberRing::new(7));
+    quotient::test_with_number_ring(OddCyclotomicNumberRing::new(5));
+    quotient::test_with_number_ring(OddCyclotomicNumberRing::new(7));
     let ring = CompositeCyclotomicNumberRing::new(3, 5);
-    decomposition_ring::test_with_number_ring(ring);
-    decomposition_ring::test_with_number_ring(CompositeCyclotomicNumberRing::new(3, 7));
+    quotient::test_with_number_ring(ring);
+    quotient::test_with_number_ring(CompositeCyclotomicNumberRing::new(3, 7));
 }
 
 #[test]
@@ -746,18 +727,10 @@ fn test_small_coeff_basis_conversion() {
     assert_arr_eq(original, actual);
 }
 
-// #[test]
-// fn test_odd_cyclotomic_single_rns_ring() {
-//     single_rns_ring::test_with_number_ring(OddCyclotomicDecomposableNumberRing::new(5));
-//     single_rns_ring::test_with_number_ring(OddCyclotomicDecomposableNumberRing::new(7));
-//     single_rns_ring::test_with_number_ring(CompositeCyclotomicDecomposableNumberRing::new(3, 5));
-//     single_rns_ring::test_with_number_ring(CompositeCyclotomicDecomposableNumberRing::new(3, 7));
-// }
-
 #[test]
 fn test_permute_galois_automorphism() {
     let Fp = zn_64::Zn::new(257);
-    let R = DecompositionRingBase::new(OddCyclotomicNumberRing::new(7), Fp);
+    let R = quotient::NumberRingQuotientBase::new(OddCyclotomicNumberRing::new(7), Fp);
     let gal_el = |x: i64| R.galois_group().from_representative(x);
 
     assert_el_eq!(R, ring_literal!(&R, [0, 0, 1, 0, 0, 0]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 1, 0, 0, 0, 0]), gal_el(2)));
@@ -765,7 +738,7 @@ fn test_permute_galois_automorphism() {
     assert_el_eq!(R, ring_literal!(&R, [0, 0, 0, 0, 1, 0]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 0, 1, 0, 0, 0]), gal_el(2)));
     assert_el_eq!(R, ring_literal!(&R, [-1, -1, -1, -1, -1, -1]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 0, 1, 0, 0, 0]), gal_el(3)));
 
-    let R = DecompositionRingBase::new(CompositeCyclotomicNumberRing::new(5, 3), Fp);
+    let R = quotient::NumberRingQuotientBase::new(CompositeCyclotomicNumberRing::new(5, 3), Fp);
     let gal_el = |x: i64| R.galois_group().from_representative(x);
 
     assert_el_eq!(R, ring_literal!(&R, [0, 0, 1, 0, 0, 0, 0, 0]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 1, 0, 0, 0, 0, 0, 0]), gal_el(2)));

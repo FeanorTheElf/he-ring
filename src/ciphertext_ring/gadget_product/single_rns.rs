@@ -17,9 +17,9 @@ use std::alloc::Global;
 use std::marker::PhantomData;
 use std::ops::Range;
 
-use crate::rings::gadget_product::double_rns::prime_factor_groups;
-use crate::rings::number_ring::HECyclotomicNumberRing;
-use crate::rings::single_rns_ring::*;
+use crate::ciphertext_ring::gadget_product::double_rns::prime_factor_groups;
+use crate::ciphertext_ring::number_ring::HECyclotomicNumberRing;
+use crate::ciphertext_ring::single_rns_ring::*;
 use crate::cyclotomic::CyclotomicRing;
 use crate::rnsconv::*;
 use crate::IsEq;
@@ -84,11 +84,11 @@ impl<'a, NumberRing, A, C>  GadgetProductLhsOperand<'a, NumberRing, A, C>
         };
     }
 
-    pub(in crate::rings) fn element(&self) -> &SingleRNSRingEl<NumberRing, A, C> {
+    pub(in crate::ciphertext_ring) fn element(&self) -> &SingleRNSRingEl<NumberRing, A, C> {
         &self.element
     }
 
-    pub(in crate::rings) fn digits(&self) -> usize {
+    pub(in crate::ciphertext_ring) fn digits(&self) -> usize {
         self.data.len()
     }
 }

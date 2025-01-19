@@ -5,8 +5,8 @@ use feanor_math::primitive_int::StaticRing;
 use feanor_math::{assert_el_eq, ring::*};
 
 use crate::cyclotomic::*;
-use crate::rings::decomposition_ring::DecompositionRingBase;
-use crate::rings::pow2_cyclotomic::Pow2CyclotomicNumberRing;
+use crate::ciphertext_ring::decomposition_ring::NumberRingQuotientBase;
+use crate::ciphertext_ring::pow2_cyclotomic::Pow2CyclotomicNumberRing;
 
 pub enum Coefficient<R: ?Sized + RingBase> {
     Zero, One, Integer(i32), Other(R::Element)
@@ -654,7 +654,7 @@ fn test_circuit_tensor_compose() {
 
 #[test]
 fn test_circuit_tensor_compose_with_galois() {
-    let ring = DecompositionRingBase::new(Pow2CyclotomicNumberRing::new(16), Zn::new(17));
+    let ring = NumberRingQuotientBase::new(Pow2CyclotomicNumberRing::new(16), Zn::new(17));
 
     let x = PlaintextCircuit::identity(1, &ring);
     let y = PlaintextCircuit::identity(1, &ring);

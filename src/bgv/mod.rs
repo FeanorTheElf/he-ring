@@ -14,8 +14,8 @@ use feanor_math::divisibility::DivisibilityRingStore;
 use feanor_math::seq::*;
 
 use crate::cyclotomic::CyclotomicRing;
-use crate::rings::bxv::BXVCiphertextRing;
-use crate::rings::decomposition_ring::{DecompositionRing, DecompositionRingBase};
+use crate::ciphertext_ring::bxv::BXVCiphertextRing;
+use crate::ciphertext_ring::decomposition_ring::{NumberRingQuotient, NumberRingQuotientBase};
 use crate::rnsconv;
 use crate::rnsconv::bgv_rescale::CongruencePreservingRescaling;
 
@@ -24,7 +24,7 @@ use rand::{Rng, CryptoRng};
 
 pub type NumberRing<Params: BGVParams> = <Params::CiphertextRing as BXVCiphertextRing>::NumberRing;
 pub type CiphertextRing<Params: BGVParams> = RingValue<Params::CiphertextRing>;
-pub type PlaintextRing<Params: BGVParams> = DecompositionRing<NumberRing<Params>, Zn>;
+pub type PlaintextRing<Params: BGVParams> = NumberRingQuotient<NumberRing<Params>, Zn>;
 pub type SecretKey<Params: BGVParams> = El<CiphertextRing<Params>>;
 pub type GadgetProductOperand<'a, Params: BGVParams> = <Params::CiphertextRing as BXVCiphertextRing>::GadgetProductRhsOperand<'a>;
 pub type KeySwitchKey<'a, Params: BGVParams> = (usize, (GadgetProductOperand<'a, Params>, GadgetProductOperand<'a, Params>));
@@ -57,7 +57,7 @@ pub trait BGVParams {
     fn number_ring(&self) -> NumberRing<Self>;
 
     fn create_plaintext_ring(&self, modulus: i64) -> PlaintextRing<Self> {
-        DecompositionRingBase::new(self.number_ring(), Zn::new(modulus as u64))
+        NumberRingQuotientBase::new(self.number_ring(), Zn::new(modulus as u64))
     }
 
     fn gen_sk<R: Rng + CryptoRng>(C: &CiphertextRing<Self>, mut rng: R) -> SecretKey<Self> {

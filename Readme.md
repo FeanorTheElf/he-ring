@@ -18,7 +18,7 @@ Three of them are implemented in this library, while one is already present in `
 | Representation of `q` | Multiplication implemented via   |                                      |
 |-----------------------|----------------------------------|--------------------------------------|
 | Single integer        | Convolution & explicit reduction | `FreeAlgebraImpl` from `feanor_math` |
-| Single integer        | Ring factorization               | `DecompositionRing`                  |
+| Single integer        | Ring factorization               | `NumberRingQuotient`                  |
 | RNS basis             | Convolution & explicit reduction | `SingleRNSRing`                      |
 | RNS basis             | Ring factorization               | `DoubleRNSRing`                      |
 
@@ -33,7 +33,7 @@ Three of them are implemented in this library, while one is already present in `
      - non-arithmetic operations usually require mapping elements back into coefficient form
      - Galois operations can usually be computed in linear time in decomposed form
 
-Note that in most HE-related situations, you will want the "Ring factorization"-based methods, i.e. use `DoubleRNSRing` for the ciphertext ring and `DecompositionRing` for the plaintext ring.
+Note that in most HE-related situations, you will want the "Ring factorization"-based methods, i.e. use `DoubleRNSRing` for the ciphertext ring and `NumberRingQuotient` for the plaintext ring.
 
 This code is contained in the modules [`crate::ntt`] and [`crate::rings`].
 In detail, the following is available:

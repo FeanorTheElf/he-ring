@@ -18,12 +18,12 @@ use std::marker::PhantomData;
 use std::ops::Range;
 
 use crate::cyclotomic::CyclotomicGaloisGroupEl;
-use crate::rings::double_rns_ring::*;
+use crate::ciphertext_ring::double_rns_ring::*;
 use crate::cyclotomic::CyclotomicRing;
-use crate::rings::pow2_cyclotomic::Pow2CyclotomicNumberRing;
-use crate::rings::pow2_cyclotomic::Pow2CyclotomicDecomposedNumberRing;
+use crate::ciphertext_ring::pow2_cyclotomic::Pow2CyclotomicNumberRing;
+use crate::ciphertext_ring::pow2_cyclotomic::Pow2CyclotomicDecomposedNumberRing;
 use crate::rnsconv::*;
-use crate::rings::number_ring::*;
+use crate::ciphertext_ring::number_ring::*;
 use crate::IsEq;
 
 // don't use the matrix one here, as in our case, one dimension is very small (e.g. 3), and the matrix

@@ -9,10 +9,10 @@ use feanor_math::assert_el_eq;
 use feanor_math::ring::*;
 
 use crate::cyclotomic::{CyclotomicGaloisGroup, CyclotomicGaloisGroupEl};
-use crate::rings::decomposition_ring::{DecompositionRing, DecompositionRingBase};
-use crate::rings::hypercube::{DefaultHypercube, HypercubeIsomorphism, HypercubeStructure};
-use crate::rings::number_ring::HECyclotomicNumberRing;
-use crate::rings::odd_cyclotomic::CompositeCyclotomicNumberRing;
+use crate::ciphertext_ring::decomposition_ring::{NumberRingQuotient, NumberRingQuotientBase};
+use crate::ciphertext_ring::hypercube::{DefaultHypercube, HypercubeIsomorphism, HypercubeStructure};
+use crate::ciphertext_ring::number_ring::HECyclotomicNumberRing;
+use crate::ciphertext_ring::odd_cyclotomic::CompositeCyclotomicNumberRing;
 
 use super::HELinearTransform;
 
@@ -21,7 +21,7 @@ pub struct Broadcast1d<NumberRing, A>
         A: Allocator + Clone
 {
     shift_elements: Vec<CyclotomicGaloisGroupEl>,
-    clear_slots_factor: El<DecompositionRing<NumberRing, Zn, A>>,
+    clear_slots_factor: El<NumberRingQuotient<NumberRing, Zn, A>>,
     number_ring: NumberRing
 }
 
@@ -59,7 +59,7 @@ impl<NumberRing, A> HELinearTransform<NumberRing, A> for Broadcast1d<NumberRing,
             clone_fn: CloneFn
         ) -> T
             where AddFn: FnMut(T, &T) -> T,
-                ScaleFn: FnMut(T, &El<DecompositionRing<NumberRing, Zn, A>>) -> T,
+                ScaleFn: FnMut(T, &El<NumberRingQuotient<NumberRing, Zn, A>>) -> T,
                 ApplyGaloisFn: FnMut(T, &[CyclotomicGaloisGroupEl]) -> Vec<T>,
                 CloneFn: FnMut(&T) -> T
     {
@@ -96,7 +96,7 @@ impl<NumberRing, A> HELinearTransform<NumberRing, A> for Broadcast1d<NumberRing,
 #[test]
 fn test_broadcast() {
     // F11[X]/Phi_35(X) ~ F_(11^3)^8
-    let ring = DecompositionRingBase::new(CompositeCyclotomicNumberRing::new(5, 7), Zn::new(11));
+    let ring = NumberRingQuotientBase::new(CompositeCyclotomicNumberRing::new(5, 7), Zn::new(11));
     let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(5 * 7), 11);
     let H = HypercubeIsomorphism::new::<false>(&ring, hypercube);
     assert_eq!(7, H.hypercube().factor_of_n(0).unwrap());

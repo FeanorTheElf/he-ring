@@ -1,5 +1,7 @@
+use feanor_math::algorithms::miller_rabin::is_prime;
 use feanor_math::divisibility::DivisibilityRing;
 use feanor_math::integer::IntegerRing;
+use feanor_math::primitive_int::StaticRing;
 use feanor_math::ring::*;
 use feanor_math::rings::extension::FreeAlgebra;
 use feanor_math::rings::float_complex::Complex64;
@@ -10,6 +12,12 @@ use feanor_math::seq::{SwappableVectorViewMut, VectorView, VectorViewMut};
 
 use crate::cyclotomic::{CyclotomicGaloisGroup, CyclotomicGaloisGroupEl, CyclotomicRing};
 use crate::IsEq;
+
+pub mod quotient;
+pub mod pow2_cyclotomic;
+pub mod odd_cyclotomic;
+pub mod interpolate;
+pub mod hypercube;
 
 ///
 /// Trait for objects that represent number rings (more concretely, orders in number
@@ -36,16 +44,7 @@ pub trait HENumberRing: Send + Sync + PartialEq {
 
     fn mod_p(&self, Fp: zn_64::Zn) -> Self::Decomposed;
 
-    ///
-    /// Returns the largest prime `<= leq_than` that is "suitable" for this
-    /// number ring. TODO: refactor to get rid of this fuzzy notion of suitable.
-    /// 
-    /// Originally, "suitable" was supposed to mean that `p` splits completely
-    /// in the number ring, but since then a lot of additional constraints have been
-    /// introduced, so that now it means "works well with the single-RNS and double-RNS
-    /// implementation".
-    /// 
-    fn largest_suitable_prime(&self, leq_than: i64) -> Option<i64>;
+    fn mod_p_required_root_of_unity(&self) -> usize;
 
     ///
     /// Returns an upper bound on the value
@@ -93,10 +92,10 @@ pub trait HECyclotomicNumberRing: HENumberRing {
 
     type DecomposedAsCyclotomic: HECyclotomicNumberRingMod + IsEq<Self::Decomposed>;
 
-    fn n(&self) -> u64;
+    fn n(&self) -> usize;
 
     fn galois_group(&self) -> CyclotomicGaloisGroup {
-        CyclotomicGaloisGroup::new(self.n())
+        CyclotomicGaloisGroup::new(self.n() as u64)
     }
 }
 
@@ -148,10 +147,10 @@ pub trait HENumberRingMod: Send + Sync + PartialEq {
 
 pub trait HECyclotomicNumberRingMod: HENumberRingMod {
 
-    fn n(&self) -> u64;
+    fn n(&self) -> usize;
 
     fn galois_group(&self) -> CyclotomicGaloisGroup {
-        CyclotomicGaloisGroup::new(self.n())
+        CyclotomicGaloisGroup::new(self.n() as u64)
     }
 
     ///
@@ -161,4 +160,16 @@ pub trait HECyclotomicNumberRingMod: HENumberRingMod {
     fn permute_galois_action<V1, V2>(&self, src: V1, dst: V2, galois_element: CyclotomicGaloisGroupEl)
         where V1: VectorView<zn_64::ZnEl>,
             V2: SwappableVectorViewMut<zn_64::ZnEl>;
+}
+
+pub fn largest_prime_leq_congruent_to_one(leq_than: i64, congruent_to_one_mod: i64) -> Option<i64> {
+    assert!(leq_than > congruent_to_one_mod);
+    let mut current = leq_than - (leq_than - 1) % congruent_to_one_mod;
+    while !is_prime(&StaticRing::<i64>::RING, &current, 10) {
+        current -= congruent_to_one_mod;
+        if current <= 0 {
+            return None;
+        }
+    }
+    return Some(current);
 }

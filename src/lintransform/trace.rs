@@ -25,12 +25,12 @@ use feanor_math::rings::zn::*;
 use feanor_math::seq::*;
 use feanor_math::algorithms::linsolve::LinSolveRingStore;
 
-use crate::rings::hypercube::SlotRingOver;
-use crate::rings::number_ring::HECyclotomicNumberRing;
-use crate::rings::odd_cyclotomic::OddCyclotomicNumberRing;
-use crate::rings::pow2_cyclotomic::Pow2CyclotomicNumberRing;
+use crate::ciphertext_ring::hypercube::SlotRingOver;
+use crate::ciphertext_ring::number_ring::HECyclotomicNumberRing;
+use crate::ciphertext_ring::odd_cyclotomic::OddCyclotomicNumberRing;
+use crate::ciphertext_ring::pow2_cyclotomic::Pow2CyclotomicNumberRing;
 
-use crate::rings::decomposition_ring::*;
+use crate::ciphertext_ring::decomposition_ring::*;
 use crate::cyclotomic::*;
 
 use super::HELinearTransform;
@@ -77,7 +77,7 @@ impl<NumberRing> Trace<NumberRing>
             let result = self.evaluate_generic(
                 a, 
                 |x, y| slot_ring.add_ref_snd(x, y), 
-                |_, _: &El<DecompositionRing<_, _>>| unreachable!(),
+                |_, _: &El<NumberRingQuotient<_, _>>| unreachable!(),
                 |x, gs| gs.iter().map(|g| poly_ring.evaluate(
                     &slot_ring.poly_repr(&poly_ring, &x, &slot_ring.base_ring().identity()), 
                     &slot_ring.pow(slot_ring.canonical_gen(), Gal.representative(*g) as usize), 
@@ -132,7 +132,7 @@ impl<NumberRing, A> HELinearTransform<NumberRing, A> for Trace<NumberRing>
         clone_fn: CloneFn
     ) -> T
         where AddFn: FnMut(T, &T) -> T,
-            ScaleFn: FnMut(T, &El<DecompositionRing<NumberRing, Zn, A>>) -> T,
+            ScaleFn: FnMut(T, &El<NumberRingQuotient<NumberRing, Zn, A>>) -> T,
             ApplyGaloisFn: FnMut(T, &[CyclotomicGaloisGroupEl]) -> Vec<T>,
             CloneFn: FnMut(&T) -> T
     {
@@ -205,7 +205,7 @@ fn test_extract_coefficient_map() {
         let actual = trace.evaluate_generic(
             slot_ring.mul_ref(&b, &extract_constant_coeff), 
             |x, y| slot_ring.add_ref_snd(x, y), 
-            |_, _: &El<DecompositionRing<_, _>>| unreachable!(),
+            |_, _: &El<NumberRingQuotient<_, _>>| unreachable!(),
             |x, gs| gs.iter().map(|g| poly_ring.evaluate(
                 &slot_ring.poly_repr(&poly_ring, &x, &slot_ring.base_ring().identity()), 
                 &slot_ring.pow(slot_ring.canonical_gen(), Gal.representative(*g) as usize), 

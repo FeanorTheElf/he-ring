@@ -11,7 +11,7 @@ use feanor_math::rings::zn::{zn_64, zn_rns, ZnRing};
 use crate::cyclotomic::CyclotomicGaloisGroupEl;
 use crate::rnsconv::RNSOperation;
 
-use super::decomposition_ring::{DecompositionRing, DecompositionRingBase};
+use super::decomposition_ring::{NumberRingQuotient, NumberRingQuotientBase};
 use super::number_ring::{HECyclotomicNumberRing, HENumberRing};
 
 ///
@@ -50,8 +50,8 @@ pub trait BXVCiphertextRing: FreeAlgebra<BaseRing = zn_rns::Zn<zn_64::Zn, BigInt
     
     fn exact_convert_from_decompring<ZnTy, A2>(
         &self, 
-        from: &DecompositionRing<Self::NumberRing, ZnTy, A2>, 
-        element: &<DecompositionRingBase<Self::NumberRing, ZnTy, A2> as RingBase>::Element
+        from: &NumberRingQuotient<Self::NumberRing, ZnTy, A2>, 
+        element: &<NumberRingQuotientBase<Self::NumberRing, ZnTy, A2> as RingBase>::Element
     ) -> Self::Element
         where Self::NumberRing: HENumberRing,
             ZnTy: RingStore<Type = zn_64::ZnBase> + Clone,
@@ -59,10 +59,10 @@ pub trait BXVCiphertextRing: FreeAlgebra<BaseRing = zn_rns::Zn<zn_64::Zn, BigInt
     
     fn perform_rns_op_to_decompring<ZnTy, A2, Op>(
         &self, 
-        to: &DecompositionRing<Self::NumberRing, ZnTy, A2>, 
+        to: &NumberRingQuotient<Self::NumberRing, ZnTy, A2>, 
         element: &Self::Element, 
         op: &Op
-    ) -> <DecompositionRingBase<Self::NumberRing, ZnTy, A2> as RingBase>::Element 
+    ) -> <NumberRingQuotientBase<Self::NumberRing, ZnTy, A2> as RingBase>::Element 
         where Self::NumberRing: HENumberRing,
             ZnTy: RingStore<Type = zn_64::ZnBase> + Clone,
             A2: Allocator + Clone,

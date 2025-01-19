@@ -31,10 +31,10 @@ use crate::circuit::PlaintextCircuit;
 use crate::cyclotomic::*;
 use crate::lintransform::PowerTable;
 use crate::lintransform::CREATE_LINEAR_TRANSFORM_TIME_RECORDER;
-use crate::rings::hypercube::*;
-use crate::rings::number_ring::*;
-use crate::rings::decomposition_ring::*;
-use crate::rings::odd_cyclotomic::*;
+use crate::ciphertext_ring::hypercube::*;
+use crate::ciphertext_ring::number_ring::*;
+use crate::ciphertext_ring::decomposition_ring::*;
+use crate::ciphertext_ring::odd_cyclotomic::*;
 use crate::lintransform::trace::*;
 use crate::lintransform::HELinearTransform;
 
@@ -42,7 +42,7 @@ pub struct MatmulTransform<NumberRing, A = Global>
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone
 {
-    pub(super) data: Vec<(CyclotomicGaloisGroupEl, El<DecompositionRing<NumberRing, Zn, A>>)>
+    pub(super) data: Vec<(CyclotomicGaloisGroupEl, El<NumberRingQuotient<NumberRing, Zn, A>>)>
 }
 
 impl<NumberRing, A> MatmulTransform<NumberRing, A>
@@ -218,12 +218,12 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
         })
     }
 
-    pub fn switch_ring(&self, H_from: &DefaultHypercube<NumberRing, A>, to: &DecompositionRingBase<NumberRing, Zn, A>) -> Self {
+    pub fn switch_ring(&self, H_from: &DefaultHypercube<NumberRing, A>, to: &NumberRingQuotientBase<NumberRing, Zn, A>) -> Self {
         self.check_valid(H_from);
         assert_eq!(H_from.ring().n(), to.n());
         let from = H_from.ring();
         let red_map = ZnReductionMap::new(from.base_ring(), to.base_ring()).unwrap();
-        let hom = |x: &El<DecompositionRing<NumberRing, Zn, A>>| to.from_canonical_basis(H_from.ring().wrt_canonical_basis(x).into_iter().map(|x| red_map.map(x)));
+        let hom = |x: &El<NumberRingQuotient<NumberRing, Zn, A>>| to.from_canonical_basis(H_from.ring().wrt_canonical_basis(x).into_iter().map(|x| red_map.map(x)));
         Self {
             data: self.data.iter().map(|(g, coeff)| (g.clone(), hom(coeff))).collect()
         }
@@ -323,7 +323,7 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
         };
     }
 
-    pub fn mult_ring_element(H: &DefaultHypercube<NumberRing, A>, factor: El<DecompositionRing<NumberRing, Zn, A>>) -> MatmulTransform<NumberRing, A> {
+    pub fn mult_ring_element(H: &DefaultHypercube<NumberRing, A>, factor: El<NumberRingQuotient<NumberRing, Zn, A>>) -> MatmulTransform<NumberRing, A> {
         return MatmulTransform {
             data: vec![(H.galois_group().identity(), factor)]
         };
@@ -352,7 +352,7 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
     /// a shift by `ij` along the `j`-th hypercube dimension.
     /// 
     pub fn linear_combine_shifts<V, I>(H: &DefaultHypercube<NumberRing, A>, summands: I) -> Self
-        where I: Iterator<Item = (V, El<DecompositionRing<NumberRing, Zn, A>>)>,
+        where I: Iterator<Item = (V, El<NumberRingQuotient<NumberRing, Zn, A>>)>,
             V: VectorFn<i64>
     {
         let mut tmp = (0..H.hypercube().dim_count()).map(|_| 0).collect::<Vec<_>>();
@@ -451,7 +451,7 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
         };
     }
 
-    pub fn to_circuit(self, H: &DefaultHypercube<NumberRing, A>) -> PlaintextCircuit<DecompositionRingBase<NumberRing, Zn, A>> {
+    pub fn to_circuit(self, H: &DefaultHypercube<NumberRing, A>) -> PlaintextCircuit<NumberRingQuotientBase<NumberRing, Zn, A>> {
         self.check_valid(H);
 
         let (_, _, _, sizes) = self.compute_automorphisms_per_dimension(H);
@@ -466,11 +466,11 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
         return self.to_circuit_with_baby_steps(H, preferred_baby_steps);
     }
 
-    pub fn to_circuit_many(transforms: Vec<Self>, H: &DefaultHypercube<NumberRing, A>) -> PlaintextCircuit<DecompositionRingBase<NumberRing, Zn, A>> {
+    pub fn to_circuit_many(transforms: Vec<Self>, H: &DefaultHypercube<NumberRing, A>) -> PlaintextCircuit<NumberRingQuotientBase<NumberRing, Zn, A>> {
         transforms.into_iter().fold(PlaintextCircuit::identity(1, H.ring()), |current, next| next.to_circuit(H).compose(current, H.ring()))
     }
 
-    pub fn to_circuit_with_baby_steps(self, H: &DefaultHypercube<NumberRing, A>, preferred_baby_steps: usize) -> PlaintextCircuit<DecompositionRingBase<NumberRing, Zn, A>> {
+    pub fn to_circuit_with_baby_steps(self, H: &DefaultHypercube<NumberRing, A>, preferred_baby_steps: usize) -> PlaintextCircuit<NumberRingQuotientBase<NumberRing, Zn, A>> {
         self.check_valid(H);
 
         let (max_step, min_step, gcd_step, sizes) = self.compute_automorphisms_per_dimension(H);
@@ -558,7 +558,7 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
     }
 }
 
-impl<NumberRing, A> DecompositionRingBase<NumberRing, Zn, A> 
+impl<NumberRing, A> NumberRingQuotientBase<NumberRing, Zn, A> 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone
 {
@@ -574,7 +574,7 @@ pub struct CompiledLinearTransform<NumberRing, A = Global>
 {
     baby_step_galois_elements: Vec<CyclotomicGaloisGroupEl>,
     giant_step_galois_elements: Vec<Option<CyclotomicGaloisGroupEl>>,
-    coeffs: Vec<Vec<Option<El<DecompositionRing<NumberRing, Zn, A>>>>>,
+    coeffs: Vec<Vec<Option<El<NumberRingQuotient<NumberRing, Zn, A>>>>>,
     number_ring: NumberRing
 }
 
@@ -605,7 +605,7 @@ impl<NumberRing, A> HELinearTransform<NumberRing, A> for CompiledLinearTransform
             mut clone_fn: CloneFn
         ) -> T
             where AddFn: FnMut(T, &T) -> T,
-                ScaleFn: FnMut(T, &El<DecompositionRing<NumberRing, Zn, A>>) -> T,
+                ScaleFn: FnMut(T, &El<NumberRingQuotient<NumberRing, Zn, A>>) -> T,
                 ApplyGaloisFn: FnMut(T, &[CyclotomicGaloisGroupEl]) -> Vec<T>,
                 CloneFn: FnMut(&T) -> T
     {
@@ -821,13 +821,13 @@ use super::pow2::slots_to_coeffs_thin;
 #[cfg(test)]
 use super::composite::slots_to_powcoeffs_thin;
 #[cfg(test)]
-use crate::rings::pow2_cyclotomic::*;
+use crate::ciphertext_ring::pow2_cyclotomic::*;
 #[cfg(test)]
 use feanor_math::assert_el_eq;
 
 #[test]
 fn test_to_circuit() {
-    let ring = DecompositionRingBase::new(Pow2CyclotomicNumberRing::new(64), Zn::new(23));
+    let ring = NumberRingQuotientBase::new(Pow2CyclotomicNumberRing::new(64), Zn::new(23));
     let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(64), 23);
     let H = HypercubeIsomorphism::new::<false>(&ring, hypercube);
     let compiled_transform = MatmulTransform::to_circuit_many(slots_to_coeffs_thin(&H), &H);
@@ -836,7 +836,7 @@ fn test_to_circuit() {
     let expected = slots_to_coeffs_thin(&H).into_iter().fold(ring.clone_el(&input), |c, T| ring.get_ring().compute_linear_transform(&H, &c, &T));
     assert_el_eq!(&ring, &expected, &compiled_transform.evaluate(&[input], ring.identity()).pop().unwrap());
     
-    let ring = DecompositionRingBase::new(Pow2CyclotomicNumberRing::new(64), Zn::new(97));
+    let ring = NumberRingQuotientBase::new(Pow2CyclotomicNumberRing::new(64), Zn::new(97));
     let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(64), 97);
     let H = HypercubeIsomorphism::new::<false>(&ring, hypercube);
     let compiled_transform = MatmulTransform::to_circuit_many(slots_to_coeffs_thin(&H), &H);
@@ -848,7 +848,7 @@ fn test_to_circuit() {
 
 #[test]
 fn test_compile() {
-    let ring = DecompositionRingBase::new(Pow2CyclotomicNumberRing::new(64), Zn::new(23));
+    let ring = NumberRingQuotientBase::new(Pow2CyclotomicNumberRing::new(64), Zn::new(23));
     let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(64), 23);
     let H = HypercubeIsomorphism::new::<false>(&ring, hypercube);
     let compiled_transform = slots_to_coeffs_thin(&H).into_iter().map(|T| CompiledLinearTransform::create_from(&H, T, 2)).collect::<Vec<_>>();
@@ -866,7 +866,7 @@ fn test_compile() {
     current = compiled_composed_transform.evaluate(&ring, current);
     assert_el_eq!(&ring, &expected, &current);
 
-    let ring = DecompositionRingBase::new(Pow2CyclotomicNumberRing::new(64), Zn::new(97));
+    let ring = NumberRingQuotientBase::new(Pow2CyclotomicNumberRing::new(64), Zn::new(97));
     let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(64), 97);
     let H = HypercubeIsomorphism::new::<false>(&ring, hypercube);
     let compiled_transform = slots_to_coeffs_thin(&H).into_iter().map(|T| CompiledLinearTransform::create_from(&H, T, 2)).collect::<Vec<_>>();
@@ -899,7 +899,7 @@ fn test_compile() {
 
 #[test]
 fn test_compile_odd_case() {
-    let ring = DecompositionRingBase::new(CompositeCyclotomicNumberRing::new(3, 19), Zn::new(7));
+    let ring = NumberRingQuotientBase::new(CompositeCyclotomicNumberRing::new(3, 19), Zn::new(7));
     let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(3 * 19), 7);
     let H = HypercubeIsomorphism::new::<false>(&ring, hypercube);
 
@@ -912,7 +912,7 @@ fn test_compile_odd_case() {
         assert_el_eq!(&ring, &expected, &current);
     }
     
-    let ring = DecompositionRingBase::new(CompositeCyclotomicNumberRing::new(11, 31), Zn::new(2));
+    let ring = NumberRingQuotientBase::new(CompositeCyclotomicNumberRing::new(11, 31), Zn::new(2));
     let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(11 * 31), 2);
     let H = HypercubeIsomorphism::new::<false>(&ring, hypercube);
 
@@ -928,7 +928,7 @@ fn test_compile_odd_case() {
 
 #[test]
 fn test_compute_automorphisms_per_dimension() {
-    let ring = DecompositionRingBase::new(CompositeCyclotomicNumberRing::new(3, 19), Zn::new(7));
+    let ring = NumberRingQuotientBase::new(CompositeCyclotomicNumberRing::new(3, 19), Zn::new(7));
     let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(3 * 19), 7);
     let H = HypercubeIsomorphism::new::<false>(&ring, hypercube);
     assert_eq!(2, H.hypercube().dim_count());
@@ -946,7 +946,7 @@ fn test_compute_automorphisms_per_dimension() {
 
 #[test]
 fn test_compose() {
-    let ring = DecompositionRingBase::new(Pow2CyclotomicNumberRing::new(64), Zn::new(23));
+    let ring = NumberRingQuotientBase::new(Pow2CyclotomicNumberRing::new(64), Zn::new(23));
     let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(64), 23);
     let H = HypercubeIsomorphism::new::<false>(&ring, hypercube);
     let composed_transform = slots_to_coeffs_thin(&H).into_iter().fold(MatmulTransform::identity(&H), |current, next| next.compose(&current, &H));
@@ -958,7 +958,7 @@ fn test_compose() {
 
     assert_el_eq!(&ring, &expected, &current);
     
-    let ring = DecompositionRingBase::new(Pow2CyclotomicNumberRing::new(64), Zn::new(97));
+    let ring = NumberRingQuotientBase::new(Pow2CyclotomicNumberRing::new(64), Zn::new(97));
     let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(64), 97);
     let H = HypercubeIsomorphism::new::<false>(&ring, hypercube);
     let composed_transform = slots_to_coeffs_thin(&H).into_iter().fold(MatmulTransform::identity(&H), |current, next| next.compose(&current, &H));
@@ -973,7 +973,7 @@ fn test_compose() {
 
 #[test]
 fn test_invert() {
-    let ring = DecompositionRingBase::new(Pow2CyclotomicNumberRing::new(64), Zn::new(23));
+    let ring = NumberRingQuotientBase::new(Pow2CyclotomicNumberRing::new(64), Zn::new(23));
     let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(64), 23);
     let H = HypercubeIsomorphism::new::<false>(&ring, hypercube);
     let composed_transform = slots_to_coeffs_thin(&H).into_iter().fold(MatmulTransform::identity(&H), |current, next| next.compose(&current, &H));
@@ -984,7 +984,7 @@ fn test_invert() {
     let actual = ring.get_ring().compute_linear_transform(&H, &current, &inv_transform);
     assert_el_eq!(&ring, &expected, &actual);
     
-    let ring = DecompositionRingBase::new(Pow2CyclotomicNumberRing::new(64), Zn::new(97));
+    let ring = NumberRingQuotientBase::new(Pow2CyclotomicNumberRing::new(64), Zn::new(97));
     let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(64), 97);
     let H = HypercubeIsomorphism::new::<false>(&ring, hypercube);
     let composed_transform = slots_to_coeffs_thin(&H).into_iter().fold(MatmulTransform::identity(&H), |current, next| next.compose(&current, &H));
@@ -1000,7 +1000,7 @@ fn test_invert() {
 #[test]
 fn test_blockmatmul1d() {
     // F23[X]/(Phi_5) ~ F_(23^4)
-    let ring = DecompositionRingBase::new(OddCyclotomicNumberRing::new(5), Zn::new(23));
+    let ring = NumberRingQuotientBase::new(OddCyclotomicNumberRing::new(5), Zn::new(23));
     let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(5), 23);
     let H = HypercubeIsomorphism::new::<false>(&ring, hypercube);
     let matrix = [
@@ -1025,7 +1025,7 @@ fn test_blockmatmul1d() {
 
 
     // F23[X]/(Phi_7) ~ F_(23^3)^2
-    let ring = DecompositionRingBase::new(OddCyclotomicNumberRing::new(7), Zn::new(23));
+    let ring = NumberRingQuotientBase::new(OddCyclotomicNumberRing::new(7), Zn::new(23));
     let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(7), 23);
     let H = HypercubeIsomorphism::new::<false>(&ring, hypercube);
     let matrix = [

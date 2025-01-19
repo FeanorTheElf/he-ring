@@ -23,24 +23,20 @@ use feanor_math::rings::zn::*;
 use feanor_math::seq::sparse::SparseMapVector;
 use feanor_math::seq::*;
 use feanor_math::matrix::*;
-use zn_64::{Zn, ZnEl};
+use zn_64::{ZnBase, Zn, ZnEl};
 use zn_static::Fp;
 
-use crate::bfv::NumberRing;
+use crate::number_ring::odd_cyclotomic::OddCyclotomicNumberRing;
+use crate::number_ring::HECyclotomicNumberRing;
 use crate::profiling::{TimeRecorder, GLOBAL_TIME_RECORDER};
-use crate::rings::poly_remainder::CyclotomicPolyReducer;
+use crate::ciphertext_ring::poly_remainder::CyclotomicPolyReducer;
 use crate::{cyclotomic::*, euler_phi};
-use crate::rings::double_rns_ring::DoubleRNSRing;
+use crate::ciphertext_ring::double_rns_ring::{DoubleRNSRing, DoubleRNSRingBase};
 use crate::rnsconv::RNSOperation;
 use crate::ntt::HERingConvolution;
 use crate::ntt::ntt_convolution::NTTConv;
 
-use super::bxv::BXVCiphertextRing;
-use super::decomposition_ring::{DecompositionRing, DecompositionRingBase};
-use super::double_rns_ring::{SmallBasisEl, DoubleRNSRingBase};
-use super::gadget_product;
-use super::number_ring::{HECyclotomicNumberRing, HENumberRing};
-use super::odd_cyclotomic::OddCyclotomicNumberRing;
+use super::BGFVCiphertextRing;
 
 ///
 /// Implementation of the ring `Z[𝝵_n]/(q)`, where `q = p1 ... pr` is a product of "RNS factors".
@@ -58,7 +54,7 @@ use super::odd_cyclotomic::OddCyclotomicNumberRing;
 pub struct SingleRNSRingBase<NumberRing, A, C> 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<ZnBase>
 {
     // we have to store the double-RNS ring as well, since we need double-RNS representation
     // for computing Galois operations. This is because I don't think there is any good way
@@ -67,13 +63,13 @@ pub struct SingleRNSRingBase<NumberRing, A, C>
     /// Convolution algorithms to use to compute convolutions over each `Fp` in the RNS base
     convolutions: Vec<Rc<C>>,
     /// Used to compute the polynomial division by `Phi_n` when necessary
-    poly_moduli: Vec<CyclotomicPolyReducer<zn_64::Zn, Rc<C>>>
+    poly_moduli: Vec<CyclotomicPolyReducer<Zn, Rc<C>>>
 }
 
 ///
 /// [`RingStore`] for [`SingleRNSRingBase`]
 /// 
-pub type SingleRNSRing<NumberRing, A = Global, C = NTTConv<zn_64::Zn, Global>> = RingValue<SingleRNSRingBase<NumberRing, A, C>>;
+pub type SingleRNSRing<NumberRing, A = Global, C = NTTConv<Zn, Global>> = RingValue<SingleRNSRingBase<NumberRing, A, C>>;
 
 ///
 /// Type of elements of [`SingleRNSRingBase`]
@@ -81,10 +77,10 @@ pub type SingleRNSRing<NumberRing, A = Global, C = NTTConv<zn_64::Zn, Global>> =
 pub struct SingleRNSRingEl<NumberRing, A, C>
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: ConvolutionAlgorithm<zn_64::ZnBase>
+        C: ConvolutionAlgorithm<ZnBase>
 {
     /// we allow coefficients up to `n` (and not `phi(n)`) to avoid intermediate reductions modulo `Phi_n`
-    coefficients: Vec<zn_64::ZnEl, A>,
+    coefficients: Vec<ZnEl, A>,
     convolutions: PhantomData<C>,
     number_ring: PhantomData<NumberRing>
 }
@@ -92,7 +88,7 @@ pub struct SingleRNSRingEl<NumberRing, A, C>
 pub struct SingleRNSRingPreparedMultiplicant<NumberRing, A, C>
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<ZnBase>
 {
     pub(super) element: PhantomData<SingleRNSRingEl<NumberRing, A, C>>,
     pub(super) number_ring: PhantomData<NumberRing>,
@@ -103,7 +99,7 @@ impl<NumberRing, C> SingleRNSRingBase<NumberRing, Global, C>
     where NumberRing: HECyclotomicNumberRing,
         C: HERingConvolution<Zn>
 {
-    pub fn new(number_ring: NumberRing, rns_base: zn_rns::Zn<zn_64::Zn, BigIntRing>) -> RingValue<Self> {
+    pub fn new(number_ring: NumberRing, rns_base: zn_rns::Zn<Zn, BigIntRing>) -> RingValue<Self> {
         let max_log2_n = StaticRing::<i64>::RING.abs_log2_ceil(&(number_ring.n() as i64 * 2)).unwrap();
         let convolutions = rns_base.as_iter().map(|Zp| C::new(Zp.clone(), max_log2_n)).collect();
         Self::new_with(number_ring, rns_base, Global, convolutions)
@@ -113,9 +109,9 @@ impl<NumberRing, C> SingleRNSRingBase<NumberRing, Global, C>
 impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, A, C> 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<ZnBase>
 {
-    pub fn new_with(number_ring: NumberRing, rns_base: zn_rns::Zn<zn_64::Zn, BigIntRing>, allocator: A, convolutions: Vec<C>) -> RingValue<Self> {
+    pub fn new_with(number_ring: NumberRing, rns_base: zn_rns::Zn<Zn, BigIntRing>, allocator: A, convolutions: Vec<C>) -> RingValue<Self> {
         assert!(rns_base.len() > 0);
         assert_eq!(rns_base.len(), convolutions.len());
 
@@ -131,7 +127,7 @@ impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, A, C>
         })
     }
 
-    pub(super) fn reduce_modulus_partly(&self, k: usize, buffer: &mut [zn_64::ZnEl], output: &mut [zn_64::ZnEl]) {
+    pub(super) fn reduce_modulus_partly(&self, k: usize, buffer: &mut [ZnEl], output: &mut [ZnEl]) {
         record_time!(GLOBAL_TIME_RECORDER, "SingleRNSRing::reduce_modulus_partly", || {
             assert_eq!(self.n(), output.len());
             let Zp = self.rns_base().at(k);
@@ -151,7 +147,7 @@ impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, A, C>
         });
     }
 
-    pub fn rns_base(&self) -> &zn_rns::Zn<zn_64::Zn, BigIntRing> {
+    pub fn rns_base(&self) -> &zn_rns::Zn<Zn, BigIntRing> {
         self.base.get_ring().rns_base()
     }
 
@@ -159,15 +155,15 @@ impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, A, C>
         assert_eq!(self.n() as usize * self.rns_base().len(), el.coefficients.len());
     }
 
-    pub(super) fn coefficients_as_matrix<'a>(&self, element: &'a SingleRNSRingEl<NumberRing, A, C>) -> Submatrix<'a, AsFirstElement<zn_64::ZnEl>, zn_64::ZnEl> {
+    pub(super) fn coefficients_as_matrix<'a>(&self, element: &'a SingleRNSRingEl<NumberRing, A, C>) -> Submatrix<'a, AsFirstElement<ZnEl>, ZnEl> {
         Submatrix::from_1d(&element.coefficients, self.rns_base().len(), self.n())
     }
 
-    pub(super) fn coefficients_as_matrix_mut<'a>(&self, element: &'a mut SingleRNSRingEl<NumberRing, A, C>) -> SubmatrixMut<'a, AsFirstElement<zn_64::ZnEl>, zn_64::ZnEl> {
+    pub(super) fn coefficients_as_matrix_mut<'a>(&self, element: &'a mut SingleRNSRingEl<NumberRing, A, C>) -> SubmatrixMut<'a, AsFirstElement<ZnEl>, ZnEl> {
         SubmatrixMut::from_1d(&mut element.coefficients, self.rns_base().len(), self.n())
     }
 
-    pub fn to_matrix<'a>(&self, element: &'a mut SingleRNSRingEl<NumberRing, A, C>) -> Submatrix<'a, AsFirstElement<zn_64::ZnEl>, zn_64::ZnEl> {
+    pub fn to_matrix<'a>(&self, element: &'a mut SingleRNSRingEl<NumberRing, A, C>) -> Submatrix<'a, AsFirstElement<ZnEl>, ZnEl> {
         self.reduce_modulus_complete(element);
         return self.coefficients_as_matrix(element).restrict_cols(0..self.rank());
     }
@@ -185,146 +181,31 @@ impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, A, C>
     }
 }
 
-impl<NumberRing, A, C> BXVCiphertextRing for SingleRNSRingBase<NumberRing, A, C> 
+impl<NumberRing, A, C> BGFVCiphertextRing for SingleRNSRingBase<NumberRing, A, C> 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<ZnBase>
 {
     type NumberRing = NumberRing;
-    type GadgetProductLhsOperand<'a> = gadget_product::single_rns::GadgetProductLhsOperand<'a, NumberRing, A, C>
-        where Self: 'a;
-    type GadgetProductRhsOperand<'a> = gadget_product::single_rns::GadgetProductRhsOperand<'a, NumberRing, A, C>
-        where Self: 'a;
 
-    fn number_ring(&self) -> &Self::NumberRing {
-        self.base.get_ring().number_ring()
+    fn as_representation_wrt_small_generating_set<'a>(&'a self, x: &'a Self::Element) -> Submatrix<'a, AsFirstElement<ZnEl>, ZnEl> {
+        self.coefficients_as_matrix(x)
     }
-    
-    fn sample_from_coefficient_distribution<G: FnMut() -> i32>(&self, mut distribution: G) -> SingleRNSRingEl<NumberRing, A, C> {
+
+    fn from_representation_wrt_small_generating_set<V>(&self, data: Submatrix<V, ZnEl>) -> Self::Element
+        where V: AsPointerToSlice<ZnEl>
+    {
         let mut result = self.zero();
         let mut result_matrix = self.coefficients_as_matrix_mut(&mut result);
-        for j in 0..self.rank() {
-            let c = distribution();
-            for i in 0..self.rns_base().len() {
-                *result_matrix.at_mut(i, j) = self.rns_base().at(i).int_hom().map(c);
+        assert_eq!(result_matrix.row_count(), data.row_count());
+        assert_eq!(result_matrix.col_count(), data.col_count());
+        for i in 0..result_matrix.row_count() {
+            let Zp = self.rns_base().at(i);
+            for j in 0..result_matrix.col_count() {
+                *result_matrix.at_mut(i, j) = Zp.clone_el(data.at(i, j));
             }
         }
         return result;
-    }
-    
-    fn perform_rns_op_from<Op>(
-        &self, 
-        from: &Self, 
-        el: &SingleRNSRingEl<NumberRing, A, C>, 
-        op: &Op
-    ) -> SingleRNSRingEl<NumberRing, A, C> 
-        where NumberRing: HECyclotomicNumberRing,
-            Op: RNSOperation<RingType = zn_64::ZnBase>
-    {
-        record_time!(GLOBAL_TIME_RECORDER, "SingleRNSRing::perform_rns_op_from", || {
-            assert!(self.number_ring() == from.number_ring());
-            assert_eq!(self.rns_base().len(), op.output_rings().len());
-            assert_eq!(from.rns_base().len(), op.input_rings().len());
-
-            for i in 0..from.rns_base().len() {
-                assert!(from.rns_base().at(i).get_ring() == op.input_rings().at(i).get_ring());
-            }
-            for i in 0..self.rns_base().len() {
-                assert!(self.rns_base().at(i).get_ring() == op.output_rings().at(i).get_ring());
-            }
-            let mut result = self.zero();
-            op.apply(from.coefficients_as_matrix(el), self.coefficients_as_matrix_mut(&mut result));
-            return result;
-        })
-    }
-    
-    fn exact_convert_from_decompring<ZnTy, A2>(
-        &self, 
-        from: &DecompositionRing<NumberRing, ZnTy, A2>, 
-        element: &<DecompositionRingBase<NumberRing, ZnTy, A2> as RingBase>::Element
-    ) -> SingleRNSRingEl<NumberRing, A, C> 
-        where NumberRing: HENumberRing,
-            ZnTy: RingStore<Type = zn_64::ZnBase> + Clone,
-            A2: Allocator + Clone
-    {
-        assert!(self.number_ring() == from.get_ring().number_ring());
-
-        let mut result = self.zero();
-        let mut result_matrix = self.coefficients_as_matrix_mut(&mut result);
-        let el_wrt_coeff_basis = from.wrt_canonical_basis(element);
-        for j in 0..self.rank() {
-            let x = int_cast(from.base_ring().smallest_lift(el_wrt_coeff_basis.at(j)), &StaticRing::<i32>::RING, from.base_ring().integer_ring());
-            for i in 0..self.rns_base().len() {
-                *result_matrix.at_mut(i, j) = self.rns_base().at(i).int_hom().map(x);
-            }
-        }
-        return result;
-    }
-    
-    fn perform_rns_op_to_decompring<ZnTy, A2, Op>(
-        &self, 
-        to: &DecompositionRing<NumberRing, ZnTy, A2>, 
-        element: &SingleRNSRingEl<NumberRing, A, C>, 
-        op: &Op
-    ) -> <DecompositionRingBase<NumberRing, ZnTy, A2> as RingBase>::Element 
-        where NumberRing: HENumberRing,
-            ZnTy: RingStore<Type = zn_64::ZnBase> + Clone,
-            A2: Allocator + Clone,
-            Op: RNSOperation<RingType = zn_64::ZnBase>
-    {
-        record_time!(GLOBAL_TIME_RECORDER, "SingleRNSRing::perform_rns_op_to_decompring", || {
-            assert!(self.number_ring() == to.get_ring().number_ring());
-            assert_eq!(self.rns_base().len(), op.input_rings().len());
-            assert_eq!(1, op.output_rings().len());
-            
-            for i in 0..self.rns_base().len() {
-                assert!(self.rns_base().at(i).get_ring() == op.input_rings().at(i).get_ring());
-            }
-            assert!(to.base_ring().get_ring() == op.output_rings().at(0).get_ring());
-
-            let mut element = self.clone_el(element);
-            let el_matrix = self.to_matrix(&mut element);
-            let mut result = to.zero();
-            let result_matrix = SubmatrixMut::from_1d(to.get_ring().wrt_canonical_basis_mut(&mut result), 1, to.rank());
-            op.apply(el_matrix, result_matrix);
-            return result;
-        })
-    }
-
-    fn gadget_product<'a, 'b>(&self, lhs: &Self::GadgetProductLhsOperand<'a>, rhs: &Self::GadgetProductRhsOperand<'b>) -> Self::Element
-        where Self: 'a + 'b
-    {
-        record_time!(GLOBAL_TIME_RECORDER, "SingleRNSRing::gadget_product", || {
-            self.gadget_product_base(lhs, rhs)
-        })
-    }
-
-    fn gadget_product_rhs_empty<'a>(&'a self, digits: usize) -> Self::GadgetProductRhsOperand<'a> {
-        record_time!(GLOBAL_TIME_RECORDER, "SingleRNSRing::gadget_product_rhs_empty", || {
-            gadget_product::single_rns::GadgetProductRhsOperand::create_empty::<false>(self, digits)
-        })
-    }
-
-    fn to_gadget_product_lhs<'a>(&'a self, el: Self::Element, digits: usize) -> Self::GadgetProductLhsOperand<'a> {
-        record_time!(GLOBAL_TIME_RECORDER, "SingleRNSRing::to_gadget_product_lhs", || {
-            gadget_product::single_rns::GadgetProductLhsOperand::create_from_element(self, digits, el)
-        })
-    }
-
-    fn gadget_vector<'a, 'b>(&'a self, rhs_operand: &'a Self::GadgetProductRhsOperand<'b>) -> &'a [std::ops::Range<usize>] {
-        rhs_operand.gadget_vector()
-    }
-
-    fn set_rns_factor<'b>(&self, rhs_operand: &mut Self::GadgetProductRhsOperand<'b>, i: usize, el: Self::Element)
-        where Self: 'b
-    {
-        record_time!(GLOBAL_TIME_RECORDER, "SingleRNSRing::set_rns_factor", || {
-            rhs_operand.set_rns_factor(i, el)
-        })
-    }
-
-    fn apply_galois_action_many_gadget_product_operand<'a>(&'a self, x: &Self::GadgetProductLhsOperand<'a>, gs: &[CyclotomicGaloisGroupEl]) -> Vec<Self::GadgetProductLhsOperand<'a>> {
-        self.apply_galois_action_many(x.element(), gs).into_iter().map(|res| self.to_gadget_product_lhs(res, x.digits())).collect::<Vec<_>>()
     }
 
     fn two_by_two_convolution(&self, lhs: [&Self::Element; 2], rhs: [&Self::Element; 2]) -> [Self::Element; 3] {
@@ -361,7 +242,7 @@ impl<NumberRing, A, C> BXVCiphertextRing for SingleRNSRingBase<NumberRing, A, C>
 impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, A, C> 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<ZnBase>
 {
     pub fn prepare_multiplicant(&self, el: &SingleRNSRingEl<NumberRing, A, C>) -> SingleRNSRingPreparedMultiplicant<NumberRing, A, C> {
         record_time!(GLOBAL_TIME_RECORDER, "SingleRNSRing::prepare_multiplicant", || {
@@ -422,22 +303,22 @@ impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, A, C>
 pub struct SingleRNSRingBaseElVectorRepresentation<'a, NumberRing, A, C> 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<ZnBase>
 {
     element: SingleRNSRingEl<NumberRing, A, C>,
     ring: &'a SingleRNSRingBase<NumberRing, A, C>
 }
 
-impl<'a, NumberRing, A, C> VectorFn<El<zn_rns::Zn<zn_64::Zn, BigIntRing>>> for SingleRNSRingBaseElVectorRepresentation<'a, NumberRing, A, C> 
+impl<'a, NumberRing, A, C> VectorFn<El<zn_rns::Zn<Zn, BigIntRing>>> for SingleRNSRingBaseElVectorRepresentation<'a, NumberRing, A, C> 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<ZnBase>
 {
     fn len(&self) -> usize {
         self.ring.rank()
     }
 
-    fn at(&self, i: usize) -> El<zn_rns::Zn<zn_64::Zn, BigIntRing>> {
+    fn at(&self, i: usize) -> El<zn_rns::Zn<Zn, BigIntRing>> {
         assert!(i < self.len());
         self.ring.rns_base().from_congruence(self.ring.coefficients_as_matrix(&self.element).col_at(i).as_iter().enumerate().map(|(i, x)| self.ring.rns_base().at(i).clone_el(x)))
     }
@@ -446,7 +327,7 @@ impl<'a, NumberRing, A, C> VectorFn<El<zn_rns::Zn<zn_64::Zn, BigIntRing>>> for S
 impl<NumberRing, A, C> PartialEq for SingleRNSRingBase<NumberRing, A, C> 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<ZnBase>
 {
     fn eq(&self, other: &Self) -> bool {
         self.number_ring() == other.number_ring() && self.rns_base().get_ring() == other.rns_base().get_ring()
@@ -456,7 +337,7 @@ impl<NumberRing, A, C> PartialEq for SingleRNSRingBase<NumberRing, A, C>
 impl<NumberRing, A, C> RingBase for SingleRNSRingBase<NumberRing, A, C> 
     where NumberRing: HECyclotomicNumberRing, 
         A: Allocator + Clone,
-        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<ZnBase>
 {
     type Element = SingleRNSRingEl<NumberRing, A, C>;
 
@@ -596,9 +477,9 @@ impl<NumberRing, A, C> RingBase for SingleRNSRingBase<NumberRing, A, C>
 impl<NumberRing, A, C> RingExtension for SingleRNSRingBase<NumberRing, A, C> 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<ZnBase>
 {
-    type BaseRing = zn_rns::Zn<zn_64::Zn, BigIntRing>;
+    type BaseRing = zn_rns::Zn<Zn, BigIntRing>;
 
     fn base_ring<'a>(&'a self) -> &'a Self::BaseRing {
         self.rns_base()
@@ -628,7 +509,7 @@ impl<NumberRing, A, C> RingExtension for SingleRNSRingBase<NumberRing, A, C>
 impl<NumberRing, A, C> FreeAlgebra for SingleRNSRingBase<NumberRing, A, C> 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<ZnBase>
 {
     type VectorRepresentation<'a> = SingleRNSRingBaseElVectorRepresentation<'a, NumberRing, A, C> 
         where Self: 'a;
@@ -674,7 +555,7 @@ impl<NumberRing, A, C> FreeAlgebra for SingleRNSRingBase<NumberRing, A, C>
 impl<NumberRing, A, C> CyclotomicRing for SingleRNSRingBase<NumberRing, A, C> 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<ZnBase>
 {
     fn n(&self) -> usize {
         self.base.n()
@@ -704,7 +585,7 @@ impl<NumberRing, A, C> CyclotomicRing for SingleRNSRingBase<NumberRing, A, C>
 pub struct WRTCanonicalBasisElementCreator<'a, NumberRing, A, C>
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<ZnBase>
 {
     ring: &'a SingleRNSRingBase<NumberRing, A, C>
 }
@@ -712,41 +593,41 @@ pub struct WRTCanonicalBasisElementCreator<'a, NumberRing, A, C>
 impl<'a, 'b, NumberRing, A, C> Clone for WRTCanonicalBasisElementCreator<'a, NumberRing, A, C>
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<ZnBase>
 {
     fn clone(&self) -> Self {
         Self { ring: self.ring }
     }
 }
 
-impl<'a, 'b, NumberRing, A, C> Fn<(&'b [El<zn_rns::Zn<zn_64::Zn, BigIntRing>>],)> for WRTCanonicalBasisElementCreator<'a, NumberRing, A, C>
+impl<'a, 'b, NumberRing, A, C> Fn<(&'b [El<zn_rns::Zn<Zn, BigIntRing>>],)> for WRTCanonicalBasisElementCreator<'a, NumberRing, A, C>
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<ZnBase>
 {
-    extern "rust-call" fn call(&self, args: (&'b [El<zn_rns::Zn<zn_64::Zn, BigIntRing>>],)) -> Self::Output {
+    extern "rust-call" fn call(&self, args: (&'b [El<zn_rns::Zn<Zn, BigIntRing>>],)) -> Self::Output {
         self.ring.from_canonical_basis(args.0.iter().map(|x| self.ring.base_ring().clone_el(x)))
     }
 }
 
-impl<'a, 'b, NumberRing, A, C> FnMut<(&'b [El<zn_rns::Zn<zn_64::Zn, BigIntRing>>],)> for WRTCanonicalBasisElementCreator<'a, NumberRing, A, C>
+impl<'a, 'b, NumberRing, A, C> FnMut<(&'b [El<zn_rns::Zn<Zn, BigIntRing>>],)> for WRTCanonicalBasisElementCreator<'a, NumberRing, A, C>
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<ZnBase>
 {
-    extern "rust-call" fn call_mut(&mut self, args: (&'b [El<zn_rns::Zn<zn_64::Zn, BigIntRing>>],)) -> Self::Output {
+    extern "rust-call" fn call_mut(&mut self, args: (&'b [El<zn_rns::Zn<Zn, BigIntRing>>],)) -> Self::Output {
         self.call(args)
     }
 }
 
-impl<'a, 'b, NumberRing, A, C> FnOnce<(&'b [El<zn_rns::Zn<zn_64::Zn, BigIntRing>>],)> for WRTCanonicalBasisElementCreator<'a, NumberRing, A, C>
+impl<'a, 'b, NumberRing, A, C> FnOnce<(&'b [El<zn_rns::Zn<Zn, BigIntRing>>],)> for WRTCanonicalBasisElementCreator<'a, NumberRing, A, C>
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<ZnBase>
 {
     type Output = SingleRNSRingEl<NumberRing, A, C>;
 
-    extern "rust-call" fn call_once(self, args: (&'b [El<zn_rns::Zn<zn_64::Zn, BigIntRing>>],)) -> Self::Output {
+    extern "rust-call" fn call_once(self, args: (&'b [El<zn_rns::Zn<Zn, BigIntRing>>],)) -> Self::Output {
         self.call(args)
     }
 }
@@ -754,7 +635,7 @@ impl<'a, 'b, NumberRing, A, C> FnOnce<(&'b [El<zn_rns::Zn<zn_64::Zn, BigIntRing>
 impl<NumberRing, A, C> FiniteRingSpecializable for SingleRNSRingBase<NumberRing, A, C> 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<ZnBase>
 {
     fn specialize<O: FiniteRingOperation<Self>>(op: O) -> Result<O::Output, ()> {
         Ok(op.execute())
@@ -764,12 +645,12 @@ impl<NumberRing, A, C> FiniteRingSpecializable for SingleRNSRingBase<NumberRing,
 impl<NumberRing, A, C> FiniteRing for SingleRNSRingBase<NumberRing, A, C> 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
-        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
+        C: PreparedConvolutionAlgorithm<ZnBase>
 {
     type ElementsIter<'a> = MultiProduct<
-        <zn_rns::ZnBase<zn_64::Zn, BigIntRing> as FiniteRing>::ElementsIter<'a>, 
+        <zn_rns::ZnBase<Zn, BigIntRing> as FiniteRing>::ElementsIter<'a>, 
         WRTCanonicalBasisElementCreator<'a, NumberRing, A, C>, 
-        CloneRingEl<&'a zn_rns::Zn<zn_64::Zn, BigIntRing>>,
+        CloneRingEl<&'a zn_rns::Zn<Zn, BigIntRing>>,
         SingleRNSRingEl<NumberRing, A, C>
     > where Self: 'a;
 
@@ -804,10 +685,10 @@ impl<NumberRing, A1, A2, C1, C2> CanHomFrom<SingleRNSRingBase<NumberRing, A2, C2
     where NumberRing: HECyclotomicNumberRing,
         A1: Allocator + Clone,
         A2: Allocator + Clone,
-        C1: PreparedConvolutionAlgorithm<zn_64::ZnBase>,
-        C2: PreparedConvolutionAlgorithm<zn_64::ZnBase>
+        C1: PreparedConvolutionAlgorithm<ZnBase>,
+        C2: PreparedConvolutionAlgorithm<ZnBase>
 {
-    type Homomorphism = Vec<<zn_64::ZnBase as CanHomFrom<zn_64::ZnBase>>::Homomorphism>;
+    type Homomorphism = Vec<<ZnBase as CanHomFrom<ZnBase>>::Homomorphism>;
 
     fn has_canonical_hom(&self, from: &SingleRNSRingBase<NumberRing, A2, C2>) -> Option<Self::Homomorphism> {
         if self.rns_base().len() == from.rns_base().len() && self.number_ring() == from.number_ring() {
@@ -838,7 +719,7 @@ impl<NumberRing, A1, A2, C1> CanHomFrom<DoubleRNSRingBase<NumberRing, A2>> for S
     where NumberRing: HECyclotomicNumberRing,
         A1: Allocator + Clone,
         A2: Allocator + Clone,
-        C1: PreparedConvolutionAlgorithm<zn_64::ZnBase>
+        C1: PreparedConvolutionAlgorithm<ZnBase>
 {
     type Homomorphism = <DoubleRNSRingBase<NumberRing, A2> as CanIsoFromTo<Self>>::Isomorphism;
 
@@ -855,7 +736,7 @@ impl<NumberRing, A1, A2, C1> CanIsoFromTo<DoubleRNSRingBase<NumberRing, A2>> for
     where NumberRing: HECyclotomicNumberRing,
         A1: Allocator + Clone,
         A2: Allocator + Clone,
-        C1: PreparedConvolutionAlgorithm<zn_64::ZnBase>
+        C1: PreparedConvolutionAlgorithm<ZnBase>
 {
     type Isomorphism = <DoubleRNSRingBase<NumberRing, A2> as CanHomFrom<Self>>::Homomorphism;
 
@@ -872,10 +753,10 @@ impl<NumberRing, A1, A2, C1, C2> CanIsoFromTo<SingleRNSRingBase<NumberRing, A2, 
     where NumberRing: HECyclotomicNumberRing, 
         A1: Allocator + Clone,
         A2: Allocator + Clone,
-        C1: PreparedConvolutionAlgorithm<zn_64::ZnBase>,
-        C2: PreparedConvolutionAlgorithm<zn_64::ZnBase>
+        C1: PreparedConvolutionAlgorithm<ZnBase>,
+        C2: PreparedConvolutionAlgorithm<ZnBase>
 {
-    type Isomorphism = Vec<<zn_64::ZnBase as CanIsoFromTo<zn_64::ZnBase>>::Isomorphism>;
+    type Isomorphism = Vec<<ZnBase as CanIsoFromTo<ZnBase>>::Isomorphism>;
 
     fn has_canonical_iso(&self, from: &SingleRNSRingBase<NumberRing, A2, C2>) -> Option<Self::Isomorphism> {
         if self.rns_base().len() == from.rns_base().len() && self.number_ring() == from.number_ring() {
@@ -900,11 +781,20 @@ impl<NumberRing, A1, A2, C1, C2> CanIsoFromTo<SingleRNSRingBase<NumberRing, A2, 
 
 #[cfg(any(test, feature = "generic_tests"))]
 pub fn test_with_number_ring<NumberRing: Clone + HECyclotomicNumberRing>(number_ring: NumberRing) {
-    let p1 = number_ring.largest_suitable_prime(20000).unwrap();
-    let p2 = number_ring.largest_suitable_prime(p1 - 1).unwrap();
+    use feanor_math::algorithms::eea::signed_lcm;
+
+    use crate::number_ring::largest_prime_leq_congruent_to_one;
+
+    let required_root_of_unity = signed_lcm(
+        number_ring.mod_p_required_root_of_unity() as i64, 
+        1 << StaticRing::<i64>::RING.abs_log2_ceil(&(number_ring.n() as i64)).unwrap() + 2, 
+        StaticRing::<i64>::RING
+    );
+    let p1 = largest_prime_leq_congruent_to_one(20000, required_root_of_unity).unwrap();
+    let p2 = largest_prime_leq_congruent_to_one(p1 - 1, required_root_of_unity).unwrap();
     assert!(p1 != p2);
     let rank = number_ring.rank();
-    let base_ring = zn_rns::Zn::new(vec![zn_64::Zn::new(p1 as u64), zn_64::Zn::new(p2 as u64)], BigIntRing::RING);
+    let base_ring = zn_rns::Zn::new(vec![Zn::new(p1 as u64), Zn::new(p2 as u64)], BigIntRing::RING);
     let ring = SingleRNSRingBase::<_, _, NTTConv<_>>::new(number_ring.clone(), base_ring.clone());
 
     let base_ring = ring.base_ring();
@@ -943,7 +833,7 @@ pub fn test_with_number_ring<NumberRing: Clone + HECyclotomicNumberRing>(number_
 
 #[test]
 fn test_multiple_representations() {
-    let rns_base = zn_rns::Zn::new(vec![zn_64::Zn::new(2113), zn_64::Zn::new(2689)], BigIntRing::RING);
+    let rns_base = zn_rns::Zn::new(vec![Zn::new(2113), Zn::new(2689)], BigIntRing::RING);
     let ring: SingleRNSRing<_> = SingleRNSRingBase::new(OddCyclotomicNumberRing::new(3), rns_base.clone());
 
     let from_raw_representation = |data: [i32; 3]| SingleRNSRingEl {

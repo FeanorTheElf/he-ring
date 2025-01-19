@@ -41,12 +41,11 @@ use crate::cyclotomic::{CyclotomicGaloisGroup, CyclotomicGaloisGroupEl, Cyclotom
 use crate::euler_phi;
 use crate::profiling::{log_time, print_all_timings};
 use crate::ntt::dyn_convolution::*;
-use crate::lintransform::CREATE_LINEAR_TRANSFORM_TIME_RECORDER;
 
-use super::decomposition_ring::{DecompositionRing, DecompositionRingBase};
 use super::interpolate::FastPolyInterpolation;
 use super::odd_cyclotomic::CompositeCyclotomicNumberRing;
 use super::pow2_cyclotomic::Pow2CyclotomicNumberRing;
+use super::quotient::*;
 
 const ZZi64: StaticRing<i64> = StaticRing::RING;
 
@@ -382,7 +381,7 @@ fn get_prim_root_of_unity<R>(ring: R, m: usize) -> El<R>
 pub type SlotRingOver<R> = AsLocalPIR<FreeAlgebraImpl<R, Vec<El<R>>, Global, DynConvolutionAlgorithmConvolution<<R as RingStore>::Type, Arc<dyn Send + Sync + DynConvolutionAlgorithm<<R as RingStore>::Type>>>>>;
 pub type SlotRingOf<R> = SlotRingOver<RingValue<BaseRing<R>>>;
 
-pub type DefaultHypercube<'a, NumberRing, A = Global> = HypercubeIsomorphism<&'a DecompositionRing<NumberRing, Zn, A>>;
+pub type DefaultHypercube<'a, NumberRing, A = Global> = HypercubeIsomorphism<&'a NumberRingQuotient<NumberRing, Zn, A>>;
 
 pub type BaseRing<R> = <<<R as RingStore>::Type as RingExtension>::BaseRing as RingStore>::Type;
 pub type DecoratedBaseRing<R> = AsLocalPIR<RingValue<BaseRing<R>>>;
@@ -620,7 +619,7 @@ impl<R> HypercubeIsomorphism<R>
 }
 
 #[cfg(test)]
-fn test_ring1() -> (DecompositionRing<Pow2CyclotomicNumberRing, Zn>, HypercubeStructure) {
+fn test_ring1() -> (NumberRingQuotient<Pow2CyclotomicNumberRing, Zn>, HypercubeStructure) {
     let galois_group = CyclotomicGaloisGroup::new(32);
     let hypercube_structure = HypercubeStructure::new(
         galois_group,
@@ -629,12 +628,12 @@ fn test_ring1() -> (DecompositionRing<Pow2CyclotomicNumberRing, Zn>, HypercubeSt
         vec![4],
         vec![galois_group.from_representative(5)]
     );
-    let ring = DecompositionRingBase::new(Pow2CyclotomicNumberRing::new(32), Zn::new(7));
+    let ring = NumberRingQuotientBase::new(Pow2CyclotomicNumberRing::new(32), Zn::new(7));
     return (ring, hypercube_structure);
 }
 
 #[cfg(test)]
-fn test_ring2() -> (DecompositionRing<Pow2CyclotomicNumberRing, Zn>, HypercubeStructure) {
+fn test_ring2() -> (NumberRingQuotient<Pow2CyclotomicNumberRing, Zn>, HypercubeStructure) {
     let galois_group = CyclotomicGaloisGroup::new(32);
     let hypercube_structure = HypercubeStructure::new(
         galois_group,
@@ -643,12 +642,12 @@ fn test_ring2() -> (DecompositionRing<Pow2CyclotomicNumberRing, Zn>, HypercubeSt
         vec![4, 2],
         vec![galois_group.from_representative(5), galois_group.from_representative(-1)]
     );
-    let ring = DecompositionRingBase::new(Pow2CyclotomicNumberRing::new(32), Zn::new(17));
+    let ring = NumberRingQuotientBase::new(Pow2CyclotomicNumberRing::new(32), Zn::new(17));
     return (ring, hypercube_structure);
 }
 
 #[cfg(test)]
-fn test_ring3() -> (DecompositionRing<CompositeCyclotomicNumberRing, Zn>, HypercubeStructure) {
+fn test_ring3() -> (NumberRingQuotient<CompositeCyclotomicNumberRing, Zn>, HypercubeStructure) {
     let galois_group = CyclotomicGaloisGroup::new(11 * 13);
     let hypercube_structure = HypercubeStructure::new(
         galois_group,
@@ -657,7 +656,7 @@ fn test_ring3() -> (DecompositionRing<CompositeCyclotomicNumberRing, Zn>, Hyperc
         vec![2, 4],
         vec![galois_group.from_representative(79), galois_group.from_representative(67)]
     );
-    let ring = DecompositionRingBase::new(CompositeCyclotomicNumberRing::new(11, 13), Zn::new(3));
+    let ring = NumberRingQuotientBase::new(CompositeCyclotomicNumberRing::new(11, 13), Zn::new(3));
     return (ring, hypercube_structure);
 }
 
@@ -844,7 +843,7 @@ fn time_from_slot_values_large() {
     let mut rng = oorandom::Rand64::new(1);
 
     let allocator = feanor_mempool::AllocRc(Rc::new(feanor_mempool::dynsize::DynLayoutMempool::<Global>::new(Alignment::of::<u64>())));
-    let ring = RingValue::from(DecompositionRingBase::new(CompositeCyclotomicNumberRing::new(337, 127), Zn::new(65536)).into().with_allocator(allocator));
+    let ring = RingValue::from(NumberRingQuotientBase::new(CompositeCyclotomicNumberRing::new(337, 127), Zn::new(65536)).into().with_allocator(allocator));
     let galois_group = CyclotomicGaloisGroup::new(337 * 127);
     let hypercube = HypercubeStructure::new(
         galois_group,

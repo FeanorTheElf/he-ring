@@ -163,37 +163,40 @@ pub mod cyclotomic;
 /// 
 pub mod rnsconv;
 
+pub mod number_ring;
+
 ///
 /// Implementation of rings using double-RNS representation.
 /// 
-pub mod rings;
-
-///
-/// Contains algorithms to compute linear transformations and represent
-/// them as linear combination of Galois automorphisms, as required for
-/// (second-generation) HE schemes.
-/// 
-pub mod lintransform;
-
-///
-/// Contains algorithms to build arithmetic circuits, with a focus on
-/// digit extraction polynomials.
-/// 
-pub mod digitextract;
-
-///
-/// Contains an implementation of the BFV scheme.
-/// 
-pub mod bfv;
-
-pub mod bgv;
+pub mod ciphertext_ring;
 
 ///
 /// The new implementation of arithmetic-galois circuits (i.e. circuits built
 /// from linear combination, multiplication and galois gates) that will soon
 /// replace [`digitextract::ArithCircuit`] and [`lintransform::matmul::CompiledLinearTransform`].
 /// 
-pub mod circuit;
+// pub mod circuit;
+
+///
+/// Contains algorithms to compute linear transformations and represent
+/// them as linear combination of Galois automorphisms, as required for
+/// (second-generation) HE schemes.
+/// 
+// pub mod lintransform;
+
+///
+/// Contains algorithms to build arithmetic circuits, with a focus on
+/// digit extraction polynomials.
+/// 
+// pub mod digitextract;
+
+///
+/// Contains an implementation of the BFV scheme.
+/// 
+// pub mod bfv;
+
+// pub mod bgv;
+
 
 #[cfg(test)]
 use feanor_math::integer::int_cast;
