@@ -352,7 +352,25 @@ impl<NumberRing, A> BGFVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, 
     fn from_representation_wrt_small_generating_set<V>(&self, data: Submatrix<V, ZnEl>) -> Self::Element
         where V: AsPointerToSlice<ZnEl>
     {
-        unimplemented!()
+        let mut x = self.base.zero_non_fft();
+        let mut x_as_matrix = self.base.as_matrix_wrt_small_basis_mut(&mut x);
+        assert_eq!(data.row_count(), x_as_matrix.row_count());
+        assert_eq!(data.col_count(), x_as_matrix.col_count());
+        for i in 0..data.row_count() {
+            for j in 0..data.col_count() {
+                *x_as_matrix.at_mut(i, j) = self.base.base_ring().at(i).clone_el(data.at(i, j));
+            }
+        }
+        ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal { 
+            representation: RefCell::new(ManagedDoubleRNSElRepresentation::SmallBasis), 
+            small_basis_repr: {
+                let result = OnceCell::new();
+                result.set(x).ok().unwrap();
+                result   
+            }, 
+            double_rns_repr_or_part: RefCell::new(None), 
+            small_basis_part: RefCell::new(None)
+        }) }
     }
 }
 

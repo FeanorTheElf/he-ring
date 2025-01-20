@@ -38,6 +38,115 @@ impl<R: BGFVCiphertextRing> GadgetProductLhsOperand<R> {
         Self::from_element_with(ring, el, select_digits(digits, ring.base_ring().len()).clone_els())
     }
 
+    ///
+    /// Computes the "RNS-gadget product" of two elements in this ring, as often required
+    /// in HE scenarios. A "gadget product" computes the approximate product of two
+    /// ring elements `x` and `y` by using `y` and multiple scaled & noisy approximations 
+    /// to `x`. This function only supports the gadget vector given by a decomposition
+    /// `q = D1 ... Dr` into coprime "digits".
+    /// 
+    /// # What exactly is a "gadget product"?
+    /// 
+    /// In an HE setting, we often have a noisy approximation to some value `x`, say
+    /// `x + e`. Now the normal product `(x + e)y = xy + ey` includes an error of `ey`, which
+    /// (if `y` is arbitrary) is not in any way an approximation to `xy` anymore. Instead,
+    /// we can take a so-called "gadget vector" `g` and provide multiple noisy scalings of `x`, 
+    /// say `g[1] * x + e1` to `g[r] * x + er`.
+    /// Using these, we can approximate `xy` by computing a gadget-decomposition 
+    /// `y = g[1] * y1 + ... + g[m] * ym` of `y`, where the values `yi` are small, and then use 
+    /// `y1 (g[1] * x + e1) + ... + ym (g[m] * x + em)` as an approximation to `xy`.
+    /// 
+    /// The gadget vector used for this "RNS-gadget product" is the one given by the unit vectors
+    /// in the decomposition `q = D1 ... Dr` into pairwise coprime "digits". In the simplest case,
+    /// those digits are just the prime factors of `q`. However, it is usually beneficial to
+    /// group multiple prime factors into a single digit, since decreasing the number of digits
+    /// will significantly decrease the work we have to do when computing the inner product
+    /// `sum_i (g[i] xi + ei) yi`. Note that this will of course decrease the quality of 
+    /// approximation to `xy` (i.e. increase the error `sum_i yi ei`). Hence, choose the
+    /// parameter `digits` appropriately. The gadget vector used in a specific case can be
+    /// queried using [`GadgetProductRhsOperand::gadget_vector()`]. 
+    /// 
+    /// # Example
+    /// ```
+    /// # use feanor_math::ring::*;
+    /// # use feanor_math::assert_el_eq;
+    /// # use feanor_math::homomorphism::*;
+    /// # use feanor_math::rings::zn::*;
+    /// # use feanor_math::rings::zn::zn_64::*;
+    /// # use feanor_math::rings::finite::*;
+    /// # use feanor_math::integer::BigIntRing;
+    /// # use feanor_math::algorithms::fft::cooley_tuckey::CooleyTuckeyFFT;
+    /// # use feanor_math::rings::extension::FreeAlgebraStore;
+    /// # use feanor_math::seq::*;
+    /// # use he_ring::ciphertext_ring::double_rns_managed::*;
+    /// # use he_ring::number_ring::pow2_cyclotomic::Pow2CyclotomicNumberRing;
+    /// # use he_ring::gadget_product::*;
+    /// let rns_base = vec![Zn::new(17), Zn::new(97), Zn::new(113)];
+    /// let ring = ManagedDoubleRNSRingBase::new(Pow2CyclotomicNumberRing::new(16), zn_rns::Zn::new(rns_base.clone(), BigIntRing::RING));
+    /// let mut rng = oorandom::Rand64::new(1);
+    /// // we have digits == rns_base.len(), so the gadget vector has entries exactly the "CRT unit vectors" ei with ei = 1 mod pi, ei = 0 mod pj for j != i
+    /// let digits = 3;
+    /// 
+    /// // build the right-hand side operand
+    /// let rhs = ring.random_element(|| rng.rand_u64());
+    /// let mut rhs_op = GadgetProductRhsOperand::new(ring.get_ring(), digits);
+    /// for i in 0..3 {
+    ///     // set the i-th component to `gadget_vector(i) * rhs`, for now without noise
+    ///     let component_at_i = ring.inclusion().mul_ref_map(&rhs, &rhs_op.gadget_vector(ring.get_ring()).at(i));
+    ///     rhs_op.set_rns_factor(ring.get_ring(), i, component_at_i);
+    /// }
+    /// 
+    /// // compute the gadget product
+    /// let lhs = ring.random_element(|| rng.rand_u64());
+    /// let lhs_op = GadgetProductLhsOperand::from_element(ring.get_ring(), &lhs, digits);
+    /// let actual = lhs_op.gadget_product(&rhs_op, ring.get_ring());
+    /// assert_el_eq!(&ring, &ring.mul_ref(&lhs, &rhs), actual);
+    /// ```
+    /// To demonstrate how this keeps small error terms small, consider the following variation of the previous example:
+    /// ```
+    /// # use feanor_math::ring::*;
+    /// # use feanor_math::assert_el_eq;
+    /// # use feanor_math::homomorphism::*;
+    /// # use feanor_math::rings::zn::*;
+    /// # use feanor_math::rings::zn::zn_64::*;
+    /// # use feanor_math::rings::finite::*;
+    /// # use feanor_math::rings::extension::FreeAlgebra;
+    /// # use feanor_math::integer::*;
+    /// # use feanor_math::primitive_int::StaticRing;
+    /// # use feanor_math::algorithms::fft::cooley_tuckey::CooleyTuckeyFFT;
+    /// # use feanor_math::rings::extension::FreeAlgebraStore;
+    /// # use feanor_math::seq::*;
+    /// # use he_ring::ciphertext_ring::double_rns_managed::*;
+    /// # use he_ring::number_ring::pow2_cyclotomic::Pow2CyclotomicNumberRing;
+    /// # use he_ring::gadget_product::*;
+    /// # let rns_base = vec![Zn::new(17), Zn::new(97), Zn::new(113)];
+    /// # let ring = ManagedDoubleRNSRingBase::new(Pow2CyclotomicNumberRing::new(16), zn_rns::Zn::new(rns_base.clone(), BigIntRing::RING));
+    /// # let mut rng = oorandom::Rand64::new(1);
+    /// # let digits = 3;
+    /// // build the ring just as before
+    /// let rhs = ring.random_element(|| rng.rand_u64());
+    /// let mut rhs_op = GadgetProductRhsOperand::new(ring.get_ring(), digits);
+    /// // this time include some error when building `rhs_op`
+    /// let mut create_small_error = || ring.get_ring().from_canonical_basis((0..ring.rank()).map(|i| ring.base_ring().int_hom().map((rng.rand_u64() % 3) as i32 - 1)));
+    /// for i in 0..3 {
+    ///     // set the i-th component to `gadget_vector(i) * rhs`, with possibly some error included
+    ///     let component_at_i = ring.inclusion().mul_ref_map(&rhs, &rhs_op.gadget_vector(ring.get_ring()).at(i));
+    ///     rhs_op.set_rns_factor(ring.get_ring(), i, ring.add(component_at_i, create_small_error()));
+    /// }
+    /// 
+    /// // compute the gadget product
+    /// let lhs = ring.random_element(|| rng.rand_u64());
+    /// let lhs_op = GadgetProductLhsOperand::from_element(ring.get_ring(), &lhs, digits);
+    /// let actual = lhs_op.gadget_product(&rhs_op, ring.get_ring());
+    /// 
+    /// // the final result should be close to `lhs * rhs`, except for some noise
+    /// let expected = ring.mul_ref(&lhs, &rhs);
+    /// let error = ring.sub(expected, actual);
+    /// let error_coefficients = ring.wrt_canonical_basis(&error);
+    /// let max_allowed_error = (113 / 2) * 8 * 3;
+    /// assert!((0..8).all(|i| int_cast(ring.base_ring().smallest_lift(error_coefficients.at(i)), StaticRing::<i64>::RING, BigIntRing::RING).abs() <= max_allowed_error));
+    /// ```
+    /// 
     pub fn gadget_product(&self, rhs: &GadgetProductRhsOperand<R>, ring: &R) -> R::Element {
         assert_eq!(self.element_decomposition.len(), rhs.scaled_element.len(), "Gadget product operands created w.r.t. different digit sets");
         return ring.inner_product_prepared(self.element_decomposition.iter().zip(rhs.scaled_element.iter()).filter_map(|(lhs, rhs)| rhs.as_ref().map(|rhs| (lhs, rhs))));
