@@ -335,6 +335,15 @@ impl<NumberRing, A> BGFVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, 
         A: Allocator + Clone
 {
     type NumberRing = NumberRing;
+    type PreparedMultiplicant = Self::Element;
+
+    fn mul_prepared(&self, lhs: &Self::PreparedMultiplicant, rhs: &Self::PreparedMultiplicant) -> Self::Element {
+        self.mul_ref(lhs, rhs)
+    }
+
+    fn prepare_multiplicant(&self, x: Self::Element) -> Self::PreparedMultiplicant {
+        x
+    }
 
     fn as_representation_wrt_small_generating_set<'a>(&'a self, x: &'a Self::Element) -> Submatrix<'a, AsFirstElement<ZnEl>, ZnEl> {
         self.base.as_matrix_wrt_small_basis(self.to_small_basis(x).unwrap_or(&self.zero))

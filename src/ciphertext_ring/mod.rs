@@ -37,6 +37,18 @@ pub mod double_rns_managed;
 pub trait BGFVCiphertextRing: RingBase + FreeAlgebra + RingExtension<BaseRing = zn_rns::Zn<Zn, BigIntRing>> {
 
     type NumberRing: HECyclotomicNumberRing;
+    type PreparedMultiplicant;
+
+    fn prepare_multiplicant(&self, x: Self::Element) -> Self::PreparedMultiplicant;
+
+    fn mul_prepared(&self, lhs: &Self::PreparedMultiplicant, rhs: &Self::PreparedMultiplicant) -> Self::Element;
+
+    fn inner_product_prepared<'a, I>(&self, parts: I) -> Self::Element
+        where I: IntoIterator<Item = (&'a Self::PreparedMultiplicant, &'a Self::PreparedMultiplicant)>,
+            Self: 'a
+    {
+        parts.into_iter().fold(self.zero(), |current, (lhs, rhs)| self.add(current, self.mul_prepared(lhs, rhs)))
+    }
 
     ///
     /// Returns a view on the underlying representation of `x`. 
@@ -81,11 +93,17 @@ pub trait BGFVCiphertextRing: RingBase + FreeAlgebra + RingExtension<BaseRing = 
     /// Computes `[lhs[0] * rhs[0], lhs[0] * rhs[1] + lhs[1] * rhs[0], lhs[1] * rhs[1]]`, but might be
     /// faster than the naive way of evaluating this.
     /// 
-    fn two_by_two_convolution(&self, lhs: [&Self::Element; 2], rhs: [&Self::Element; 2]) -> [Self::Element; 3] {
-        [
-            self.mul_ref(lhs[0], rhs[0]),
-            self.add(self.mul_ref(lhs[0], rhs[1]), self.mul_ref(lhs[1], rhs[0])),
-            self.mul_ref(lhs[1], rhs[1])
-        ]
+    fn two_by_two_convolution(&self, lhs: [Self::Element; 2], rhs: [Self::Element; 2]) -> [Self::Element; 3] {
+        record_time!(GLOBAL_TIME_RECORDER, "BGFVCiphertextRing::two_by_two_convolution", || {
+            let mut lhs_it = lhs.into_iter();
+            let mut rhs_it = rhs.into_iter();
+            let lhs: [_; 2] = std::array::from_fn(|_| self.prepare_multiplicant(lhs_it.next().unwrap()));
+            let rhs: [_; 2] = std::array::from_fn(|_| self.prepare_multiplicant(rhs_it.next().unwrap()));
+            [
+                self.mul_prepared(&lhs[0], &rhs[0]),
+                self.inner_product_prepared([(&lhs[0], &rhs[1]), (&lhs[1], &rhs[0])]),
+                self.mul_prepared(&lhs[1], &rhs[1])
+            ]
+        })
     }
 }

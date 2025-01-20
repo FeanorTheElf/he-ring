@@ -175,6 +175,8 @@ pub mod number_ring;
 /// 
 pub mod ciphertext_ring;
 
+pub mod gadget_product;
+
 ///
 /// The new implementation of arithmetic-galois circuits (i.e. circuits built
 /// from linear combination, multiplication and galois gates) that will soon
