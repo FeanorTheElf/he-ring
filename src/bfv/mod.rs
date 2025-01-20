@@ -64,21 +64,6 @@ use rand_distr::StandardNormal;
 
 pub mod bootstrap;
 
-#[cfg(feature = "use_hexl")]
-pub type DefaultConvolution = feanor_math_hexl::conv::HEXLConvolution;
-#[cfg(not(feature = "use_hexl"))]
-pub type DefaultConvolution = crate::ntt::ntt_convolution::NTTConv<Zn>;
-
-#[cfg(feature = "use_hexl")]
-pub type DefaultNegacyclicNTT = feanor_math_hexl::hexl::HEXLNegacyclicNTT;
-#[cfg(not(feature = "use_hexl"))]
-pub type DefaultNegacyclicNTT = RustNegacyclicNTT<Zn>;
-
-#[cfg(feature = "log_allocations")]
-pub type DefaultCiphertextAllocator = LoggingAllocator;
-#[cfg(not(feature = "log_allocations"))]
-pub type DefaultCiphertextAllocator = Global;
-
 pub type NumberRing<Params: BFVParams> = <Params::CiphertextRing as BXVCiphertextRing>::NumberRing;
 pub type PlaintextRing<Params: BFVParams> = NumberRingQuotient<NumberRing<Params>, Zn, Global>;
 pub type SecretKey<Params: BFVParams> = El<CiphertextRing<Params>>;

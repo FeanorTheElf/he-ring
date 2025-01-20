@@ -27,7 +27,7 @@ pub mod single_rns_ring;
 /// Contains [`double_rns_managed::ManagedDoubleRNSRing`], an implementation of the ring `R/qR` for suitable `q`
 /// that is based on [`double_rns_ring::DoubleRNSRing`].
 ///  
-// pub mod double_rns_managed;
+pub mod double_rns_managed;
 
 ///
 /// Trait for rings `R/qR` with a number ring `R` and modulus `q = p1 ... pr` represented as 

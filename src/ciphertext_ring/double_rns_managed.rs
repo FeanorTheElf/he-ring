@@ -1,5 +1,6 @@
 use std::alloc::Allocator;
 use std::alloc::Global;
+use std::cell::OnceCell;
 use std::cell::Ref;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -11,6 +12,9 @@ use feanor_math::assert_el_eq;
 use feanor_math::delegate::DelegateRing;
 use feanor_math::homomorphism::*;
 use feanor_math::integer::*;
+use feanor_math::matrix::AsFirstElement;
+use feanor_math::matrix::AsPointerToSlice;
+use feanor_math::matrix::Submatrix;
 use feanor_math::ring::*;
 use feanor_math::rings::extension::*;
 use feanor_math::rings::finite::FiniteRing;
@@ -20,23 +24,19 @@ use feanor_math::specialization::FiniteRingOperation;
 use feanor_math::specialization::FiniteRingSpecializable;
 use zn_64::Zn;
 use zn_64::ZnBase;
+use zn_64::ZnEl;
 
-use crate::bfv::DefaultConvolution;
 use crate::cyclotomic::CyclotomicGaloisGroupEl;
 use crate::cyclotomic::CyclotomicRing;
-use crate::ciphertext_ring::number_ring::HENumberRing;
-use crate::rnsconv::RNSOperation;
+use crate::number_ring::pow2_cyclotomic::Pow2CyclotomicNumberRing;
+use crate::number_ring::HECyclotomicNumberRing;
+use crate::number_ring::HENumberRing;
+use crate::DefaultConvolution;
 
-use super::bxv::BXVCiphertextRing;
-use super::decomposition_ring::NumberRingQuotient;
-use super::decomposition_ring::NumberRingQuotientBase;
+use super::double_rns_ring;
 use super::double_rns_ring::*;
-use super::gadget_product;
-use super::number_ring::HECyclotomicNumberRing;
-use super::number_ring::HENumberRingMod;
-use super::pow2_cyclotomic::Pow2CyclotomicNumberRing;
-use super::single_rns_ring::SingleRNSRing;
-use super::single_rns_ring::SingleRNSRingBase;
+use super::single_rns_ring::*;
+use super::BGFVCiphertextRing;
 
 ///
 /// Like [`DoubleRNSRing`] but stores element in whatever representation they
@@ -61,6 +61,7 @@ impl<NumberRing> ManagedDoubleRNSRingBase<NumberRing, Global>
     }
 }
 
+#[derive(Clone, Copy)]
 enum ManagedDoubleRNSElRepresentation {
     Sum,
     SmallBasis,
@@ -69,56 +70,22 @@ enum ManagedDoubleRNSElRepresentation {
     Zero
 }
 
-enum DoubleRNSElInternal<NumberRing, A = Global> 
+struct DoubleRNSElInternal<NumberRing, A = Global> 
     where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
-    Sum(SmallBasisEl<NumberRing, A>, DoubleRNSEl<NumberRing, A>),
-    SmallBasis(SmallBasisEl<NumberRing, A>),
-    DoubleRNS(DoubleRNSEl<NumberRing, A>),
-    Both(SmallBasisEl<NumberRing, A>, DoubleRNSEl<NumberRing, A>),
-    Zero
+    representation: RefCell<ManagedDoubleRNSElRepresentation>,
+    small_basis_repr: OnceCell<SmallBasisEl<NumberRing, A>>,
+    double_rns_repr_or_part: RefCell<Option<DoubleRNSEl<NumberRing, A>>>,
+    small_basis_part: RefCell<Option<SmallBasisEl<NumberRing, A>>>
 }
 
 impl<NumberRing, A> DoubleRNSElInternal<NumberRing, A> 
     where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
-    fn unwrap_sum(self) -> (SmallBasisEl<NumberRing, A>, DoubleRNSEl<NumberRing, A>) {
-        match self {
-            DoubleRNSElInternal::Sum(coeff, doublerns) => (coeff, doublerns),
-            _ => unreachable!()
-        }
-    }
-
-    fn unwrap_small_basis(self) -> SmallBasisEl<NumberRing, A> {
-        match self {
-            DoubleRNSElInternal::SmallBasis(coeff) => coeff,
-            _ => unreachable!()
-        }
-    }
-
-    fn unwrap_ref_small_basis<'a>(&'a self) -> &'a SmallBasisEl<NumberRing, A> {
-        match self {
-            DoubleRNSElInternal::SmallBasis(coeff) => coeff,
-            DoubleRNSElInternal::Both(coeff, _) => coeff,
-            _ => unreachable!()
-        }
-    }
-    
-    fn unwrap_doublerns(self) -> DoubleRNSEl<NumberRing, A> {
-        match self {
-            DoubleRNSElInternal::DoubleRNS(doublerns) => doublerns,
-            _ => unreachable!()
-        }
-    }
-
-    fn unwrap_ref_doublerns<'a>(&'a self) -> &'a DoubleRNSEl<NumberRing, A> {
-        match self {
-            DoubleRNSElInternal::DoubleRNS(doublerns) => doublerns,
-            DoubleRNSElInternal::Both(_, doublerns) => doublerns,
-            _ => unreachable!()
-        }
+    fn get_repr(&self) -> ManagedDoubleRNSElRepresentation {
+        *self.representation.borrow()
     }
 }
 
@@ -126,7 +93,7 @@ pub struct ManagedDoubleRNSEl<NumberRing, A = Global>
     where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
-    internal: Rc<RefCell<DoubleRNSElInternal<NumberRing, A>>>
+    internal: Rc<DoubleRNSElInternal<NumberRing, A>>
 }
 
 impl<NumberRing, A> ManagedDoubleRNSRingBase<NumberRing, A>
@@ -149,42 +116,30 @@ impl<NumberRing, A> ManagedDoubleRNSRingBase<NumberRing, A>
     /// `force_coeff_repr()`.
     /// 
     pub fn force_small_basis_repr(&self, value: &ManagedDoubleRNSEl<NumberRing, A>) {
-        if let Some(coeff) = self.to_small_basis(value) {
-            let new_value = self.base.clone_el_non_fft(&*coeff);
-            drop(coeff);
-            *value.internal.borrow_mut() = DoubleRNSElInternal::SmallBasis(new_value);
-        }
+        self.to_small_basis(value);
+        *value.internal.representation.borrow_mut() = ManagedDoubleRNSElRepresentation::SmallBasis;
+        *value.internal.small_basis_part.borrow_mut() = None;
+        *value.internal.double_rns_repr_or_part.borrow_mut() = None;
     }
 
-    fn get_repr(&self, value: &ManagedDoubleRNSEl<NumberRing, A>) -> ManagedDoubleRNSElRepresentation {
-        match &*value.internal.borrow() {
-            DoubleRNSElInternal::Sum(_, _) => ManagedDoubleRNSElRepresentation::Sum,
-            DoubleRNSElInternal::SmallBasis(_) => ManagedDoubleRNSElRepresentation::SmallBasis,
-            DoubleRNSElInternal::DoubleRNS(_) => ManagedDoubleRNSElRepresentation::DoubleRNS,
-            DoubleRNSElInternal::Both(_, _) => ManagedDoubleRNSElRepresentation::Both,
-            DoubleRNSElInternal::Zero => ManagedDoubleRNSElRepresentation::Zero
-        }
-    }
-
-    fn to_small_basis<'a>(&self, value: &'a ManagedDoubleRNSEl<NumberRing, A>) -> Option<Ref<'a, SmallBasisEl<NumberRing, A>>> {
-        match self.get_repr(value) {
+    fn to_small_basis<'a>(&self, value: &'a ManagedDoubleRNSEl<NumberRing, A>) -> Option<&'a SmallBasisEl<NumberRing, A>> {
+        match value.internal.get_repr() {
             ManagedDoubleRNSElRepresentation::Sum => {
-                let mut result = value.internal.borrow_mut();
-                let (mut coeff, doublerns) = std::mem::replace(&mut *result, DoubleRNSElInternal::Zero).unwrap_sum();
-                self.base.add_assign_non_fft(&mut coeff, &self.base.undo_fft(doublerns));
-                *result = DoubleRNSElInternal::SmallBasis(coeff);
-                drop(result);
-                return Some(Ref::map(value.internal.borrow(), |x| x.unwrap_ref_small_basis()));
+                let mut result = std::mem::replace(&mut *value.internal.small_basis_part.borrow_mut(), None).unwrap();
+                let double_rns_part = std::mem::replace(&mut *value.internal.double_rns_repr_or_part.borrow_mut(), None).unwrap();
+                self.base.add_assign_non_fft(&mut result, &self.base.undo_fft(double_rns_part));
+                value.internal.small_basis_repr.set(result).ok().unwrap();
+                *value.internal.representation.borrow_mut() = ManagedDoubleRNSElRepresentation::SmallBasis;
+                return Some(value.internal.small_basis_repr.get().unwrap());
             },
             ManagedDoubleRNSElRepresentation::SmallBasis | ManagedDoubleRNSElRepresentation::Both => {
-                return Some(Ref::map(value.internal.borrow(), |x| x.unwrap_ref_small_basis()));
+                return Some(value.internal.small_basis_repr.get().unwrap());
             },
             ManagedDoubleRNSElRepresentation::DoubleRNS => {
-                let mut result = value.internal.borrow_mut();
-                let coeff = self.base.undo_fft(self.base.clone_el(result.unwrap_ref_doublerns()));
-                *result = DoubleRNSElInternal::Both(coeff, std::mem::replace(&mut *result, DoubleRNSElInternal::Zero).unwrap_doublerns());
-                drop(result);
-                return Some(Ref::map(value.internal.borrow(), |x| x.unwrap_ref_small_basis()));
+                let result = self.base.undo_fft(self.base.clone_el(value.internal.double_rns_repr_or_part.borrow().as_ref().unwrap()));
+                value.internal.small_basis_repr.set(result).ok().unwrap();
+                *value.internal.representation.borrow_mut() = ManagedDoubleRNSElRepresentation::Both;
+                return Some(value.internal.small_basis_repr.get().unwrap());
             },
             ManagedDoubleRNSElRepresentation::Zero => {
                 return None;
@@ -193,24 +148,23 @@ impl<NumberRing, A> ManagedDoubleRNSRingBase<NumberRing, A>
     }
 
     fn to_doublerns<'a>(&self, value: &'a ManagedDoubleRNSEl<NumberRing, A>) -> Option<Ref<'a, DoubleRNSEl<NumberRing, A>>> {
-        match self.get_repr(value) {
+        match value.internal.get_repr() {
             ManagedDoubleRNSElRepresentation::Sum => {
-                let mut result = value.internal.borrow_mut();
-                let (coeff, mut doublerns) = std::mem::replace(&mut *result, DoubleRNSElInternal::Zero).unwrap_sum();
-                self.base.add_assign(&mut doublerns, self.base.do_fft(coeff));
-                *result = DoubleRNSElInternal::DoubleRNS(doublerns);
-                drop(result);
-                return Some(Ref::map(value.internal.borrow(), |x| x.unwrap_ref_doublerns()));
+                let coeff_part = std::mem::replace(&mut *value.internal.small_basis_part.borrow_mut(), None).unwrap();
+                let mut result = std::mem::replace(&mut *value.internal.double_rns_repr_or_part.borrow_mut(), None).unwrap();
+                self.base.add_assign(&mut result, self.base.do_fft(coeff_part));
+                *value.internal.double_rns_repr_or_part.borrow_mut() = Some(result);
+                *value.internal.representation.borrow_mut() = ManagedDoubleRNSElRepresentation::DoubleRNS;
+                return Some(Ref::map(value.internal.double_rns_repr_or_part.borrow(), |x| x.as_ref().unwrap()));
             },
             ManagedDoubleRNSElRepresentation::DoubleRNS | ManagedDoubleRNSElRepresentation::Both => {
-                return Some(Ref::map(value.internal.borrow(), |x| x.unwrap_ref_doublerns()));
+                return Some(Ref::map(value.internal.double_rns_repr_or_part.borrow(), |x| x.as_ref().unwrap()));
             },
             ManagedDoubleRNSElRepresentation::SmallBasis => {
-                let mut result = value.internal.borrow_mut();
-                let doublerns = self.base.do_fft(self.base.clone_el_non_fft(result.unwrap_ref_small_basis()));
-                *result = DoubleRNSElInternal::Both(std::mem::replace(&mut *result, DoubleRNSElInternal::Zero).unwrap_small_basis(), doublerns);
-                drop(result);
-                return Some(Ref::map(value.internal.borrow(), |x| x.unwrap_ref_doublerns()));
+                let result = self.base.do_fft(self.base.clone_el_non_fft(value.internal.small_basis_repr.get().unwrap()));
+                *value.internal.double_rns_repr_or_part.borrow_mut() = Some(result);
+                *value.internal.representation.borrow_mut() = ManagedDoubleRNSElRepresentation::Both;
+                return Some(Ref::map(value.internal.double_rns_repr_or_part.borrow(), |x| x.as_ref().unwrap()));
             },
             ManagedDoubleRNSElRepresentation::Zero => {
                 return None;
@@ -232,255 +186,164 @@ impl<NumberRing, A> ManagedDoubleRNSRingBase<NumberRing, A>
             F_coeff_un: FnOnce(&mut SmallBasisEl<NumberRing, A>),
             F_doublerns_un: FnOnce(&mut DoubleRNSEl<NumberRing, A>),
     {
-        match (&*lhs.internal.borrow(), &*rhs.internal.borrow()) {
-            (_, DoubleRNSElInternal::Zero) => self.clone_el(lhs),
-            (DoubleRNSElInternal::Zero, DoubleRNSElInternal::DoubleRNS(rhs_doublerns)) => {
-                let mut result_fft = self.base.clone_el(rhs_doublerns);
-                f4(&mut result_fft);
-                return ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::DoubleRNS(result_fft))) };
+        let sum = |x1: SmallBasisEl<NumberRing, A>, x2: DoubleRNSEl<NumberRing, A>| ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal {
+            double_rns_repr_or_part: RefCell::new(Some(x2)),
+            representation: RefCell::new(ManagedDoubleRNSElRepresentation::Sum),
+            small_basis_repr: OnceCell::new(),
+            small_basis_part: RefCell::new(Some(x1))
+        }) };
+        let double_rns = |x: DoubleRNSEl<NumberRing, A>| ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal {
+            double_rns_repr_or_part: RefCell::new(Some(x)),
+            representation: RefCell::new(ManagedDoubleRNSElRepresentation::DoubleRNS),
+            small_basis_repr: OnceCell::new(),
+            small_basis_part: RefCell::new(None)
+        }) };
+        let small_basis = |x: SmallBasisEl<NumberRing, A>| ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal {
+            double_rns_repr_or_part: RefCell::new(None),
+            representation: RefCell::new(ManagedDoubleRNSElRepresentation::SmallBasis),
+            small_basis_repr: {
+                let result = OnceCell::new();
+                result.set(x).ok().unwrap();
+                result
             },
-            (DoubleRNSElInternal::Zero, DoubleRNSElInternal::SmallBasis(rhs_coeff)) => {
-                let mut result_coeff = self.base.clone_el_non_fft(rhs_coeff);
+            small_basis_part: RefCell::new(None)
+        }) };
+        let both = |x1: SmallBasisEl<NumberRing, A>, x2: DoubleRNSEl<NumberRing, A>| ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal {
+            double_rns_repr_or_part: RefCell::new(Some(x2)),
+            representation: RefCell::new(ManagedDoubleRNSElRepresentation::Both),
+            small_basis_repr: {
+                let result = OnceCell::new();
+                result.set(x1).ok().unwrap();
+                result
+            },
+            small_basis_part: RefCell::new(None)
+        }) };
+
+        match (lhs.internal.get_repr(), rhs.internal.get_repr()) {
+            (_, ManagedDoubleRNSElRepresentation::Zero) => self.clone_el(lhs),
+            (ManagedDoubleRNSElRepresentation::Zero, ManagedDoubleRNSElRepresentation::DoubleRNS) => {
+                let mut result_fft = self.base.clone_el(rhs.internal.double_rns_repr_or_part.borrow().as_ref().unwrap());
+                f4(&mut result_fft);
+                return double_rns(result_fft);
+            },
+            (ManagedDoubleRNSElRepresentation::Zero, ManagedDoubleRNSElRepresentation::SmallBasis) => {
+                let mut result_coeff = self.base.clone_el_non_fft(rhs.internal.small_basis_repr.get().unwrap());
                 f3(&mut result_coeff);
-                return ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::SmallBasis(result_coeff))) };
+                return small_basis(result_coeff);
             },
-            (DoubleRNSElInternal::Zero, DoubleRNSElInternal::Sum(rhs_coeff, rhs_doublerns)) => {
-                let mut result_fft = self.base.clone_el(rhs_doublerns);
-                let mut result_coeff = self.base.clone_el_non_fft(rhs_coeff);
+            (ManagedDoubleRNSElRepresentation::Zero, ManagedDoubleRNSElRepresentation::Sum) => {
+                let mut result_fft = self.base.clone_el(rhs.internal.double_rns_repr_or_part.borrow().as_ref().unwrap());
+                let mut result_coeff = self.base.clone_el_non_fft(rhs.internal.small_basis_part.borrow().as_ref().unwrap());
                 f3(&mut result_coeff);
                 f4(&mut result_fft);
-                return ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::Sum(result_coeff, result_fft))) };
+                return sum(result_coeff, result_fft);
             },
-            (DoubleRNSElInternal::Zero, DoubleRNSElInternal::Both(rhs_coeff, rhs_doublerns)) => {
-                let mut result_fft = self.base.clone_el(rhs_doublerns);
-                let mut result_coeff = self.base.clone_el_non_fft(rhs_coeff);
+            (ManagedDoubleRNSElRepresentation::Zero, ManagedDoubleRNSElRepresentation::Both) => {
+                let mut result_fft = self.base.clone_el(rhs.internal.double_rns_repr_or_part.borrow().as_ref().unwrap());
+                let mut result_coeff = self.base.clone_el_non_fft(rhs.internal.small_basis_repr.get().unwrap());
                 f3(&mut result_coeff);
                 f4(&mut result_fft);
-                return ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::Both(result_coeff, result_fft))) };
+                return both(result_coeff, result_fft);
             },
-            (DoubleRNSElInternal::Sum(lhs_coeff, lhs_doublerns), DoubleRNSElInternal::Sum(rhs_coeff, rhs_doublerns)) => {
-                let mut result_coeff = self.base.clone_el_non_fft(lhs_coeff);
-                let mut result_fft = self.base.clone_el(lhs_doublerns);
-                f1(&mut result_coeff, rhs_coeff);
-                f2(&mut result_fft, rhs_doublerns);
-                return ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::Sum(result_coeff, result_fft))) };
+            (ManagedDoubleRNSElRepresentation::Sum, ManagedDoubleRNSElRepresentation::Sum) => {
+                let mut result_fft = self.base.clone_el(lhs.internal.double_rns_repr_or_part.borrow().as_ref().unwrap());
+                let mut result_coeff = self.base.clone_el_non_fft(lhs.internal.small_basis_part.borrow().as_ref().unwrap());
+                f1(&mut result_coeff, rhs.internal.small_basis_part.borrow().as_ref().unwrap());
+                f2(&mut result_fft, rhs.internal.double_rns_repr_or_part.borrow().as_ref().unwrap());
+                return sum(result_coeff, result_fft);
             },
-            (DoubleRNSElInternal::Sum(lhs_coeff, lhs_doublerns), DoubleRNSElInternal::SmallBasis(rhs_coeff)) => {
-                let mut result_coeff = self.base.clone_el_non_fft(lhs_coeff);
-                let result_fft = self.base.clone_el(lhs_doublerns);
-                f1(&mut result_coeff, rhs_coeff);
-                return ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::Sum(result_coeff, result_fft))) };
+            (ManagedDoubleRNSElRepresentation::Sum, ManagedDoubleRNSElRepresentation::SmallBasis) => {
+                let mut result_coeff = self.base.clone_el_non_fft(lhs.internal.small_basis_part.borrow().as_ref().unwrap());
+                let result_fft = self.base.clone_el(lhs.internal.double_rns_repr_or_part.borrow().as_ref().unwrap());
+                f1(&mut result_coeff, rhs.internal.small_basis_repr.get().unwrap());
+                return sum(result_coeff, result_fft);
             },
-            (DoubleRNSElInternal::Sum(lhs_coeff, lhs_doublerns), DoubleRNSElInternal::DoubleRNS(rhs_doublerns)) => {
-                let result_coeff = self.base.clone_el_non_fft(lhs_coeff);
-                let mut result_fft = self.base.clone_el(lhs_doublerns);
-                f2(&mut result_fft, rhs_doublerns);
-                return ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::Sum(result_coeff, result_fft))) };
+            (ManagedDoubleRNSElRepresentation::Sum, ManagedDoubleRNSElRepresentation::DoubleRNS) => {
+                let result_coeff = self.base.clone_el_non_fft(lhs.internal.small_basis_part.borrow().as_ref().unwrap());
+                let mut result_fft = self.base.clone_el(lhs.internal.double_rns_repr_or_part.borrow().as_ref().unwrap());
+                f2(&mut result_fft, rhs.internal.double_rns_repr_or_part.borrow().as_ref().unwrap());
+                return sum(result_coeff, result_fft);
             },
-            (DoubleRNSElInternal::Sum(lhs_coeff, lhs_doublerns), DoubleRNSElInternal::Both(rhs_coeff, _)) => {
-                let mut result_coeff = self.base.clone_el_non_fft(lhs_coeff);
-                let result_fft = self.base.clone_el(lhs_doublerns);
-                f1(&mut result_coeff, rhs_coeff);
-                return ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::Sum(result_coeff, result_fft))) };
+            (ManagedDoubleRNSElRepresentation::Sum, ManagedDoubleRNSElRepresentation::Both) => {
+                let mut result_coeff = self.base.clone_el_non_fft(lhs.internal.small_basis_part.borrow().as_ref().unwrap());
+                let result_fft = self.base.clone_el(lhs.internal.double_rns_repr_or_part.borrow().as_ref().unwrap());
+                f1(&mut result_coeff, rhs.internal.small_basis_repr.get().unwrap());
+                return sum(result_coeff, result_fft);
             },
-            (DoubleRNSElInternal::SmallBasis(lhs_coeff), DoubleRNSElInternal::Sum(rhs_coeff, rhs_doublerns)) => {
-                let mut result_coeff = self.base.clone_el_non_fft(lhs_coeff);
-                let mut result_fft = self.base.clone_el(rhs_doublerns);
-                f1(&mut result_coeff, rhs_coeff);
+            (ManagedDoubleRNSElRepresentation::SmallBasis, ManagedDoubleRNSElRepresentation::Sum) => {
+                let mut result_fft = self.base.clone_el(rhs.internal.double_rns_repr_or_part.borrow().as_ref().unwrap());
+                let mut result_coeff = self.base.clone_el_non_fft(lhs.internal.small_basis_repr.get().unwrap());
+                f1(&mut result_coeff, rhs.internal.small_basis_part.borrow().as_ref().unwrap());
                 f4(&mut result_fft);
-                return ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::Sum(result_coeff, result_fft))) };
+                return sum(result_coeff, result_fft);
             },
-            (DoubleRNSElInternal::SmallBasis(lhs_coeff), DoubleRNSElInternal::SmallBasis(rhs_coeff)) => {
-                let mut result_coeff = self.base.clone_el_non_fft(lhs_coeff);
-                f1(&mut result_coeff, rhs_coeff);
-                return ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::SmallBasis(result_coeff))) };
+            (ManagedDoubleRNSElRepresentation::SmallBasis, ManagedDoubleRNSElRepresentation::SmallBasis) | 
+                (ManagedDoubleRNSElRepresentation::SmallBasis, ManagedDoubleRNSElRepresentation::Both) | 
+                (ManagedDoubleRNSElRepresentation::Both, ManagedDoubleRNSElRepresentation::SmallBasis) => 
+            {
+                let mut result_coeff = self.base.clone_el_non_fft(lhs.internal.small_basis_repr.get().unwrap());
+                f1(&mut result_coeff, rhs.internal.small_basis_repr.get().unwrap());
+                return small_basis(result_coeff);
             },
-            (DoubleRNSElInternal::SmallBasis(lhs_coeff), DoubleRNSElInternal::DoubleRNS(rhs_doublerns)) => {
-                let result_coeff = self.base.clone_el_non_fft(lhs_coeff);
-                let mut result_fft = self.base.clone_el(rhs_doublerns);
+            (ManagedDoubleRNSElRepresentation::SmallBasis, ManagedDoubleRNSElRepresentation::DoubleRNS) => {
+                let result_coeff = self.base.clone_el_non_fft(lhs.internal.small_basis_repr.get().unwrap());
+                let mut result_fft = self.base.clone_el(rhs.internal.double_rns_repr_or_part.borrow().as_ref().unwrap());
                 f4(&mut result_fft);
-                return ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::Sum(result_coeff, result_fft))) };
+                return sum(result_coeff, result_fft);
             },
-            (DoubleRNSElInternal::SmallBasis(lhs_coeff), DoubleRNSElInternal::Both(rhs_coeff, _)) => {
-                let mut result_coeff = self.base.clone_el_non_fft(lhs_coeff);
-                f1(&mut result_coeff, rhs_coeff);
-                return ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::SmallBasis(result_coeff))) };
-            },
-            (DoubleRNSElInternal::DoubleRNS(lhs_doublerns), DoubleRNSElInternal::Sum(rhs_coeff, rhs_doublerns)) => {
-                let mut result_coeff = self.base.clone_el_non_fft(rhs_coeff);
-                let mut result_fft = self.base.clone_el(lhs_doublerns);
-                f2(&mut result_fft, rhs_doublerns);
+            (ManagedDoubleRNSElRepresentation::DoubleRNS, ManagedDoubleRNSElRepresentation::Sum) => {
+                let mut result_fft = self.base.clone_el(lhs.internal.double_rns_repr_or_part.borrow().as_ref().unwrap());
+                let mut result_coeff = self.base.clone_el_non_fft(rhs.internal.small_basis_part.borrow().as_ref().unwrap());
+                f2(&mut result_fft, rhs.internal.double_rns_repr_or_part.borrow().as_ref().unwrap());
                 f3(&mut result_coeff);
-                return ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::Sum(result_coeff, result_fft))) };
+                return sum(result_coeff, result_fft);
             },
-            (DoubleRNSElInternal::DoubleRNS(lhs_doublerns), DoubleRNSElInternal::SmallBasis(rhs_coeff)) => {
-                let mut result_coeff = self.base.clone_el_non_fft(rhs_coeff);
-                let result_fft = self.base.clone_el(lhs_doublerns);
+            (ManagedDoubleRNSElRepresentation::DoubleRNS, ManagedDoubleRNSElRepresentation::SmallBasis) => {
+                let mut result_coeff = self.base.clone_el_non_fft(rhs.internal.small_basis_repr.get().unwrap());
+                let result_fft = self.base.clone_el(lhs.internal.double_rns_repr_or_part.borrow().as_ref().unwrap());
                 f3(&mut result_coeff);
-                return ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::Sum(result_coeff, result_fft))) };
+                return sum(result_coeff, result_fft);
             },
-            (DoubleRNSElInternal::DoubleRNS(lhs_doublerns), DoubleRNSElInternal::DoubleRNS(rhs_doublerns)) => {
-                let mut result_fft = self.base.clone_el(lhs_doublerns);
-                f2(&mut result_fft, rhs_doublerns);
-                return ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::DoubleRNS(result_fft))) };
+            (ManagedDoubleRNSElRepresentation::DoubleRNS, ManagedDoubleRNSElRepresentation::DoubleRNS) | 
+                (ManagedDoubleRNSElRepresentation::DoubleRNS, ManagedDoubleRNSElRepresentation::Both) | 
+                (ManagedDoubleRNSElRepresentation::Both, ManagedDoubleRNSElRepresentation::DoubleRNS) =>
+            {
+                let mut result_fft = self.base.clone_el(lhs.internal.double_rns_repr_or_part.borrow().as_ref().unwrap());
+                f2(&mut result_fft, rhs.internal.double_rns_repr_or_part.borrow().as_ref().unwrap());
+                return double_rns(result_fft);
             },
-            (DoubleRNSElInternal::DoubleRNS(lhs_doublerns), DoubleRNSElInternal::Both(_, rhs_doublerns)) => {
-                let mut result_fft = self.base.clone_el(lhs_doublerns);
-                f2(&mut result_fft, rhs_doublerns);
-                return ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::DoubleRNS(result_fft))) };
-            },
-            (DoubleRNSElInternal::Both(lhs_coeff, _), DoubleRNSElInternal::Sum(rhs_coeff, rhs_doublerns)) => {
-                let mut result_coeff = self.base.clone_el_non_fft(lhs_coeff);
-                let mut result_fft = self.base.clone_el(rhs_doublerns);
-                f1(&mut result_coeff, rhs_coeff);
+            (ManagedDoubleRNSElRepresentation::Both, ManagedDoubleRNSElRepresentation::Sum) => {
+                let mut result_fft = self.base.clone_el(rhs.internal.double_rns_repr_or_part.borrow().as_ref().unwrap());
+                let mut result_coeff = self.base.clone_el_non_fft(lhs.internal.small_basis_repr.get().unwrap());
+                f1(&mut result_coeff, rhs.internal.small_basis_part.borrow().as_ref().unwrap());
                 f4(&mut result_fft);
-                return ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::Sum(result_coeff, result_fft))) };
+                return sum(result_coeff, result_fft);
             },
-            (DoubleRNSElInternal::Both(lhs_coeff, _), DoubleRNSElInternal::SmallBasis(rhs_coeff)) => {
-                let mut result_coeff = self.base.clone_el_non_fft(lhs_coeff);
-                f1(&mut result_coeff, rhs_coeff);
-                return ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::SmallBasis(result_coeff))) };
-            },
-            (DoubleRNSElInternal::Both(_, lhs_doublerns), DoubleRNSElInternal::DoubleRNS(rhs_doublerns)) => {
-                let mut result_fft = self.base.clone_el(lhs_doublerns);
-                f2(&mut result_fft, rhs_doublerns);
-                return ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::DoubleRNS(result_fft))) };
-            },
-            (DoubleRNSElInternal::Both(lhs_coeff, lhs_doublerns), DoubleRNSElInternal::Both(rhs_coeff, rhs_doublerns)) => {
-                let mut result_coeff = self.base.clone_el_non_fft(lhs_coeff);
-                let mut result_fft = self.base.clone_el(lhs_doublerns);
-                f1(&mut result_coeff, rhs_coeff);
-                f2(&mut result_fft, rhs_doublerns);
-                return ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::Both(result_coeff, result_fft))) };
+            (ManagedDoubleRNSElRepresentation::Both, ManagedDoubleRNSElRepresentation::Both) => {
+                let mut result_fft = self.base.clone_el(lhs.internal.double_rns_repr_or_part.borrow().as_ref().unwrap());
+                let mut result_coeff = self.base.clone_el_non_fft(lhs.internal.small_basis_repr.get().unwrap());
+                f1(&mut result_coeff, rhs.internal.small_basis_repr.get().unwrap());
+                f2(&mut result_fft, rhs.internal.double_rns_repr_or_part.borrow().as_ref().unwrap());
+                return both(result_coeff, result_fft);
             },
         }
     }
 }
 
-pub struct GadgetProductRhsOperand<'a, NumberRing, A> 
-    where NumberRing: HENumberRing,
-        A: Allocator + Clone
-{
-    base: gadget_product::double_rns::GadgetProductRhsOperand<'a, NumberRing, A>
-}
-
-pub struct GadgetProductLhsOperand<'a, NumberRing, A> 
-    where NumberRing: HENumberRing,
-        A: Allocator + Clone
-{
-    base: gadget_product::double_rns::GadgetProductLhsOperand<'a, NumberRing, A>
-}
-
-impl<NumberRing, A> BXVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, A> 
+impl<NumberRing, A> BGFVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, A> 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone
 {
     type NumberRing = NumberRing;
-    type GadgetProductLhsOperand<'a> = GadgetProductLhsOperand<'a, NumberRing, A>
-        where Self: 'a;
-    type GadgetProductRhsOperand<'a> = GadgetProductRhsOperand<'a, NumberRing, A>
-        where Self: 'a;
 
-    fn number_ring(&self) -> &Self::NumberRing {
-        self.base.number_ring()
+    fn as_representation_wrt_small_generating_set<'a>(&'a self, x: &'a Self::Element) -> Submatrix<'a, AsFirstElement<ZnEl>, ZnEl> {
+        self.base.as_matrix_wrt_small_basis(self.to_small_basis(x).unwrap_or(&self.zero))
     }
 
-    fn sample_from_coefficient_distribution<G: FnMut() -> i32>(&self, distribution: G) -> ManagedDoubleRNSEl<NumberRing, A> {
-        ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::SmallBasis(self.base.sample_from_coefficient_distribution(distribution)))) }
-    }
-    
-    fn perform_rns_op_from<Op>(
-        &self, 
-        from: &Self, 
-        el: &ManagedDoubleRNSEl<NumberRing, A>, 
-        op: &Op
-    ) -> ManagedDoubleRNSEl<NumberRing, A> 
-        where NumberRing: HENumberRing,
-            Op: RNSOperation<RingType = zn_64::ZnBase>
+    fn from_representation_wrt_small_generating_set<V>(&self, data: Submatrix<V, ZnEl>) -> Self::Element
+        where V: AsPointerToSlice<ZnEl>
     {
-        let result = if let Some(value) = from.to_small_basis(el) {
-            self.base.perform_rns_op_from(&from.base, &*value, op)
-        } else {
-            self.base.perform_rns_op_from(&from.base, &from.zero, op)
-        };
-        ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::SmallBasis(result))) }
-    }
-    
-    fn exact_convert_from_decompring<ZnTy, A2>(
-        &self, 
-        from: &NumberRingQuotient<NumberRing, ZnTy, A2>, 
-        element: &<NumberRingQuotientBase<NumberRing, ZnTy, A2> as RingBase>::Element
-    ) -> ManagedDoubleRNSEl<NumberRing, A> 
-        where NumberRing: HENumberRing,
-            ZnTy: RingStore<Type = zn_64::ZnBase> + Clone,
-            A2: Allocator + Clone
-    {
-        ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::SmallBasis(self.base.exact_convert_from_decompring(from, element)))) }
-    }
-    
-    fn perform_rns_op_to_decompring<ZnTy, A2, Op>(
-        &self, 
-        to: &NumberRingQuotient<NumberRing, ZnTy, A2>, 
-        element: &ManagedDoubleRNSEl<NumberRing, A>, 
-        op: &Op
-    ) -> <NumberRingQuotientBase<NumberRing, ZnTy, A2> as RingBase>::Element 
-        where NumberRing: HENumberRing,
-            ZnTy: RingStore<Type = zn_64::ZnBase> + Clone,
-            A2: Allocator + Clone,
-            Op: RNSOperation<RingType = zn_64::ZnBase>
-    {
-        if let Some(value) = self.to_small_basis(element) {
-            return self.base.perform_rns_op_to_decompring(to, &*value, op);
-        } else {
-            return self.base.perform_rns_op_to_decompring(to, &self.zero, op);
-        }
-    }
-
-    fn gadget_product<'a, 'b>(&self, lhs: &Self::GadgetProductLhsOperand<'a>, rhs: &Self::GadgetProductRhsOperand<'b>) -> Self::Element
-        where Self: 'a + 'b
-    {
-        match self.base.preferred_output_repr(&lhs.base, &rhs.base) {
-            gadget_product::double_rns::ElRepr::Coeff => ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::SmallBasis(self.base.gadget_product_coeff(&lhs.base, &rhs.base)))) },
-            gadget_product::double_rns::ElRepr::NTT => ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::DoubleRNS(self.base.gadget_product_ntt(&lhs.base, &rhs.base)))) }
-        }
-    }
-
-    fn gadget_product_rhs_empty<'a>(&'a self, digits: usize) -> Self::GadgetProductRhsOperand<'a> {
-        GadgetProductRhsOperand {
-            base: gadget_product::double_rns::GadgetProductRhsOperand::create_empty::<false>(&self.base, digits)
-        }
-    }
-
-    fn to_gadget_product_lhs<'a>(&'a self, el: Self::Element, digits: usize) -> Self::GadgetProductLhsOperand<'a> {
-        if let Some(nonzero) = self.to_small_basis(&el) {
-            GadgetProductLhsOperand {
-                base: gadget_product::double_rns::GadgetProductLhsOperand::create_from_element(&self.base, digits, self.base.clone_el_non_fft(&*nonzero))
-            }
-        } else {
-            GadgetProductLhsOperand {
-                base: gadget_product::double_rns::GadgetProductLhsOperand::create_from_element(&self.base, digits, self.base.clone_el_non_fft(&self.zero))
-            }
-        }
-    }
-
-    fn gadget_vector<'a, 'b>(&'a self, rhs_operand: &'a Self::GadgetProductRhsOperand<'b>) -> &'a [std::ops::Range<usize>] {
-        rhs_operand.base.gadget_vector()
-    }
-
-    fn set_rns_factor<'b>(&self, rhs_operand: &mut Self::GadgetProductRhsOperand<'b>, i: usize, el: Self::Element)
-        where Self: 'b
-    {
-        if let Some(nonzero) = self.to_small_basis(&el) {
-            rhs_operand.base.set_rns_factor(i, self.base.clone_el_non_fft(&*nonzero))
-        } else {
-            rhs_operand.base.set_rns_factor(i, self.base.clone_el_non_fft(&self.zero))
-        }
-    }
-
-    fn apply_galois_action_many_gadget_product_operand<'a>(&'a self, x: &Self::GadgetProductLhsOperand<'a>, gs: &[CyclotomicGaloisGroupEl]) -> Vec<Self::GadgetProductLhsOperand<'a>> {
-        gs.iter().map(|g| GadgetProductLhsOperand {
-            base: x.base.apply_galois_action(&self.base, *g)
-        }).collect()
+        unimplemented!()
     }
 }
 
@@ -498,7 +361,12 @@ impl<NumberRing, A> CyclotomicRing for ManagedDoubleRNSRingBase<NumberRing, A>
         } else {
             return self.zero();
         };
-        ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::DoubleRNS(result))) }
+        ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal { 
+            representation: RefCell::new(ManagedDoubleRNSElRepresentation::DoubleRNS), 
+            small_basis_repr: OnceCell::new(), 
+            double_rns_repr_or_part: RefCell::new(Some(result)), 
+            small_basis_part: RefCell::new(None)
+        }) }
     }
 }
 
@@ -522,7 +390,7 @@ impl<NumberRing, A> RingBase for ManagedDoubleRNSRingBase<NumberRing, A>
     }
 
     fn eq_el(&self, lhs: &Self::Element, rhs: &Self::Element) -> bool {
-        match (self.get_repr(lhs), self.get_repr(rhs)) {
+        match (lhs.internal.get_repr(), rhs.internal.get_repr()) {
             (ManagedDoubleRNSElRepresentation::Zero, _) | (_, ManagedDoubleRNSElRepresentation::Zero) => self.is_zero(lhs),
             (ManagedDoubleRNSElRepresentation::SmallBasis, _) | (_, ManagedDoubleRNSElRepresentation::SmallBasis) => self.base.eq_el_non_fft(&*self.to_small_basis(lhs).unwrap(), &*self.to_small_basis(rhs).unwrap()),
             _ => self.base.eq_el(&*self.to_doublerns(lhs).unwrap(), &*self.to_doublerns(rhs).unwrap())
@@ -530,7 +398,7 @@ impl<NumberRing, A> RingBase for ManagedDoubleRNSRingBase<NumberRing, A>
     }
 
     fn is_zero(&self, value: &Self::Element) -> bool {
-        match self.get_repr(value) {
+        match value.internal.get_repr() {
             ManagedDoubleRNSElRepresentation::Zero => true,
             ManagedDoubleRNSElRepresentation::Sum | ManagedDoubleRNSElRepresentation::SmallBasis | ManagedDoubleRNSElRepresentation::Both => self.base.eq_el_non_fft(&*self.to_small_basis(value).unwrap(), &self.zero),
             ManagedDoubleRNSElRepresentation::DoubleRNS => self.base.is_zero(&*self.to_doublerns(value).unwrap())
@@ -538,7 +406,12 @@ impl<NumberRing, A> RingBase for ManagedDoubleRNSRingBase<NumberRing, A>
     }
 
     fn zero(&self) -> Self::Element {
-        ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::Zero)) }
+        ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal { 
+            representation: RefCell::new(ManagedDoubleRNSElRepresentation::Zero), 
+            small_basis_repr: OnceCell::new(), 
+            double_rns_repr_or_part: RefCell::new(None), 
+            small_basis_part: RefCell::new(None)
+        }) }
     }
     
     fn dbg_within<'a>(&self, value: &Self::Element, out: &mut std::fmt::Formatter<'a>, env: EnvBindingStrength) -> std::fmt::Result {
@@ -556,7 +429,12 @@ impl<NumberRing, A> RingBase for ManagedDoubleRNSRingBase<NumberRing, A>
             return
         };
         self.base.square(&mut result);
-        value.internal = Rc::new(RefCell::new(DoubleRNSElInternal::DoubleRNS(result)));
+        value.internal = Rc::new(DoubleRNSElInternal { 
+            representation: RefCell::new(ManagedDoubleRNSElRepresentation::DoubleRNS), 
+            small_basis_repr: OnceCell::new(), 
+            double_rns_repr_or_part: RefCell::new(Some(result)), 
+            small_basis_part: RefCell::new(None)
+        });
     }
 
     fn negate(&self, value: Self::Element) -> Self::Element {
@@ -609,7 +487,12 @@ impl<NumberRing, A> RingBase for ManagedDoubleRNSRingBase<NumberRing, A>
         } else {
             return self.zero();
         };
-        return ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::DoubleRNS(result))) };
+        return ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal { 
+            representation: RefCell::new(ManagedDoubleRNSElRepresentation::DoubleRNS), 
+            small_basis_repr: OnceCell::new(), 
+            double_rns_repr_or_part: RefCell::new(Some(result)), 
+            small_basis_part: RefCell::new(None)
+        }) };
     }
 
     fn pow_gen<R: IntegerRingStore>(&self, x: Self::Element, power: &El<R>, integers: R) -> Self::Element 
@@ -620,7 +503,12 @@ impl<NumberRing, A> RingBase for ManagedDoubleRNSRingBase<NumberRing, A>
         } else {
             return self.zero();
         };
-        return ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::DoubleRNS(result))) };
+        return ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal { 
+            representation: RefCell::new(ManagedDoubleRNSElRepresentation::DoubleRNS), 
+            small_basis_repr: OnceCell::new(), 
+            double_rns_repr_or_part: RefCell::new(Some(result)), 
+            small_basis_part: RefCell::new(None)
+        }) };
     }
 
     fn characteristic<I: IntegerRingStore + Copy>(&self, ZZ: I) -> Option<El<I>>
@@ -735,7 +623,16 @@ impl<NumberRing, A> RingExtension for ManagedDoubleRNSRingBase<NumberRing, A>
     fn from(&self, x: El<Self::BaseRing>) -> Self::Element {
         let result_fft = self.base.from(self.base_ring().clone_el(&x));
         let result_coeff = self.base.from_non_fft(x);
-        return ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::Both(result_coeff, result_fft))) };
+        return ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal {
+            double_rns_repr_or_part: RefCell::new(Some(result_fft)),
+            representation: RefCell::new(ManagedDoubleRNSElRepresentation::Both),
+            small_basis_part: RefCell::new(None),
+            small_basis_repr: {
+                let result = OnceCell::new();
+                result.set(result_coeff).ok().unwrap();
+                result
+            }
+        })};
     }
 }
 
@@ -748,7 +645,12 @@ impl<NumberRing, A> FreeAlgebra for ManagedDoubleRNSRingBase<NumberRing, A>
 
     fn canonical_gen(&self) -> Self::Element {
         let result = self.base.canonical_gen();
-        return ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::DoubleRNS(result))) };
+        return ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal {
+            double_rns_repr_or_part: RefCell::new(Some(result)),
+            representation: RefCell::new(ManagedDoubleRNSElRepresentation::DoubleRNS),
+            small_basis_part: RefCell::new(None),
+            small_basis_repr: OnceCell::new()
+        })};
     }
 
     fn rank(&self) -> usize {
@@ -768,7 +670,12 @@ impl<NumberRing, A> FreeAlgebra for ManagedDoubleRNSRingBase<NumberRing, A>
             V::IntoIter: DoubleEndedIterator
     {
         let result = self.base.from_canonical_basis(vec);
-        return ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::DoubleRNS(result))) };
+        return ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal {
+            double_rns_repr_or_part: RefCell::new(Some(result)),
+            representation: RefCell::new(ManagedDoubleRNSElRepresentation::DoubleRNS),
+            small_basis_part: RefCell::new(None),
+            small_basis_repr: OnceCell::new()
+        })};
     }
 }
 
@@ -793,13 +700,23 @@ impl<NumberRing, A> FiniteRing for ManagedDoubleRNSRingBase<NumberRing, A>
             where NumberRing: HENumberRing,
                 A: Allocator + Clone
         {
-            ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::DoubleRNS(x))) }
+            return ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal {
+                double_rns_repr_or_part: RefCell::new(Some(x)),
+                representation: RefCell::new(ManagedDoubleRNSElRepresentation::DoubleRNS),
+                small_basis_part: RefCell::new(None),
+                small_basis_repr: OnceCell::new()
+            })};
         }
         self.base.elements().map(from_doublerns)
     }
 
     fn random_element<G: FnMut() -> u64>(&self, rng: G) -> <Self as RingBase>::Element {
-        ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::DoubleRNS(self.base.random_element(rng)))) }
+        return ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal {
+            double_rns_repr_or_part: RefCell::new(Some(self.base.random_element(rng))),
+            representation: RefCell::new(ManagedDoubleRNSElRepresentation::DoubleRNS),
+            small_basis_part: RefCell::new(None),
+            small_basis_repr: OnceCell::new()
+        })};
     }
 
     fn size<I: IntegerRingStore + Copy>(&self, ZZ: I) -> Option<El<I>>
@@ -825,7 +742,16 @@ impl<NumberRing, A1, A2, C> CanHomFrom<SingleRNSRingBase<NumberRing, A1, C>> for
         if from.is_zero(&el) {
             return self.zero();
         }
-        ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::SmallBasis(self.base.map_in_from_singlerns(from, el, hom)))) }
+        return ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal {
+            double_rns_repr_or_part: RefCell::new(None),
+            representation: RefCell::new(ManagedDoubleRNSElRepresentation::SmallBasis),
+            small_basis_part: RefCell::new(None),
+            small_basis_repr: {
+                let result = OnceCell::new();
+                result.set(self.base.map_in_from_singlerns(from, el, hom)).ok().unwrap();
+                result
+            }
+        })};
     }
 }
 
@@ -844,7 +770,12 @@ impl<NumberRing, A1, A2> CanHomFrom<DoubleRNSRingBase<NumberRing, A1>> for Manag
         if from.is_zero(&el) {
             return self.zero();
         }
-        ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::DoubleRNS(self.base.map_in(from, el, hom)))) }
+        return ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal {
+            double_rns_repr_or_part: RefCell::new(Some(self.base.map_in(from, el, hom))),
+            representation: RefCell::new(ManagedDoubleRNSElRepresentation::DoubleRNS),
+            small_basis_part: RefCell::new(None),
+            small_basis_repr: OnceCell::new()
+        })};
     }
 }
 
@@ -861,7 +792,12 @@ impl<NumberRing, A1, A2> CanHomFrom<ManagedDoubleRNSRingBase<NumberRing, A1>> fo
 
     fn map_in_ref(&self, from: &ManagedDoubleRNSRingBase<NumberRing, A1>, el: &<ManagedDoubleRNSRingBase<NumberRing, A1> as RingBase>::Element, hom: &Self::Homomorphism) -> Self::Element {
         if let Some(el) = from.to_doublerns(el) {
-            ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(DoubleRNSElInternal::DoubleRNS(self.base.map_in_ref(&from.base, &*el, hom)))) }
+            return ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal {
+                double_rns_repr_or_part: RefCell::new(Some(self.base.map_in_ref(&from.base, &*el, hom))),
+                representation: RefCell::new(ManagedDoubleRNSElRepresentation::DoubleRNS),
+                small_basis_part: RefCell::new(None),
+                small_basis_repr: OnceCell::new()
+            })};
         } else {
             self.zero()
         }
@@ -1000,48 +936,104 @@ fn test_add_result_independent_of_repr() {
     let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
     let ring = ManagedDoubleRNSRingBase::new(Pow2CyclotomicNumberRing::new(4), rns_base);
     let base = &ring.get_ring().base;
-    let reprs_of_11: [Box<dyn Fn() -> DoubleRNSElInternal<_, _>>; 4] = [
-        Box::new(|| DoubleRNSElInternal::SmallBasis(base.from_non_fft(base.base_ring().int_hom().map(11)))),
-        Box::new(|| DoubleRNSElInternal::DoubleRNS(base.from_int(11))),
-        Box::new(|| DoubleRNSElInternal::Sum(base.from_non_fft(base.base_ring().int_hom().map(1)), base.from_int(10))),
-        Box::new(|| DoubleRNSElInternal::Both(base.from_non_fft(base.base_ring().int_hom().map(11)), base.from_int(11))),
+    let reprs_of_11: [Box<dyn Fn() -> ManagedDoubleRNSEl<_, _>>; 4] = [
+        Box::new(|| ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal {
+            double_rns_repr_or_part: RefCell::new(None),
+            representation: RefCell::new(ManagedDoubleRNSElRepresentation::SmallBasis),
+            small_basis_repr: {
+                let result = OnceCell::new();
+                result.set(base.from_non_fft(base.base_ring().int_hom().map(11))).ok().unwrap();
+                result
+            },
+            small_basis_part: RefCell::new(None)
+        })}),
+        Box::new(|| ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal {
+            double_rns_repr_or_part: RefCell::new(Some(base.from_int(11))),
+            representation: RefCell::new(ManagedDoubleRNSElRepresentation::DoubleRNS),
+            small_basis_part: RefCell::new(None),
+            small_basis_repr: OnceCell::new()
+        })}),
+        Box::new(|| ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal {
+            double_rns_repr_or_part: RefCell::new(Some(base.from_int(10))),
+            representation: RefCell::new(ManagedDoubleRNSElRepresentation::Sum),
+            small_basis_part: RefCell::new(Some(base.from_non_fft(base.base_ring().int_hom().map(1)))),
+            small_basis_repr: OnceCell::new()
+        })}),
+        Box::new(|| ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal {
+            double_rns_repr_or_part: RefCell::new(Some(base.from_int(11))),
+            representation: RefCell::new(ManagedDoubleRNSElRepresentation::Both),
+            small_basis_repr: {
+                let result = OnceCell::new();
+                result.set(base.from_non_fft(base.base_ring().int_hom().map(11))).ok().unwrap();
+                result
+            },
+            small_basis_part: RefCell::new(None)
+        })})
     ];
-    let reprs_of_102: [Box<dyn Fn() -> DoubleRNSElInternal<_, _>>; 4] = [
-       Box::new(|| DoubleRNSElInternal::SmallBasis(base.from_non_fft(base.base_ring().int_hom().map(102)))),
-       Box::new(|| DoubleRNSElInternal::DoubleRNS(base.from_int(102))),
-       Box::new(|| DoubleRNSElInternal::Sum(base.from_non_fft(base.base_ring().int_hom().map(2)), base.from_int(100))),
-       Box::new(|| DoubleRNSElInternal::Both(base.from_non_fft(base.base_ring().int_hom().map(102)), base.from_int(102))),
+    let reprs_of_102: [Box<dyn Fn() -> ManagedDoubleRNSEl<_, _>>; 4] = [
+        Box::new(|| ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal {
+            double_rns_repr_or_part: RefCell::new(None),
+            representation: RefCell::new(ManagedDoubleRNSElRepresentation::SmallBasis),
+            small_basis_repr: {
+                let result = OnceCell::new();
+                result.set(base.from_non_fft(base.base_ring().int_hom().map(102))).ok().unwrap();
+                result
+            },
+            small_basis_part: RefCell::new(None)
+        })}),
+        Box::new(|| ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal {
+            double_rns_repr_or_part: RefCell::new(Some(base.from_int(102))),
+            representation: RefCell::new(ManagedDoubleRNSElRepresentation::DoubleRNS),
+            small_basis_part: RefCell::new(None),
+            small_basis_repr: OnceCell::new()
+        })}),
+        Box::new(|| ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal {
+            double_rns_repr_or_part: RefCell::new(Some(base.from_int(100))),
+            representation: RefCell::new(ManagedDoubleRNSElRepresentation::Sum),
+            small_basis_part: RefCell::new(Some(base.from_non_fft(base.base_ring().int_hom().map(2)))),
+            small_basis_repr: OnceCell::new()
+        })}),
+        Box::new(|| ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal {
+            double_rns_repr_or_part: RefCell::new(Some(base.from_int(102))),
+            representation: RefCell::new(ManagedDoubleRNSElRepresentation::Both),
+            small_basis_repr: {
+                let result = OnceCell::new();
+                result.set(base.from_non_fft(base.base_ring().int_hom().map(102))).ok().unwrap();
+                result
+            },
+            small_basis_part: RefCell::new(None)
+        })})
     ];
     for a in &reprs_of_11 {
         for b in &reprs_of_102 {
-            let x = ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(a())) };
+            let x = a();
             assert_el_eq!(RingRef::new(base), base.from_int(22), ring.get_ring().to_doublerns(&ring.add_ref(&x, &x)).unwrap());
 
-            let x = ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(a())) };
-            let y = ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(b())) };
+            let x = a();
+            let y = b();
             assert_el_eq!(RingRef::new(base), base.from_int(113), ring.get_ring().to_doublerns(&ring.add_ref(&x, &y)).unwrap());
 
-            let x = ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(a())) };
-            let y = ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(b())) };
+            let x = a();
+            let y = b();
             assert!(base.eq_el_non_fft(&base.from_non_fft(base.base_ring().int_hom().map(113)), &*ring.get_ring().to_small_basis(&ring.add_ref(&x, &y)).unwrap()));
 
-            let x = ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(a())) };
-            let y = ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(b())) };
+            let x = a();
+            let y = b();
             assert_el_eq!(RingRef::new(base), base.from_int(-91), ring.get_ring().to_doublerns(&ring.sub_ref(&x, &y)).unwrap());
 
-            let x = ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(a())) };
-            let y = ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(b())) };
+            let x = a();
+            let y = b();
             assert!(base.eq_el_non_fft(&base.from_non_fft(base.base_ring().int_hom().map(-91)), &*ring.get_ring().to_small_basis(&ring.sub_ref(&x, &y)).unwrap()));
 
-            let x = ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(a())) };
+            let x = a();
             assert_el_eq!(RingRef::new(base), base.from_int(121), ring.get_ring().to_doublerns(&ring.mul_ref(&x, &x)).unwrap());
 
-            let x = ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(a())) };
-            let y = ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(b())) };
+            let x = a();
+            let y = b();
             assert_el_eq!(RingRef::new(base), base.from_int(1122), ring.get_ring().to_doublerns(&ring.mul_ref(&x, &y)).unwrap());
 
-            let x = ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(a())) };
-            let y = ManagedDoubleRNSEl { internal: Rc::new(RefCell::new(b())) };
+            let x = a();
+            let y = b();
             assert!(base.eq_el_non_fft(&base.from_non_fft(base.base_ring().int_hom().map(1122)), &*ring.get_ring().to_small_basis(&ring.mul_ref(&x, &y)).unwrap()));
         }
     }

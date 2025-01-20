@@ -20,6 +20,8 @@
 
 #![doc = include_str!("../Readme.md")]
 
+use std::alloc::Global;
+
 use feanor_math::algorithms::miller_rabin::is_prime;
 use feanor_math::integer::BigIntRing;
 use feanor_math::integer::BigIntRingBase;
@@ -34,6 +36,7 @@ use feanor_math::rings::extension::galois_field::GaloisField;
 use feanor_math::rings::field::AsFieldBase;
 use feanor_math::rings::local::AsLocalPIRBase;
 use feanor_math::rings::zn::zn_64;
+use feanor_math::rings::zn::zn_64::Zn;
 use feanor_math::rings::zn::{FromModulusCreateableZnRing, ZnRing};
 use feanor_math::serialization::SerializableElementRing;
 
@@ -57,6 +60,21 @@ extern crate serde;
 extern crate rand;
 extern crate rand_distr;
 
+#[cfg(feature = "use_hexl")]
+pub type DefaultConvolution = feanor_math_hexl::conv::HEXLConvolution;
+#[cfg(not(feature = "use_hexl"))]
+pub type DefaultConvolution = crate::ntt::ntt_convolution::NTTConv<Zn>;
+
+#[cfg(feature = "use_hexl")]
+pub type DefaultNegacyclicNTT = feanor_math_hexl::hexl::HEXLNegacyclicNTT;
+#[cfg(not(feature = "use_hexl"))]
+pub type DefaultNegacyclicNTT = RustNegacyclicNTT<Zn>;
+
+#[cfg(feature = "log_allocations")]
+pub type DefaultCiphertextAllocator = LoggingAllocator;
+#[cfg(not(feature = "log_allocations"))]
+pub type DefaultCiphertextAllocator = Global;
+
 pub trait IsEq<T: ?Sized> {
 
     fn from_ref<'a>(t: &'a T) -> &'a Self;
@@ -67,22 +85,6 @@ impl<T: ?Sized> IsEq<T> for T {
     
     fn from_ref<'a>(t: &'a T) -> &'a Self { t }
     fn to_ref<'a>(&'a self) -> &'a T { self }
-}
-
-pub fn largest_prime_congruent_one(modulus: El<BigIntRing>) -> impl Fn(El<BigIntRing>) -> Option<El<BigIntRing>> {
-    move |leq_than| {
-        let ZZbig = BigIntRing::RING;
-        let lt_than = ZZbig.sub(leq_than, ZZbig.one());
-        let mut current = ZZbig.add(ZZbig.sub(ZZbig.clone_el(&lt_than), ZZbig.euclidean_rem(lt_than, &modulus)), ZZbig.one());
-        while ZZbig.is_pos(&current) && !is_prime(ZZbig, &current, 10) {
-            ZZbig.sub_assign_ref(&mut current, &modulus);
-        }
-        if ZZbig.is_pos(&current) {
-            return Some(current);
-        } else {
-            return None;
-        }
-    }
 }
 
 pub fn sample_primes<F>(min_bits: usize, max_bits: usize, max_bits_each_modulus: usize, largest_prime_leq: F) -> Option<Vec<El<BigIntRing>>>
@@ -136,6 +138,9 @@ fn euler_phi(factorization: &[(i64, usize)]) -> i64 {
     StaticRing::<i64>::RING.prod(factorization.iter().map(|(p, e)| (p - 1) * StaticRing::<i64>::RING.pow(*p, e - 1)))
 }
 
+///
+/// Euler's totient function
+/// 
 fn euler_phi_squarefree(factorization: &[i64]) -> i64 {
     StaticRing::<i64>::RING.prod(factorization.iter().map(|p| p - 1))
 }
@@ -200,11 +205,14 @@ pub mod ciphertext_ring;
 
 #[cfg(test)]
 use feanor_math::integer::int_cast;
+use number_ring::largest_prime_leq_congruent_to_one;
+use number_ring::pow2_cyclotomic::RustNegacyclicNTT;
 
 #[test]
 fn test_sample_primes() {
+    let ZZi64 = StaticRing::<i64>::RING;
     let ZZbig = BigIntRing::RING;
-    let result = sample_primes(60, 62, 58, largest_prime_congruent_one(int_cast(422144, ZZbig, StaticRing::<i64>::RING))).unwrap();
+    let result = sample_primes(60, 62, 58, |b| largest_prime_leq_congruent_to_one(int_cast(b, ZZi64, ZZbig), 422144).map(|x| int_cast(x, ZZbig, ZZi64))).unwrap();
     assert_eq!(result.len(), 2);
     let prod = ZZbig.prod(result.iter().map(|n| ZZbig.clone_el(n)));
     assert!(ZZbig.abs_log2_floor(&prod).unwrap() >= 60);
@@ -212,7 +220,7 @@ fn test_sample_primes() {
     assert!(result.iter().all(|n| ZZbig.is_one(&ZZbig.euclidean_rem(ZZbig.clone_el(n), &int_cast(422144, ZZbig, StaticRing::<i64>::RING)))));
 
     let ZZbig = BigIntRing::RING;
-    let result = sample_primes(135, 138, 58, largest_prime_congruent_one(int_cast(422144, ZZbig, StaticRing::<i64>::RING))).unwrap();
+    let result = sample_primes(135, 138, 58, |b| largest_prime_leq_congruent_to_one(int_cast(b, ZZi64, ZZbig), 422144).map(|x| int_cast(x, ZZbig, ZZi64))).unwrap();
     assert_eq!(result.len(), 3);
     let prod = ZZbig.prod(result.iter().map(|n| ZZbig.clone_el(n)));
     assert!(ZZbig.abs_log2_floor(&prod).unwrap() >= 135);
@@ -220,7 +228,7 @@ fn test_sample_primes() {
     assert!(result.iter().all(|n| ZZbig.is_one(&ZZbig.euclidean_rem(ZZbig.clone_el(n), &int_cast(422144, ZZbig, StaticRing::<i64>::RING)))));
 
     let ZZbig = BigIntRing::RING;
-    let result = sample_primes(115, 118, 58, largest_prime_congruent_one(int_cast(422144, ZZbig, StaticRing::<i64>::RING))).unwrap();
+    let result = sample_primes(115, 118, 58, |b| largest_prime_leq_congruent_to_one(int_cast(b, ZZi64, ZZbig), 422144).map(|x| int_cast(x, ZZbig, ZZi64))).unwrap();
     assert_eq!(result.len(), 2);
     let prod = ZZbig.prod(result.iter().map(|n| ZZbig.clone_el(n)));
     assert!(ZZbig.abs_log2_floor(&prod).unwrap() >= 115);
