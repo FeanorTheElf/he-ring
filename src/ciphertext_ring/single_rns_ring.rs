@@ -253,7 +253,7 @@ impl<NumberRing, A, C> BGFVCiphertextRing for SingleRNSRingBase<NumberRing, A, C
         debug_assert_eq!(self.base_ring().len(), result_as_matrix.row_count());
         debug_assert_eq!(self.n(), result_as_matrix.col_count());
 
-        let value_as_matrix =self.coefficients_as_matrix(&value);
+        let value_as_matrix = from.coefficients_as_matrix(&value);
         debug_assert_eq!(from.base_ring().len(), value_as_matrix.row_count());
         debug_assert_eq!(from.n(), value_as_matrix.col_count());
 
@@ -845,6 +845,16 @@ pub fn test_with_number_ring<NumberRing: Clone + HECyclotomicNumberRing>(number_
 
     let double_rns_ring = DoubleRNSRingBase::new(number_ring.clone(), base_ring.clone());
     feanor_math::ring::generic_tests::test_hom_axioms(&ring, &double_rns_ring, elements.iter().map(|x| ring.clone_el(x)));
+    
+    let dropped_rns_factor_ring = SingleRNSRingBase::new(number_ring.clone(), zn_rns::Zn::new(vec![Zn::new(p2 as u64)], BigIntRing::RING));
+
+    for a in &elements {
+        assert_el_eq!(
+            &dropped_rns_factor_ring,
+            dropped_rns_factor_ring.from_canonical_basis(ring.wrt_canonical_basis(a).iter().map(|c| dropped_rns_factor_ring.base_ring().from_congruence([*ring.base_ring().get_congruence(&c).at(1)].into_iter()))),
+            dropped_rns_factor_ring.get_ring().drop_rns_factor(ring.get_ring(), &[0], ring.clone_el(a))
+        );
+    }
 }
 
 #[test]

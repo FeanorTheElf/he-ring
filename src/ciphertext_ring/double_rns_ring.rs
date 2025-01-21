@@ -16,12 +16,12 @@ use feanor_math::rings::finite::*;
 use feanor_math::ring::*;
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
 use feanor_math::rings::zn::*;
+use feanor_math::rings::zn::zn_64::*;
 use feanor_math::homomorphism::*;
 use feanor_math::seq::*;
 use feanor_math::specialization::FiniteRingOperation;
 use feanor_math::specialization::FiniteRingSpecializable;
 use serde_json::Number;
-use zn_64::ZnBase;
 
 use crate::cyclotomic::{CyclotomicGaloisGroupEl, CyclotomicRing};
 use crate::profiling::TimeRecorder;
@@ -51,7 +51,7 @@ pub struct DoubleRNSRingBase<NumberRing, A = Global>
     /// The number ring modulo each RNS factor `pi`, use for conversion between small and multiplicative basis
     ring_decompositions: Vec<<NumberRing as HENumberRing>::Decomposed>,
     /// The current RNS base
-    rns_base: zn_rns::Zn<zn_64::Zn, BigIntRing>,
+    rns_base: zn_rns::Zn<Zn, BigIntRing>,
     /// Use to allocate memory for ring elements
     allocator: A
 }
@@ -71,7 +71,7 @@ pub struct DoubleRNSEl<NumberRing, A = Global>
 {
     pub(super) number_ring: PhantomData<NumberRing>,
     pub(super) allocator: PhantomData<A>,
-    pub(super) el_wrt_mult_basis: Vec<zn_64::ZnEl, A>
+    pub(super) el_wrt_mult_basis: Vec<ZnEl, A>
 }
 
 ///
@@ -83,13 +83,13 @@ pub struct SmallBasisEl<NumberRing, A = Global>
 {
     number_ring: PhantomData<NumberRing>,
     allocator: PhantomData<A>,
-    el_wrt_small_basis: Vec<zn_64::ZnEl, A>
+    el_wrt_small_basis: Vec<ZnEl, A>
 }
 
 impl<NumberRing> DoubleRNSRingBase<NumberRing> 
     where NumberRing: HENumberRing
 {
-    pub fn new(number_ring: NumberRing, rns_base: zn_rns::Zn<zn_64::Zn, BigIntRing>) -> RingValue<Self> {
+    pub fn new(number_ring: NumberRing, rns_base: zn_rns::Zn<Zn, BigIntRing>) -> RingValue<Self> {
         Self::new_with(number_ring, rns_base, Global)
     }
 }
@@ -98,7 +98,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
     where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
-    pub fn new_with(number_ring: NumberRing, rns_base: zn_rns::Zn<zn_64::Zn, BigIntRing>, allocator: A) -> RingValue<Self> {
+    pub fn new_with(number_ring: NumberRing, rns_base: zn_rns::Zn<Zn, BigIntRing>, allocator: A) -> RingValue<Self> {
         assert!(rns_base.len() > 0);
         RingValue::from(Self {
             ring_decompositions: rns_base.as_iter().map(|Fp| number_ring.mod_p(Fp.clone())).collect(),
@@ -112,7 +112,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
         &self.ring_decompositions
     }
 
-    pub fn rns_base(&self) -> &zn_rns::Zn<zn_64::Zn, BigIntRing> {
+    pub fn rns_base(&self) -> &zn_rns::Zn<Zn, BigIntRing> {
         &self.rns_base
     }
 
@@ -120,11 +120,11 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
         self.rank() * self.rns_base().len()
     }
 
-    pub fn as_matrix_wrt_small_basis<'a>(&self, element: &'a SmallBasisEl<NumberRing, A>) -> Submatrix<'a, AsFirstElement<zn_64::ZnEl>, zn_64::ZnEl> {
+    pub fn as_matrix_wrt_small_basis<'a>(&self, element: &'a SmallBasisEl<NumberRing, A>) -> Submatrix<'a, AsFirstElement<ZnEl>, ZnEl> {
         Submatrix::from_1d(&element.el_wrt_small_basis, self.rns_base().len(), self.rank())
     }
 
-    pub fn as_matrix_wrt_small_basis_mut<'a>(&self, element: &'a mut SmallBasisEl<NumberRing, A>) -> SubmatrixMut<'a, AsFirstElement<zn_64::ZnEl>, zn_64::ZnEl> {
+    pub fn as_matrix_wrt_small_basis_mut<'a>(&self, element: &'a mut SmallBasisEl<NumberRing, A>) -> SubmatrixMut<'a, AsFirstElement<ZnEl>, ZnEl> {
         SubmatrixMut::from_1d(&mut element.el_wrt_small_basis, self.rns_base().len(), self.rank())
     }
 
@@ -257,7 +257,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
         }
     }
 
-    pub fn mul_scalar_assign_non_fft(&self, lhs: &mut SmallBasisEl<NumberRing, A>, rhs: &El<zn_rns::Zn<zn_64::Zn, BigIntRing>>) {
+    pub fn mul_scalar_assign_non_fft(&self, lhs: &mut SmallBasisEl<NumberRing, A>, rhs: &El<zn_rns::Zn<Zn, BigIntRing>>) {
         assert_eq!(self.element_len(), lhs.el_wrt_small_basis.len());
         for i in 0..self.rns_base().len() {
             for j in 0..self.rank() {
@@ -580,11 +580,11 @@ pub struct DoubleRNSRingBaseElVectorRepresentation<'a, NumberRing, A>
     where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
-    el_wrt_coeff_basis: Vec<zn_64::ZnEl, A>,
+    el_wrt_coeff_basis: Vec<ZnEl, A>,
     ring: &'a DoubleRNSRingBase<NumberRing, A>
 }
 
-impl<'a, NumberRing, A> VectorFn<El<zn_rns::Zn<zn_64::Zn, BigIntRing>>> for DoubleRNSRingBaseElVectorRepresentation<'a, NumberRing, A> 
+impl<'a, NumberRing, A> VectorFn<El<zn_rns::Zn<Zn, BigIntRing>>> for DoubleRNSRingBaseElVectorRepresentation<'a, NumberRing, A> 
     where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
@@ -592,7 +592,7 @@ impl<'a, NumberRing, A> VectorFn<El<zn_rns::Zn<zn_64::Zn, BigIntRing>>> for Doub
         self.ring.rank()
     }
 
-    fn at(&self, i: usize) -> El<zn_rns::Zn<zn_64::Zn, BigIntRing>> {
+    fn at(&self, i: usize) -> El<zn_rns::Zn<Zn, BigIntRing>> {
         assert!(i < self.len());
         self.ring.rns_base().from_congruence(self.el_wrt_coeff_basis[i..].iter().step_by(self.ring.rank()).enumerate().map(|(i, x)| self.ring.rns_base().at(i).clone_el(x)))
     }
@@ -637,7 +637,7 @@ impl<NumberRing, A> RingExtension for DoubleRNSRingBase<NumberRing, A>
     where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
-    type BaseRing = zn_rns::Zn<zn_64::Zn, BigIntRing>;
+    type BaseRing = zn_rns::Zn<Zn, BigIntRing>;
 
     fn base_ring<'a>(&'a self) -> &'a Self::BaseRing {
         self.rns_base()
@@ -690,31 +690,31 @@ impl<'a, 'b, NumberRing, A> Clone for WRTCanonicalBasisElementCreator<'a, Number
     }
 }
 
-impl<'a, 'b, NumberRing, A> Fn<(&'b [El<zn_rns::Zn<zn_64::Zn, BigIntRing>>],)> for WRTCanonicalBasisElementCreator<'a, NumberRing, A>
+impl<'a, 'b, NumberRing, A> Fn<(&'b [El<zn_rns::Zn<Zn, BigIntRing>>],)> for WRTCanonicalBasisElementCreator<'a, NumberRing, A>
     where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
-    extern "rust-call" fn call(&self, args: (&'b [El<zn_rns::Zn<zn_64::Zn, BigIntRing>>],)) -> Self::Output {
+    extern "rust-call" fn call(&self, args: (&'b [El<zn_rns::Zn<Zn, BigIntRing>>],)) -> Self::Output {
         self.ring.from_canonical_basis(args.0.iter().map(|x| self.ring.base_ring().clone_el(x)))
     }
 }
 
-impl<'a, 'b, NumberRing, A> FnMut<(&'b [El<zn_rns::Zn<zn_64::Zn, BigIntRing>>],)> for WRTCanonicalBasisElementCreator<'a, NumberRing, A>
+impl<'a, 'b, NumberRing, A> FnMut<(&'b [El<zn_rns::Zn<Zn, BigIntRing>>],)> for WRTCanonicalBasisElementCreator<'a, NumberRing, A>
     where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
-    extern "rust-call" fn call_mut(&mut self, args: (&'b [El<zn_rns::Zn<zn_64::Zn, BigIntRing>>],)) -> Self::Output {
+    extern "rust-call" fn call_mut(&mut self, args: (&'b [El<zn_rns::Zn<Zn, BigIntRing>>],)) -> Self::Output {
         self.call(args)
     }
 }
 
-impl<'a, 'b, NumberRing, A> FnOnce<(&'b [El<zn_rns::Zn<zn_64::Zn, BigIntRing>>],)> for WRTCanonicalBasisElementCreator<'a, NumberRing, A>
+impl<'a, 'b, NumberRing, A> FnOnce<(&'b [El<zn_rns::Zn<Zn, BigIntRing>>],)> for WRTCanonicalBasisElementCreator<'a, NumberRing, A>
     where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
     type Output = El<DoubleRNSRing<NumberRing, A>>;
 
-    extern "rust-call" fn call_once(self, args: (&'b [El<zn_rns::Zn<zn_64::Zn, BigIntRing>>],)) -> Self::Output {
+    extern "rust-call" fn call_once(self, args: (&'b [El<zn_rns::Zn<Zn, BigIntRing>>],)) -> Self::Output {
         self.call(args)
     }
 }
@@ -733,9 +733,9 @@ impl<NumberRing, A> FiniteRing for DoubleRNSRingBase<NumberRing, A>
         A: Allocator + Clone
 {
     type ElementsIter<'a> = MultiProduct<
-        <zn_rns::ZnBase<zn_64::Zn, BigIntRing> as FiniteRing>::ElementsIter<'a>, 
+        <zn_rns::ZnBase<Zn, BigIntRing> as FiniteRing>::ElementsIter<'a>, 
         WRTCanonicalBasisElementCreator<'a, NumberRing, A>, 
-        CloneRingEl<&'a zn_rns::Zn<zn_64::Zn, BigIntRing>>,
+        CloneRingEl<&'a zn_rns::Zn<Zn, BigIntRing>>,
         El<DoubleRNSRing<NumberRing, A>>
     > where Self: 'a;
 
@@ -770,7 +770,7 @@ impl<NumberRing, A1, A2> CanHomFrom<DoubleRNSRingBase<NumberRing, A2>> for Doubl
         A1: Allocator + Clone,
         A2: Allocator + Clone,
 {
-    type Homomorphism = Vec<<zn_64::ZnBase as CanHomFrom<zn_64::ZnBase>>::Homomorphism>;
+    type Homomorphism = Vec<<ZnBase as CanHomFrom<ZnBase>>::Homomorphism>;
 
     fn has_canonical_hom(&self, from: &DoubleRNSRingBase<NumberRing, A2>) -> Option<Self::Homomorphism> {
         if self.rns_base().len() == from.rns_base().len() && self.number_ring() == from.number_ring() {
@@ -803,9 +803,9 @@ impl<NumberRing, A1, A2, C2> CanHomFrom<SingleRNSRingBase<NumberRing, A2, C2>> f
     where NumberRing: HECyclotomicNumberRing,
         A1: Allocator + Clone,
         A2: Allocator + Clone,
-        C2: PreparedConvolutionAlgorithm<zn_64::ZnBase>
+        C2: PreparedConvolutionAlgorithm<ZnBase>
 {
-    type Homomorphism = Vec<<zn_64::ZnBase as CanHomFrom<zn_64::ZnBase>>::Homomorphism>;
+    type Homomorphism = Vec<<ZnBase as CanHomFrom<ZnBase>>::Homomorphism>;
 
     fn has_canonical_hom(&self, from: &SingleRNSRingBase<NumberRing, A2, C2>) -> Option<Self::Homomorphism> {
         if self.rns_base().len() == from.rns_base().len() && self.number_ring() == from.number_ring() {
@@ -824,9 +824,9 @@ impl<NumberRing, A1, A2, C2> CanIsoFromTo<SingleRNSRingBase<NumberRing, A2, C2>>
     where NumberRing: HECyclotomicNumberRing,
         A1: Allocator + Clone,
         A2: Allocator + Clone,
-        C2: PreparedConvolutionAlgorithm<zn_64::ZnBase>
+        C2: PreparedConvolutionAlgorithm<ZnBase>
 {
-    type Isomorphism = Vec<<zn_64::ZnBase as CanIsoFromTo<zn_64::ZnBase>>::Isomorphism>;
+    type Isomorphism = Vec<<ZnBase as CanIsoFromTo<ZnBase>>::Isomorphism>;
 
     fn has_canonical_iso(&self, from: &SingleRNSRingBase<NumberRing, A2, C2>) -> Option<Self::Isomorphism> {
         if self.rns_base().len() == from.rns_base().len() && self.number_ring() == from.number_ring() {
@@ -846,7 +846,7 @@ impl<NumberRing, A1, A2> CanIsoFromTo<DoubleRNSRingBase<NumberRing, A2>> for Dou
         A1: Allocator + Clone,
         A2: Allocator + Clone,
 {
-    type Isomorphism = Vec<<zn_64::ZnBase as CanIsoFromTo<zn_64::ZnBase>>::Isomorphism>;
+    type Isomorphism = Vec<<ZnBase as CanIsoFromTo<ZnBase>>::Isomorphism>;
 
     fn has_canonical_iso(&self, from: &DoubleRNSRingBase<NumberRing, A2>) -> Option<Self::Isomorphism> {
         if self.rns_base().len() == from.rns_base().len() && self.number_ring() == from.number_ring() {
@@ -874,6 +874,7 @@ impl<NumberRing, A1, A2> CanIsoFromTo<DoubleRNSRingBase<NumberRing, A2>> for Dou
 #[cfg(any(test, feature = "generic_tests"))]
 pub fn test_with_number_ring<NumberRing: Clone + HECyclotomicNumberRing>(number_ring: NumberRing) {
     use feanor_math::algorithms::eea::signed_lcm;
+    use feanor_math::assert_el_eq;
 
     use crate::profiling::{clear_all_timings, print_all_timings};
     use crate::ntt::ntt_convolution::NTTConv;
@@ -887,7 +888,7 @@ pub fn test_with_number_ring<NumberRing: Clone + HECyclotomicNumberRing>(number_
     let p2 = largest_prime_leq_congruent_to_one(p1 - 1, required_root_of_unity).unwrap();
     assert!(p1 != p2);
     let rank = number_ring.rank();
-    let base_ring = zn_rns::Zn::new(vec![zn_64::Zn::new(p1 as u64), zn_64::Zn::new(p2 as u64)], BigIntRing::RING);
+    let base_ring = zn_rns::Zn::new(vec![Zn::new(p1 as u64), Zn::new(p2 as u64)], BigIntRing::RING);
     let ring = DoubleRNSRingBase::new(number_ring.clone(), base_ring.clone());
 
     let base_ring = ring.base_ring();
@@ -910,4 +911,14 @@ pub fn test_with_number_ring<NumberRing: Clone + HECyclotomicNumberRing>(number_
 
     let single_rns_ring = SingleRNSRingBase::<_, _, NTTConv<_>>::new(number_ring.clone(), base_ring.clone());
     feanor_math::ring::generic_tests::test_hom_axioms(&ring, &single_rns_ring, elements.iter().map(|x| ring.clone_el(x)));
+
+    let dropped_rns_factor_ring = DoubleRNSRingBase::new(number_ring.clone(), zn_rns::Zn::new(vec![Zn::new(p2 as u64)], BigIntRing::RING));
+
+    for a in &elements {
+        assert_el_eq!(
+            &dropped_rns_factor_ring,
+            dropped_rns_factor_ring.from_canonical_basis(ring.wrt_canonical_basis(a).iter().map(|c| dropped_rns_factor_ring.base_ring().from_congruence([*ring.base_ring().get_congruence(&c).at(1)].into_iter()))),
+            dropped_rns_factor_ring.get_ring().drop_rns_factor(ring.get_ring(), &[0], ring.clone_el(a))
+        );
+    }
 }
