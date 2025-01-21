@@ -25,6 +25,10 @@ pub struct GadgetProductLhsOperand<R: BGFVCiphertextRing> {
 
 impl<R: BGFVCiphertextRing> GadgetProductLhsOperand<R> {
 
+    ///
+    /// Creates a [`GadgetProductLhsOperand`] w.r.t. the gadget vector given by `digits`.
+    /// For an explanation of gadget products, see [`GadgetProductLhsOperand::gadget_product()`].
+    /// 
     pub fn from_element_with<V>(ring: &R, el: &R::Element, digits: V) -> Self
         where V: VectorFn<Range<usize>>
     {
@@ -34,6 +38,10 @@ impl<R: BGFVCiphertextRing> GadgetProductLhsOperand<R> {
         };
     }
 
+    /// 
+    /// Creates a [`GadgetProductLhsOperand`] w.r.t. the RNS gadget vector that has `digits` digits.
+    /// For an explanation of gadget products, see [`GadgetProductLhsOperand::gadget_product()`].
+    /// 
     pub fn from_element(ring: &R, el: &R::Element, digits: usize) -> Self {
         Self::from_element_with(ring, el, select_digits(digits, ring.base_ring().len()).clone_els())
     }
@@ -224,10 +232,18 @@ impl<R: BGFVCiphertextRing> GadgetProductRhsOperand<R> {
         self.scaled_element[i] = Some(ring.prepare_multiplicant(el));
     }
     
+    /// 
+    /// Creates a [`GadgetProductRhsOperand`] representing `0` w.r.t. the RNS gadget vector that has `digits` digits.
+    /// For an explanation of gadget products, see [`GadgetProductLhsOperand::gadget_product()`].
+    /// 
     pub fn new(ring: &R, digits: usize) -> Self {
         Self::new_with(ring, select_digits(digits, ring.base_ring().len()))
     }
 
+    /// 
+    /// Creates a [`GadgetProductRhsOperand`] representing `0` w.r.t. the RNS gadget given by `digits`.
+    /// For an explanation of gadget products, see [`GadgetProductLhsOperand::gadget_product()`].
+    /// 
     pub fn new_with(ring: &R, digits: Vec<Range<usize>>) -> Self {
         let mut operands = Vec::with_capacity(digits.len());
         operands.extend((0..digits.len()).map(|_| None));
