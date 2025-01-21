@@ -189,9 +189,9 @@ impl<NumberRing, A, C> BGFVCiphertextRing for SingleRNSRingBase<NumberRing, A, C
     type NumberRing = NumberRing;
     type PreparedMultiplicant = SingleRNSRingPreparedMultiplicant<NumberRing, A, C>;
 
-    fn prepare_multiplicant(&self, el: SingleRNSRingEl<NumberRing, A, C>) -> SingleRNSRingPreparedMultiplicant<NumberRing, A, C> {
+    fn prepare_multiplicant(&self, el: &SingleRNSRingEl<NumberRing, A, C>) -> SingleRNSRingPreparedMultiplicant<NumberRing, A, C> {
         record_time!(GLOBAL_TIME_RECORDER, "SingleRNSRing::prepare_multiplicant", || {
-            let el_as_matrix = self.coefficients_as_matrix(&el);
+            let el_as_matrix = self.coefficients_as_matrix(el);
             let mut result = Vec::new_in(self.allocator().clone());
             result.extend(self.rns_base().as_iter().enumerate().map(|(i, Zp)| self.convolutions[i].prepare_convolution_operand(el_as_matrix.row_at(i), Zp)));
             SingleRNSRingPreparedMultiplicant {
@@ -835,7 +835,7 @@ pub fn test_with_number_ring<NumberRing: Clone + HECyclotomicNumberRing>(number_
     for a in &elements {
         for b in &elements {
             for c in &elements {
-                let actual = ring.get_ring().two_by_two_convolution([ring.clone_el(a), ring.clone_el(b)], [ring.clone_el(c), ring.one()]);
+                let actual = ring.get_ring().two_by_two_convolution([a, b], [c, &ring.one()]);
                 assert_el_eq!(&ring, ring.mul_ref(a, c), &actual[0]);
                 assert_el_eq!(&ring, ring.add_ref_snd(ring.mul_ref(b, c), a), &actual[1]);
                 assert_el_eq!(&ring, b, &actual[2]);

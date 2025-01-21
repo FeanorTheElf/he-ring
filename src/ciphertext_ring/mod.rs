@@ -39,7 +39,7 @@ pub trait BGFVCiphertextRing: RingBase + FreeAlgebra + RingExtension<BaseRing = 
     type NumberRing: HECyclotomicNumberRing;
     type PreparedMultiplicant;
 
-    fn prepare_multiplicant(&self, x: Self::Element) -> Self::PreparedMultiplicant;
+    fn prepare_multiplicant(&self, x: &Self::Element) -> Self::PreparedMultiplicant;
 
     fn mul_prepared(&self, lhs: &Self::PreparedMultiplicant, rhs: &Self::PreparedMultiplicant) -> Self::Element;
 
@@ -50,9 +50,9 @@ pub trait BGFVCiphertextRing: RingBase + FreeAlgebra + RingExtension<BaseRing = 
         parts.into_iter().fold(self.zero(), |current, (lhs, rhs)| self.add(current, self.mul_prepared(lhs, rhs)))
     }
 
-    fn drop_rns_factor(&self, from: &Self, drop_factors: &[usize], value: Self::Element) -> Self::Element;
+    fn drop_rns_factor(&self, from: &Self, dropped_rns_factors: &[usize], value: Self::Element) -> Self::Element;
 
-    fn drop_rns_factor_prepared(&self, from: &Self, drop_factors: &[usize], value: Self::PreparedMultiplicant) -> Self::PreparedMultiplicant;
+    fn drop_rns_factor_prepared(&self, from: &Self, dropped_rns_factors: &[usize], value: Self::PreparedMultiplicant) -> Self::PreparedMultiplicant;
 
     ///
     /// Returns a view on the underlying representation of `x`. 
@@ -97,7 +97,7 @@ pub trait BGFVCiphertextRing: RingBase + FreeAlgebra + RingExtension<BaseRing = 
     /// Computes `[lhs[0] * rhs[0], lhs[0] * rhs[1] + lhs[1] * rhs[0], lhs[1] * rhs[1]]`, but might be
     /// faster than the naive way of evaluating this.
     /// 
-    fn two_by_two_convolution(&self, lhs: [Self::Element; 2], rhs: [Self::Element; 2]) -> [Self::Element; 3] {
+    fn two_by_two_convolution(&self, lhs: [&Self::Element; 2], rhs: [&Self::Element; 2]) -> [Self::Element; 3] {
         record_time!(GLOBAL_TIME_RECORDER, "BGFVCiphertextRing::two_by_two_convolution", || {
             let mut lhs_it = lhs.into_iter();
             let mut rhs_it = rhs.into_iter();

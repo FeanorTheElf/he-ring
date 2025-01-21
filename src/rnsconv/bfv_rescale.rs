@@ -58,7 +58,7 @@ impl<A> AlmostExactRescalingConvert<A>
     /// At least the moduli belonging to `b` are expected to be sorted.
     /// 
     pub fn new_with(in_moduli: Vec<Zn>, num_moduli: Vec<Zn>, den_moduli_count: usize, allocator: A) -> Self {
-        let rescaling = AlmostExactRescaling::new_with(in_moduli.clone(), num_moduli, den_moduli_count, allocator.clone());
+        let rescaling = AlmostExactRescaling::new_with(in_moduli.clone(), num_moduli, (0..den_moduli_count).collect(), allocator.clone());
         let convert = UsedBaseConversion::new_with(
             rescaling.output_rings().iter().cloned().collect(),
             in_moduli[..den_moduli_count].iter().cloned().collect(),
@@ -136,7 +136,7 @@ impl<A> RNSOperation for AlmostExactRescalingConvert<A>
 /// let from = vec![Zn::new(17), Zn::new(19), Zn::new(23)];
 /// let from_modulus = 17 * 19 * 23;
 /// let to = vec![Zn::new(29)];
-/// let rescaling = AlmostExactRescaling::new_with(from.clone(), to.clone(), 3, Global);
+/// let rescaling = AlmostExactRescaling::new_with(from.clone(), to.clone(), vec![0, 1, 2], Global);
 /// let mut output = [to[0].zero()];
 ///
 /// let x = 1000;
@@ -160,14 +160,27 @@ impl<A> RNSOperation for AlmostExactRescalingConvert<A>
 pub struct AlmostExactRescaling<A>
     where A: Allocator + Clone
 {
-    q_moduli: Vec<Zn>,
-    /// `q_moduli[i + b_moduli_count] = aq_over_b_moduli[q_to_aq_over_b_permutation[i]]`
-    q_over_b_to_aq_over_b_permutation: Vec<usize>,
+    /// ordered as supplied when instantiating the object
+    input_moduli_unordered: Vec<Zn>,
+    /// ordered as supplied when instantiating the object
+    output_moduli_unordered: Vec<Zn>,
+    /// ordered in ascending order
+    aq_over_b_moduli: Vec<Zn>,
+    b_moduli: Vec<Zn>,
+    /// the `i`-th entry points to the position of `aq_over_b_moduli[i]` in `input_moduli_unordered`, or `None` if 
+    /// `aq_over_b_moduli[i]` belongs to `a`
+    input_permutation_q_over_b: Vec<Option<usize>>,
+    /// the `i`-th entry points to the position of `b_moduli[i]` in `input_moduli_unordered`
+    input_permutation_b: Vec<usize>,
+    /// the `i`-th entry points to the position of `aq_over_b_moduli[i]` in `output_moduli_unordered`
+    output_permutation: Vec<usize>,
     /// contains the moduli of `q` and then the moduli of `a`
     b_to_aq_over_b_lift: UsedBaseConversion<A>,
-    /// a as element of each modulus of `q` (ordered as `q_moduli`)
-    a: Vec<El<Zn>>,
-    /// 1/b as element of each modulus of `aq/b` (ordered as `self.aq_over_b_moduli()`)
+    /// `a` as an element of each modulus of `q/b`
+    a_mod_q_over_b: Vec<Option<El<Zn>>>,
+    /// `a` as an element of each modulus of `b`
+    a_mod_b: Vec<El<Zn>>,
+    /// `b^-1` as an element of each modulus of `aq/b`
     b_inv: Vec<El<Zn>>,
     allocator: A,
     a_bigint: El<BigIntRing>,
@@ -190,9 +203,8 @@ impl<A> AlmostExactRescaling<A>
     ///  - `q` is the product of `in_moduli`
     ///  - `a` is the product of `num_moduli`
     ///  - `b` is the product of the first `den_moduli_count` elements of `in_moduli`
-    /// At least the moduli belonging to `b` are expected to be sorted.
     /// 
-    pub fn new_with(in_moduli: Vec<Zn>, num_moduli: Vec<Zn>, den_moduli_count: usize, allocator: A) -> Self {
+    pub fn new_with(in_moduli: Vec<Zn>, num_moduli: Vec<Zn>, den_moduli_indices: Vec<usize>, allocator: A) -> Self {
         let a_moduli_count = num_moduli.len();
         let ZZ = in_moduli[0].integer_ring();
         for ring in &in_moduli {
@@ -201,54 +213,59 @@ impl<A> AlmostExactRescaling<A>
         for ring in &num_moduli {
             assert!(ring.integer_ring().get_ring() == ZZ.get_ring());
         }
-        
         let a = ZZbig.prod(num_moduli.iter().map(|Zn| int_cast(Zn.integer_ring().clone_el(Zn.modulus()), &ZZbig, Zn.integer_ring())));
-        let b = ZZbig.prod(in_moduli.iter().take(den_moduli_count).map(|Zn| int_cast(Zn.integer_ring().clone_el(Zn.modulus()), &ZZbig, Zn.integer_ring())));
-        let a_mod = in_moduli.iter().map(|Zn| Zn.coerce(&ZZbig, ZZbig.clone_el(&a))).collect::<Vec<_>>();
+        let b = ZZbig.prod(den_moduli_indices.iter().map(|i| &in_moduli[*i]).map(|Zn| int_cast(Zn.integer_ring().clone_el(Zn.modulus()), &ZZbig, Zn.integer_ring())));
+        
+        let aq_over_b_moduli_unsorted = num_moduli.iter().copied()
+            .chain((0..in_moduli.len()).filter(|i| !den_moduli_indices.contains(i)).map(|i| in_moduli[i]))
+            .collect::<Vec<_>>();
+        let (aq_over_b_moduli, permutation) = sort_unstable_permutation(aq_over_b_moduli_unsorted, |ring_l, ring_r| ZZ.cmp(ring_l.modulus(), ring_r.modulus()));
+        let b_moduli = den_moduli_indices.iter().map(|i| in_moduli[*i]).collect::<Vec<_>>();
+        let input_permutation_b = den_moduli_indices;
 
-        let mut in_moduli_iter = in_moduli.iter().cloned();
-        let b_moduli = in_moduli_iter.by_ref().take(den_moduli_count).collect::<Vec<_>>();
-        let aq_over_b_moduli_unsorted = in_moduli_iter.chain(num_moduli.into_iter()).collect::<Vec<_>>();
-        let (aq_over_b_moduli, aq_permutation) = sort_unstable_permutation(aq_over_b_moduli_unsorted, |ring_l, ring_r| ZZ.cmp(ring_l.modulus(), ring_r.modulus()));
-        let mut q_over_b_to_aq_over_b_permutation = aq_permutation;
-        q_over_b_to_aq_over_b_permutation.truncate(aq_over_b_moduli.len() - a_moduli_count);
+        let input_moduli_unordered = in_moduli;
+        let mut input_permutation_q_over_b = Vec::new();
 
-        let b_to_aq_over_b_lift = UsedBaseConversion::new_with(
-            b_moduli,
-            aq_over_b_moduli,
-            allocator.clone()
-        );
-        let inv_b = b_to_aq_over_b_lift.output_rings()
-            .iter()
-            .map(|ring: &Zn| ring.invert(&ring.coerce(&ZZbig, ZZbig.clone_el(&b))).unwrap())
-            .collect();
+        for i in 0..aq_over_b_moduli.len() {
+            let mut in_moduli_index = input_moduli_unordered.iter().enumerate().filter(|(_, Zn)| Zn.modulus() == aq_over_b_moduli[i].modulus());
+            input_permutation_q_over_b.push(in_moduli_index.next().map(|(i, _)| i));
+            assert!(in_moduli_index.next().is_none());
+        }
+
+        let mut output_moduli_unordered = Vec::new();
+        let mut output_permutation = Vec::new();
+        output_permutation.resize(aq_over_b_moduli.len(), usize::MAX);
+
+        for i in 0..aq_over_b_moduli.len() {
+            let index_in_ordered = permutation[i];
+            output_permutation[index_in_ordered] = i;
+            output_moduli_unordered.push(aq_over_b_moduli[index_in_ordered]);
+        }
+
+        let mut a_mod_q_over_b = Vec::new();
+        a_mod_q_over_b.resize(aq_over_b_moduli.len(), None);
+
+        for i in num_moduli.len()..aq_over_b_moduli.len() {
+            let index_in_ordered = permutation[i];
+            a_mod_q_over_b[index_in_ordered] = Some(aq_over_b_moduli[index_in_ordered].coerce(&ZZbig, ZZbig.clone_el(&a)));
+        }
 
         AlmostExactRescaling {
-            b_inv: inv_b, 
-            a: a_mod,
-            b_to_aq_over_b_lift: b_to_aq_over_b_lift,
-            q_over_b_to_aq_over_b_permutation: q_over_b_to_aq_over_b_permutation,
-            q_moduli: in_moduli, 
+            a_mod_b: b_moduli.iter().map(|Zn| Zn.coerce(&ZZbig, ZZbig.clone_el(&a))).collect(),
+            a_mod_q_over_b: a_mod_q_over_b,
+            b_inv: aq_over_b_moduli.iter().map(|Zn| Zn.invert(&Zn.coerce(&ZZbig, ZZbig.clone_el(&b))).unwrap()).collect(),
+            output_permutation: output_permutation,
+            input_permutation_b: input_permutation_b,
+            input_permutation_q_over_b: input_permutation_q_over_b,
+            b_to_aq_over_b_lift: UsedBaseConversion::new_with(b_moduli.clone(), aq_over_b_moduli.clone(), allocator.clone()),
+            b_moduli: b_moduli,
+            aq_over_b_moduli: aq_over_b_moduli,
+            input_moduli_unordered: input_moduli_unordered,
+            output_moduli_unordered: output_moduli_unordered,
             allocator: allocator,
             a_bigint: a,
             b_bigint: b
         }
-    }
-}
-
-impl<A> AlmostExactRescaling<A>
-    where A: Allocator + Clone
-{
-    fn b_moduli<'a>(&'a self) -> &'a [Zn] {
-        self.b_to_aq_over_b_lift.input_rings()
-    }
-
-    fn q_moduli<'a>(&'a self) -> &'a [Zn] {
-        &self.q_moduli
-    }
-
-    fn aq_over_b_moduli<'a>(&'a self) -> &'a [Zn] {
-        self.b_to_aq_over_b_lift.output_rings()
     }
 }
 
@@ -260,11 +277,11 @@ impl<A> RNSOperation for AlmostExactRescaling<A>
     type RingType = ZnBase;
 
     fn input_rings<'a>(&'a self) -> &'a [Zn] {
-        self.q_moduli()
+        &self.input_moduli_unordered
     }
 
     fn output_rings<'a>(&'a self) -> &'a [Zn] {
-        self.aq_over_b_moduli()
+        &self.output_moduli_unordered
     }
 
     fn apply<V1, V2>(&self, input: Submatrix<V1, El<Self::Ring>>, mut output: SubmatrixMut<V2, El<Self::Ring>>)
@@ -278,42 +295,48 @@ impl<A> RNSOperation for AlmostExactRescaling<A>
         let col_count = input.col_count();
 
         // Compute `x := el * a mod aq`, store it in `x_mod_b` and `x_mod_aq_over_b`
-        let mut x_mod_b = Vec::with_capacity_in(self.b_moduli().len() * col_count, self.allocator.clone());
-        x_mod_b.extend((0..(self.b_moduli().len() * col_count)).map(|_| self.b_moduli().at(0).get_ring().zero()));
-        let mut x_mod_b = SubmatrixMut::from_1d(&mut x_mod_b, self.b_moduli().len(), col_count);
-        for i in 0..self.b_moduli().len() {
-            for j in 0..col_count {
-                *x_mod_b.at_mut(i, j) = self.b_moduli().at(i).mul_ref(input.at(i, j), self.a.at(i));
-            }
-        }
+        let mut x_mod_b = Vec::with_capacity_in(self.b_moduli.len() * col_count, self.allocator.clone());
+        x_mod_b.extend((0..self.b_moduli.len()).flat_map(|i| (0..col_count).map(move |j| {
+            let input_i = self.input_permutation_b[i];
+            debug_assert!(self.b_moduli[i].get_ring() == self.input_rings()[input_i].get_ring());
+            self.b_moduli[i].mul_ref(input.at(input_i, j), self.a_mod_b.at(i))
+        })));
+        let x_mod_b = Submatrix::from_1d(&x_mod_b, self.b_moduli.len(), col_count);
 
-        for i in 0..self.aq_over_b_moduli().len() {
-            for j in 0..col_count {
-                *output.at_mut(i, j) = self.aq_over_b_moduli().at(i).zero();
+        let mut x_mod_aq_over_b = Vec::with_capacity_in(self.aq_over_b_moduli.len() * col_count, self.allocator.clone());
+        x_mod_aq_over_b.extend((0..self.aq_over_b_moduli.len()).flat_map(|i| (0..col_count).map(move |j| {
+            if let Some(input_i) = self.input_permutation_q_over_b[i] {
+                debug_assert!(self.aq_over_b_moduli[i].get_ring() == self.input_rings()[input_i].get_ring());
+                self.aq_over_b_moduli[i].mul_ref(input.at(input_i, j), self.a_mod_q_over_b.at(i).as_ref().unwrap())
+            } else {
+                self.aq_over_b_moduli[i].zero()
             }
-        }
-        for i in self.b_moduli().len()..in_len {
-            for j in 0..col_count {
-                let target_index = self.q_over_b_to_aq_over_b_permutation[i - self.b_moduli().len()];
-                *output.at_mut(target_index, j) = self.aq_over_b_moduli().at(target_index).mul_ref(input.at(i, j), self.a.at(i));
-            }
-        }
-        let mut x_mod_aq_over_b = output;
+        })));
+        let x_mod_aq_over_b = SubmatrixMut::from_1d(&mut x_mod_aq_over_b, self.aq_over_b_moduli.len(), col_count);
 
         // Compute the shortest lift of `x mod b` to `aq/b`; Here we might introduce an error of `+/- b`
         // that will later be rescaled to `+/- 1`.
-        let mut x_mod_b_lift: Vec<ZnEl, _> = Vec::with_capacity_in(self.aq_over_b_moduli().len() * col_count, self.allocator.clone());
-        x_mod_b_lift.extend((0..(self.aq_over_b_moduli().len() * col_count)).map(|idx| self.aq_over_b_moduli().at(idx / col_count).zero()));
-        let mut x_mod_b_lift = SubmatrixMut::from_1d(&mut x_mod_b_lift, self.aq_over_b_moduli().len(), col_count);
-        self.b_to_aq_over_b_lift.apply(x_mod_b.as_const(), x_mod_b_lift.reborrow());
-        debug_assert!(x_mod_b_lift.row_count() == self.aq_over_b_moduli().len());
+        let mut x_mod_b_lift = output.reborrow();
+        self.b_to_aq_over_b_lift.apply(x_mod_b, x_mod_b_lift.reborrow());
 
-        for (i, Zk) in self.aq_over_b_moduli().iter().enumerate() {
+        // compute the result
+        let mut result = x_mod_aq_over_b;
+        for i in 0..self.aq_over_b_moduli.len() {
+            let Zk = self.aq_over_b_moduli.at(i);
             for j in 0..col_count {
-                // Subtract `lift(x mod b) mod aq/b` from `x_mod_aq_over_b`
-                Zk.sub_assign_ref(x_mod_aq_over_b.at_mut(i, j), x_mod_b_lift.at(i, j));
-                // Now `x_mod_aq_over_b - lift(x mod b)` is divisibible by b
-                Zk.mul_assign_ref(x_mod_aq_over_b.at_mut(i, j), self.b_inv.at(i));
+                // Subtract `lift(x mod b) mod aq/b` from `result`
+                let divisble_by_b = Zk.sub_ref(result.at(i, j), x_mod_b_lift.at(i, j));
+                // Now `result - lift(x mod b)` is divisibible by b
+                *result.at_mut(i, j) = Zk.mul_ref_snd(divisble_by_b, self.b_inv.at(i));
+            }
+        }
+
+        // copy and permute the result to output
+        for i in 0..self.aq_over_b_moduli.len() {
+            let output_i = self.output_permutation[i];
+            for j in 0..col_count {
+                debug_assert!(self.aq_over_b_moduli.at(i).get_ring() == self.output_rings().at(output_i).get_ring());
+                *output.at_mut(output_i, j) = *result.at(i, j);
             }
         }
     }
@@ -321,28 +344,33 @@ impl<A> RNSOperation for AlmostExactRescaling<A>
 }
 
 #[test]
-fn test_rescale() {
+fn test_rescale_partial() {
     let from = vec![Zn::new(17), Zn::new(97), Zn::new(113)];
     let num = vec![Zn::new(257)];
-    let to = vec![Zn::new(113), Zn::new(257)];
+    let to = vec![Zn::new(257), Zn::new(113)];
     let q = 17 * 97 * 113;
 
     let rescaling = AlmostExactRescaling::new_with(
         from.clone(), 
         num.clone(), 
-        2,
+        vec![0, 1],
         Global
     );
 
     for i in -(q/2)..=(q/2) {
         let input = from.iter().map(|Zn| Zn.int_hom().map(i)).collect::<Vec<_>>();
-        let output = to.iter().map(|Zn| Zn.int_hom().map((i as f64 * 257. / 17. / 97.).round() as i32)).collect::<Vec<_>>();
+        let expected = to.iter().map(|Zn| Zn.int_hom().map((i as f64 * 257. / 17. / 97.).round() as i32)).collect::<Vec<_>>();
         let mut actual = to.iter().map(|Zn| Zn.zero()).collect::<Vec<_>>();
 
         rescaling.apply(Submatrix::from_1d(&input, 3, 1), SubmatrixMut::from_1d(&mut actual, 2, 1));
 
-        for j in 0..output.len() {
-            assert!(to.at(j).smallest_lift(to.at(j).sub_ref(output.at(j), actual.at(j))).abs() <= 1);
+        for j in 0..expected.len() {
+            assert!(
+                to.at(j).smallest_lift(to.at(j).sub_ref(expected.at(j), actual.at(j))).abs() <= 1,
+                "Expected {} to be {} +/- 1",
+                to.at(j).format(actual.at(j)),
+                to.at(j).format(expected.at(j))
+            );
         }
     }
 }
@@ -357,19 +385,24 @@ fn test_rescale_small_num() {
     let rescaling = AlmostExactRescaling::new_with(
         from.clone(), 
         num.clone(), 
-        2,
+        vec![0, 1],
         Global
     );
 
     for i in -(q/2)..=(q/2) {
         let input = from.iter().map(|Zn| Zn.int_hom().map(i)).collect::<Vec<_>>();
-        let output = to.iter().map(|Zn| Zn.int_hom().map((i as f64 * 19. * 23. / 17. / 97.).round() as i32)).collect::<Vec<_>>();
+        let expected = to.iter().map(|Zn| Zn.int_hom().map((i as f64 * 19. * 23. / 17. / 97.).round() as i32)).collect::<Vec<_>>();
         let mut actual = to.iter().map(|Zn| Zn.zero()).collect::<Vec<_>>();
 
         rescaling.apply(Submatrix::from_1d(&input, 3, 1), SubmatrixMut::from_1d(&mut actual, 3, 1));
 
-        for j in 0..output.len() {
-            assert!(to.at(j).smallest_lift(to.at(j).sub_ref(output.at(j), actual.at(j))).abs() <= 1);
+        for j in 0..expected.len() {
+            assert!(
+                to.at(j).smallest_lift(to.at(j).sub_ref(expected.at(j), actual.at(j))).abs() <= 1,
+                "Expected {} to be {} +/- 1",
+                to.at(j).format(actual.at(j)),
+                to.at(j).format(expected.at(j))
+            );
         }
     }
 }
@@ -383,7 +416,7 @@ fn test_rescale_small() {
     let rescaling = AlmostExactRescaling::new_with(
         from.clone(), 
         num.clone(), 
-        3,
+        vec![0, 1, 2],
         Global
     );
 

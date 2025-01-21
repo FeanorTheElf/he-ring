@@ -14,6 +14,7 @@ use crate::ciphertext_ring::double_rns_ring::DoubleRNSRingBase;
 use crate::ciphertext_ring::single_rns_ring::SingleRNSRingBase;
 use crate::ciphertext_ring::BGFVCiphertextRing;
 use crate::number_ring::pow2_cyclotomic::Pow2CyclotomicNumberRing;
+use crate::rnsconv::bfv_rescale::AlmostExactRescaling;
 use crate::rnsconv::{lift, RNSOperation};
 use crate::DefaultConvolution;
 
@@ -157,7 +158,7 @@ impl<R: BGFVCiphertextRing> GadgetProductLhsOperand<R> {
     /// 
     pub fn gadget_product(&self, rhs: &GadgetProductRhsOperand<R>, ring: &R) -> R::Element {
         assert_eq!(self.element_decomposition.len(), rhs.scaled_element.len(), "Gadget product operands created w.r.t. different digit sets");
-        return ring.inner_product_prepared(self.element_decomposition.iter().zip(rhs.scaled_element.iter()).filter_map(|(lhs, rhs)| rhs.as_ref().map(|rhs| (lhs, rhs))));
+        return ring.inner_product_prepared(self.element_decomposition.iter().zip(rhs.scaled_element.iter()).filter_map(|(lhs, rhs)| rhs.as_ref().map(|(rhs, _)| (lhs, rhs))));
     }
 }
 
@@ -195,13 +196,13 @@ fn gadget_decompose<R, V>(ring: &R, el: &R::Element, digits: V) -> Vec<R::Prepar
             SubmatrixMut::from_1d(&mut current_row[..], homs.len(), el_as_matrix.col_count())
         );
 
-        result.push(ring.prepare_multiplicant(ring.from_representation_wrt_small_generating_set(Submatrix::from_1d(&current_row[..], homs.len(), el_as_matrix.col_count()))));
+        result.push(ring.prepare_multiplicant(&ring.from_representation_wrt_small_generating_set(Submatrix::from_1d(&current_row[..], homs.len(), el_as_matrix.col_count()))));
     }
     return result;
 }
 
 pub struct GadgetProductRhsOperand<R: BGFVCiphertextRing> {
-    scaled_element: Vec<Option<R::PreparedMultiplicant>>,
+    scaled_element: Vec<Option<(R::PreparedMultiplicant, R::Element)>>,
     digits: Vec<Range<usize>>
 }
 
@@ -229,7 +230,7 @@ impl<R: BGFVCiphertextRing> GadgetProductRhsOperand<R> {
     }
 
     pub fn set_rns_factor(&mut self, ring: &R, i: usize, el: R::Element) {
-        self.scaled_element[i] = Some(ring.prepare_multiplicant(el));
+        self.scaled_element[i] = Some((ring.prepare_multiplicant(&el), el));
     }
     
     /// 
@@ -251,6 +252,42 @@ impl<R: BGFVCiphertextRing> GadgetProductRhsOperand<R> {
             scaled_element: operands,
             digits: digits
         };
+    }
+
+    pub fn modulus_switch(self, from: &R, dropped_rns_factors: &[usize], to: &R) {
+        assert_eq!(to.base_ring().len() + dropped_rns_factors.len(), from.base_ring().len());
+        debug_assert_eq!(self.digits.len(), self.scaled_element.len());
+        let mut result_scaled_el = Vec::new();
+        let mut result_digits = Vec::new();
+        let mut current = 0;
+        for (digit, scaled_el) in self.digits.iter().zip(self.scaled_element.into_iter()) {
+            let old_digit_len = digit.end - digit.start;
+            let dropped_from_digit = dropped_rns_factors.iter().filter(|i| digit.contains(&i)).count();
+            assert!(dropped_from_digit <= old_digit_len);
+            if dropped_from_digit == old_digit_len {
+                continue;
+            }
+            result_digits.push(current..(current + old_digit_len - dropped_from_digit));
+            current += old_digit_len - dropped_from_digit;
+            if dropped_from_digit > 0 {
+                if let Some((_, scaled_el)) = scaled_el {
+                    let rescaling = AlmostExactRescaling::new_with(
+                        from.base_ring().as_iter().copied().collect(),
+                        Vec::new(),
+                        unimplemented!(),
+                        Global
+                    );
+                } else {
+                    result_scaled_el.push(None);
+                }
+            } else {       
+                if let Some((scaled_el_prepared, scaled_el)) = scaled_el {
+                    result_scaled_el.push(Some((to.drop_rns_factor_prepared(from, dropped_rns_factors, scaled_el_prepared), to.drop_rns_factor(from, dropped_rns_factors, scaled_el))));
+                } else {
+                    result_scaled_el.push(None);
+                }
+            }
+        }
     }
 }
 

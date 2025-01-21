@@ -337,20 +337,54 @@ impl<NumberRing, A> BGFVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, 
     type NumberRing = NumberRing;
     type PreparedMultiplicant = Self::Element;
 
-    fn drop_rns_factor(&self, from: &Self, drop_factors: &[usize], value: Self::Element) -> Self::Element {
-        unimplemented!()
+    fn drop_rns_factor(&self, from: &Self, dropped_rns_factors: &[usize], value: Self::Element) -> Self::Element {
+        match value.internal.get_repr() {
+            ManagedDoubleRNSElRepresentation::Zero => self.zero(),
+            ManagedDoubleRNSElRepresentation::Sum => ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal {
+                double_rns_repr_or_part: RefCell::new(Some(self.base.drop_rns_factor(&from.base, dropped_rns_factors, value.internal.double_rns_repr_or_part.borrow().as_ref().unwrap()))),
+                representation: RefCell::new(ManagedDoubleRNSElRepresentation::Sum),
+                small_basis_part: RefCell::new(Some(self.base.drop_rns_factor_non_fft(&from.base, dropped_rns_factors, value.internal.small_basis_part.borrow().as_ref().unwrap()))),
+                small_basis_repr: OnceCell::new()
+            }) },
+            ManagedDoubleRNSElRepresentation::SmallBasis => ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal {
+                double_rns_repr_or_part: RefCell::new(None),
+                representation: RefCell::new(ManagedDoubleRNSElRepresentation::SmallBasis),
+                small_basis_part: RefCell::new(None),
+                small_basis_repr: {
+                    let result = OnceCell::new();
+                    result.set(self.base.drop_rns_factor_non_fft(&from.base, dropped_rns_factors, value.internal.small_basis_repr.get().unwrap())).ok().unwrap();
+                    result
+                }
+            }) },
+            ManagedDoubleRNSElRepresentation::DoubleRNS => ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal {
+                double_rns_repr_or_part: RefCell::new(Some(self.base.drop_rns_factor(&from.base, dropped_rns_factors, value.internal.double_rns_repr_or_part.borrow().as_ref().unwrap()))),
+                representation: RefCell::new(ManagedDoubleRNSElRepresentation::DoubleRNS),
+                small_basis_part: RefCell::new(None),
+                small_basis_repr: OnceCell::new()
+            }) },
+            ManagedDoubleRNSElRepresentation::Both => ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal {
+                double_rns_repr_or_part: RefCell::new(Some(self.base.drop_rns_factor(&from.base, dropped_rns_factors, value.internal.double_rns_repr_or_part.borrow().as_ref().unwrap()))),
+                representation: RefCell::new(ManagedDoubleRNSElRepresentation::Both),
+                small_basis_part: RefCell::new(None),
+                small_basis_repr: {
+                    let result = OnceCell::new();
+                    result.set(self.base.drop_rns_factor_non_fft(&from.base, dropped_rns_factors, value.internal.small_basis_repr.get().unwrap())).ok().unwrap();
+                    result
+                }
+            }) }
+        }
     }
 
     fn drop_rns_factor_prepared(&self, from: &Self, drop_factors: &[usize], value: Self::PreparedMultiplicant) -> Self::PreparedMultiplicant {
-        unimplemented!()
+        self.drop_rns_factor(from, drop_factors, value)
     }
 
     fn mul_prepared(&self, lhs: &Self::PreparedMultiplicant, rhs: &Self::PreparedMultiplicant) -> Self::Element {
         self.mul_ref(lhs, rhs)
     }
 
-    fn prepare_multiplicant(&self, x: Self::Element) -> Self::PreparedMultiplicant {
-        x
+    fn prepare_multiplicant(&self, x: &Self::Element) -> Self::PreparedMultiplicant {
+        self.clone_el(x)
     }
 
     fn as_representation_wrt_small_generating_set<'a>(&'a self, x: &'a Self::Element) -> Submatrix<'a, AsFirstElement<ZnEl>, ZnEl> {

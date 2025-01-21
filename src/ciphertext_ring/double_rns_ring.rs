@@ -348,7 +348,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
         return result;
     }
     
-    pub fn drop_rns_factor(&self, from: &Self, drop_factors: &[usize], value: DoubleRNSEl<NumberRing, A>) -> DoubleRNSEl<NumberRing, A> {
+    pub fn drop_rns_factor(&self, from: &Self, drop_factors: &[usize], value: &DoubleRNSEl<NumberRing, A>) -> DoubleRNSEl<NumberRing, A> {
         assert!(self.number_ring() == from.number_ring());
         assert_eq!(self.base_ring().len() + drop_factors.len(), from.base_ring().len());
         assert!(drop_factors.iter().all(|i| *i < from.base_ring().len()));
@@ -370,7 +370,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
         return result;
     }
 
-    pub fn drop_rns_factor_non_fft(&self, from: &Self, drop_factors: &[usize], value: SmallBasisEl<NumberRing, A>) -> SmallBasisEl<NumberRing, A> {
+    pub fn drop_rns_factor_non_fft(&self, from: &Self, drop_factors: &[usize], value: &SmallBasisEl<NumberRing, A>) -> SmallBasisEl<NumberRing, A> {
         assert!(self.number_ring() == from.number_ring());
         assert_eq!(self.base_ring().len() + drop_factors.len(), from.base_ring().len());
         assert!(drop_factors.iter().all(|i| *i < from.base_ring().len()));
@@ -918,7 +918,7 @@ pub fn test_with_number_ring<NumberRing: Clone + HECyclotomicNumberRing>(number_
         assert_el_eq!(
             &dropped_rns_factor_ring,
             dropped_rns_factor_ring.from_canonical_basis(ring.wrt_canonical_basis(a).iter().map(|c| dropped_rns_factor_ring.base_ring().from_congruence([*ring.base_ring().get_congruence(&c).at(1)].into_iter()))),
-            dropped_rns_factor_ring.get_ring().drop_rns_factor(ring.get_ring(), &[0], ring.clone_el(a))
+            dropped_rns_factor_ring.get_ring().drop_rns_factor(ring.get_ring(), &[0], a)
         );
     }
 }
