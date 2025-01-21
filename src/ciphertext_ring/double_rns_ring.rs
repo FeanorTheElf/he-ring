@@ -347,6 +347,52 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
         }
         return result;
     }
+    
+    pub fn drop_rns_factor(&self, from: &Self, drop_factors: &[usize], value: DoubleRNSEl<NumberRing, A>) -> DoubleRNSEl<NumberRing, A> {
+        assert!(self.number_ring() == from.number_ring());
+        assert_eq!(self.base_ring().len() + drop_factors.len(), from.base_ring().len());
+        assert!(drop_factors.iter().all(|i| *i < from.base_ring().len()));
+        assert_eq!(from.element_len(), value.el_wrt_mult_basis.len());
+
+        let mut result = self.zero();
+        let mut i_self = 0;
+        for i_from in 0..from.base_ring().len() {
+            if drop_factors.contains(&i_from) {
+                continue;
+            }
+            assert!(self.base_ring().at(i_self).get_ring() == from.base_ring().at(i_from).get_ring());
+            for j in 0..self.rank() {
+                result.el_wrt_mult_basis[j + i_self * self.rank()] = value.el_wrt_mult_basis[j + i_from * from.rank()];
+            }
+            i_self += 1;
+        }
+
+        return result;
+    }
+
+    pub fn drop_rns_factor_non_fft(&self, from: &Self, drop_factors: &[usize], value: SmallBasisEl<NumberRing, A>) -> SmallBasisEl<NumberRing, A> {
+        assert!(self.number_ring() == from.number_ring());
+        assert_eq!(self.base_ring().len() + drop_factors.len(), from.base_ring().len());
+        assert!(drop_factors.iter().all(|i| *i < from.base_ring().len()));
+        assert_eq!(from.element_len(), value.el_wrt_small_basis.len());
+
+        let mut result = self.zero_non_fft();
+        let mut result_as_matrix = self.as_matrix_wrt_small_basis_mut(&mut result);
+        let value_as_matrix = self.as_matrix_wrt_small_basis(&value);
+        let mut i_self = 0;
+        for i_from in 0..from.base_ring().len() {
+            if drop_factors.contains(&i_from) {
+                continue;
+            }
+            assert!(self.base_ring().at(i_self).get_ring() == from.base_ring().at(i_from).get_ring());
+            for j in 0..self.rank() {
+                *result_as_matrix.at_mut(i_self, j) = *value_as_matrix.at(i_from, j);
+            }
+            i_self += 1;
+        }
+
+        return result;
+    }
 }
 
 impl<NumberRing, A> PartialEq for DoubleRNSRingBase<NumberRing, A> 

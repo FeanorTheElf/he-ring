@@ -243,6 +243,59 @@ impl<NumberRing, A, C> BGFVCiphertextRing for SingleRNSRingBase<NumberRing, A, C
         })
     }
 
+    fn drop_rns_factor(&self, from: &Self, drop_factors: &[usize], value: Self::Element) -> Self::Element {
+        assert_eq!(self.n(), from.n());
+        assert_eq!(self.base_ring().len() + drop_factors.len(), from.base_ring().len());
+        assert!(drop_factors.iter().all(|i| *i < from.base_ring().len()));
+
+        let mut result = self.zero();
+        let mut result_as_matrix = self.coefficients_as_matrix_mut(&mut result);
+        debug_assert_eq!(self.base_ring().len(), result_as_matrix.row_count());
+        debug_assert_eq!(self.n(), result_as_matrix.col_count());
+
+        let value_as_matrix =self.coefficients_as_matrix(&value);
+        debug_assert_eq!(from.base_ring().len(), value_as_matrix.row_count());
+        debug_assert_eq!(from.n(), value_as_matrix.col_count());
+
+        let mut i_self = 0;
+        for i_from in 0..from.base_ring().len() {
+            if drop_factors.contains(&i_from) {
+                continue;
+            }
+            assert!(self.base_ring().at(i_self).get_ring() == from.base_ring().at(i_from).get_ring());
+            for j in 0..result_as_matrix.col_count() {
+                *result_as_matrix.at_mut(i_self, j) = *value_as_matrix.at(i_from, j);
+            }
+            i_self += 1;
+        }
+
+        return result;
+    }
+
+    fn drop_rns_factor_prepared(&self, from: &Self, drop_factors: &[usize], value: Self::PreparedMultiplicant) -> Self::PreparedMultiplicant {
+        assert_eq!(self.n(), from.n());
+        assert_eq!(self.base_ring().len() + drop_factors.len(), from.base_ring().len());
+        assert!(drop_factors.iter().all(|i| *i < from.base_ring().len()));
+        debug_assert_eq!(from.base_ring().len(), value.data.len());
+
+        let mut result = Vec::with_capacity_in(self.base_ring().len(), self.allocator().clone());
+        let mut i_self = 0;
+        for (i_from, operand) in value.data.into_iter().enumerate() {
+            if drop_factors.contains(&i_from) {
+                continue;
+            }
+            assert!(self.base_ring().at(i_self).get_ring() == from.base_ring().at(i_from).get_ring());
+            result.push(operand);
+            i_self += 1;
+        }
+
+        return SingleRNSRingPreparedMultiplicant {
+            data: result,
+            element: PhantomData,
+            number_ring: PhantomData
+        };
+    }
+
     fn as_representation_wrt_small_generating_set<'a>(&'a self, x: &'a Self::Element) -> Submatrix<'a, AsFirstElement<ZnEl>, ZnEl> {
         self.coefficients_as_matrix(x)
     }

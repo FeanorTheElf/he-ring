@@ -337,6 +337,14 @@ impl<NumberRing, A> BGFVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, 
     type NumberRing = NumberRing;
     type PreparedMultiplicant = Self::Element;
 
+    fn drop_rns_factor(&self, from: &Self, drop_factors: &[usize], value: Self::Element) -> Self::Element {
+        unimplemented!()
+    }
+
+    fn drop_rns_factor_prepared(&self, from: &Self, drop_factors: &[usize], value: Self::PreparedMultiplicant) -> Self::PreparedMultiplicant {
+        unimplemented!()
+    }
+
     fn mul_prepared(&self, lhs: &Self::PreparedMultiplicant, rhs: &Self::PreparedMultiplicant) -> Self::Element {
         self.mul_ref(lhs, rhs)
     }
