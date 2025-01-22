@@ -29,6 +29,7 @@ use crate::number_ring::*;
 use crate::rnsconv::*;
 use crate::IsEq;
 use super::single_rns_ring::*;
+use super::BGFVCiphertextRing;
 
 ///
 /// The ring `R/qR` specified by a collection of [`HENumberRingMod`] for all prime factors `p | q`. 

@@ -17,10 +17,14 @@ use crate::cyclotomic::*;
 use crate::lintransform::matmul::*;
 use crate::lintransform::HELinearTransform;
 use crate::lintransform::PowerTable;
-use crate::ciphertext_ring::hypercube::*;
-use crate::ciphertext_ring::number_ring::*;
-use crate::ciphertext_ring::decomposition_ring::*;
-use crate::ciphertext_ring::pow2_cyclotomic::*;
+use crate::number_ring::hypercube::DefaultHypercube;
+use crate::number_ring::hypercube::HypercubeStructure;
+use crate::number_ring::hypercube::SlotRingOver;
+use crate::number_ring::pow2_cyclotomic::Pow2CyclotomicNumberRing;
+use crate::number_ring::quotient::NumberRingQuotientBase;
+use crate::number_ring::{HECyclotomicNumberRing, HENumberRing};
+use crate::number_ring::quotient::NumberRingQuotient;
+use crate::number_ring::hypercube::HypercubeIsomorphism;
 use crate::lintransform::trace::Trace;
 
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;

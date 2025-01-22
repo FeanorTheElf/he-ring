@@ -1,11 +1,16 @@
-use feanor_math::integer::BigIntRing;
-use feanor_math::matrix::{AsFirstElement, AsPointerToSlice, Submatrix};
-use feanor_math::ring::*;
-use feanor_math::rings::extension::FreeAlgebra;
-use feanor_math::rings::zn::zn_64::ZnEl;
-use feanor_math::rings::zn::{zn_64::Zn, zn_rns};
+use std::alloc::Allocator;
 
+use feanor_math::integer::BigIntRing;
+use feanor_math::matrix::{AsFirstElement, AsPointerToSlice, Submatrix, SubmatrixMut};
+use feanor_math::ring::*;
+use feanor_math::rings::extension::{FreeAlgebra, FreeAlgebraStore};
+use feanor_math::rings::zn::zn_64::{ZnEl, Zn, ZnBase};
+use feanor_math::rings::zn::zn_rns;
+use feanor_math::seq::{VectorView, VectorFn};
+
+use crate::number_ring::quotient::{NumberRingQuotient, NumberRingQuotientEl};
 use crate::number_ring::HECyclotomicNumberRing;
+use crate::rnsconv::RNSOperation;
 
 ///
 /// Code for fast polynomial division by a cyclotomic polynomial.
@@ -38,6 +43,8 @@ pub trait BGFVCiphertextRing: RingBase + FreeAlgebra + RingExtension<BaseRing = 
 
     type NumberRing: HECyclotomicNumberRing;
     type PreparedMultiplicant;
+
+    fn number_ring(&self) -> &Self::NumberRing;
 
     fn prepare_multiplicant(&self, x: &Self::Element) -> Self::PreparedMultiplicant;
 
@@ -110,4 +117,49 @@ pub trait BGFVCiphertextRing: RingBase + FreeAlgebra + RingExtension<BaseRing = 
             ]
         })
     }
+}
+
+pub fn perform_rns_op<R, Op>(to: &R, from: &R, el: &R::Element, op: &Op) -> R::Element
+    where R: BGFVCiphertextRing,
+        Op: RNSOperation<RingType = ZnBase>
+{
+    assert!(from.number_ring() == to.number_ring());
+    assert_eq!(op.input_rings().len(), from.base_ring().len());
+    assert_eq!(op.output_rings().len(), to.base_ring().len());
+    assert!(op.input_rings().iter().zip(from.base_ring().as_iter()).all(|(l, r)| l.get_ring() == r.get_ring()));
+    assert!(op.output_rings().iter().zip(to.base_ring().as_iter()).all(|(l, r)| l.get_ring() == r.get_ring()));
+
+    let el_repr = from.as_representation_wrt_small_generating_set(el);
+    let mut res_repr = Vec::with_capacity(el_repr.col_count() * to.base_ring().len());
+    res_repr.resize(el_repr.col_count() * to.base_ring().len(), to.base_ring().at(0).zero());
+    let mut res_repr = SubmatrixMut::from_1d(&mut res_repr, to.base_ring().len(), el_repr.col_count());
+    op.apply(el_repr, res_repr.reborrow());
+    return to.from_representation_wrt_small_generating_set(res_repr.as_const());
+}
+
+pub fn perform_rns_op_to_plaintext_ring<R, Op, A>(to: &NumberRingQuotient<R::NumberRing, Zn, A>, from: &R, el: &R::Element, op: &Op) -> NumberRingQuotientEl<R::NumberRing, Zn, A>
+    where R: BGFVCiphertextRing,
+        Op: RNSOperation<RingType = ZnBase>,
+        A: Allocator + Clone
+{
+    assert!(from.number_ring() == to.get_ring().number_ring());
+    assert_eq!(op.input_rings().len(), from.base_ring().len());
+    assert_eq!(op.output_rings().len(), 1);
+    assert!(op.input_rings().iter().zip(from.base_ring().as_iter()).all(|(l, r)| l.get_ring() == r.get_ring()));
+    assert!(op.output_rings().at(0).get_ring() == to.base_ring().get_ring());
+
+    let mut el_repr = Vec::with_capacity(from.rank() * from.base_ring().len());
+    el_repr.resize(from.rank() * from.base_ring().len(), from.base_ring().at(0).zero());
+    let mut el_repr = SubmatrixMut::from_1d(&mut el_repr, from.base_ring().len(), from.rank());
+    for (j, c) in from.wrt_canonical_basis(el).iter().enumerate() {
+        for (i, x) in from.base_ring().get_congruence(&c).as_iter().enumerate() {
+            *el_repr.at_mut(i, j) = *x;
+        }
+    }
+
+    let mut res_repr = Vec::with_capacity(el_repr.col_count());
+    res_repr.resize(el_repr.col_count(), to.base_ring().zero());
+    let mut res_repr = SubmatrixMut::from_1d(&mut res_repr, 1, el_repr.col_count());
+    op.apply(el_repr.as_const(), res_repr.reborrow());
+    return to.from_canonical_basis(res_repr.row_at(0).copy_els().iter());
 }

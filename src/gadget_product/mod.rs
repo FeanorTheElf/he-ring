@@ -14,6 +14,7 @@ use feanor_math::homomorphism::Homomorphism;
 use crate::ciphertext_ring::double_rns_ring::DoubleRNSRingBase;
 use crate::ciphertext_ring::single_rns_ring::SingleRNSRingBase;
 use crate::ciphertext_ring::BGFVCiphertextRing;
+use crate::cyclotomic::{CyclotomicGaloisGroupEl, CyclotomicRing};
 use crate::number_ring::pow2_cyclotomic::Pow2CyclotomicNumberRing;
 use crate::rnsconv::bfv_rescale::AlmostExactRescaling;
 use crate::rnsconv::{lift, RNSOperation};
@@ -22,7 +23,7 @@ use crate::DefaultConvolution;
 type UsedBaseConversion<A> = lift::AlmostExactBaseConversion<A>;
 
 pub struct GadgetProductLhsOperand<R: BGFVCiphertextRing> {
-    element_decomposition: Vec<R::PreparedMultiplicant>
+    element_decomposition: Vec<(R::PreparedMultiplicant, R::Element)>
 }
 
 impl<R: BGFVCiphertextRing> GadgetProductLhsOperand<R> {
@@ -46,6 +47,31 @@ impl<R: BGFVCiphertextRing> GadgetProductLhsOperand<R> {
     /// 
     pub fn from_element(ring: &R, el: &R::Element, digits: usize) -> Self {
         Self::from_element_with(ring, el, select_digits(digits, ring.base_ring().len()).clone_els())
+    }
+
+    pub fn apply_galois_action(&self, ring: &R, g: CyclotomicGaloisGroupEl) -> Self 
+        where R: CyclotomicRing
+    {
+        Self {
+            element_decomposition: self.element_decomposition.iter().map(|(_prepared_el, el)| {
+                let new_el = ring.apply_galois_action(el, g);
+                return (ring.prepare_multiplicant(&new_el), new_el);
+            }).collect()
+        }
+    }
+
+    pub fn apply_galois_action_many(&self, ring: &R, gs: &[CyclotomicGaloisGroupEl]) -> Vec<Self>
+        where R: CyclotomicRing
+    {
+        let mut result = Vec::with_capacity(gs.len());
+        result.resize_with(gs.len(), || GadgetProductLhsOperand { element_decomposition: Vec::new() });
+        for (_prepared_el, el) in &self.element_decomposition {
+            let new_els = ring.apply_galois_action_many(el, gs);
+            for (i, new_el) in new_els.into_iter().enumerate() {
+                result[i].element_decomposition.push((ring.prepare_multiplicant(&new_el), new_el));
+            }
+        }
+        return result;
     }
 
     ///
@@ -159,7 +185,7 @@ impl<R: BGFVCiphertextRing> GadgetProductLhsOperand<R> {
     /// 
     pub fn gadget_product(&self, rhs: &GadgetProductRhsOperand<R>, ring: &R) -> R::Element {
         assert_eq!(self.element_decomposition.len(), rhs.scaled_element.len(), "Gadget product operands created w.r.t. different digit sets");
-        return ring.inner_product_prepared(self.element_decomposition.iter().zip(rhs.scaled_element.iter()).filter_map(|(lhs, rhs)| rhs.as_ref().map(|(rhs, _)| (lhs, rhs))));
+        return ring.inner_product_prepared(self.element_decomposition.iter().zip(rhs.scaled_element.iter()).filter_map(|((lhs, _), rhs)| rhs.as_ref().map(|(rhs, _)| (lhs, rhs))));
     }
 }
 
@@ -171,7 +197,7 @@ impl<R: BGFVCiphertextRing> GadgetProductLhsOperand<R> {
 /// 
 /// The order of the fourier coefficients is the same as specified by the corresponding [`GeneralizedFFT`].
 /// 
-fn gadget_decompose<R, V>(ring: &R, el: &R::Element, digits: V) -> Vec<R::PreparedMultiplicant>
+fn gadget_decompose<R, V>(ring: &R, el: &R::Element, digits: V) -> Vec<(R::PreparedMultiplicant, R::Element)>
     where R: BGFVCiphertextRing,
         V: VectorFn<Range<usize>>
 {
@@ -197,7 +223,11 @@ fn gadget_decompose<R, V>(ring: &R, el: &R::Element, digits: V) -> Vec<R::Prepar
             SubmatrixMut::from_1d(&mut current_row[..], homs.len(), el_as_matrix.col_count())
         );
 
-        result.push(ring.prepare_multiplicant(&ring.from_representation_wrt_small_generating_set(Submatrix::from_1d(&current_row[..], homs.len(), el_as_matrix.col_count()))));
+        let decomposition_part = ring.from_representation_wrt_small_generating_set(Submatrix::from_1d(&current_row[..], homs.len(), el_as_matrix.col_count()));
+        result.push((
+            ring.prepare_multiplicant(&decomposition_part),
+            decomposition_part
+        ));
     }
     return result;
 }

@@ -31,10 +31,15 @@ use crate::circuit::PlaintextCircuit;
 use crate::cyclotomic::*;
 use crate::lintransform::PowerTable;
 use crate::lintransform::CREATE_LINEAR_TRANSFORM_TIME_RECORDER;
-use crate::ciphertext_ring::hypercube::*;
-use crate::ciphertext_ring::number_ring::*;
-use crate::ciphertext_ring::decomposition_ring::*;
-use crate::ciphertext_ring::odd_cyclotomic::*;
+use crate::number_ring::hypercube::DefaultHypercube;
+use crate::number_ring::hypercube::HypercubeStructure;
+use crate::number_ring::hypercube::SlotRingOver;
+use crate::number_ring::odd_cyclotomic::CompositeCyclotomicNumberRing;
+use crate::number_ring::odd_cyclotomic::OddCyclotomicNumberRing;
+use crate::number_ring::quotient::NumberRingQuotientBase;
+use crate::number_ring::{HECyclotomicNumberRing, HENumberRing};
+use crate::number_ring::quotient::NumberRingQuotient;
+use crate::number_ring::hypercube::HypercubeIsomorphism;
 use crate::lintransform::trace::*;
 use crate::lintransform::HELinearTransform;
 
@@ -821,7 +826,7 @@ use super::pow2::slots_to_coeffs_thin;
 #[cfg(test)]
 use super::composite::slots_to_powcoeffs_thin;
 #[cfg(test)]
-use crate::ciphertext_ring::pow2_cyclotomic::*;
+use crate::number_ring::pow2_cyclotomic::*;
 #[cfg(test)]
 use feanor_math::assert_el_eq;
 

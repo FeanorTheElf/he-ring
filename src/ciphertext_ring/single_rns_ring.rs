@@ -168,10 +168,6 @@ impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, A, C>
         return self.coefficients_as_matrix(element).restrict_cols(0..self.rank());
     }
 
-    pub fn number_ring(&self) -> &NumberRing {
-        self.base.get_ring().number_ring()
-    }
-
     pub fn allocator(&self) -> &A {
         self.base.get_ring().allocator()
     }
@@ -188,6 +184,10 @@ impl<NumberRing, A, C> BGFVCiphertextRing for SingleRNSRingBase<NumberRing, A, C
 {
     type NumberRing = NumberRing;
     type PreparedMultiplicant = SingleRNSRingPreparedMultiplicant<NumberRing, A, C>;
+    
+    fn number_ring(&self) -> &NumberRing {
+        self.base.get_ring().number_ring()
+    }
 
     fn prepare_multiplicant(&self, el: &SingleRNSRingEl<NumberRing, A, C>) -> SingleRNSRingPreparedMultiplicant<NumberRing, A, C> {
         record_time!(GLOBAL_TIME_RECORDER, "SingleRNSRing::prepare_multiplicant", || {

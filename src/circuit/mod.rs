@@ -5,8 +5,10 @@ use feanor_math::primitive_int::StaticRing;
 use feanor_math::{assert_el_eq, ring::*};
 
 use crate::cyclotomic::*;
-use crate::ciphertext_ring::decomposition_ring::NumberRingQuotientBase;
-use crate::ciphertext_ring::pow2_cyclotomic::Pow2CyclotomicNumberRing;
+use crate::number_ring::pow2_cyclotomic::Pow2CyclotomicNumberRing;
+use crate::number_ring::{HECyclotomicNumberRing, HENumberRing};
+use crate::number_ring::quotient::{NumberRingQuotient, NumberRingQuotientBase};
+use crate::number_ring::hypercube::HypercubeIsomorphism;
 
 pub enum Coefficient<R: ?Sized + RingBase> {
     Zero, One, Integer(i32), Other(R::Element)

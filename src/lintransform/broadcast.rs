@@ -9,10 +9,10 @@ use feanor_math::assert_el_eq;
 use feanor_math::ring::*;
 
 use crate::cyclotomic::{CyclotomicGaloisGroup, CyclotomicGaloisGroupEl};
-use crate::ciphertext_ring::decomposition_ring::{NumberRingQuotient, NumberRingQuotientBase};
-use crate::ciphertext_ring::hypercube::{DefaultHypercube, HypercubeIsomorphism, HypercubeStructure};
-use crate::ciphertext_ring::number_ring::HECyclotomicNumberRing;
-use crate::ciphertext_ring::odd_cyclotomic::CompositeCyclotomicNumberRing;
+use crate::number_ring::odd_cyclotomic::CompositeCyclotomicNumberRing;
+use crate::number_ring::{HECyclotomicNumberRing, HENumberRing};
+use crate::number_ring::quotient::{NumberRingQuotient, NumberRingQuotientBase};
+use crate::number_ring::hypercube::{DefaultHypercube, HypercubeIsomorphism, HypercubeStructure};
 
 use super::HELinearTransform;
 

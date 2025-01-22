@@ -9,8 +9,8 @@ use feanor_math::rings::zn::ZnRingStore;
 
 use crate::cyclotomic::{CyclotomicGaloisGroupEl, CyclotomicRingStore};
 use crate::profiling::TimeRecorder;
-use crate::ciphertext_ring::number_ring::HECyclotomicNumberRing;
-use crate::ciphertext_ring::{decomposition_ring::NumberRingQuotient, number_ring::HENumberRing};
+use crate::number_ring::{HECyclotomicNumberRing, HENumberRing};
+use crate::number_ring::quotient::NumberRingQuotient;
 
 pub static CREATE_LINEAR_TRANSFORM_TIME_RECORDER: TimeRecorder = TimeRecorder::new("CreateLinTransform");
 

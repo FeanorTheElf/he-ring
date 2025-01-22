@@ -178,29 +178,30 @@ pub mod ciphertext_ring;
 pub mod gadget_product;
 
 ///
+/// Contains an implementation of the BFV scheme.
+/// 
+pub mod bfv;
+
+///
 /// The new implementation of arithmetic-galois circuits (i.e. circuits built
 /// from linear combination, multiplication and galois gates) that will soon
 /// replace [`digitextract::ArithCircuit`] and [`lintransform::matmul::CompiledLinearTransform`].
 /// 
-// pub mod circuit;
+pub mod circuit;
 
 ///
 /// Contains algorithms to compute linear transformations and represent
 /// them as linear combination of Galois automorphisms, as required for
 /// (second-generation) HE schemes.
 /// 
-// pub mod lintransform;
+pub mod lintransform;
 
 ///
 /// Contains algorithms to build arithmetic circuits, with a focus on
 /// digit extraction polynomials.
 /// 
-// pub mod digitextract;
+pub mod digitextract;
 
-///
-/// Contains an implementation of the BFV scheme.
-/// 
-// pub mod bfv;
 
 // pub mod bgv;
 

@@ -14,12 +14,17 @@ use feanor_math::primitive_int::*;
 use feanor_math::seq::VectorFn;
 use matmul::MatmulTransform;
 
+use crate::number_ring::hypercube::DefaultHypercube;
+use crate::number_ring::hypercube::HypercubeStructure;
+use crate::number_ring::hypercube::SlotRingOver;
+use crate::number_ring::odd_cyclotomic::CompositeCyclotomicNumberRing;
+use crate::number_ring::quotient::NumberRingQuotientBase;
 use crate::profiling::clear_all_timings;
 use crate::profiling::log_time;
 use crate::profiling::print_all_timings;
-use crate::ciphertext_ring::decomposition_ring::NumberRingQuotientBase;
-use crate::ciphertext_ring::hypercube::*;
-use crate::ciphertext_ring::odd_cyclotomic::CompositeCyclotomicNumberRing;
+use crate::number_ring::{HECyclotomicNumberRing, HENumberRing};
+use crate::number_ring::quotient::NumberRingQuotient;
+use crate::number_ring::hypercube::HypercubeIsomorphism;
 use crate::cyclotomic::*;
 use crate::lintransform::*;
 

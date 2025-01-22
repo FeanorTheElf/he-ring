@@ -25,12 +25,11 @@ use feanor_math::rings::zn::*;
 use feanor_math::seq::*;
 use feanor_math::algorithms::linsolve::LinSolveRingStore;
 
-use crate::ciphertext_ring::hypercube::SlotRingOver;
-use crate::ciphertext_ring::number_ring::HECyclotomicNumberRing;
-use crate::ciphertext_ring::odd_cyclotomic::OddCyclotomicNumberRing;
-use crate::ciphertext_ring::pow2_cyclotomic::Pow2CyclotomicNumberRing;
-
-use crate::ciphertext_ring::decomposition_ring::*;
+use crate::number_ring::hypercube::SlotRingOver;
+use crate::number_ring::odd_cyclotomic::OddCyclotomicNumberRing;
+use crate::number_ring::{HECyclotomicNumberRing, HENumberRing};
+use crate::number_ring::quotient::NumberRingQuotient;
+use crate::number_ring::hypercube::HypercubeIsomorphism;
 use crate::cyclotomic::*;
 
 use super::HELinearTransform;
