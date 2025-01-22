@@ -123,7 +123,6 @@ impl<A> RNSOperation for AlmostExactRescalingConvert<A>
 /// 
 /// # Examples
 /// ```
-/// #![feature(const_type_name)]
 /// #![feature(allocator_api)]
 /// # use std::alloc::Global;
 /// # use feanor_math::ring::*;
@@ -147,7 +146,21 @@ impl<A> RNSOperation for AlmostExactRescalingConvert<A>
 ///     &output[0]);
 /// ```
 /// We sometimes get an error of `+/- 1`
-/// ```should_panikc
+/// ```should_panic
+/// #![feature(allocator_api)]
+/// # use std::alloc::Global;
+/// # use feanor_math::ring::*;
+/// # use feanor_math::rings::zn::zn_64::*;
+/// # use feanor_math::assert_el_eq;
+/// # use feanor_math::homomorphism::*;
+/// # use feanor_math::matrix::*;
+/// # use he_ring::rnsconv::*;
+/// # use he_ring::rnsconv::bfv_rescale::AlmostExactRescaling;
+/// # let from = vec![Zn::new(17), Zn::new(19), Zn::new(23)];
+/// # let from_modulus = 17 * 19 * 23;
+/// # let to = vec![Zn::new(29)];
+/// # let rescaling = AlmostExactRescaling::new_with(from.clone(), to.clone(), vec![0, 1, 2], Global);
+/// # let mut output = [to[0].zero()];
 /// for x in 1000..2000 {
 ///     rescaling.apply(Submatrix::from_1d(&[from[0].int_hom().map(x), from[1].int_hom().map(x), from[2].int_hom().map(x)], 3, 1), SubmatrixMut::from_1d(&mut output, 1, 1));
 ///     assert_el_eq!(

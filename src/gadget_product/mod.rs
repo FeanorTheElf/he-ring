@@ -4,6 +4,7 @@ use std::ops::Range;
 use feanor_math::integer::BigIntRing;
 use feanor_math::matrix::{Submatrix, SubmatrixMut};
 use feanor_math::primitive_int::StaticRing;
+use feanor_math::rings::zn::ZnRingStore;
 use feanor_math::{assert_el_eq, ring::*};
 use feanor_math::rings::zn::{zn_64::Zn, zn_rns};
 use feanor_math::seq::subvector::SubvectorView;
@@ -254,7 +255,7 @@ impl<R: BGFVCiphertextRing> GadgetProductRhsOperand<R> {
         };
     }
 
-    pub fn modulus_switch(self, from: &R, dropped_rns_factors: &[usize], to: &R) {
+    pub fn modulus_switch(self, to: &R, dropped_rns_factors: &[usize], from: &R) -> Self {
         assert_eq!(to.base_ring().len() + dropped_rns_factors.len(), from.base_ring().len());
         debug_assert_eq!(self.digits.len(), self.scaled_element.len());
         let mut result_scaled_el = Vec::new();
@@ -269,25 +270,17 @@ impl<R: BGFVCiphertextRing> GadgetProductRhsOperand<R> {
             }
             result_digits.push(current..(current + old_digit_len - dropped_from_digit));
             current += old_digit_len - dropped_from_digit;
-            if dropped_from_digit > 0 {
-                if let Some((_, scaled_el)) = scaled_el {
-                    let rescaling = AlmostExactRescaling::new_with(
-                        from.base_ring().as_iter().copied().collect(),
-                        Vec::new(),
-                        unimplemented!(),
-                        Global
-                    );
-                } else {
-                    result_scaled_el.push(None);
-                }
-            } else {       
-                if let Some((scaled_el_prepared, scaled_el)) = scaled_el {
-                    result_scaled_el.push(Some((to.drop_rns_factor_prepared(from, dropped_rns_factors, scaled_el_prepared), to.drop_rns_factor(from, dropped_rns_factors, scaled_el))));
-                } else {
-                    result_scaled_el.push(None);
-                }
+            if let Some((scaled_el_prepared, scaled_el)) = scaled_el {
+                let new_scaled_el = to.drop_rns_factor(from, dropped_rns_factors, scaled_el);
+                result_scaled_el.push(Some((to.drop_rns_factor_prepared(from, dropped_rns_factors, scaled_el_prepared), new_scaled_el)));
+            } else {
+                result_scaled_el.push(None);
             }
         }
+        return Self {
+            digits: result_digits,
+            scaled_element: result_scaled_el
+        };
     }
 }
 
@@ -306,4 +299,36 @@ fn test_gadget_decomposition() {
     let lhs = GadgetProductLhsOperand::from_element(ring.get_ring(), &ring.inclusion().map(hom_i32.map(1000)), 2);
 
     assert_el_eq!(ring, ring.inclusion().map(hom_i32.map(1000)), lhs.gadget_product(&rhs, ring.get_ring()));
+}
+
+#[test]
+fn test_modulus_switch() {
+    let ring = SingleRNSRingBase::<_, Global, DefaultConvolution>::new(Pow2CyclotomicNumberRing::new(4), zn_rns::Zn::create_from_primes(vec![17, 97, 113], BigIntRing::RING));
+    let rns_base = ring.base_ring();
+    let from_congruence = |data: &[i32]| rns_base.from_congruence(data.iter().enumerate().map(|(i, c)| rns_base.at(i).int_hom().map(*c)));
+
+    let mut rhs = GadgetProductRhsOperand::new(ring.get_ring(), 2);
+    rhs.set_rns_factor(ring.get_ring(), 0, ring.inclusion().map(from_congruence(&[1, 1, 0])));
+    rhs.set_rns_factor(ring.get_ring(), 1, ring.inclusion().map(from_congruence(&[0, 0, 1])));
+
+    let smaller_ring = SingleRNSRingBase::<_, Global, DefaultConvolution>::new(Pow2CyclotomicNumberRing::new(4), zn_rns::Zn::create_from_primes(vec![17, 113], BigIntRing::RING));
+    let rhs = rhs.modulus_switch(smaller_ring.get_ring(), &[1], ring.get_ring());
+    let lhs = GadgetProductLhsOperand::from_element(smaller_ring.get_ring(), &smaller_ring.int_hom().map(1000), 2);
+
+    assert_el_eq!(&smaller_ring, smaller_ring.int_hom().map(1000), lhs.gadget_product(&rhs, smaller_ring.get_ring()));
+
+    let ring = SingleRNSRingBase::<_, Global, DefaultConvolution>::new(Pow2CyclotomicNumberRing::new(4), zn_rns::Zn::create_from_primes(vec![17, 97, 113, 193, 241], BigIntRing::RING));
+    let rns_base = ring.base_ring();
+    let from_congruence = |data: &[i32]| rns_base.from_congruence(data.iter().enumerate().map(|(i, c)| rns_base.at(i).int_hom().map(*c)));
+
+    let mut rhs = GadgetProductRhsOperand::new(ring.get_ring(), 3);
+    rhs.set_rns_factor(ring.get_ring(), 0, ring.inclusion().map(from_congruence(&[1000, 1000, 0, 0, 0])));
+    rhs.set_rns_factor(ring.get_ring(), 1, ring.inclusion().map(from_congruence(&[0, 0, 1000, 1000, 0])));
+    rhs.set_rns_factor(ring.get_ring(), 2, ring.inclusion().map(from_congruence(&[0, 0, 0, 0, 1000])));
+
+    let smaller_ring = SingleRNSRingBase::<_, Global, DefaultConvolution>::new(Pow2CyclotomicNumberRing::new(4), zn_rns::Zn::create_from_primes(vec![17, 193, 241], BigIntRing::RING));
+    let rhs = rhs.modulus_switch(smaller_ring.get_ring(), &[1, 2], ring.get_ring());
+    let lhs = GadgetProductLhsOperand::from_element(smaller_ring.get_ring(), &smaller_ring.int_hom().map(1000), 3);
+
+    assert_el_eq!(&smaller_ring, smaller_ring.int_hom().map(1000000), lhs.gadget_product(&rhs, smaller_ring.get_ring()));
 }
