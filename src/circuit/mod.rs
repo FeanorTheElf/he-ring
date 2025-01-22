@@ -25,8 +25,26 @@ impl<R: ?Sized + RingBase> Coefficient<R> {
         }
     }
 
-    fn eq<S: RingStore<Type = R> + Copy>(&self, other: &Self, ring: S) -> bool {
+    pub fn eq<S: RingStore<Type = R> + Copy>(&self, other: &Self, ring: S) -> bool {
         ring.eq_el(&self.clone(ring).to_ring_el(ring), &other.clone(ring).to_ring_el(ring))
+    }
+
+    pub fn add_to<S: RingStore<Type = R> + Copy>(&self, target: El<S>, ring: S) -> El<S> {
+        match self {
+            Coefficient::Zero => target,
+            Coefficient::One => ring.add(target, ring.one()),
+            Coefficient::Integer(x) => ring.add(target, ring.int_hom().map(*x)),
+            Coefficient::Other(x) => ring.add_ref_snd(target, x)
+        }
+    }
+
+    pub fn mul_to<S: RingStore<Type = R> + Copy>(&self, target: El<S>, ring: S) -> El<S> {
+        match self {
+            Coefficient::Zero => ring.zero(),
+            Coefficient::One => target,
+            Coefficient::Integer(x) => ring.int_hom().mul_map(target, *x),
+            Coefficient::Other(x) => ring.mul_ref_snd(target, x)
+        }
     }
 
     fn from<S: RingStore<Type = R> + Copy>(el: El<S>, ring: S) -> Self {
@@ -39,7 +57,7 @@ impl<R: ?Sized + RingBase> Coefficient<R> {
         }
     }
 
-    fn to_ring_el<S: RingStore<Type = R>>(self, ring: S) -> El<S> {
+    pub fn to_ring_el<S: RingStore<Type = R>>(self, ring: S) -> El<S> {
         match self {
             Coefficient::Zero => ring.zero(),
             Coefficient::One => ring.one(),
@@ -173,7 +191,7 @@ impl<R: RingBase + Default> PartialEq for PlaintextCircuit<R> {
 
 impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
 
-    pub fn check_invariants(&self) {
+    fn check_invariants(&self) {
         let mut current_count = self.input_count;
         for gate in &self.gates {
             match gate {
@@ -208,6 +226,9 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
         }).sum()
     }
 
+    ///
+    /// Creates the empty circuit, without in-or outputs.
+    /// 
     pub fn empty() -> Self {
         Self {
             input_count: 0,
@@ -216,6 +237,14 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
         }
     }
 
+    ///
+    /// Creates the constant circuit that always outputs the given constant
+    /// ```text
+    ///  |‾‾‾|
+    ///  |___|
+    ///    |
+    /// ```
+    /// 
     pub fn constant_i32<S: RingStore<Type = R>>(el: i32, ring: S) -> Self {
         let result = Self {
             input_count: 0,
@@ -235,6 +264,14 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
         return result;
     }
 
+    /// 
+    /// Creates the constant circuit that always outputs the given constant
+    /// ```text
+    ///  |‾‾‾|
+    ///  |___|
+    ///    |
+    /// ```
+    /// 
     pub fn constant<S: RingStore<Type = R>>(el: El<S>, ring: S) -> Self {
         let result = Self {
             input_count: 0,
@@ -248,6 +285,19 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
         return result;
     }
 
+    /// 
+    /// Creates the circuit that computes the linear transform of many input elements,
+    /// w.r.t. the given list of coefficients.
+    /// ```text
+    ///        |   |   |   ...
+    ///  |‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾|
+    ///  | c[0] x0 + c[1] x1 + ... |
+    ///  |_________________________|
+    ///              |
+    /// ```
+    /// If you want to pass the list of coefficients as ring elements, consider using
+    /// [`PlaintextCircuit::linear_transform_ring()`].
+    /// 
     pub fn linear_transform<S: RingStore<Type = R>>(coeffs: &[Coefficient<R>], ring: S) -> Self {
         let result = Self {
             input_count: coeffs.len(),
@@ -261,6 +311,17 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
         return result;
     }
 
+    /// 
+    /// Creates the circuit that computes the linear transform of many input elements,
+    /// w.r.t. the given list of coefficients.
+    /// ```text
+    ///        |   |   |   ...
+    ///  |‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾|
+    ///  | c[0] x0 + c[1] x1 + ... |
+    ///  |_________________________|
+    ///              |
+    /// ```
+    /// 
     pub fn linear_transform_ring<S: RingStore<Type = R>>(coeffs: &[El<S>], ring: S) -> Self {
         let result = Self {
             input_count: coeffs.len(),
@@ -274,6 +335,18 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
         return result;
     }
 
+    /// 
+    /// Creates the circuit consisting of a single addition gate
+    /// ```text
+    ///   | |
+    ///  |‾‾‾|
+    ///  | + |
+    ///  |___|
+    ///    |
+    /// ```
+    /// This is a special case of [`PlaintextCircuit::linear_transform()`], in many cases
+    /// the latter is more convenient to use.
+    /// 
     pub fn add<S: RingStore<Type = R>>(ring: S) -> Self {
         let result = Self {
             input_count: 2,
@@ -286,6 +359,16 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
         return result;
     }
 
+    /// 
+    /// Creates the circuit consisting of a single multiplication gate
+    /// ```text
+    ///   | |
+    ///  |‾‾‾|
+    ///  | * |
+    ///  |___|
+    ///    |
+    /// ```
+    /// 
     pub fn mul<S: RingStore<Type = R>>(ring: S) -> Self {
         let result = Self {
             input_count: 2,
@@ -308,6 +391,16 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
         return result;
     }
 
+    /// 
+    /// Creates the circuit consisting of a single Galois gate
+    /// ```text
+    ///    |
+    ///  |‾‾‾|
+    ///  | σ |
+    ///  |___|
+    ///    |
+    /// ```
+    /// 
     pub fn gal<S: RingStore<Type = R>>(g: CyclotomicGaloisGroupEl, ring: S) -> Self {
         let result = Self {
             input_count: 1,
@@ -324,6 +417,16 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
         return result;
     }
 
+    /// 
+    /// Creates the circuit consisting of a single multiple-Galois gate
+    /// ```text
+    ///         |
+    ///  |‾‾‾‾‾‾‾‾‾‾‾‾‾|
+    ///  | σ1, σ2, ... |
+    ///  |_____________|
+    ///    |   |  ...
+    /// ```
+    /// 
     pub fn gal_many<S: RingStore<Type = R>>(gs: &[CyclotomicGaloisGroupEl], ring: S) -> Self {
         let result = Self {
             input_count: 1,
@@ -343,10 +446,40 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
         return result;
     }
 
+    ///
+    /// Copies all the output wires of this circuit, i.e. given a circuit
+    /// ```text
+    ///    | | | |
+    ///   |‾‾‾‾‾‾‾|
+    ///   |   C1  |
+    ///   |_______|
+    ///     | | |
+    /// ```
+    /// this computes
+    /// ```text
+    ///    | | | |
+    ///   |‾‾‾‾‾‾‾|
+    ///   |   C1  |
+    ///   |_______|
+    ///    |  ┊  ┊
+    ///    |‾‾┊‾‾┊‾‾|
+    ///    |  |‾‾┊‾‾┊‾‾|
+    ///    |  |  |‾‾┊‾‾┊‾‾|
+    ///    |  |  |  |  |  |
+    /// ```
+    /// 
     pub fn output_twice<S: RingStore<Type = R> + Copy>(self, ring: S) -> Self {
         self.output_times(2, ring)
     }
 
+    ///
+    /// Creates the circuit that drops the given number of wires, i.e. the circuit
+    /// ```text
+    ///   |  |  |  ...
+    ///   ┴  ┴  ┴
+    /// ```
+    /// which has no output wires.
+    /// 
     pub fn drop(wire_count: usize) -> Self {
         let result = Self {
             input_count: wire_count,
@@ -357,6 +490,13 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
         return result;
     }
 
+    ///
+    /// Creates the circuit that leaves all wires unchanged, i.e.
+    /// ```text
+    ///   |  |  |  |  ...
+    ///   |  |  |  |  ...
+    /// ```
+    /// 
     pub fn identity<S: RingStore<Type = R>>(wire_count: usize, ring: S) -> Self {
         let result = Self {
             input_count: wire_count,
@@ -370,6 +510,10 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
         return result;
     }
 
+    ///
+    /// Creates the circuit that outputs the input wires at the indices given in `output_wires`.
+    /// An input wire can be mentioned multiple times.
+    /// 
     pub fn select<S: RingStore<Type = R>>(input_wire_count: usize, output_wires: &[usize], ring: S) -> Self {
         let result = Self {
             input_count: input_wire_count,
@@ -602,6 +746,23 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
             PlainCircuitGate::Gal(_, _) => false,
             PlainCircuitGate::Mul(_, _) => true
         })
+    }
+
+    pub fn multiplication_gate_count(&self) -> usize {
+        self.gates.iter().filter(|gate| match gate {
+            PlainCircuitGate::Gal(_, _) => false,
+            PlainCircuitGate::Mul(_, _) => true
+        }).count()
+    }
+
+    pub fn required_galois_keys(&self, galois_group: &CyclotomicGaloisGroup) -> Vec<CyclotomicGaloisGroupEl> {
+        let mut result = self.gates.iter().flat_map(|gate| match gate {
+            PlainCircuitGate::Gal(gs, _) => gs.iter().copied(),
+            PlainCircuitGate::Mul(_, _) => [].iter().copied()
+        }).collect::<Vec<_>>();
+        result.sort_unstable_by_key(|g| galois_group.representative(*g));
+        result.dedup_by_key(|g| galois_group.representative(*g));
+        return result;
     }
     
     pub fn is_linear(&self) -> bool {

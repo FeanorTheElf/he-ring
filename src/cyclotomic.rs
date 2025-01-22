@@ -21,6 +21,15 @@ pub struct CyclotomicGaloisGroup {
     order: usize
 }
 
+impl PartialEq for CyclotomicGaloisGroup {
+
+    fn eq(&self, other: &Self) -> bool {
+        self.ring.get_ring() == other.ring.get_ring()
+    }
+}
+
+impl Eq for CyclotomicGaloisGroup {}
+
 impl CyclotomicGaloisGroup {
 
     pub fn new(n: u64) -> Self {

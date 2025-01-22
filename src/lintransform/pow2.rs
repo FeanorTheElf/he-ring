@@ -1,4 +1,5 @@
 use std::alloc::Allocator;
+use std::alloc::Global;
 
 use feanor_math::algorithms::fft::cooley_tuckey::bitreverse;
 use feanor_math::algorithms::unity_root::is_prim_root_of_unity;
@@ -13,9 +14,10 @@ use feanor_math::rings::zn::*;
 use feanor_math::assert_el_eq;
 use feanor_math::seq::VectorView;
 
+use crate::circuit::PlaintextCircuit;
 use crate::cyclotomic::*;
 use crate::lintransform::matmul::*;
-use crate::lintransform::HELinearTransform;
+use crate::lintransform::trace::trace_circuit;
 use crate::lintransform::PowerTable;
 use crate::number_ring::hypercube::DefaultHypercube;
 use crate::number_ring::hypercube::HypercubeStructure;
@@ -25,7 +27,6 @@ use crate::number_ring::quotient::NumberRingQuotientBase;
 use crate::number_ring::{HECyclotomicNumberRing, HENumberRing};
 use crate::number_ring::quotient::NumberRingQuotient;
 use crate::number_ring::hypercube::HypercubeIsomorphism;
-use crate::lintransform::trace::Trace;
 
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
 
@@ -404,17 +405,19 @@ pub fn slots_to_coeffs_thin_inv<NumberRing>(H: &DefaultHypercube<NumberRing>) ->
     }
 }
 
-pub fn coeffs_to_slots_thin<NumberRing>(H: &DefaultHypercube<NumberRing>) -> (Vec<MatmulTransform<NumberRing>>, Trace<NumberRing>)
+pub fn coeffs_to_slots_thin<NumberRing>(H: &DefaultHypercube<NumberRing>) -> PlaintextCircuit<NumberRingQuotientBase<NumberRing, Zn, Global>>
     where NumberRing: HECyclotomicNumberRing + Clone
 {
     let log2_n = ZZ.abs_log2_ceil(&(H.hypercube().n() as i64)).unwrap();
     assert_eq!(H.hypercube().n(), 1 << log2_n);
 
-    let trace = Trace::new(H.ring().get_ring().number_ring().clone(), H.galois_group().representative(H.hypercube().frobenius(1)) as i64, H.slot_ring().rank());
     let mut result = slots_to_coeffs_thin_inv(H);
     let last = MatmulTransform::mult_scalar_slots(H, &H.slot_ring().inclusion().map(H.slot_ring().base_ring().invert(&H.slot_ring().base_ring().int_hom().map(H.slot_ring().rank() as i32)).unwrap()));
     *result.last_mut().unwrap() = result.last().unwrap().compose(&last, H);
-    return (result, trace);
+
+    let trace_circuit = trace_circuit(H.ring().get_ring(), &H.galois_group(), H.hypercube().frobenius(1), H.slot_ring().rank());
+    let result_circuit = MatmulTransform::to_circuit_many(result, H);
+    return trace_circuit.compose(result_circuit, H.ring());
 }
 
 #[test]
@@ -491,15 +494,11 @@ fn test_coeffs_to_slots_thin() {
             input[bitreverse(i, 3) * 2 + j * 16 + 1] = i * 2 + j + 1 + 16;
         }
     }
-    let mut current = ring_literal!(&ring, input);
-    let (main_transform, trace) = coeffs_to_slots_thin(&H);
-    for T in main_transform {
-        current = ring.get_ring().compute_linear_transform(&H, &current, &T);
-    }
-    current = trace.evaluate(&ring, ring.clone_el(&current));
-
+    let current = ring_literal!(&ring, input);
+    let circuit = coeffs_to_slots_thin(&H);
+    let actual = circuit.evaluate(std::slice::from_ref(&current), ring.identity()).pop().unwrap();
     let expected = H.from_slot_values((1..17).map(|n| H.slot_ring().int_hom().map(n)));
-    assert_el_eq!(&ring, &expected, &current);
+    assert_el_eq!(&ring, &expected, &actual);
 
     // `F23[X]/(X^32 + 1) ~ F_(23^8)^4`
     let ring = NumberRingQuotientBase::new(Pow2CyclotomicNumberRing::new(64), Zn::new(23));
@@ -509,29 +508,12 @@ fn test_coeffs_to_slots_thin() {
     let mut input = [0; 32];
     input[4] = 1;
     input[16] = 1;
-    let mut current = ring_literal!(&ring, input);
-    let (main_transform, trace) = coeffs_to_slots_thin(&H);
-    for T in main_transform.iter().rev().skip(1).rev() {
-        current = ring.get_ring().compute_linear_transform(&H, &current, &T);
-    }
-    for a in H.get_slot_values(&current) {
-        H.slot_ring().println(&a);
-    }
-    println!();
-    current = ring.get_ring().compute_linear_transform(&H, &current, main_transform.last().unwrap());
-    current = trace.evaluate(&ring, ring.clone_el(&current));
 
+    let current = ring_literal!(&ring, input);
+    let circuit = coeffs_to_slots_thin(&H);
+    let actual = circuit.evaluate(std::slice::from_ref(&current), ring.identity()).pop().unwrap();
     let expected = H.from_slot_values([0, 0, 1, 0].into_iter().map(|n| H.slot_ring().int_hom().map(n)));
-    
-    for a in H.get_slot_values(&current) {
-        H.slot_ring().println(&a);
-    }
-    println!();
-    for a in H.get_slot_values(&expected) {
-        H.slot_ring().println(&a);
-    }
-
-    assert_el_eq!(&ring, &expected, &current);
+    assert_el_eq!(&ring, &expected, &actual);
 
     let mut input = [0; 32];
     for i in 0..4 {
@@ -543,14 +525,9 @@ fn test_coeffs_to_slots_thin() {
             input[bitreverse(i, 2) * 4 + k + 16] = i + 1 + 4 * k + 16;
         }
     }
-    let mut current = ring_literal!(&ring, input);
-    let (main_transform, trace) = coeffs_to_slots_thin(&H);
-    for T in main_transform.iter() {
-        current = ring.get_ring().compute_linear_transform(&H, &current, &T);
-    }
-    current = trace.evaluate(&ring, ring.clone_el(&current));
-
+    let current = ring_literal!(&ring, input);
+    let circuit = coeffs_to_slots_thin(&H);
+    let actual = circuit.evaluate(std::slice::from_ref(&current), ring.identity()).pop().unwrap();
     let expected = H.from_slot_values([1, 2, 3, 4].into_iter().map(|n| H.slot_ring().int_hom().map(n)));
-
-    assert_el_eq!(&ring, &expected, &current);
+    assert_el_eq!(&ring, &expected, &actual);
 }

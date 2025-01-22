@@ -13,14 +13,12 @@ use polys::{poly_to_circuit, precomputed_p_2};
 use rand::thread_rng;
 
 use crate::cyclotomic::CyclotomicRingStore;
-use crate::lintransform::trace::Trace;
+use crate::lintransform::matmul::MatmulTransform;
 use crate::rnsconv;
 use crate::digitextract::*;
 use crate::lintransform::pow2::{self, coeffs_to_slots_thin};
-use crate::lintransform::HELinearTransform;
 use crate::digitextract::polys::digit_retain_poly;
 use crate::lintransform::composite;
-use crate::lintransform::matmul::CompiledLinearTransform;
 
 use super::*;
 
@@ -39,8 +37,8 @@ pub struct ThinBootstrapParams<Params: BFVParams> {
 /// 
 pub struct ThinBootstrapData<Params: BFVParams> {
     digit_extract: DigitExtract,
-    slots_to_coeffs_thin: Vec<CompiledLinearTransform<NumberRing<Params>>>,
-    coeffs_to_slots_thin: (Vec<CompiledLinearTransform<NumberRing<Params>>>, Option<Trace<NumberRing<Params>>>),
+    slots_to_coeffs_thin: PlaintextCircuit<<PlaintextRing<Params> as RingStore>::Type>,
+    coeffs_to_slots_thin: PlaintextCircuit<<PlaintextRing<Params> as RingStore>::Type>,
     plaintext_ring_hierarchy: Vec<PlaintextRing<Params>>
 }
 
@@ -68,22 +66,14 @@ impl<Params: BFVParams> ThinBootstrapParams<Params>
         let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(plaintext_ring.n() as u64), p);
         let H = HypercubeIsomorphism::new::<LOG>(&plaintext_ring, hypercube);
         let original_H = H.change_modulus(&original_plaintext_ring);
-        let slots_to_coeffs = log_time::<_, _, LOG, _>("Creating Slots-to-Coeffs transform", |[]| pow2::slots_to_coeffs_thin(&original_H));
-        let (coeffs_to_slots, trace) = log_time::<_, _, LOG, _>("Creating Coeffs-to-Slots transform", |[]| {
-            let (transforms, trace) = pow2::coeffs_to_slots_thin(&H);
-            (transforms, Some(trace))
-        });
-        let (compiled_coeffs_to_slots_thin, compiled_slots_to_coeffs_thin): (Vec<_>, Vec<_>) = log_time::<_, _, LOG, _>("Compiling transforms", |[]| (
-            coeffs_to_slots.into_iter().map(|T| CompiledLinearTransform::compile(&H, T)).collect::<Vec<_>>(),
-            slots_to_coeffs.into_iter().map(|T| CompiledLinearTransform::compile(&original_H, T)).collect::<Vec<_>>()
-        ));
-
+        let slots_to_coeffs = log_time::<_, _, LOG, _>("Creating Slots-to-Coeffs transform", |[]| MatmulTransform::to_circuit_many(pow2::slots_to_coeffs_thin(&original_H), &original_H));
+        let coeffs_to_slots = log_time::<_, _, LOG, _>("Creating Coeffs-to-Slots transform", |[]| pow2::coeffs_to_slots_thin(&H));
         let plaintext_ring_hierarchy = ((r + 1)..=e).map(|k| self.scheme_params.create_plaintext_ring(ZZ.pow(p, k))).collect();
 
         return ThinBootstrapData {
             digit_extract,
-            slots_to_coeffs_thin: compiled_slots_to_coeffs_thin,
-            coeffs_to_slots_thin: (compiled_coeffs_to_slots_thin, trace),
+            slots_to_coeffs_thin: slots_to_coeffs,
+            coeffs_to_slots_thin: coeffs_to_slots,
             plaintext_ring_hierarchy: plaintext_ring_hierarchy
         };
     }
@@ -108,20 +98,14 @@ impl<Params: BFVParams> ThinBootstrapParams<Params>
         let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(plaintext_ring.n() as u64), p);
         let H = HypercubeIsomorphism::new::<LOG>(&plaintext_ring, hypercube);
         let original_H = H.change_modulus(&original_plaintext_ring);
-        let slots_to_coeffs = log_time::<_, _, LOG, _>("Creating Slots-to-Coeffs transform", |[]| composite::slots_to_powcoeffs_thin(&original_H));
-        let coeffs_to_slots = log_time::<_, _, LOG, _>("Creating Coeffs-to-Slots transform", |[]| composite::powcoeffs_to_slots_thin(&H));
-
-        let (compiled_coeffs_to_slots_thin, compiled_slots_to_coeffs_thin): (Vec<_>, Vec<_>) = log_time::<_, _, LOG, _>("Compiling transforms", |[]| (
-            coeffs_to_slots.into_iter().map(|T| CompiledLinearTransform::compile(&H, T)).collect::<Vec<_>>(),
-            slots_to_coeffs.into_iter().map(|T| CompiledLinearTransform::compile(&original_H, T)).collect::<Vec<_>>()
-        ));
-
+        let slots_to_coeffs = log_time::<_, _, LOG, _>("Creating Slots-to-Coeffs transform", |[]| MatmulTransform::to_circuit_many(composite::slots_to_powcoeffs_thin(&original_H), &original_H));
+        let coeffs_to_slots = log_time::<_, _, LOG, _>("Creating Coeffs-to-Slots transform", |[]| MatmulTransform::to_circuit_many(composite::powcoeffs_to_slots_thin(&H), &H));
         let plaintext_ring_hierarchy = ((r + 1)..=e).map(|k| self.scheme_params.create_plaintext_ring(ZZ.pow(p, k))).collect();
 
         return ThinBootstrapData {
             digit_extract,
-            slots_to_coeffs_thin: compiled_slots_to_coeffs_thin,
-            coeffs_to_slots_thin: (compiled_coeffs_to_slots_thin, None),
+            slots_to_coeffs_thin: slots_to_coeffs,
+            coeffs_to_slots_thin: coeffs_to_slots,
             plaintext_ring_hierarchy: plaintext_ring_hierarchy
         };
     }
@@ -375,11 +359,8 @@ impl<Params: BFVParams> ThinBootstrapData<Params> {
 
     pub fn required_galois_keys(&self, P: &PlaintextRing<Params>) -> Vec<CyclotomicGaloisGroupEl> {
         let mut result = Vec::new();
-        result.extend(self.slots_to_coeffs_thin.iter().flat_map(|T| T.required_galois_keys().into_iter()));
-        result.extend(self.coeffs_to_slots_thin.0.iter().flat_map(|T| T.required_galois_keys().into_iter()));
-        if let Some(trace) = &self.coeffs_to_slots_thin.1 {
-            result.extend(<_ as HELinearTransform<_, Global>>::required_galois_keys(trace));
-        }
+        result.extend(self.slots_to_coeffs_thin.required_galois_keys(&P.galois_group()).into_iter());
+        result.extend(self.coeffs_to_slots_thin.required_galois_keys(&P.galois_group()).into_iter());
         result.sort_by_key(|g| P.galois_group().representative(*g));
         result.dedup_by(|g, s| P.galois_group().eq_el(*g, *s));
         return result;
@@ -410,7 +391,9 @@ impl<Params: BFVParams> ThinBootstrapData<Params> {
         debug_assert_eq!(ZZ.pow(self.p(), self.e()), *P_main.base_ring().modulus());
 
         let values_in_coefficients = log_time::<_, _, LOG, _>("1. Computing Slots-to-Coeffs transform", |[key_switches]| {
-            return Params::hom_compute_linear_transform::<_, false>(P_base, C, ct, &self.slots_to_coeffs_thin, gk, key_switches);
+            let result = self.slots_to_coeffs_thin.evaluate_bfv::<Params>(P_base, C, None, std::slice::from_ref(&ct), None, gk, key_switches);
+            assert_eq!(1, result.len());
+            return result.into_iter().next().unwrap();
         });
         if let Some(sk) = debug_sk {
             Params::dec_println(P_base, C, &values_in_coefficients, sk);
@@ -427,12 +410,9 @@ impl<Params: BFVParams> ThinBootstrapData<Params> {
         }
 
         let noisy_decryption_in_slots = log_time::<_, _, LOG, _>("3. Computing Coeffs-to-Slots transform", |[key_switches]| {
-            let moved_to_slots = Params::hom_compute_linear_transform::<_, false>(P_main, C, noisy_decryption, &self.coeffs_to_slots_thin.0, gk, key_switches);
-            if let Some(trace) = &self.coeffs_to_slots_thin.1 {
-                return Params::hom_compute_linear_transform::<_, false>(P_main, C, moved_to_slots, std::slice::from_ref(trace), gk, key_switches);
-            } else {
-                return moved_to_slots;
-            };
+            let result = self.coeffs_to_slots_thin.evaluate_bfv::<Params>(P_main, C, None, std::slice::from_ref(&noisy_decryption), None, gk, key_switches);
+            assert_eq!(1, result.len());
+            return result.into_iter().next().unwrap();
         });
         if let Some(sk) = debug_sk {
             Params::dec_println_slots(P_main, C, &noisy_decryption_in_slots, sk);

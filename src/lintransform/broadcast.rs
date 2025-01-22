@@ -14,8 +14,6 @@ use crate::number_ring::{HECyclotomicNumberRing, HENumberRing};
 use crate::number_ring::quotient::{NumberRingQuotient, NumberRingQuotientBase};
 use crate::number_ring::hypercube::{DefaultHypercube, HypercubeIsomorphism, HypercubeStructure};
 
-use super::HELinearTransform;
-
 pub struct Broadcast1d<NumberRing, A>
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone

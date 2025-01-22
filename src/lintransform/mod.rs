@@ -40,40 +40,7 @@ pub mod pow2;
 ///
 /// Contains an implementation of the slot-broadcast transform.
 /// 
-pub mod broadcast;
-
-pub trait HELinearTransform<NumberRing, A>
-    where NumberRing: HECyclotomicNumberRing,
-        A: Allocator + Clone
-{
-    fn number_ring(&self) -> &NumberRing;
-
-    fn evaluate_generic<T, AddFn, ScaleFn, ApplyGaloisFn, CloneFn>(
-        &self,
-        input: T,
-        add_fn: AddFn,
-        scale_fn: ScaleFn,
-        apply_galois_fn: ApplyGaloisFn,
-        clone_fn: CloneFn
-    ) -> T
-        where AddFn: FnMut(T, &T) -> T,
-            ScaleFn: FnMut(T, &El<NumberRingQuotient<NumberRing, Zn, A>>) -> T,
-            ApplyGaloisFn: FnMut(T, &[CyclotomicGaloisGroupEl]) -> Vec<T>,
-            CloneFn: FnMut(&T) -> T;
-
-    fn required_galois_keys(&self) -> Vec<CyclotomicGaloisGroupEl> {
-        let Gal = self.number_ring().galois_group();
-        let mut result = Vec::new();
-        self.evaluate_generic((), |(), ()| (), |(), _| (), |(), gs| { result.extend(gs.iter().copied()); gs.iter().map(|_| ()).collect::<Vec<_>>() }, |()| ());
-        result.sort_unstable_by_key(|g| Gal.representative(*g));
-        result.dedup_by(|g1, g2| Gal.eq_el(*g1, *g2));
-        return result;
-    }
-
-    fn evaluate(&self, ring: &NumberRingQuotient<NumberRing, Zn, A>, input: El<NumberRingQuotient<NumberRing, Zn, A>>) -> El<NumberRingQuotient<NumberRing, Zn, A>> {
-        self.evaluate_generic(input, |a, b| ring.add_ref_snd(a, b), |a, b| ring.mul_ref_snd(a, b), |x, gs| ring.apply_galois_action_many(&x, gs), |a| ring.clone_el(a))
-    }
-}
+// pub mod broadcast;
 
 pub struct PowerTable<R>
     where R: RingStore
