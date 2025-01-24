@@ -23,6 +23,7 @@ use crate::ciphertext_ring::{perform_rns_op, BGFVCiphertextRing};
 use crate::cyclotomic::CyclotomicRing;
 use crate::gadget_product::{GadgetProductLhsOperand, GadgetProductRhsOperand};
 use crate::ntt::HERingNegacyclicNTT;
+use crate::number_ring::odd_cyclotomic::CompositeCyclotomicNumberRing;
 use crate::number_ring::{largest_prime_leq_congruent_to_one, HECyclotomicNumberRing, HENumberRing};
 use crate::number_ring::pow2_cyclotomic::Pow2CyclotomicNumberRing;
 use crate::number_ring::quotient::{NumberRingQuotient, NumberRingQuotientBase};
@@ -319,6 +320,45 @@ impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingNegacyclicNTT<Zn
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct CompositeBGV<A: Allocator + Clone + Send + Sync = DefaultCiphertextAllocator> {
+    pub log2_q_min: usize,
+    pub log2_q_max: usize,
+    pub n1: usize,
+    pub n2: usize,
+    pub ciphertext_allocator: A
+}
+
+impl<A: Allocator + Clone + Send + Sync> BGVParams for CompositeBGV<A> {
+
+    type CiphertextRing = ManagedDoubleRNSRingBase<CompositeCyclotomicNumberRing, A>;
+
+    fn number_ring(&self) -> CompositeCyclotomicNumberRing {
+        CompositeCyclotomicNumberRing::new(self.n1, self.n2)
+    }
+
+    fn max_rns_base(&self) -> zn_rns::Zn<Zn, BigIntRing> {
+        let log2_q = self.log2_q_min..self.log2_q_max;
+        let number_ring = self.number_ring();
+        let required_root_of_unity = number_ring.mod_p_required_root_of_unity() as i64;
+        let mut rns_base = sample_primes(log2_q.start, log2_q.end, 56, |bound| largest_prime_leq_congruent_to_one(int_cast(bound, ZZ, ZZbig), required_root_of_unity).map(|p| int_cast(p, ZZbig, ZZ))).unwrap();
+        rns_base.sort_unstable_by(|l, r| ZZbig.cmp(l, r));
+        return zn_rns::Zn::new(rns_base.into_iter().map(|p| Zn::new(int_cast(p, ZZ, ZZbig) as u64)).collect(), ZZbig);
+    }
+
+    #[instrument(skip_all)]
+    fn create_ciphertext_ring<I>(&self, max_rns_base: &zn_rns::Zn<Zn, BigIntRing>, use_primes: I) -> CiphertextRing<Self>
+        where I: Iterator<Item = usize>
+    {
+        let current_rns_base = use_primes.map(|i| *max_rns_base.at(i));
+        return ManagedDoubleRNSRingBase::new_with(
+            self.number_ring(),
+            zn_rns::Zn::new(current_rns_base.collect(), ZZbig),
+            self.ciphertext_allocator.clone()
+        );
+    }
+}
+
 pub fn small_basis_repr<Params, NumberRing, A>(C: &CiphertextRing<Params>, ct: Ciphertext<Params>) -> Ciphertext<Params>
     where Params: BGVParams<CiphertextRing = ManagedDoubleRNSRingBase<NumberRing, A>>,
         NumberRing: HECyclotomicNumberRing,
@@ -419,25 +459,81 @@ fn measure_time_pow2_bgv() {
 
     let m = P.int_hom().map(2);
     let ct = log_time::<_, _, true, _>("EncSym", |[]|
-        small_basis_repr::<Pow2BGV<_, _>, _, _>(&C, Pow2BGV::enc_sym(&P, &C, &mut rng, &m, &sk))
+        Pow2BGV::enc_sym(&P, &C, &mut rng, &m, &sk)
     );
 
     let res = log_time::<_, _, true, _>("HomAddPlain", |[]| 
-        small_basis_repr::<Pow2BGV<_, _>, _, _>(&C, Pow2BGV::hom_add_plain(&P, &C, &m, Pow2BGV::clone_ct(&P, &C, &ct)))
+        Pow2BGV::hom_add_plain(&P, &C, &m, Pow2BGV::clone_ct(&P, &C, &ct))
     );
     assert_el_eq!(&P, &P.int_hom().map(4), &Pow2BGV::dec(&P, &C, res, &sk));
 
     let res = log_time::<_, _, true, _>("HomMulPlain", |[]| 
-        small_basis_repr::<Pow2BGV<_, _>, _, _>(&C, Pow2BGV::hom_mul_plain(&P, &C, &m, Pow2BGV::clone_ct(&P, &C, &ct)))
+        Pow2BGV::hom_mul_plain(&P, &C, &m, Pow2BGV::clone_ct(&P, &C, &ct))
     );
     assert_el_eq!(&P, &P.int_hom().map(4), &Pow2BGV::dec(&P, &C, res, &sk));
 
     let rk = log_time::<_, _, true, _>("GenRK", |[]| 
         Pow2BGV::gen_rk(&P, &C, &mut rng, &sk, digits)
     );
-    let ct2 = small_basis_repr::<Pow2BGV<_, _>, _, _>(&C, Pow2BGV::enc_sym(&P, &C, &mut rng, &m, &sk));
+    let ct2 = Pow2BGV::enc_sym(&P, &C, &mut rng, &m, &sk);
     let res = log_time::<_, _, true, _>("HomMul", |[]| 
-        small_basis_repr::<Pow2BGV<_, _>, _, _>(&C, Pow2BGV::hom_mul(&P, &C, ct, ct2, &rk, None))
+        Pow2BGV::hom_mul(&P, &C, ct, ct2, &rk, None)
     );
     assert_el_eq!(&P, &P.int_hom().map(4), &Pow2BGV::dec(&P, &C, res, &sk));
+}
+
+#[test]
+#[ignore]
+fn measure_time_double_rns_composite_bgv() {
+    let (chrome_layer, _guard) = tracing_chrome::ChromeLayerBuilder::new().build();
+    tracing_subscriber::registry().with(chrome_layer).init();
+
+    let mut rng = thread_rng();
+    
+    let params = CompositeBGV {
+        log2_q_min: 1090,
+        log2_q_max: 1100,
+        n1: 127,
+        n2: 337,
+        ciphertext_allocator: AllocArc(Arc::new(DynLayoutMempool::<Global>::new(Alignment::of::<u64>()))),
+    };
+    let t = 4;
+    let digits = 3;
+    
+    let P = log_time::<_, _, true, _>("CreatePtxtRing", |[]|
+        params.create_plaintext_ring(t)
+    );
+    let max_rns_base = params.max_rns_base();
+    let C = log_time::<_, _, true, _>("CreateCtxtRing", |[]|
+        params.create_ciphertext_ring(&max_rns_base, 0..max_rns_base.len())
+    );
+
+    let sk = log_time::<_, _, true, _>("GenSK", |[]| 
+        CompositeBGV::gen_sk(&C, &mut rng)
+    );
+    
+    let m = P.int_hom().map(3);
+    let ct = log_time::<_, _, true, _>("EncSym", |[]|
+        CompositeBGV::enc_sym(&P, &C, &mut rng, &m, &sk)
+    );
+    assert_el_eq!(&P, &P.int_hom().map(3), &CompositeBGV::dec(&P, &C, CompositeBGV::clone_ct(&P, &C, &ct), &sk));
+
+    let res = log_time::<_, _, true, _>("HomAddPlain", |[]| 
+        CompositeBGV::hom_add_plain(&P, &C, &m, CompositeBGV::clone_ct(&P, &C, &ct))
+    );
+    assert_el_eq!(&P, &P.int_hom().map(2), &CompositeBGV::dec(&P, &C, res, &sk));
+
+    let res = log_time::<_, _, true, _>("HomMulPlain", |[]| 
+        CompositeBGV::hom_mul_plain(&P, &C, &m, CompositeBGV::clone_ct(&P, &C, &ct))
+    );
+    assert_el_eq!(&P, &P.int_hom().map(1), &CompositeBGV::dec(&P, &C, res, &sk));
+
+    let rk = log_time::<_, _, true, _>("GenRK", |[]| 
+        CompositeBGV::gen_rk(&P, &C, &mut rng, &sk, digits)
+    );
+    let ct2 = CompositeBGV::enc_sym(&P, &C, &mut rng, &m, &sk);
+    let res = log_time::<_, _, true, _>("HomMul", |[]| 
+        CompositeBGV::hom_mul(&P, &C, ct, ct2, &rk, None)
+    );
+    assert_el_eq!(&P, &P.int_hom().map(1), &CompositeBGV::dec(&P, &C, res, &sk));
 }

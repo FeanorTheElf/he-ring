@@ -1019,30 +1019,30 @@ fn measure_time_pow2_bfv() {
 
     let m = P.int_hom().map(2);
     let ct = log_time::<_, _, true, _>("EncSym", |[]|
-        small_basis_repr::<Pow2BFV<_, _>, _, _>(&C, Pow2BFV::enc_sym(&P, &C, &mut rng, &m, &sk))
+        Pow2BFV::enc_sym(&P, &C, &mut rng, &m, &sk)
     );
 
     let res = log_time::<_, _, true, _>("HomAddPlain", |[]| 
-        small_basis_repr::<Pow2BFV<_, _>, _, _>(&C, Pow2BFV::hom_add_plain(&P, &C, &m, Pow2BFV::clone_ct(&C, &ct)))
+        Pow2BFV::hom_add_plain(&P, &C, &m, Pow2BFV::clone_ct(&C, &ct))
     );
     assert_el_eq!(&P, &P.int_hom().map(4), &Pow2BFV::dec(&P, &C, res, &sk));
 
     let res = log_time::<_, _, true, _>("HomAdd", |[]| 
-        small_basis_repr::<Pow2BFV<_, _>, _, _>(&C, Pow2BFV::hom_add(&C, Pow2BFV::clone_ct(&C, &ct), &ct))
+        Pow2BFV::hom_add(&C, Pow2BFV::clone_ct(&C, &ct), &ct)
     );
     assert_el_eq!(&P, &P.int_hom().map(4), &Pow2BFV::dec(&P, &C, res, &sk));
 
     let res = log_time::<_, _, true, _>("HomMulPlain", |[]| 
-        small_basis_repr::<Pow2BFV<_, _>, _, _>(&C, Pow2BFV::hom_mul_plain(&P, &C, &m, Pow2BFV::clone_ct(&C, &ct)))
+        Pow2BFV::hom_mul_plain(&P, &C, &m, Pow2BFV::clone_ct(&C, &ct))
     );
     assert_el_eq!(&P, &P.int_hom().map(4), &Pow2BFV::dec(&P, &C, res, &sk));
 
     let rk = log_time::<_, _, true, _>("GenRK", |[]| 
         Pow2BFV::gen_rk(&C, &mut rng, &sk, digits)
     );
-    let ct2 = small_basis_repr::<Pow2BFV<_, _>, _, _>(&C, Pow2BFV::enc_sym(&P, &C, &mut rng, &m, &sk));
+    let ct2 = Pow2BFV::enc_sym(&P, &C, &mut rng, &m, &sk);
     let res = log_time::<_, _, true, _>("HomMul", |[]| 
-        small_basis_repr::<Pow2BFV<_, _>, _, _>(&C, Pow2BFV::hom_mul(&P, &C, &C_mul, ct, ct2, &rk))
+        Pow2BFV::hom_mul(&P, &C, &C_mul, ct, ct2, &rk)
     );
     assert_el_eq!(&P, &P.int_hom().map(4), &Pow2BFV::dec(&P, &C, res, &sk));
 }
@@ -1078,31 +1078,31 @@ fn measure_time_double_rns_composite_bfv() {
     
     let m = P.int_hom().map(3);
     let ct = log_time::<_, _, true, _>("EncSym", |[]|
-        small_basis_repr::<CompositeBFV<_>, _, _>(&C, CompositeBFV::enc_sym(&P, &C, &mut rng, &m, &sk))
+        CompositeBFV::enc_sym(&P, &C, &mut rng, &m, &sk)
     );
     assert_el_eq!(&P, &P.int_hom().map(3), &CompositeBFV::dec(&P, &C, CompositeBFV::clone_ct(&C, &ct), &sk));
 
     let res = log_time::<_, _, true, _>("HomAdd", |[]| 
-        small_basis_repr::<CompositeBFV<_>, _, _>(&C, CompositeBFV::hom_add(&C, CompositeBFV::clone_ct(&C, &ct), &ct))
+        CompositeBFV::hom_add(&C, CompositeBFV::clone_ct(&C, &ct), &ct)
     );
     assert_el_eq!(&P, &P.int_hom().map(2), &CompositeBFV::dec(&P, &C, res, &sk));
 
     let res = log_time::<_, _, true, _>("HomAddPlain", |[]| 
-        small_basis_repr::<CompositeBFV<_>, _, _>(&C, CompositeBFV::hom_add_plain(&P, &C, &m, CompositeBFV::clone_ct(&C, &ct)))
+        CompositeBFV::hom_add_plain(&P, &C, &m, CompositeBFV::clone_ct(&C, &ct))
     );
     assert_el_eq!(&P, &P.int_hom().map(2), &CompositeBFV::dec(&P, &C, res, &sk));
 
     let res = log_time::<_, _, true, _>("HomMulPlain", |[]| 
-        small_basis_repr::<CompositeBFV<_>, _, _>(&C, CompositeBFV::hom_mul_plain(&P, &C, &m, CompositeBFV::clone_ct(&C, &ct)))
+        CompositeBFV::hom_mul_plain(&P, &C, &m, CompositeBFV::clone_ct(&C, &ct))
     );
     assert_el_eq!(&P, &P.int_hom().map(1), &CompositeBFV::dec(&P, &C, res, &sk));
 
     let rk = log_time::<_, _, true, _>("GenRK", |[]| 
         CompositeBFV::gen_rk(&C, &mut rng, &sk, digits)
     );
-    let ct2 = small_basis_repr::<CompositeBFV<_>, _, _>(&C, CompositeBFV::enc_sym(&P, &C, &mut rng, &m, &sk));
+    let ct2 = CompositeBFV::enc_sym(&P, &C, &mut rng, &m, &sk);
     let res = log_time::<_, _, true, _>("HomMul", |[]| 
-        small_basis_repr::<CompositeBFV<_>, _, _>(&C, CompositeBFV::hom_mul(&P, &C, &C_mul, ct, ct2, &rk))
+        CompositeBFV::hom_mul(&P, &C, &C_mul, ct, ct2, &rk)
     );
     assert_el_eq!(&P, &P.int_hom().map(1), &CompositeBFV::dec(&P, &C, res, &sk));
 }
