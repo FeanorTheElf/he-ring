@@ -7,6 +7,7 @@ use feanor_math::rings::extension::{FreeAlgebra, FreeAlgebraStore};
 use feanor_math::rings::zn::zn_64::{ZnEl, Zn, ZnBase};
 use feanor_math::rings::zn::zn_rns;
 use feanor_math::seq::{VectorView, VectorFn};
+use tracing::instrument;
 
 use crate::number_ring::quotient::{NumberRingQuotient, NumberRingQuotientEl};
 use crate::number_ring::HECyclotomicNumberRing;
@@ -104,21 +105,21 @@ pub trait BGFVCiphertextRing: RingBase + FreeAlgebra + RingExtension<BaseRing = 
     /// Computes `[lhs[0] * rhs[0], lhs[0] * rhs[1] + lhs[1] * rhs[0], lhs[1] * rhs[1]]`, but might be
     /// faster than the naive way of evaluating this.
     /// 
+    #[instrument(skip_all)]
     fn two_by_two_convolution(&self, lhs: [&Self::Element; 2], rhs: [&Self::Element; 2]) -> [Self::Element; 3] {
-        record_time!(GLOBAL_TIME_RECORDER, "BGFVCiphertextRing::two_by_two_convolution", || {
-            let mut lhs_it = lhs.into_iter();
-            let mut rhs_it = rhs.into_iter();
-            let lhs: [_; 2] = std::array::from_fn(|_| self.prepare_multiplicant(lhs_it.next().unwrap()));
-            let rhs: [_; 2] = std::array::from_fn(|_| self.prepare_multiplicant(rhs_it.next().unwrap()));
-            [
-                self.mul_prepared(&lhs[0], &rhs[0]),
-                self.inner_product_prepared([(&lhs[0], &rhs[1]), (&lhs[1], &rhs[0])]),
-                self.mul_prepared(&lhs[1], &rhs[1])
-            ]
-        })
+        let mut lhs_it = lhs.into_iter();
+        let mut rhs_it = rhs.into_iter();
+        let lhs: [_; 2] = std::array::from_fn(|_| self.prepare_multiplicant(lhs_it.next().unwrap()));
+        let rhs: [_; 2] = std::array::from_fn(|_| self.prepare_multiplicant(rhs_it.next().unwrap()));
+        [
+            self.mul_prepared(&lhs[0], &rhs[0]),
+            self.inner_product_prepared([(&lhs[0], &rhs[1]), (&lhs[1], &rhs[0])]),
+            self.mul_prepared(&lhs[1], &rhs[1])
+        ]
     }
 }
 
+#[instrument(skip_all)]
 pub fn perform_rns_op<R, Op>(to: &R, from: &R, el: &R::Element, op: &Op) -> R::Element
     where R: BGFVCiphertextRing,
         Op: RNSOperation<RingType = ZnBase>
@@ -137,6 +138,7 @@ pub fn perform_rns_op<R, Op>(to: &R, from: &R, el: &R::Element, op: &Op) -> R::E
     return to.from_representation_wrt_small_generating_set(res_repr.as_const());
 }
 
+#[instrument(skip_all)]
 pub fn perform_rns_op_to_plaintext_ring<R, Op, A>(to: &NumberRingQuotient<R::NumberRing, Zn, A>, from: &R, el: &R::Element, op: &Op) -> NumberRingQuotientEl<R::NumberRing, Zn, A>
     where R: BGFVCiphertextRing,
         Op: RNSOperation<RingType = ZnBase>,

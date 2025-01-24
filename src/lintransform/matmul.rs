@@ -25,12 +25,12 @@ use feanor_math::homomorphism::*;
 
 use serde::de::DeserializeSeed;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use tracing::instrument;
 
 use crate::circuit::Coefficient;
 use crate::circuit::PlaintextCircuit;
 use crate::cyclotomic::*;
 use crate::lintransform::PowerTable;
-use crate::lintransform::CREATE_LINEAR_TRANSFORM_TIME_RECORDER;
 use crate::number_ring::hypercube::DefaultHypercube;
 use crate::number_ring::hypercube::HypercubeStructure;
 use crate::number_ring::hypercube::SlotRingOver;
@@ -89,34 +89,34 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
     ///   e_U(j) -> sum_i matrix(i, j, U(i)) e_U(i)
     /// ```
     /// 
+    #[instrument(skip_all)]
     pub fn matmul1d<G>(H: &DefaultHypercube<NumberRing, A>, dim_index: usize, matrix: G) -> MatmulTransform<NumberRing, A>
         where G: Sync + Fn(usize, usize, &[usize]) -> El<SlotRingOver<Zn>>,
             A: Send + Sync
     {
-        record_time!(CREATE_LINEAR_TRANSFORM_TIME_RECORDER, "matmul1d", || {
-            let m = H.hypercube().m(dim_index) as i64;
-            let mut result = MatmulTransform {
-                data: ((1 - m)..m).into_par_iter().map(|s| {
-                    let coeff = H.from_slot_values(H.hypercube().hypercube_iter(|idxs: &[usize]| if idxs[dim_index] as i64 >= s && idxs[dim_index] as i64 - s < m {
-                        matrix(idxs[dim_index], (idxs[dim_index] as i64 - s) as usize, idxs)
-                    } else {
-                        H.slot_ring().zero()
-                    }));
-                    return (
-                        H.hypercube().map_1d(dim_index, s),
-                        coeff, 
-                    );
-                }).collect()
-            };
-            result.canonicalize(H);
-            return result;
-        })
+        let m = H.hypercube().m(dim_index) as i64;
+        let mut result = MatmulTransform {
+            data: ((1 - m)..m).into_par_iter().map(|s| {
+                let coeff = H.from_slot_values(H.hypercube().hypercube_iter(|idxs: &[usize]| if idxs[dim_index] as i64 >= s && idxs[dim_index] as i64 - s < m {
+                    matrix(idxs[dim_index], (idxs[dim_index] as i64 - s) as usize, idxs)
+                } else {
+                    H.slot_ring().zero()
+                }));
+                return (
+                    H.hypercube().map_1d(dim_index, s),
+                    coeff, 
+                );
+            }).collect()
+        };
+        result.canonicalize(H);
+        return result;
     }
     
     ///
     /// Applies a linea transform on each slot separately. The transform is given by its matrix w.r.t. the basis
     /// `1, X, ..., X^(d - 1)` where `X` is the canonical generator of the slot ring.
     /// 
+    #[instrument(skip_all)]
     pub fn blockmatmul0d<G>(H: &DefaultHypercube<NumberRing, A>, matrix: G) -> MatmulTransform<NumberRing, A>
         where G: Fn(usize, usize, &[usize]) -> El<Zn>
     {
@@ -172,56 +172,55 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
     ///   X^l e_U(j) -> sum_(i, k) matrix((i, k), (j, l), U(i)) X^k e_U(i)
     /// ```
     /// 
+    #[instrument(skip_all)]
     pub fn blockmatmul1d<'a, G>(H: &DefaultHypercube<NumberRing, A>, dim_index: usize, matrix: G) -> MatmulTransform<NumberRing, A>
         where G: Sync + Fn((usize, usize), (usize, usize), &[usize]) -> El<Zn>,
             A: Send + Sync
     {
-        record_time!(CREATE_LINEAR_TRANSFORM_TIME_RECORDER, "blockmatmul1d", || {
-            let m = H.hypercube().m(dim_index) as i64;
-            let d = H.slot_ring().rank();
-            let Gal = H.galois_group();
-            let extract_coeff_factors = (0..d).map(|j| 
-                extract_linear_map(H.slot_ring(), |x| H.slot_ring().wrt_canonical_basis(&x).at(j))
-            ).collect::<Vec<_>>();
-            
-            let poly_ring = DensePolyRing::new(H.slot_ring().base_ring(), "X");
-            let canonical_gen_powertable = PowerTable::new(H.slot_ring(), H.slot_ring().canonical_gen(), H.ring().n() as usize);
-            // this is the map `X -> X^p`, which is the frobenius in our case, since we choose the canonical generator of the slot ring as root of unity
-            let apply_frobenius = |x: &El<SlotRingOver<Zn>>, count: i64| H.slot_ring().sum(
-                H.slot_ring().wrt_canonical_basis(x).iter().enumerate().map(|(i, c)| H.slot_ring().inclusion().mul_ref_map(
-                    &*canonical_gen_powertable.get_power(i as i64 * Gal.representative(H.hypercube().frobenius(count)) as i64),
-                    &c
-                )
-            ));
-            
-            // the approach is as follows:
-            // We consider the matrix by block-diagonals as in [`matmul1d()`], which correspond to shifting slots within a hypercolumn.
-            // Additionally however, we need to take care of the transformation within a slot. Unfortunately, the matrix structure does
-            // not nicely correspond to structure of the Frobenius anymore (more concretely, the basis `1, X, ..., X^(d - 1)` w.r.t. which
-            // we represent the matrix is not normal). Thus, we have to solve a linear system, which is done by [`Trace::extract_coefficient_map`].
-            // In other words, we compute the Frobenius-coefficients for the maps `sum a_k X^k -> a_l` for all `l`. Then we we take the
-            // desired map as the linear combination of these extract-coefficient-maps.
-            let mut result = MatmulTransform {
-                data: ((1 - m)..m).into_par_iter().flat_map_iter(|s| (0..d).map(move |frobenius_index| (s, frobenius_index))).map(|(s, frobenius_index)| {
-                    let coeff = H.from_slot_values(H.hypercube().hypercube_iter(|idxs| if idxs[dim_index] as i64 >= s && idxs[dim_index] as i64 - s < m {
-                        let i = idxs[dim_index];
-                        let j = (idxs[dim_index] as i64 - s) as usize;
-                        <_ as ComputeInnerProduct>::inner_product(H.slot_ring().get_ring(), (0..d).map(|l| (
-                            apply_frobenius(&extract_coeff_factors[l], frobenius_index as i64),
-                            H.slot_ring().from_canonical_basis((0..d).map(|k| matrix((i, k), (j, l), idxs)))
-                        )))
-                    } else {
-                        H.slot_ring().zero()
-                    }));
-                    return (
-                        H.galois_group().mul(H.hypercube().map_1d(dim_index, s), H.hypercube().frobenius(frobenius_index as i64)),
-                        coeff, 
-                    );
-                }).collect()
-            };
-            result.canonicalize(H);
-            return result;
-        })
+        let m = H.hypercube().m(dim_index) as i64;
+        let d = H.slot_ring().rank();
+        let Gal = H.galois_group();
+        let extract_coeff_factors = (0..d).map(|j| 
+            extract_linear_map(H.slot_ring(), |x| H.slot_ring().wrt_canonical_basis(&x).at(j))
+        ).collect::<Vec<_>>();
+        
+        let poly_ring = DensePolyRing::new(H.slot_ring().base_ring(), "X");
+        let canonical_gen_powertable = PowerTable::new(H.slot_ring(), H.slot_ring().canonical_gen(), H.ring().n() as usize);
+        // this is the map `X -> X^p`, which is the frobenius in our case, since we choose the canonical generator of the slot ring as root of unity
+        let apply_frobenius = |x: &El<SlotRingOver<Zn>>, count: i64| H.slot_ring().sum(
+            H.slot_ring().wrt_canonical_basis(x).iter().enumerate().map(|(i, c)| H.slot_ring().inclusion().mul_ref_map(
+                &*canonical_gen_powertable.get_power(i as i64 * Gal.representative(H.hypercube().frobenius(count)) as i64),
+                &c
+            )
+        ));
+        
+        // the approach is as follows:
+        // We consider the matrix by block-diagonals as in [`matmul1d()`], which correspond to shifting slots within a hypercolumn.
+        // Additionally however, we need to take care of the transformation within a slot. Unfortunately, the matrix structure does
+        // not nicely correspond to structure of the Frobenius anymore (more concretely, the basis `1, X, ..., X^(d - 1)` w.r.t. which
+        // we represent the matrix is not normal). Thus, we have to solve a linear system, which is done by [`Trace::extract_coefficient_map`].
+        // In other words, we compute the Frobenius-coefficients for the maps `sum a_k X^k -> a_l` for all `l`. Then we we take the
+        // desired map as the linear combination of these extract-coefficient-maps.
+        let mut result = MatmulTransform {
+            data: ((1 - m)..m).into_par_iter().flat_map_iter(|s| (0..d).map(move |frobenius_index| (s, frobenius_index))).map(|(s, frobenius_index)| {
+                let coeff = H.from_slot_values(H.hypercube().hypercube_iter(|idxs| if idxs[dim_index] as i64 >= s && idxs[dim_index] as i64 - s < m {
+                    let i = idxs[dim_index];
+                    let j = (idxs[dim_index] as i64 - s) as usize;
+                    <_ as ComputeInnerProduct>::inner_product(H.slot_ring().get_ring(), (0..d).map(|l| (
+                        apply_frobenius(&extract_coeff_factors[l], frobenius_index as i64),
+                        H.slot_ring().from_canonical_basis((0..d).map(|k| matrix((i, k), (j, l), idxs)))
+                    )))
+                } else {
+                    H.slot_ring().zero()
+                }));
+                return (
+                    H.galois_group().mul(H.hypercube().map_1d(dim_index, s), H.hypercube().frobenius(frobenius_index as i64)),
+                    coeff, 
+                );
+            }).collect()
+        };
+        result.canonicalize(H);
+        return result;
     }
 
     pub fn switch_ring(&self, H_from: &DefaultHypercube<NumberRing, A>, to: &NumberRingQuotientBase<NumberRing, Zn, A>) -> Self {
@@ -235,6 +234,7 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
         }
     }
 
+    #[instrument(skip_all)]
     pub fn inverse(&self, H: &DefaultHypercube<NumberRing, A>) -> Self {
         self.check_valid(H);
         let Gal = H.galois_group();
@@ -309,6 +309,7 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
         }
     }
 
+    #[instrument(skip_all)]
     pub fn compose(&self, run_first: &MatmulTransform<NumberRing, A>, H: &DefaultHypercube<NumberRing, A>) -> Self {
         self.check_valid(H);
         run_first.check_valid(H);
@@ -323,24 +324,28 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
         return result;
     }
 
+    #[instrument(skip_all)]
     pub fn mult_scalar_slots(H: &DefaultHypercube<NumberRing, A>, scalar: &El<SlotRingOver<Zn>>) -> MatmulTransform<NumberRing, A> {
         return MatmulTransform {
             data: vec![(H.galois_group().identity(), H.from_slot_values((0..H.slot_count()).map(|_| H.slot_ring().clone_el(scalar))))]
         };
     }
 
+    #[instrument(skip_all)]
     pub fn mult_ring_element(H: &DefaultHypercube<NumberRing, A>, factor: El<NumberRingQuotient<NumberRing, Zn, A>>) -> MatmulTransform<NumberRing, A> {
         return MatmulTransform {
             data: vec![(H.galois_group().identity(), factor)]
         };
     }
 
+    #[instrument(skip_all)]
     pub fn identity(H: &DefaultHypercube<NumberRing, A>) -> Self {
         Self {
             data: vec![(H.galois_group().identity(), H.ring().one())]
         }
     }
 
+    #[instrument(skip_all)]
     pub fn shift(H: &DefaultHypercube<NumberRing, A>, positions: &[i64]) -> Self {
         assert_eq!(H.hypercube().dim_count(), positions.len());
         Self {
@@ -357,6 +362,7 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
     /// `σ_(i1, ..., ir)` is the Galois automorphism that corresponds to
     /// a shift by `ij` along the `j`-th hypercube dimension.
     /// 
+    #[instrument(skip_all)]
     pub fn linear_combine_shifts<V, I>(H: &DefaultHypercube<NumberRing, A>, summands: I) -> Self
         where I: Iterator<Item = (V, El<NumberRingQuotient<NumberRing, Zn, A>>)>,
             V: VectorFn<i64>
@@ -425,6 +431,7 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
         );
     }
 
+    #[instrument(skip_all)]
     pub fn baby_step_giant_step_params<V>(automorphisms_per_dim: V, preferred_baby_steps: usize) -> BabyStepGiantStepParams
         where V: VectorFn<usize>
     {
@@ -457,6 +464,7 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
         };
     }
 
+    #[instrument(skip_all)]
     pub fn to_circuit(self, H: &DefaultHypercube<NumberRing, A>) -> PlaintextCircuit<NumberRingQuotientBase<NumberRing, Zn, A>> {
         self.check_valid(H);
 
@@ -472,10 +480,12 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
         return self.to_circuit_with_baby_steps(H, preferred_baby_steps);
     }
 
+    #[instrument(skip_all)]
     pub fn to_circuit_many(transforms: Vec<Self>, H: &DefaultHypercube<NumberRing, A>) -> PlaintextCircuit<NumberRingQuotientBase<NumberRing, Zn, A>> {
         transforms.into_iter().fold(PlaintextCircuit::identity(1, H.ring()), |current, next| next.to_circuit(H).compose(current, H.ring()))
     }
 
+    #[instrument(skip_all)]
     pub fn to_circuit_with_baby_steps(self, H: &DefaultHypercube<NumberRing, A>, preferred_baby_steps: usize) -> PlaintextCircuit<NumberRingQuotientBase<NumberRing, Zn, A>> {
         self.check_valid(H);
 
@@ -591,6 +601,7 @@ impl<NumberRing, A> NumberRingQuotientBase<NumberRing, Zn, A>
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone
 {
+    #[instrument(skip_all)]
     pub fn compute_linear_transform(&self, H: &DefaultHypercube<NumberRing, A>, el: &<Self as RingBase>::Element, transform: &MatmulTransform<NumberRing, A>) -> <Self as RingBase>::Element {
         assert!(H.ring().get_ring() == self);
         <_ as RingBase>::sum(self, transform.data.iter().map(|(s, c)| self.mul_ref_fst(c, self.apply_galois_action(el, *s))))

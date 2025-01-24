@@ -2,6 +2,8 @@ use std::alloc::{Allocator, Global};
 use std::cell::{Ref, RefCell};
 use std::cmp::{min, max};
 
+use tracing::instrument;
+
 use feanor_math::algorithms::convolution::{ConvolutionAlgorithm, STANDARD_CONVOLUTION};
 use feanor_math::algorithms::convolution::PreparedConvolutionAlgorithm;
 use feanor_math::algorithms::fft::cooley_tuckey::CooleyTuckeyFFT;
@@ -64,21 +66,20 @@ impl<R, A> NTTConv<R, A>
         1 << self.max_log2_n
     }
 
+    #[instrument(skip_all)]
     fn compute_convolution_base(&self, mut lhs: PreparedConvolutionOperand<R, A>, rhs: &PreparedConvolutionOperand<R, A>, out: &mut [El<R>]) {
-        record_time!(GLOBAL_TIME_RECORDER, "NTTConv::compute_convolution_base", || {
-            let log2_n = ZZ.abs_log2_ceil(&(lhs.data.len() as i64)).unwrap();
-            assert_eq!(lhs.data.len(), 1 << log2_n);
-            assert_eq!(rhs.data.len(), 1 << log2_n);
-            assert!(lhs.len + rhs.len <= 1 << log2_n);
-            assert!(out.len() >= lhs.len + rhs.len);
-            for i in 0..(1 << log2_n) {
-                self.ring.mul_assign_ref(&mut lhs.data[i], &rhs.data[i]);
-            }
-            self.get_fft(log2_n).unordered_inv_fft(&mut lhs.data[..], &self.ring);
-            for i in 0..(lhs.len + rhs.len) {
-                self.ring.add_assign_ref(&mut out[i], &lhs.data[i]);
-            }
-        })
+        let log2_n = ZZ.abs_log2_ceil(&(lhs.data.len() as i64)).unwrap();
+        assert_eq!(lhs.data.len(), 1 << log2_n);
+        assert_eq!(rhs.data.len(), 1 << log2_n);
+        assert!(lhs.len + rhs.len <= 1 << log2_n);
+        assert!(out.len() >= lhs.len + rhs.len);
+        for i in 0..(1 << log2_n) {
+            self.ring.mul_assign_ref(&mut lhs.data[i], &rhs.data[i]);
+        }
+        self.get_fft(log2_n).unordered_inv_fft(&mut lhs.data[..], &self.ring);
+        for i in 0..(lhs.len + rhs.len) {
+            self.ring.add_assign_ref(&mut out[i], &lhs.data[i]);
+        }
     }
 
     fn get_fft<'a>(&'a self, log2_n: usize) -> &'a CooleyTuckeyFFT<R::Type, R::Type, Identity<R>> {
@@ -94,18 +95,17 @@ impl<R, A> NTTConv<R, A>
         };
     }
     
+    #[instrument(skip_all)]
     fn prepare_convolution_base<V: VectorView<El<R>>>(&self, val: V, log2_n: usize) -> PreparedConvolutionOperand<R, A> {
-        record_time!(GLOBAL_TIME_RECORDER, "NTTConv::prepare_convolution_base", || {
-            let mut result = Vec::with_capacity_in(1 << log2_n, self.allocator.clone());
-            result.extend(val.as_iter().map(|x| self.ring.clone_el(x)));
-            result.resize_with(1 << log2_n, || self.ring.zero());
-            let fft = self.get_fft(log2_n);
-            fft.unordered_fft(&mut result[..], &self.ring);
-            return PreparedConvolutionOperand {
-                len: val.len(),
-                data: result
-            };
-        })
+        let mut result = Vec::with_capacity_in(1 << log2_n, self.allocator.clone());
+        result.extend(val.as_iter().map(|x| self.ring.clone_el(x)));
+        result.resize_with(1 << log2_n, || self.ring.zero());
+        let fft = self.get_fft(log2_n);
+        fft.unordered_fft(&mut result[..], &self.ring);
+        return PreparedConvolutionOperand {
+            len: val.len(),
+            data: result
+        };
     }
 }
 
@@ -173,14 +173,14 @@ impl<R, A> PreparedConvolutionAlgorithm<R::Type> for NTTConv<R, A>
         match log2_lhs.cmp(&log2_rhs) {
             std::cmp::Ordering::Equal => self.compute_convolution_base(self.clone_prepared_operand(lhs), rhs, dst),
             std::cmp::Ordering::Greater => self.compute_convolution_prepared(rhs, lhs, dst, ring),
-            std::cmp::Ordering::Less => record_time!(GLOBAL_TIME_RECORDER, "NTTConv::compute_convolution_prepared::redo_fft", || {
+            std::cmp::Ordering::Less => {
                 let mut lhs_new = Vec::with_capacity_in(lhs.data.len(), self.allocator.clone());
                 lhs_new.extend(lhs.data.iter().map(|x| self.ring.clone_el(x)));
                 self.get_fft(log2_lhs).unordered_inv_fft(&mut lhs_new[..], ring);
                 lhs_new.resize_with(1 << log2_rhs, || ring.zero());
                 self.get_fft(log2_rhs).unordered_fft(&mut lhs_new[..], ring);
                 self.compute_convolution_base(PreparedConvolutionOperand { data: lhs_new, len: lhs.len }, rhs, dst);
-            })
+            }
         }
     }
 }

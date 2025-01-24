@@ -23,12 +23,12 @@ use feanor_math::rings::zn::*;
 use feanor_math::seq::sparse::SparseMapVector;
 use feanor_math::seq::*;
 use feanor_math::matrix::*;
+use tracing::instrument;
 use zn_64::{ZnBase, Zn, ZnEl};
 use zn_static::Fp;
 
 use crate::number_ring::odd_cyclotomic::OddCyclotomicNumberRing;
 use crate::number_ring::HECyclotomicNumberRing;
-use crate::profiling::{TimeRecorder, GLOBAL_TIME_RECORDER};
 use crate::ciphertext_ring::poly_remainder::CyclotomicPolyReducer;
 use crate::{cyclotomic::*, euler_phi};
 use crate::ciphertext_ring::double_rns_ring::{DoubleRNSRing, DoubleRNSRingBase};
@@ -99,6 +99,7 @@ impl<NumberRing, C> SingleRNSRingBase<NumberRing, Global, C>
     where NumberRing: HECyclotomicNumberRing,
         C: HERingConvolution<Zn>
 {
+    #[instrument(skip_all)]
     pub fn new(number_ring: NumberRing, rns_base: zn_rns::Zn<Zn, BigIntRing>) -> RingValue<Self> {
         let max_log2_n = StaticRing::<i64>::RING.abs_log2_ceil(&(number_ring.n() as i64 * 2)).unwrap();
         let convolutions = rns_base.as_iter().map(|Zp| C::new(Zp.clone(), max_log2_n)).collect();
@@ -111,6 +112,7 @@ impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, A, C>
         A: Allocator + Clone,
         C: PreparedConvolutionAlgorithm<ZnBase>
 {
+    #[instrument(skip_all)]
     pub fn new_with(number_ring: NumberRing, rns_base: zn_rns::Zn<Zn, BigIntRing>, allocator: A, convolutions: Vec<C>) -> RingValue<Self> {
         assert!(rns_base.len() > 0);
         assert_eq!(rns_base.len(), convolutions.len());
@@ -127,24 +129,21 @@ impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, A, C>
         })
     }
 
+    #[instrument(skip_all)]
     pub(super) fn reduce_modulus_partly(&self, k: usize, buffer: &mut [ZnEl], output: &mut [ZnEl]) {
-        record_time!(GLOBAL_TIME_RECORDER, "SingleRNSRing::reduce_modulus_partly", || {
-            assert_eq!(self.n(), output.len());
-            let Zp = self.rns_base().at(k);
-        
-            for i in 0..self.n() {
-                output[i] = Zp.sum((i..buffer.len()).step_by(self.n()).map(|j| buffer[j]));
-            }
-        });
+        assert_eq!(self.n(), output.len());
+        let Zp = self.rns_base().at(k);
+                for i in 0..self.n() {
+            output[i] = Zp.sum((i..buffer.len()).step_by(self.n()).map(|j| buffer[j]));
+        }
     }
 
+    #[instrument(skip_all)]
     pub(super) fn reduce_modulus_complete(&self, el: &mut SingleRNSRingEl<NumberRing, A, C>) {
-        record_time!(GLOBAL_TIME_RECORDER, "SingleRNSRing::reduce_modulus_complete", || {
-            let mut el_matrix = self.coefficients_as_matrix_mut(el);
-            for k in 0..self.rns_base().len() {
-                self.poly_moduli[k].remainder(el_matrix.row_mut_at(k));
-            }
-        });
+        let mut el_matrix = self.coefficients_as_matrix_mut(el);
+        for k in 0..self.rns_base().len() {
+            self.poly_moduli[k].remainder(el_matrix.row_mut_at(k));
+        }
     }
 
     pub fn rns_base(&self) -> &zn_rns::Zn<Zn, BigIntRing> {
@@ -189,60 +188,58 @@ impl<NumberRing, A, C> BGFVCiphertextRing for SingleRNSRingBase<NumberRing, A, C
         self.base.get_ring().number_ring()
     }
 
+    #[instrument(skip_all)]
     fn prepare_multiplicant(&self, el: &SingleRNSRingEl<NumberRing, A, C>) -> SingleRNSRingPreparedMultiplicant<NumberRing, A, C> {
-        record_time!(GLOBAL_TIME_RECORDER, "SingleRNSRing::prepare_multiplicant", || {
-            let el_as_matrix = self.coefficients_as_matrix(el);
-            let mut result = Vec::new_in(self.allocator().clone());
-            result.extend(self.rns_base().as_iter().enumerate().map(|(i, Zp)| self.convolutions[i].prepare_convolution_operand(el_as_matrix.row_at(i), Zp)));
-            SingleRNSRingPreparedMultiplicant {
-                element: PhantomData,
-                data: result,
-                number_ring: PhantomData
-            }
-        })
+        let el_as_matrix = self.coefficients_as_matrix(el);
+        let mut result = Vec::new_in(self.allocator().clone());
+        result.extend(self.rns_base().as_iter().enumerate().map(|(i, Zp)| self.convolutions[i].prepare_convolution_operand(el_as_matrix.row_at(i), Zp)));
+        SingleRNSRingPreparedMultiplicant {
+            element: PhantomData,
+            data: result,
+            number_ring: PhantomData
+        }
     }
 
+    #[instrument(skip_all)]
     fn mul_prepared(&self, lhs: &SingleRNSRingPreparedMultiplicant<NumberRing, A, C>, rhs: &SingleRNSRingPreparedMultiplicant<NumberRing, A, C>) -> SingleRNSRingEl<NumberRing, A, C> {
-        record_time!(GLOBAL_TIME_RECORDER, "SingleRNSRing::mul_prepared", || {
-            let mut unreduced_result = Vec::with_capacity_in(2 * self.n(), self.allocator());
-            let mut result = self.zero();
+        let mut unreduced_result = Vec::with_capacity_in(2 * self.n(), self.allocator());
+        let mut result = self.zero();
+        
+        for k in 0..self.rns_base().len() {
+            let Zp = self.rns_base().at(k);
+            unreduced_result.clear();
+            unreduced_result.resize_with(self.n() * 2, || Zp.zero());
             
-            for k in 0..self.rns_base().len() {
-                let Zp = self.rns_base().at(k);
-                unreduced_result.clear();
-                unreduced_result.resize_with(self.n() * 2, || Zp.zero());
-                
-                self.convolutions[k].compute_convolution_prepared(
-                    rhs.data.at(k),
-                    lhs.data.at(k),
-                    &mut unreduced_result,
-                    Zp
-                );
-                self.reduce_modulus_partly(k, &mut unreduced_result, self.coefficients_as_matrix_mut(&mut result).row_mut_at(k));
-            }
-            return result;
-        })
+            self.convolutions[k].compute_convolution_prepared(
+                rhs.data.at(k),
+                lhs.data.at(k),
+                &mut unreduced_result,
+                Zp
+            );
+            self.reduce_modulus_partly(k, &mut unreduced_result, self.coefficients_as_matrix_mut(&mut result).row_mut_at(k));
+        }
+        return result;
     }
 
+    #[instrument(skip_all)]
     fn inner_product_prepared<'a, I>(&self, parts: I) -> Self::Element
         where I: IntoIterator<Item = (&'a Self::PreparedMultiplicant, &'a Self::PreparedMultiplicant)>,
             Self: 'a
     {
-        record_time!(GLOBAL_TIME_RECORDER, "SingleRNSRing::inner_product_prepared", || {
-            let mut result = self.zero();
-            let mut unreduced_result = Vec::with_capacity_in(2 * self.n(), self.allocator());
-            let parts = parts.into_iter().collect::<Vec<_>>();
-            for k in 0..self.rns_base().len() {
-                let Zp = self.rns_base().at(k);
-                unreduced_result.clear();
-                unreduced_result.resize_with(self.n() * 2, || Zp.zero());
-                self.convolutions[k].compute_convolution_inner_product_prepared(parts.iter().copied().map(|(lhs, rhs)| (&lhs.data[k], &rhs.data[k])), &mut unreduced_result, Zp);
-                self.reduce_modulus_partly(k, &mut unreduced_result, self.coefficients_as_matrix_mut(&mut result).row_mut_at(k));
-            }
-            return result;
-        })
+        let mut result = self.zero();
+        let mut unreduced_result = Vec::with_capacity_in(2 * self.n(), self.allocator());
+        let parts = parts.into_iter().collect::<Vec<_>>();
+        for k in 0..self.rns_base().len() {
+            let Zp = self.rns_base().at(k);
+            unreduced_result.clear();
+            unreduced_result.resize_with(self.n() * 2, || Zp.zero());
+            self.convolutions[k].compute_convolution_inner_product_prepared(parts.iter().copied().map(|(lhs, rhs)| (&lhs.data[k], &rhs.data[k])), &mut unreduced_result, Zp);
+            self.reduce_modulus_partly(k, &mut unreduced_result, self.coefficients_as_matrix_mut(&mut result).row_mut_at(k));
+        }
+        return result;
     }
 
+    #[instrument(skip_all)]
     fn drop_rns_factor(&self, from: &Self, drop_factors: &[usize], value: Self::Element) -> Self::Element {
         assert_eq!(self.n(), from.n());
         assert_eq!(self.base_ring().len() + drop_factors.len(), from.base_ring().len());
@@ -272,6 +269,7 @@ impl<NumberRing, A, C> BGFVCiphertextRing for SingleRNSRingBase<NumberRing, A, C
         return result;
     }
 
+    #[instrument(skip_all)]
     fn drop_rns_factor_prepared(&self, from: &Self, drop_factors: &[usize], value: Self::PreparedMultiplicant) -> Self::PreparedMultiplicant {
         assert_eq!(self.n(), from.n());
         assert_eq!(self.base_ring().len() + drop_factors.len(), from.base_ring().len());
@@ -300,6 +298,7 @@ impl<NumberRing, A, C> BGFVCiphertextRing for SingleRNSRingBase<NumberRing, A, C
         self.coefficients_as_matrix(x)
     }
 
+    #[instrument(skip_all)]
     fn from_representation_wrt_small_generating_set<V>(&self, data: Submatrix<V, ZnEl>) -> Self::Element
         where V: AsPointerToSlice<ZnEl>
     {
@@ -369,6 +368,7 @@ impl<NumberRing, A, C> RingBase for SingleRNSRingBase<NumberRing, A, C>
         }
     }
 
+    #[instrument(skip_all)]
     fn add_assign_ref(&self, lhs: &mut Self::Element, rhs: &Self::Element) {
         self.check_valid(lhs);
         self.check_valid(rhs);
@@ -385,6 +385,7 @@ impl<NumberRing, A, C> RingBase for SingleRNSRingBase<NumberRing, A, C>
         self.add_assign_ref(lhs, &rhs);
     }
 
+    #[instrument(skip_all)]
     fn sub_assign_ref(&self, lhs: &mut Self::Element, rhs: &Self::Element) {
         self.check_valid(lhs);
         self.check_valid(rhs);
@@ -397,6 +398,7 @@ impl<NumberRing, A, C> RingBase for SingleRNSRingBase<NumberRing, A, C>
         }
     }
 
+    #[instrument(skip_all)]
     fn negate_inplace(&self, lhs: &mut Self::Element) {
         self.check_valid(lhs);
         let mut lhs_matrix = self.coefficients_as_matrix_mut(lhs);
@@ -411,34 +413,35 @@ impl<NumberRing, A, C> RingBase for SingleRNSRingBase<NumberRing, A, C>
         self.mul_assign_ref(lhs, &rhs);
     }
 
+    #[instrument(skip_all)]
     fn mul_assign_ref(&self, lhs: &mut Self::Element, rhs: &Self::Element) {
         self.check_valid(lhs);
         self.check_valid(rhs);
-        record_time!(GLOBAL_TIME_RECORDER, "SingleRNSRing::mul_assign_ref", || {
-            let mut unreduced_result = Vec::with_capacity_in(2 * self.n(), self.allocator());
+        let mut unreduced_result = Vec::with_capacity_in(2 * self.n(), self.allocator());
+        
+        let rhs_matrix = self.coefficients_as_matrix(rhs);
+        let mut lhs_matrix = self.coefficients_as_matrix_mut(lhs);
+        for k in 0..self.rns_base().len() {
+            let Zp = self.rns_base().at(k);
+            unreduced_result.clear();
+            unreduced_result.resize_with(self.n() * 2, || Zp.zero());
             
-            let rhs_matrix = self.coefficients_as_matrix(rhs);
-            let mut lhs_matrix = self.coefficients_as_matrix_mut(lhs);
-            for k in 0..self.rns_base().len() {
-                let Zp = self.rns_base().at(k);
-                unreduced_result.clear();
-                unreduced_result.resize_with(self.n() * 2, || Zp.zero());
-                
-                self.convolutions[k].compute_convolution(
-                    rhs_matrix.row_at(k),
-                    lhs_matrix.row_at(k),
-                    &mut unreduced_result,
-                    Zp
-                );
-                self.reduce_modulus_partly(k, &mut unreduced_result, lhs_matrix.row_mut_at(k));
-            }
-        })
+            self.convolutions[k].compute_convolution(
+                rhs_matrix.row_at(k),
+                lhs_matrix.row_at(k),
+                &mut unreduced_result,
+                Zp
+            );
+            self.reduce_modulus_partly(k, &mut unreduced_result, lhs_matrix.row_mut_at(k));
+        }
     }
     
+    #[instrument(skip_all)]
     fn from_int(&self, value: i32) -> Self::Element {
         self.from(self.base_ring().get_ring().from_int(value))
     }
 
+    #[instrument(skip_all)]
     fn mul_assign_int(&self, lhs: &mut Self::Element, rhs: i32) {
         self.check_valid(lhs);
         let mut lhs_matrix = self.coefficients_as_matrix_mut(lhs);
@@ -460,6 +463,7 @@ impl<NumberRing, A, C> RingBase for SingleRNSRingBase<NumberRing, A, C>
         };
     }
 
+    #[instrument(skip_all)]
     fn eq_el(&self, lhs: &Self::Element, rhs: &Self::Element) -> bool {
         let mut lhs = self.clone_el(lhs);
         let lhs = self.to_matrix(&mut lhs);
@@ -502,6 +506,7 @@ impl<NumberRing, A, C> RingExtension for SingleRNSRingBase<NumberRing, A, C>
         self.rns_base()
     }
 
+    #[instrument(skip_all)]
     fn from(&self, x: El<Self::BaseRing>) -> Self::Element {
         let mut result = self.zero();
         let mut result_matrix = self.coefficients_as_matrix_mut(&mut result);
@@ -512,6 +517,7 @@ impl<NumberRing, A, C> RingExtension for SingleRNSRingBase<NumberRing, A, C>
         return result;
     }
 
+    #[instrument(skip_all)]
     fn mul_assign_base(&self, lhs: &mut Self::Element, rhs: &El<Self::BaseRing>) {
         let x_congruence = self.rns_base().get_congruence(rhs);
         let mut lhs_matrix = self.coefficients_as_matrix_mut(lhs);
@@ -531,6 +537,7 @@ impl<NumberRing, A, C> FreeAlgebra for SingleRNSRingBase<NumberRing, A, C>
     type VectorRepresentation<'a> = SingleRNSRingBaseElVectorRepresentation<'a, NumberRing, A, C> 
         where Self: 'a;
 
+        #[instrument(skip_all)]
     fn canonical_gen(&self) -> SingleRNSRingEl<NumberRing, A, C> {
         let mut result = self.zero();
         let mut result_matrix = self.coefficients_as_matrix_mut(&mut result);
@@ -544,6 +551,7 @@ impl<NumberRing, A, C> FreeAlgebra for SingleRNSRingBase<NumberRing, A, C>
         self.number_ring().rank()
     }
 
+    #[instrument(skip_all)]
     fn wrt_canonical_basis<'a>(&'a self, el: &'a SingleRNSRingEl<NumberRing, A, C>) -> Self::VectorRepresentation<'a> {
         let mut reduced_el = self.clone_el(el);
         self.reduce_modulus_complete(&mut reduced_el);
@@ -553,6 +561,7 @@ impl<NumberRing, A, C> FreeAlgebra for SingleRNSRingBase<NumberRing, A, C>
         }
     }
 
+    #[instrument(skip_all)]
     fn from_canonical_basis<V>(&self, vec: V) -> SingleRNSRingEl<NumberRing, A, C>
         where V: IntoIterator<Item = El<Self::BaseRing>>
     {
@@ -582,6 +591,7 @@ impl<NumberRing, A, C> CyclotomicRing for SingleRNSRingBase<NumberRing, A, C>
         self.base.galois_group()
     }
 
+    #[instrument(skip_all)]
     fn apply_galois_action(&self, el: &Self::Element, s: CyclotomicGaloisGroupEl) -> Self::Element {
         let self_ref = RingRef::new(self);
         let iso = self.base.can_iso(&self_ref).unwrap();
@@ -590,6 +600,7 @@ impl<NumberRing, A, C> CyclotomicRing for SingleRNSRingBase<NumberRing, A, C>
         return iso.map(result_double_rns);
     }
     
+    #[instrument(skip_all)]
     fn apply_galois_action_many<'a>(&'a self, el: &Self::Element, gs: &'a [CyclotomicGaloisGroupEl]) -> Vec<Self::Element> {
         let self_ref = RingRef::new(self);
         let iso = (&self.base).into_can_iso(self_ref).ok().unwrap();

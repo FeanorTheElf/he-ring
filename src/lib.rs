@@ -70,9 +70,6 @@ pub type DefaultNegacyclicNTT = feanor_math_hexl::hexl::HEXLNegacyclicNTT;
 #[cfg(not(feature = "use_hexl"))]
 pub type DefaultNegacyclicNTT = RustNegacyclicNTT<Zn>;
 
-#[cfg(feature = "log_allocations")]
-pub type DefaultCiphertextAllocator = LoggingAllocator;
-#[cfg(not(feature = "log_allocations"))]
 pub type DefaultCiphertextAllocator = Global;
 
 pub trait IsEq<T: ?Sized> {
@@ -202,9 +199,7 @@ pub mod lintransform;
 /// 
 pub mod digitextract;
 
-
 // pub mod bgv;
-
 
 #[cfg(test)]
 use feanor_math::integer::int_cast;

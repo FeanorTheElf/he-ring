@@ -22,9 +22,9 @@ use feanor_math::seq::*;
 use feanor_math::specialization::FiniteRingOperation;
 use feanor_math::specialization::FiniteRingSpecializable;
 use serde_json::Number;
+use tracing::instrument;
 
 use crate::cyclotomic::{CyclotomicGaloisGroupEl, CyclotomicRing};
-use crate::profiling::TimeRecorder;
 use crate::number_ring::*;
 use crate::rnsconv::*;
 use crate::IsEq;
@@ -90,6 +90,7 @@ pub struct SmallBasisEl<NumberRing, A = Global>
 impl<NumberRing> DoubleRNSRingBase<NumberRing> 
     where NumberRing: HENumberRing
 {
+    #[instrument(skip_all)]
     pub fn new(number_ring: NumberRing, rns_base: zn_rns::Zn<Zn, BigIntRing>) -> RingValue<Self> {
         Self::new_with(number_ring, rns_base, Global)
     }
@@ -99,6 +100,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
     where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
+    #[instrument(skip_all)]
     pub fn new_with(number_ring: NumberRing, rns_base: zn_rns::Zn<Zn, BigIntRing>, allocator: A) -> RingValue<Self> {
         assert!(rns_base.len() > 0);
         RingValue::from(Self {
@@ -133,19 +135,18 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
         &self.number_ring
     }
 
+    #[instrument(skip_all)]
     pub fn undo_fft(&self, element: DoubleRNSEl<NumberRing, A>) -> SmallBasisEl<NumberRing, A> {
-        record_time!(GLOBAL_TIME_RECORDER, "DoubleRNSRing::undo_fft", || {
-            assert_eq!(element.el_wrt_mult_basis.len(), self.element_len());
-            let mut result = element.el_wrt_mult_basis;
-            for i in 0..self.rns_base().len() {
-                self.ring_decompositions[i].mult_basis_to_small_basis(&mut result[(i * self.rank())..((i + 1) * self.rank())]);
-            }
-            SmallBasisEl {
-                el_wrt_small_basis: result,
-                number_ring: PhantomData,
-                allocator: PhantomData
-            }
-        })
+        assert_eq!(element.el_wrt_mult_basis.len(), self.element_len());
+        let mut result = element.el_wrt_mult_basis;
+        for i in 0..self.rns_base().len() {
+            self.ring_decompositions[i].mult_basis_to_small_basis(&mut result[(i * self.rank())..((i + 1) * self.rank())]);
+        }
+        SmallBasisEl {
+            el_wrt_small_basis: result,
+            number_ring: PhantomData,
+            allocator: PhantomData
+        }
     }
 
     pub fn allocator(&self) -> &A {
@@ -177,19 +178,18 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
         }
     }
 
+    #[instrument(skip_all)]
     pub fn do_fft(&self, element: SmallBasisEl<NumberRing, A>) -> DoubleRNSEl<NumberRing, A> {
-        record_time!(GLOBAL_TIME_RECORDER, "DoubleRNSRing::do_fft", || {
-            assert_eq!(element.el_wrt_small_basis.len(), self.element_len());
-            let mut result = element.el_wrt_small_basis;
-            for i in 0..self.rns_base().len() {
-                self.ring_decompositions[i].small_basis_to_mult_basis(&mut result[(i * self.rank())..((i + 1) * self.rank())]);
-            }
-            DoubleRNSEl {
-                el_wrt_mult_basis: result,
-                number_ring: PhantomData,
-                allocator: PhantomData
-            }
-        })
+        assert_eq!(element.el_wrt_small_basis.len(), self.element_len());
+        let mut result = element.el_wrt_small_basis;
+        for i in 0..self.rns_base().len() {
+            self.ring_decompositions[i].small_basis_to_mult_basis(&mut result[(i * self.rank())..((i + 1) * self.rank())]);
+        }
+        DoubleRNSEl {
+            el_wrt_mult_basis: result,
+            number_ring: PhantomData,
+            allocator: PhantomData
+        }
     }
 
     pub fn sample_from_coefficient_distribution<G: FnMut() -> i32>(&self, mut distribution: G) -> SmallBasisEl<NumberRing, A> {
@@ -234,6 +234,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
         return true;
     }
 
+    #[instrument(skip_all)]
     pub fn negate_inplace_non_fft(&self, val: &mut SmallBasisEl<NumberRing, A>) {
         assert_eq!(self.element_len(), val.el_wrt_small_basis.len());
         for i in 0..self.rns_base().len() {
@@ -243,11 +244,13 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
         }
     }
 
+    #[instrument(skip_all)]
     pub fn negate_non_fft(&self, mut val: SmallBasisEl<NumberRing, A>) -> SmallBasisEl<NumberRing, A> {
         self.negate_inplace_non_fft(&mut val);
         return val;
     }
 
+    #[instrument(skip_all)]
     pub fn sub_assign_non_fft(&self, lhs: &mut SmallBasisEl<NumberRing, A>, rhs: &SmallBasisEl<NumberRing, A>) {
         assert_eq!(self.element_len(), lhs.el_wrt_small_basis.len());
         assert_eq!(self.element_len(), rhs.el_wrt_small_basis.len());
@@ -258,6 +261,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
         }
     }
 
+    #[instrument(skip_all)]
     pub fn mul_scalar_assign_non_fft(&self, lhs: &mut SmallBasisEl<NumberRing, A>, rhs: &El<zn_rns::Zn<Zn, BigIntRing>>) {
         assert_eq!(self.element_len(), lhs.el_wrt_small_basis.len());
         for i in 0..self.rns_base().len() {
@@ -267,6 +271,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
         }
     }
 
+    #[instrument(skip_all)]
     pub fn add_assign_non_fft(&self, lhs: &mut SmallBasisEl<NumberRing, A>, rhs: &SmallBasisEl<NumberRing, A>) {
         assert_eq!(self.element_len(), lhs.el_wrt_small_basis.len());
         assert_eq!(self.element_len(), rhs.el_wrt_small_basis.len());
@@ -277,6 +282,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
         }
     }
 
+    #[instrument(skip_all)]
     pub fn from_canonical_basis_non_fft<V>(&self, vec: V) -> SmallBasisEl<NumberRing, A>
         where V: IntoIterator<Item = El<<Self as RingExtension>::BaseRing>>
     {
@@ -297,6 +303,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
         };
     }
 
+    #[instrument(skip_all)]
     pub fn wrt_canonical_basis_non_fft<'a>(&'a self, el: SmallBasisEl<NumberRing, A>) -> DoubleRNSRingBaseElVectorRepresentation<'a, NumberRing, A> {
         let mut result = el.el_wrt_small_basis;
         for i in 0..self.rns_base().len() {
@@ -308,6 +315,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
         };
     }
 
+    #[instrument(skip_all)]
     pub fn map_in_from_singlerns<A2, C>(&self, from: &SingleRNSRingBase<NumberRing, A2, C>, mut el: El<SingleRNSRing<NumberRing, A2, C>>, hom: &<Self as CanHomFrom<SingleRNSRingBase<NumberRing, A2, C>>>::Homomorphism) -> SmallBasisEl<NumberRing, A>
         where NumberRing: HECyclotomicNumberRing,
             A2: Allocator + Clone,
@@ -330,6 +338,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
         }
     }
 
+    #[instrument(skip_all)]
     pub fn map_out_to_singlerns<A2, C>(&self, to: &SingleRNSRingBase<NumberRing, A2, C>, el: SmallBasisEl<NumberRing, A>, iso: &<Self as CanIsoFromTo<SingleRNSRingBase<NumberRing, A2, C>>>::Isomorphism) -> El<SingleRNSRing<NumberRing, A2, C>>
         where NumberRing: HECyclotomicNumberRing,
             A2: Allocator + Clone,
@@ -349,6 +358,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
         return result;
     }
     
+    #[instrument(skip_all)]
     pub fn drop_rns_factor(&self, from: &Self, drop_factors: &[usize], value: &DoubleRNSEl<NumberRing, A>) -> DoubleRNSEl<NumberRing, A> {
         assert!(self.number_ring() == from.number_ring());
         assert_eq!(self.base_ring().len() + drop_factors.len(), from.base_ring().len());
@@ -371,6 +381,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
         return result;
     }
 
+    #[instrument(skip_all)]
     pub fn drop_rns_factor_non_fft(&self, from: &Self, drop_factors: &[usize], value: &SmallBasisEl<NumberRing, A>) -> SmallBasisEl<NumberRing, A> {
         assert!(self.number_ring() == from.number_ring());
         assert_eq!(self.base_ring().len() + drop_factors.len(), from.base_ring().len());
@@ -422,6 +433,7 @@ impl<NumberRing, A> RingBase for DoubleRNSRingBase<NumberRing, A>
         }
     }
 
+    #[instrument(skip_all)]
     fn add_assign_ref(&self, lhs: &mut Self::Element, rhs: &Self::Element) {
         assert_eq!(self.element_len(), lhs.el_wrt_mult_basis.len());
         assert_eq!(self.element_len(), rhs.el_wrt_mult_basis.len());
@@ -436,6 +448,7 @@ impl<NumberRing, A> RingBase for DoubleRNSRingBase<NumberRing, A>
         self.add_assign_ref(lhs, &rhs);
     }
 
+    #[instrument(skip_all)]
     fn sub_assign_ref(&self, lhs: &mut Self::Element, rhs: &Self::Element) {
         assert_eq!(self.element_len(), lhs.el_wrt_mult_basis.len());
         assert_eq!(self.element_len(), rhs.el_wrt_mult_basis.len());
@@ -446,6 +459,7 @@ impl<NumberRing, A> RingBase for DoubleRNSRingBase<NumberRing, A>
         }
     }
 
+    #[instrument(skip_all)]
     fn negate_inplace(&self, lhs: &mut Self::Element) {
         assert_eq!(self.element_len(), lhs.el_wrt_mult_basis.len());
         for i in 0..self.rns_base().len() {
@@ -459,6 +473,7 @@ impl<NumberRing, A> RingBase for DoubleRNSRingBase<NumberRing, A>
         self.mul_assign_ref(lhs, &rhs);
     }
 
+    #[instrument(skip_all)]
     fn mul_assign_ref(&self, lhs: &mut Self::Element, rhs: &Self::Element) {
         assert_eq!(self.element_len(), lhs.el_wrt_mult_basis.len());
         assert_eq!(self.element_len(), rhs.el_wrt_mult_basis.len());
@@ -473,6 +488,7 @@ impl<NumberRing, A> RingBase for DoubleRNSRingBase<NumberRing, A>
         self.from(self.base_ring().get_ring().from_int(value))
     }
 
+    #[instrument(skip_all)]
     fn mul_assign_int(&self, lhs: &mut Self::Element, rhs: i32) {
         assert_eq!(self.element_len(), lhs.el_wrt_mult_basis.len());
         for i in 0..self.rns_base().len() {
@@ -493,6 +509,7 @@ impl<NumberRing, A> RingBase for DoubleRNSRingBase<NumberRing, A>
         };
     }
 
+    #[instrument(skip_all)]
     fn eq_el(&self, lhs: &Self::Element, rhs: &Self::Element) -> bool {
         assert_eq!(self.element_len(), lhs.el_wrt_mult_basis.len());
         assert_eq!(self.element_len(), rhs.el_wrt_mult_basis.len());
@@ -519,6 +536,7 @@ impl<NumberRing, A> RingBase for DoubleRNSRingBase<NumberRing, A>
         self.dbg_within(value, out, EnvBindingStrength::Weakest)
     }
 
+    #[instrument(skip_all)]
     fn square(&self, value: &mut Self::Element) {
         assert_eq!(self.element_len(), value.el_wrt_mult_basis.len());
         for i in 0..self.rns_base().len() {
@@ -543,18 +561,17 @@ impl<NumberRing, A> CyclotomicRing for DoubleRNSRingBase<NumberRing, A>
         self.number_ring.n() as usize
     }
 
+    #[instrument(skip_all)]
     fn apply_galois_action(&self, el: &Self::Element, g: CyclotomicGaloisGroupEl) -> Self::Element {
-        record_time!(GLOBAL_TIME_RECORDER, "DoubleRNSRing::apply_galois_action", || {
-            let mut result = self.zero();
-            for (i, _) in self.rns_base().as_iter().enumerate() {
-                <NumberRing::DecomposedAsCyclotomic>::from_ref(&self.ring_decompositions()[i]).permute_galois_action(
-                    &el.el_wrt_mult_basis[(i * self.rank())..((i + 1) * self.rank())],
-                    &mut result.el_wrt_mult_basis[(i * self.rank())..((i + 1) * self.rank())],
-                    g
-                );
-            }
-            return result;
-        })
+        let mut result = self.zero();
+        for (i, _) in self.rns_base().as_iter().enumerate() {
+            <NumberRing::DecomposedAsCyclotomic>::from_ref(&self.ring_decompositions()[i]).permute_galois_action(
+                &el.el_wrt_mult_basis[(i * self.rank())..((i + 1) * self.rank())],
+                &mut result.el_wrt_mult_basis[(i * self.rank())..((i + 1) * self.rank())],
+                g
+            );
+        }
+        return result;
     }
 }
 
@@ -562,6 +579,7 @@ impl<NumberRing, A> DivisibilityRing for DoubleRNSRingBase<NumberRing, A>
     where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
+    #[instrument(skip_all)]
     fn checked_left_div(&self, lhs: &Self::Element, rhs: &Self::Element) -> Option<Self::Element> {
         let mut result = Vec::with_capacity_in(self.element_len(), self.allocator.clone());
         for (i, Zp) in self.rns_base().as_iter().enumerate() {
@@ -606,6 +624,7 @@ impl<NumberRing, A> FreeAlgebra for DoubleRNSRingBase<NumberRing, A>
     type VectorRepresentation<'a> = DoubleRNSRingBaseElVectorRepresentation<'a, NumberRing, A> 
         where Self: 'a;
 
+    #[instrument(skip_all)]
     fn canonical_gen(&self) -> Self::Element {
         let mut result = self.zero_non_fft().el_wrt_small_basis;
         for (i, Zp) in self.rns_base().as_iter().enumerate() {
@@ -623,10 +642,12 @@ impl<NumberRing, A> FreeAlgebra for DoubleRNSRingBase<NumberRing, A>
         self.ring_decompositions[0].rank()
     }
 
+    #[instrument(skip_all)]
     fn wrt_canonical_basis<'a>(&'a self, el: &'a Self::Element) -> Self::VectorRepresentation<'a> {
         self.wrt_canonical_basis_non_fft(self.undo_fft(self.clone_el(el)))
     }
 
+    #[instrument(skip_all)]
     fn from_canonical_basis<V>(&self, vec: V) -> Self::Element
         where V: IntoIterator<Item = El<Self::BaseRing>>
     {
@@ -648,6 +669,7 @@ impl<NumberRing, A> RingExtension for DoubleRNSRingBase<NumberRing, A>
         self.from_ref(&x)
     }
 
+    #[instrument(skip_all)]
     fn from_ref(&self, x: &El<Self::BaseRing>) -> Self::Element {
         let x_congruence = self.rns_base().get_congruence(x);
         let mut result = Vec::with_capacity_in(self.element_len(), self.allocator.clone());
@@ -665,6 +687,7 @@ impl<NumberRing, A> RingExtension for DoubleRNSRingBase<NumberRing, A>
         };
     }
 
+    #[instrument(skip_all)]
     fn mul_assign_base(&self, lhs: &mut Self::Element, rhs: &El<Self::BaseRing>) {
         let x_congruence = self.rns_base().get_congruence(rhs);
         for (i, Zp) in self.rns_base().as_iter().enumerate() {
@@ -877,7 +900,6 @@ pub fn test_with_number_ring<NumberRing: Clone + HECyclotomicNumberRing>(number_
     use feanor_math::algorithms::eea::signed_lcm;
     use feanor_math::assert_el_eq;
 
-    use crate::profiling::{clear_all_timings, print_all_timings};
     use crate::ntt::ntt_convolution::NTTConv;
 
     let required_root_of_unity = signed_lcm(

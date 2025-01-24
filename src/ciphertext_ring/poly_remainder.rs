@@ -14,10 +14,10 @@ use feanor_math::rings::poly::*;
 use feanor_math::rings::zn::zn_64::Zn;
 use feanor_math::rings::zn::ZnRingStore;
 use sparse_poly::SparsePolyRing;
+use tracing::instrument;
 
 use crate::ntt::ntt_convolution::NTTConv;
 use crate::ntt::HERingConvolution;
-use crate::profiling::GLOBAL_TIME_RECORDER;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum SmallCoeff {
@@ -36,6 +36,7 @@ struct SparsePolyReducer<R>
 impl<R> SparsePolyReducer<R>
     where R: RingStore
 {
+    #[instrument(skip_all)]
     fn new<P>(poly_ring: P, poly: &El<P>, ring: R, stride: usize) -> Self
         where P: RingStore,
             P::Type: PolyRing,
@@ -64,39 +65,38 @@ impl<R> SparsePolyReducer<R>
         };
     }
 
+    #[instrument(skip_all)]
     fn remainder(&self, data: &mut [El<R>]) {
-        record_time!(GLOBAL_TIME_RECORDER, "SparsePolyReducer::remainder", || {
-            let mut start_pos_it = (self.degree..data.len()).step_by(self.stride).rev();
-            if let Some(i) = start_pos_it.next() {
-                let stride = data.len() - i;
-                let (base, reduce) = data[(i - self.degree)..].split_at_mut(self.degree);
-                for j in 0..self.coefficients.len() {
-                    match self.coefficients[j] {
-                        SmallCoeff::Zero => {},
-                        SmallCoeff::One => for k in 0..stride {
-                            self.ring.add_assign_ref(&mut base[k + j * self.stride], &reduce[k]);
-                        },
-                        SmallCoeff::NegOne => for k in 0..stride {
-                            self.ring.sub_assign_ref(&mut base[k + j * self.stride], &reduce[k]);
-                        }
+        let mut start_pos_it = (self.degree..data.len()).step_by(self.stride).rev();
+        if let Some(i) = start_pos_it.next() {
+            let stride = data.len() - i;
+            let (base, reduce) = data[(i - self.degree)..].split_at_mut(self.degree);
+            for j in 0..self.coefficients.len() {
+                match self.coefficients[j] {
+                    SmallCoeff::Zero => {},
+                    SmallCoeff::One => for k in 0..stride {
+                        self.ring.add_assign_ref(&mut base[k + j * self.stride], &reduce[k]);
+                    },
+                    SmallCoeff::NegOne => for k in 0..stride {
+                        self.ring.sub_assign_ref(&mut base[k + j * self.stride], &reduce[k]);
                     }
                 }
             }
-            for i in start_pos_it {
-                let (base, reduce) = data[(i - self.degree)..].split_at_mut(self.degree);
-                for j in 0..self.coefficients.len() {
-                    match self.coefficients[j] {
-                        SmallCoeff::Zero => {},
-                        SmallCoeff::One => for k in 0..self.stride {
-                            self.ring.add_assign_ref(&mut base[k + j * self.stride], &reduce[k]);
-                        },
-                        SmallCoeff::NegOne => for k in 0..self.stride {
-                            self.ring.sub_assign_ref(&mut base[k + j * self.stride], &reduce[k]);
-                        }
+        }
+        for i in start_pos_it {
+            let (base, reduce) = data[(i - self.degree)..].split_at_mut(self.degree);
+            for j in 0..self.coefficients.len() {
+                match self.coefficients[j] {
+                    SmallCoeff::Zero => {},
+                    SmallCoeff::One => for k in 0..self.stride {
+                        self.ring.add_assign_ref(&mut base[k + j * self.stride], &reduce[k]);
+                    },
+                    SmallCoeff::NegOne => for k in 0..self.stride {
+                        self.ring.sub_assign_ref(&mut base[k + j * self.stride], &reduce[k]);
                     }
                 }
             }
-        })
+        }
     }
 }
 
@@ -118,6 +118,7 @@ impl<R, C> BarettPolyReducer<R, C>
     where R: RingStore,
         C: PreparedConvolutionAlgorithm<R::Type>
 {
+    #[instrument(skip_all)]
     fn new<P>(poly_ring: P, poly: &El<P>, ring: R, f_deg: usize, convolution: C) -> Self
         where P: RingStore,
             P::Type: PolyRing,
@@ -140,20 +141,19 @@ impl<R, C> BarettPolyReducer<R, C>
         };
     }
 
+    #[instrument(skip_all)]
     fn remainder(&self, data: &mut [El<R>]) {
-        record_time!(GLOBAL_TIME_RECORDER, "BarettPolyReducer::remainder", || {
-            assert!(data.len() >= self.f_deg + 2);
-            assert!(self.ring.is_zero(&data[self.f_deg + 1]));
-            let mut quotient = Vec::with_capacity_in(2 * (self.f_deg - self.q_deg + 1), Global);
-            quotient.resize_with(2 * (self.f_deg - self.q_deg + 1), || self.ring.zero());
-            self.convolution.compute_convolution(&data[self.q_deg..=self.f_deg], &self.neg_Xn_over_q, &mut quotient, &self.ring);
-            let quotient = &quotient[(self.f_deg - self.q_deg)..(2 * (self.f_deg - self.q_deg) + 1)];
-            let quotient = self.convolution.prepare_convolution_operand(&quotient, &self.ring);
-            let step = 1 << StaticRing::<i64>::RING.abs_log2_ceil(&((self.f_deg - self.q_deg + 1) as i64)).unwrap();
-            for i in (0..=self.q_deg).step_by(step) {
-                self.convolution.compute_convolution_rhs_prepared(&self.q[i..min(self.q.len(), i + step)], &quotient, &mut data[i..min(self.f_deg + 2, i + 2 * step)], &self.ring);
-            }
-        })
+        assert!(data.len() >= self.f_deg + 2);
+        assert!(self.ring.is_zero(&data[self.f_deg + 1]));
+        let mut quotient = Vec::with_capacity_in(2 * (self.f_deg - self.q_deg + 1), Global);
+        quotient.resize_with(2 * (self.f_deg - self.q_deg + 1), || self.ring.zero());
+        self.convolution.compute_convolution(&data[self.q_deg..=self.f_deg], &self.neg_Xn_over_q, &mut quotient, &self.ring);
+        let quotient = &quotient[(self.f_deg - self.q_deg)..(2 * (self.f_deg - self.q_deg) + 1)];
+        let quotient = self.convolution.prepare_convolution_operand(&quotient, &self.ring);
+        let step = 1 << StaticRing::<i64>::RING.abs_log2_ceil(&((self.f_deg - self.q_deg + 1) as i64)).unwrap();
+        for i in (0..=self.q_deg).step_by(step) {
+            self.convolution.compute_convolution_rhs_prepared(&self.q[i..min(self.q.len(), i + step)], &quotient, &mut data[i..min(self.f_deg + 2, i + 2 * step)], &self.ring);
+        }
     }
 }
 
@@ -174,6 +174,7 @@ impl<R, C> CyclotomicPolyReducer<R, C>
     where R: RingStore + Clone,
         C: PreparedConvolutionAlgorithm<R::Type>
 {
+    #[instrument(skip_all)]
     pub fn new(ring: R, n: i64, convolution: C) -> Self {
         let factorization = factor(StaticRing::<i64>::RING, n);
         let poly_ring = SparsePolyRing::new(StaticRing::<i32>::RING, "X");
@@ -208,6 +209,7 @@ impl<R, C> CyclotomicPolyReducer<R, C>
         };
     }
 
+    #[instrument(skip_all)]
     pub fn remainder(&self, data: &mut [El<R>]) {
         let mut current_len = data.len();
         for reducer in &self.sparse_reducers {

@@ -21,6 +21,7 @@ use feanor_math::homomorphism::*;
 use feanor_math::rings::poly::sparse_poly::SparsePolyRing;
 use feanor_math::rings::zn::*;
 use subvector::SubvectorView;
+use tracing::instrument;
 use zn_static::Fp;
 use crate::feanor_math::rings::extension::*;
 use feanor_math::seq::*;
@@ -539,32 +540,31 @@ impl<F, A> HENumberRingMod for CompositeCyclotomicDecomposedNumberRing<F, A>
     where F: Send + Sync + FFTAlgorithm<zn_64::ZnBase> + PartialEq,
         A: Send + Sync + Allocator + Clone
 {
+    #[instrument(skip_all)]
     fn small_basis_to_mult_basis<V>(&self, mut data: V)
         where V: SwappableVectorViewMut<zn_64::ZnEl>
     {
-        record_time!(GLOBAL_TIME_RECORDER, "CompositeCyclotomicDecomposedNumberRing::small_basis_to_mult_basis", || {
-            for i in 0..self.tensor_factor2.rank() {
-                self.tensor_factor1.small_basis_to_mult_basis(SubvectorView::new(&mut data).restrict((i * self.tensor_factor1.rank())..((i + 1) * self.tensor_factor1.rank())));
-            }
-            for j in 0..self.tensor_factor1.rank() {
-                self.tensor_factor2.small_basis_to_mult_basis(SubvectorView::new(&mut data).restrict(j..).step_by_view(self.tensor_factor1.rank()));
-            }
-        })
+        for i in 0..self.tensor_factor2.rank() {
+            self.tensor_factor1.small_basis_to_mult_basis(SubvectorView::new(&mut data).restrict((i * self.tensor_factor1.rank())..((i + 1) * self.tensor_factor1.rank())));
+        }
+        for j in 0..self.tensor_factor1.rank() {
+            self.tensor_factor2.small_basis_to_mult_basis(SubvectorView::new(&mut data).restrict(j..).step_by_view(self.tensor_factor1.rank()));
+        }
     }
 
+    #[instrument(skip_all)]
     fn mult_basis_to_small_basis<V>(&self, mut data: V)
         where V: SwappableVectorViewMut<zn_64::ZnEl>
     {
-        record_time!(GLOBAL_TIME_RECORDER, "CompositeCyclotomicDecomposedNumberRing::mult_basis_to_small_basis", || {
-            for j in 0..self.tensor_factor1.rank() {
-                self.tensor_factor2.mult_basis_to_small_basis(SubvectorView::new(&mut data).restrict(j..).step_by_view(self.tensor_factor1.rank()));
-            }
-            for i in 0..self.tensor_factor2.rank() {
-                self.tensor_factor1.mult_basis_to_small_basis(SubvectorView::new(&mut data).restrict((i * self.tensor_factor1.rank())..((i + 1) * self.tensor_factor1.rank())));
-            }
-        })
+        for j in 0..self.tensor_factor1.rank() {
+            self.tensor_factor2.mult_basis_to_small_basis(SubvectorView::new(&mut data).restrict(j..).step_by_view(self.tensor_factor1.rank()));
+        }
+        for i in 0..self.tensor_factor2.rank() {
+            self.tensor_factor1.mult_basis_to_small_basis(SubvectorView::new(&mut data).restrict((i * self.tensor_factor1.rank())..((i + 1) * self.tensor_factor1.rank())));
+        }
     }
 
+    #[instrument(skip_all)]
     fn coeff_basis_to_small_basis<V>(&self, mut data: V)
         where V: SwappableVectorViewMut<zn_64::ZnEl>
     {
@@ -580,6 +580,7 @@ impl<F, A> HENumberRingMod for CompositeCyclotomicDecomposedNumberRing<F, A>
         }
     }
 
+    #[instrument(skip_all)]
     fn small_basis_to_coeff_basis<V>(&self, mut data: V)
         where V: SwappableVectorViewMut<zn_64::ZnEl>
     {

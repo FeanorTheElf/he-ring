@@ -13,20 +13,19 @@ use feanor_math::rings::zn::ZnRingStore;
 use feanor_math::divisibility::DivisibilityRingStore;
 use feanor_math::seq::*;
 
+use crate::ciphertext_ring::BGFVCiphertextRing;
 use crate::cyclotomic::CyclotomicRing;
-use crate::ciphertext_ring::bxv::BXVCiphertextRing;
-use crate::ciphertext_ring::decomposition_ring::{NumberRingQuotient, NumberRingQuotientBase};
-use crate::rnsconv;
+use crate::number_ring::quotient::{NumberRingQuotient, NumberRingQuotientBase};
 use crate::rnsconv::bgv_rescale::CongruencePreservingRescaling;
 
 use rand_distr::StandardNormal;
 use rand::{Rng, CryptoRng};
 
-pub type NumberRing<Params: BGVParams> = <Params::CiphertextRing as BXVCiphertextRing>::NumberRing;
+pub type NumberRing<Params: BGVParams> = <Params::CiphertextRing as BGFVCiphertextRing>::NumberRing;
 pub type CiphertextRing<Params: BGVParams> = RingValue<Params::CiphertextRing>;
 pub type PlaintextRing<Params: BGVParams> = NumberRingQuotient<NumberRing<Params>, Zn>;
 pub type SecretKey<Params: BGVParams> = El<CiphertextRing<Params>>;
-pub type GadgetProductOperand<'a, Params: BGVParams> = <Params::CiphertextRing as BXVCiphertextRing>::GadgetProductRhsOperand<'a>;
+pub type GadgetProductOperand<'a, Params: BGVParams> = <Params::CiphertextRing as BGFVCiphertextRing>::GadgetProductRhsOperand<'a>;
 pub type KeySwitchKey<'a, Params: BGVParams> = (usize, (GadgetProductOperand<'a, Params>, GadgetProductOperand<'a, Params>));
 pub type RelinKey<'a, Params: BGVParams> = KeySwitchKey<'a, Params>;
 
@@ -47,7 +46,7 @@ pub struct Ciphertext<Params: ?Sized + BGVParams> {
 
 pub trait BGVParams {
     
-    type CiphertextRing: BXVCiphertextRing + CyclotomicRing;
+    type CiphertextRing: BGFVCiphertextRing + CyclotomicRing;
 
     fn max_rns_base(&self) -> zn_rns::Zn<Zn, BigIntRing>;
 
@@ -93,14 +92,12 @@ pub trait BGVParams {
     }
 
     fn hom_add_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
-        record_time!(GLOBAL_TIME_RECORDER, "BGVParams::hom_add_plain", || {
-            let m = C.get_ring().exact_convert_from_decompring(P, &P.inclusion().mul_ref_map(m, &ct.implicit_scale));
-            return Ciphertext {
-                c0: C.add(ct.c0, m),
-                c1: ct.c1,
-                implicit_scale: ct.implicit_scale
-            };
-        })
+        let m = C.get_ring().exact_convert_from_decompring(P, &P.inclusion().mul_ref_map(m, &ct.implicit_scale));
+        return Ciphertext {
+            c0: C.add(ct.c0, m),
+            c1: ct.c1,
+            implicit_scale: ct.implicit_scale
+        };
     }
 
     fn enc_sym<R: Rng + CryptoRng>(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, rng: R, m: &El<PlaintextRing<Self>>, sk: &SecretKey<Self>) -> Ciphertext<Self> {
@@ -108,14 +105,12 @@ pub trait BGVParams {
     }
 
     fn hom_mul_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
-        record_time!(GLOBAL_TIME_RECORDER, "BFVParams::hom_mul_plain", || {
-            let m = C.get_ring().exact_convert_from_decompring(P, m);
-            return Ciphertext {
-                c0: C.mul_ref_snd(ct.c0, &m), 
-                c1: C.mul(ct.c1, m),
-                implicit_scale: ct.implicit_scale
-            };
-        })
+        let m = C.get_ring().exact_convert_from_decompring(P, m);
+        return Ciphertext {
+            c0: C.mul_ref_snd(ct.c0, &m), 
+            c1: C.mul(ct.c1, m),
+            implicit_scale: ct.implicit_scale
+        };
     }
 
     fn hom_mul_plain_i64(_P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: i64, ct: Ciphertext<Self>) -> Ciphertext<Self> {
@@ -188,14 +183,12 @@ pub trait BGVParams {
         where Self: 'a
     {
         assert_el_eq!(P.base_ring(), &lhs.implicit_scale, &rhs.implicit_scale);
-        record_time!(GLOBAL_TIME_RECORDER, "BFVParams::hom_mul", || {
-            let [res0, res1, res2] = C.get_ring().two_by_two_convolution([&lhs.c0, &lhs.c1], [&rhs.c0, &rhs.c1]);
+        let [res0, res1, res2] = C.get_ring().two_by_two_convolution([&lhs.c0, &lhs.c1], [&rhs.c0, &rhs.c1]);
         
-            let op = C.get_ring().to_gadget_product_lhs(res2, rk.0);
-            let (s0, s1) = &rk.1;
+        let op = C.get_ring().to_gadget_product_lhs(res2, rk.0);
+        let (s0, s1) = &rk.1;
         
-            return (C.add_ref(&res0, &C.get_ring().gadget_product(&op, s0)), C.add_ref(&res1, &C.get_ring().gadget_product(&op, s1)));
-        })
+        return (C.add_ref(&res0, &C.get_ring().gadget_product(&op, s0)), C.add_ref(&res1, &C.get_ring().gadget_product(&op, s1)));
     }
 
     fn modulus_switch(P: &PlaintextRing<Self>, Cold: &CiphertextRing<Self>, Cnew: &CiphertextRing<Self>, ct: Ciphertext<Self>) -> Ciphertext<Self> {

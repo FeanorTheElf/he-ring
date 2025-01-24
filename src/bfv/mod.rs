@@ -34,6 +34,7 @@ use feanor_math::rings::finite::FiniteRingStore;
 use feanor_mempool::dynsize::DynLayoutMempool;
 use feanor_mempool::AllocArc;
 use feanor_mempool::AllocRc;
+use tracing::instrument;
 
 use crate::ciphertext_ring::perform_rns_op;
 use crate::ciphertext_ring::perform_rns_op_to_plaintext_ring;
@@ -154,6 +155,7 @@ pub trait BFVParams {
     ///
     /// Generates a secret key, using the randomness of the given rng.
     /// 
+    #[instrument(skip_all)]
     fn gen_sk<R: Rng + CryptoRng>(C: &CiphertextRing<Self>, mut rng: R) -> SecretKey<Self> {
         // we sample uniform ternary secrets 
         let result = C.from_canonical_basis((0..C.rank()).map(|_| C.base_ring().int_hom().map((rng.next_u32() % 3) as i32 - 1)));
@@ -163,6 +165,7 @@ pub trait BFVParams {
     ///
     /// Generates a new encryption of zero using the secret key and the randomness of the given rng.
     /// 
+    #[instrument(skip_all)]
     fn enc_sym_zero<R: Rng + CryptoRng>(C: &CiphertextRing<Self>, mut rng: R, sk: &SecretKey<Self>) -> Ciphertext<Self> {
         let a = C.random_element(|| rng.next_u64());
         let mut b = C.negate(C.mul_ref(&a, &sk));
@@ -184,6 +187,7 @@ pub trait BFVParams {
     ///
     /// Encrypts the given value, using the randomness of the given rng.
     /// 
+    #[instrument(skip_all)]
     fn enc_sym<R: Rng + CryptoRng>(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, rng: R, m: &El<PlaintextRing<Self>>, sk: &SecretKey<Self>) -> Ciphertext<Self> {
         Self::hom_add_plain(P, C, m, Self::enc_sym_zero(C, rng, sk))
     }
@@ -220,6 +224,7 @@ pub trait BFVParams {
     /// caller to ensure that the ciphertext is defined over the given ring, and is a valid
     /// BFV encryption w.r.t. the given plaintext modulus.
     /// 
+    #[instrument(skip_all)]
     fn dec(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: Ciphertext<Self>, sk: &SecretKey<Self>) -> El<PlaintextRing<Self>> {
         let (c0, c1) = ct;
         let noisy_m = C.add(c0, C.mul_ref_snd(c1, sk));
@@ -230,6 +235,7 @@ pub trait BFVParams {
     /// Decrypts a given ciphertext and prints its value to stdout.
     /// Designed for debugging purposes.
     /// 
+    #[instrument(skip_all)]
     fn dec_println(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: &Ciphertext<Self>, sk: &SecretKey<Self>) {
         let m = Self::dec(P, C, Self::clone_ct(C, ct), sk);
         println!("ciphertext (noise budget: {}):", Self::noise_budget(P, C, ct, sk));
@@ -241,6 +247,7 @@ pub trait BFVParams {
     /// Decrypts a given ciphertext and prints the values in its slots to stdout.
     /// Designed for debugging purposes.
     /// 
+    #[instrument(skip_all)]
     fn dec_println_slots(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: &Ciphertext<Self>, sk: &SecretKey<Self>) {
         let (p, _e) = is_prime_power(ZZ, P.base_ring().modulus()).unwrap();
         let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(P.n() as u64), p);
@@ -260,12 +267,11 @@ pub trait BFVParams {
     /// caller to ensure that the ciphertexts are defined over the given ring, and are
     /// BFV encryptions w.r.t. compatible plaintext moduli.
     /// 
+    #[instrument(skip_all)]
     fn hom_add(C: &CiphertextRing<Self>, lhs: Ciphertext<Self>, rhs: &Ciphertext<Self>) -> Ciphertext<Self> {
-        record_time!(GLOBAL_TIME_RECORDER, "BFVParams::hom_add", || {
-            let (lhs0, lhs1) = lhs;
-            let (rhs0, rhs1) = rhs;
-            return (C.add_ref(&lhs0, &rhs0), C.add_ref(&lhs1, &rhs1));
-        })
+        let (lhs0, lhs1) = lhs;
+        let (rhs0, rhs1) = rhs;
+        return (C.add_ref(&lhs0, &rhs0), C.add_ref(&lhs1, &rhs1));
     }
     
     ///
@@ -275,12 +281,11 @@ pub trait BFVParams {
     /// caller to ensure that the ciphertexts are defined over the given ring, and are
     /// BFV encryptions w.r.t. compatible plaintext moduli.
     /// 
+    #[instrument(skip_all)]
     fn hom_sub(C: &CiphertextRing<Self>, lhs: Ciphertext<Self>, rhs: &Ciphertext<Self>) -> Ciphertext<Self> {
-        record_time!(GLOBAL_TIME_RECORDER, "BFVParams::hom_sub", || {
-            let (lhs0, lhs1) = lhs;
-            let (rhs0, rhs1) = rhs;
-            return (C.sub_ref(&lhs0, rhs0), C.sub_ref(&lhs1, rhs1));
-        })
+        let (lhs0, lhs1) = lhs;
+        let (rhs0, rhs1) = rhs;
+        return (C.sub_ref(&lhs0, rhs0), C.sub_ref(&lhs1, rhs1));
     }
     
     ///
@@ -297,17 +302,16 @@ pub trait BFVParams {
     /// caller to ensure that the ciphertext is defined over the given ring, and is
     /// BFV encryption w.r.t. the given plaintext modulus.
     /// 
+    #[instrument(skip_all)]
     fn hom_add_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
-        record_time!(GLOBAL_TIME_RECORDER, "BFVParams::hom_add_plain", || {
-            let ZZ_to_Zq = C.base_ring().can_hom(P.base_ring().integer_ring()).unwrap();
-            let mut m = C.from_canonical_basis(P.wrt_canonical_basis(m).iter().map(|c| ZZ_to_Zq.map(P.base_ring().smallest_lift(c))));
-            let Delta = C.base_ring().coerce(&ZZbig, ZZbig.rounded_div(
-                ZZbig.clone_el(C.base_ring().modulus()), 
-                &int_cast(*P.base_ring().modulus() as i32, &ZZbig, &StaticRing::<i32>::RING)
-            ));
-            C.inclusion().mul_assign_ref_map(&mut m, &Delta);
-            return (C.add(ct.0, m), ct.1);
-        })
+        let ZZ_to_Zq = C.base_ring().can_hom(P.base_ring().integer_ring()).unwrap();
+        let mut m = C.from_canonical_basis(P.wrt_canonical_basis(m).iter().map(|c| ZZ_to_Zq.map(P.base_ring().smallest_lift(c))));
+        let Delta = C.base_ring().coerce(&ZZbig, ZZbig.rounded_div(
+            ZZbig.clone_el(C.base_ring().modulus()), 
+            &int_cast(*P.base_ring().modulus() as i32, &ZZbig, &StaticRing::<i32>::RING)
+        ));
+        C.inclusion().mul_assign_ref_map(&mut m, &Delta);
+        return (C.add(ct.0, m), ct.1);
     }
     
     ///
@@ -317,13 +321,12 @@ pub trait BFVParams {
     /// caller to ensure that the ciphertext is defined over the given ring, and is
     /// BFV encryption w.r.t. the given plaintext modulus.
     /// 
+    #[instrument(skip_all)]
     fn hom_mul_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
-        record_time!(GLOBAL_TIME_RECORDER, "BFVParams::hom_mul_plain", || {
-            let ZZ_to_Zq = C.base_ring().can_hom(P.base_ring().integer_ring()).unwrap();
-            let m = C.from_canonical_basis(P.wrt_canonical_basis(m).iter().map(|c| ZZ_to_Zq.map(P.base_ring().smallest_lift(c))));
-            let (c0, c1) = ct;
-            return (C.mul_ref_snd(c0, &m), C.mul(c1, m));
-        })
+        let ZZ_to_Zq = C.base_ring().can_hom(P.base_ring().integer_ring()).unwrap();
+        let m = C.from_canonical_basis(P.wrt_canonical_basis(m).iter().map(|c| ZZ_to_Zq.map(P.base_ring().smallest_lift(c))));
+        let (c0, c1) = ct;
+        return (C.mul_ref_snd(c0, &m), C.mul(c1, m));
     }
     
     ///
@@ -333,6 +336,7 @@ pub trait BFVParams {
     /// caller to ensure that the ciphertext is defined over the given ring, and is
     /// BFV encryption w.r.t. the given plaintext modulus.
     /// 
+    #[instrument(skip_all)]
     fn hom_mul_plain_i64(_P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: i64, ct: Ciphertext<Self>) -> Ciphertext<Self> {
         (C.int_hom().mul_map(ct.0, m as i32), C.int_hom().mul_map(ct.1, m as i32))
     }
@@ -344,6 +348,7 @@ pub trait BFVParams {
     /// and `|e|` is the `l_inf`-norm of the noise term. This will decrease during homomorphic
     /// operations, and if it reaches zero, decryption may yield incorrect results.
     /// 
+    #[instrument(skip_all)]
     fn noise_budget(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: &Ciphertext<Self>, sk: &SecretKey<Self>) -> usize {
         let (c0, c1) = Self::clone_ct(C, ct);
         let noisy_m = C.add(c0, C.mul_ref_snd(c1, sk));
@@ -368,6 +373,7 @@ pub trait BFVParams {
     /// of the relinearization key. Thus, a larger value for `digits` will result in lower (additive)
     /// noise growth during relinearization, at the cost of higher performance.
     /// 
+    #[instrument(skip_all)]
     fn gen_rk<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing<Self>, rng: R, sk: &SecretKey<Self>, digits: usize) -> RelinKey<'a, Self>
         where Self: 'a
     {
@@ -381,34 +387,31 @@ pub trait BFVParams {
     /// caller to ensure that the ciphertexts are defined over the given ring, and are
     /// BFV encryptions w.r.t. the given plaintext modulus.
     /// 
+    #[instrument(skip_all)]
     fn hom_mul<'a>(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, C_mul: &CiphertextRing<Self>, lhs: Ciphertext<Self>, rhs: Ciphertext<Self>, rk: &RelinKey<'a, Self>) -> Ciphertext<Self>
         where Self: 'a
     {
-        record_time!(GLOBAL_TIME_RECORDER, "BFVParams::hom_mul", || {
-            let conv_data = Self::create_multiplication_rescale(P, C, C_mul);
+        let conv_data = Self::create_multiplication_rescale(P, C, C_mul);
+        let (c00, c01) = lhs;
+        let (c10, c11) = rhs;
 
-            let (c00, c01) = lhs;
-            let (c10, c11) = rhs;
-            let lift = |c| perform_rns_op(C_mul.get_ring(), C.get_ring(), &c, &conv_data.lift_to_C_mul);
+        let lift = |c| perform_rns_op(C_mul.get_ring(), C.get_ring(), &c, &conv_data.lift_to_C_mul);
+        let c00_lifted = lift(c00);
+        let c01_lifted = lift(c01);
+        let c10_lifted = lift(c10);
+        let c11_lifted = lift(c11);
+
+        let [lifted0, lifted1, lifted2] = C_mul.get_ring().two_by_two_convolution([&c00_lifted, &c01_lifted], [&c10_lifted, &c11_lifted]);
+
+        let scale_down = |c: El<CiphertextRing<Self>>| perform_rns_op(C.get_ring(), C_mul.get_ring(), &c, &conv_data.scale_down_to_C);
+        let res0 = scale_down(lifted0);
+        let res1 = scale_down(lifted1);
+        let res2 = scale_down(lifted2);
+
+        let op = GadgetProductLhsOperand::from_element_with(C.get_ring(), &res2, rk.0.gadget_vector_moduli_indices());
+        let (s0, s1) = rk;
+        return (C.add_ref(&res0, &op.gadget_product(s0, C.get_ring())), C.add_ref(&res1, &op.gadget_product(s1, C.get_ring())));
         
-            let c00_lifted = lift(c00);
-            let c01_lifted = lift(c01);
-            let c10_lifted = lift(c10);
-            let c11_lifted = lift(c11);
-        
-            let [lifted0, lifted1, lifted2] = C_mul.get_ring().two_by_two_convolution([&c00_lifted, &c01_lifted], [&c10_lifted, &c11_lifted]);
-        
-            let scale_down = |c: El<CiphertextRing<Self>>| perform_rns_op(C.get_ring(), C_mul.get_ring(), &c, &conv_data.scale_down_to_C);
-        
-            let res0 = scale_down(lifted0);
-            let res1 = scale_down(lifted1);
-            let res2 = scale_down(lifted2);
-        
-            let op = GadgetProductLhsOperand::from_element_with(C.get_ring(), &res2, rk.0.gadget_vector_moduli_indices());
-            let (s0, s1) = rk;
-        
-            return (C.add_ref(&res0, &op.gadget_product(s0, C.get_ring())), C.add_ref(&res1, &op.gadget_product(s1, C.get_ring())));
-        })
     }
     
     ///
@@ -423,6 +426,7 @@ pub trait BFVParams {
     /// of the key-switching key. Thus, a larger value for `digits` will result in lower (additive)
     /// noise growth during key-switching, at the cost of higher performance.
     /// 
+    #[instrument(skip_all)]
     fn gen_switch_key<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing<Self>, mut rng: R, old_sk: &SecretKey<Self>, new_sk: &SecretKey<Self>, digits: usize) -> KeySwitchKey<'a, Self>
         where Self: 'a
     {
@@ -448,6 +452,7 @@ pub trait BFVParams {
     /// Using a key-switch key, computes an encryption encrypting the same message as the given ciphertext
     /// under a different secret key.
     /// 
+    #[instrument(skip_all)]
     fn key_switch<'a>(C: &CiphertextRing<Self>, ct: Ciphertext<Self>, switch_key: &KeySwitchKey<'a, Self>) -> Ciphertext<Self>
         where Self: 'a
     {
@@ -464,6 +469,7 @@ pub trait BFVParams {
     /// Modulus-switches from `R/qR` to `R/tR`, where the latter one is given as a plaintext ring.
     /// In particular, this is necessary during bootstrapping.
     /// 
+    #[instrument(skip_all)]
     fn mod_switch_to_plaintext(target: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: Ciphertext<Self>) -> (El<PlaintextRing<Self>>, El<PlaintextRing<Self>>) {
         let mod_switch = AlmostExactRescaling::new_with(
             C.base_ring().as_iter().map(|Zp| *Zp).collect(),
@@ -487,6 +493,7 @@ pub trait BFVParams {
     /// of the key-switching key. Thus, a larger value for `digits` will result in lower (additive)
     /// noise growth during key-switching, at the cost of higher performance.
     /// 
+    #[instrument(skip_all)]
     fn gen_gk<'a, R: Rng + CryptoRng>(C: &'a CiphertextRing<Self>, rng: R, sk: &SecretKey<Self>, g: CyclotomicGaloisGroupEl, digits: usize) -> KeySwitchKey<'a, Self>
         where Self: 'a
     {
@@ -497,15 +504,14 @@ pub trait BFVParams {
     /// Computes an encryption of `sigma(x)`, where `x` is the message encrypted by the given ciphertext
     /// and `sigma` is the given Galois automorphism.
     /// 
+    #[instrument(skip_all)]
     fn hom_galois<'a>(C: &CiphertextRing<Self>, ct: Ciphertext<Self>, g: CyclotomicGaloisGroupEl, gk: &KeySwitchKey<'a, Self>) -> Ciphertext<Self>
         where Self: 'a
     {
-        record_time!(GLOBAL_TIME_RECORDER, "BFVParams::hom_galois", || {
-            Self::key_switch(C, (
-                C.get_ring().apply_galois_action(&ct.0, g),
-                C.get_ring().apply_galois_action(&ct.1, g)
-            ), gk)
-        })
+        Self::key_switch(C, (
+            C.get_ring().apply_galois_action(&ct.0, g),
+            C.get_ring().apply_galois_action(&ct.1, g)
+        ), gk)
     }
     
     ///
@@ -513,30 +519,29 @@ pub trait BFVParams {
     /// Functionally, this is equivalent to calling [`BFVParams::hom_galois()`]
     /// multiple times, but can be faster.
     /// 
+    #[instrument(skip_all)]
     fn hom_galois_many<'a, 'b, V>(C: &CiphertextRing<Self>, ct: Ciphertext<Self>, gs: &[CyclotomicGaloisGroupEl], gks: V) -> Vec<Ciphertext<Self>>
         where V: VectorFn<&'b KeySwitchKey<'a, Self>>,
             KeySwitchKey<'a, Self>: 'b,
             'a: 'b,
             Self: 'a
     {
-        record_time!(GLOBAL_TIME_RECORDER, "BFVParams::hom_galois_many", || {
-            let digits = gks.at(0).0.gadget_vector_moduli_indices();
-            let has_same_digits = |gk: &GadgetProductRhsOperand<_>| gk.gadget_vector_moduli_indices().len() == digits.len() && gk.gadget_vector_moduli_indices().iter().zip(digits.iter()).all(|(l, r)| l == r);
-            assert!(gks.iter().all(|gk| has_same_digits(&gk.0) && has_same_digits(&gk.1)));
-            let (c0, c1) = ct;
-            let c1_op = GadgetProductLhsOperand::from_element_with(C.get_ring(), &c1, digits);
-            let c1_op_gs = c1_op.apply_galois_action_many(C.get_ring(), gs);
-            let c0_gs = C.get_ring().apply_galois_action_many(&c0, gs).into_iter();
-            assert_eq!(gks.len(), c1_op_gs.len());
-            assert_eq!(gks.len(), c0_gs.len());
-            return c0_gs.zip(c1_op_gs.iter()).enumerate().map(|(i, (c0_g, c1_g))| {
-                let (s0, s1) = gks.at(i);
-                let r0 = c1_g.gadget_product(s0, C.get_ring());
-                let r1 = c1_g.gadget_product(s1, C.get_ring());
-                let c0_g = C.apply_galois_action(&c0, gs[i]);
-                return (C.add_ref(&r0, &c0_g), r1);
-            }).collect();
-        })
+        let digits = gks.at(0).0.gadget_vector_moduli_indices();
+        let has_same_digits = |gk: &GadgetProductRhsOperand<_>| gk.gadget_vector_moduli_indices().len() == digits.len() && gk.gadget_vector_moduli_indices().iter().zip(digits.iter()).all(|(l, r)| l == r);
+        assert!(gks.iter().all(|gk| has_same_digits(&gk.0) && has_same_digits(&gk.1)));
+        let (c0, c1) = ct;
+        let c1_op = GadgetProductLhsOperand::from_element_with(C.get_ring(), &c1, digits);
+        let c1_op_gs = c1_op.apply_galois_action_many(C.get_ring(), gs);
+        let c0_gs = C.get_ring().apply_galois_action_many(&c0, gs).into_iter();
+        assert_eq!(gks.len(), c1_op_gs.len());
+        assert_eq!(gks.len(), c0_gs.len());
+        return c0_gs.zip(c1_op_gs.iter()).enumerate().map(|(i, (c0_g, c1_g))| {
+            let (s0, s1) = gks.at(i);
+            let r0 = c1_g.gadget_product(s0, C.get_ring());
+            let r1 = c1_g.gadget_product(s1, C.get_ring());
+            let c0_g = C.apply_galois_action(&c0, gs[i]);
+            return (C.add_ref(&r0, &c0_g), r1);
+        }).collect();
     }
 
     fn create_multiplication_rescale(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, Cmul: &CiphertextRing<Self>) -> MulConversionData {
@@ -629,6 +634,7 @@ impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingNegacyclicNTT<Zn
         self.log2_q_min..self.log2_q_max
     }
 
+    #[instrument(skip_all)]
     fn create_ciphertext_rings(&self) -> (CiphertextRing<Self>, CiphertextRing<Self>)  {
         let log2_q = self.ciphertext_modulus_bits();
         let number_ring = self.number_ring();
@@ -681,6 +687,7 @@ impl<A: Allocator + Clone + Send + Sync> BFVParams for CompositeBFV<A> {
         CompositeCyclotomicNumberRing::new(self.n1, self.n2)
     }
 
+    #[instrument(skip_all)]
     fn create_ciphertext_rings(&self) -> (CiphertextRing<Self>, CiphertextRing<Self>)  {
         let log2_q = self.ciphertext_modulus_bits();
         let number_ring = self.number_ring();
@@ -738,6 +745,7 @@ impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingConvolution<Zn>>
         CompositeCyclotomicNumberRing::new(self.n1, self.n2)
     }
 
+    #[instrument(skip_all)]
     fn create_ciphertext_rings(&self) -> (CiphertextRing<Self>, CiphertextRing<Self>) {
         let log2_q = self.ciphertext_modulus_bits();
         let number_ring = self.number_ring();
@@ -811,6 +819,9 @@ pub fn small_basis_repr<Params, NumberRing, A>(C: &CiphertextRing<Params>, ct: C
     C.get_ring().force_small_basis_repr(&ct.1);
     return ct;
 }
+
+#[cfg(test)]
+use tracing_subscriber::prelude::*;
 
 #[test]
 fn test_pow2_bfv_hom_galois() {
@@ -906,6 +917,9 @@ fn test_composite_bfv_mul() {
 #[test]
 #[ignore]
 fn print_timings_pow2_bfv_mul() {
+    let (chrome_layer, _guard) = tracing_chrome::ChromeLayerBuilder::new().build();
+    tracing_subscriber::registry().with(chrome_layer).init();
+
     let mut rng = thread_rng();
     
     let params = Pow2BFV {
@@ -952,17 +966,18 @@ fn print_timings_pow2_bfv_mul() {
     let rk = log_time::<_, _, true, _>("GenRK", |[]| 
         Pow2BFV::gen_rk(&C, &mut rng, &sk, digits)
     );
-    clear_all_timings();
     let res = log_time::<_, _, true, _>("HomMul", |[]| 
         small_basis_repr::<Pow2BFV, _, _>(&C, Pow2BFV::hom_mul(&P, &C, &C_mul, Pow2BFV::clone_ct(&C, &ct), Pow2BFV::clone_ct(&C, &ct), &rk))
     );
-    print_all_timings();
     assert_el_eq!(&P, &P.int_hom().map(4), &Pow2BFV::dec(&P, &C, res, &sk));
 }
 
 #[test]
 #[ignore]
 fn print_timings_double_rns_composite_bfv_mul() {
+    let (chrome_layer, _guard) = tracing_chrome::ChromeLayerBuilder::new().build();
+    tracing_subscriber::registry().with(chrome_layer).init();
+
     let mut rng = thread_rng();
     
     let params = CompositeBFV {
@@ -1010,11 +1025,9 @@ fn print_timings_double_rns_composite_bfv_mul() {
     let rk = log_time::<_, _, true, _>("GenRK", |[]| 
         CompositeBFV::gen_rk(&C, &mut rng, &sk, digits)
     );
-    clear_all_timings();
     let res = log_time::<_, _, true, _>("HomMul", |[]| 
         small_basis_repr::<CompositeBFV, _, _>(&C, CompositeBFV::hom_mul(&P, &C, &C_mul, CompositeBFV::clone_ct(&C, &ct), CompositeBFV::clone_ct(&C, &ct), &rk))
     );
-    print_all_timings();
     assert_el_eq!(&P, &P.int_hom().map(1), &CompositeBFV::dec(&P, &C, res, &sk));
 }
 
@@ -1083,6 +1096,9 @@ fn test_single_rns_composite_bfv_mul() {
 #[test]
 #[ignore]
 fn print_timings_single_rns_composite_bfv_mul() {
+    let (chrome_layer, _guard) = tracing_chrome::ChromeLayerBuilder::new().build();
+    tracing_subscriber::registry().with(chrome_layer).init();
+
     let mut rng = thread_rng();
     
     let params = CompositeSingleRNSBFV {
@@ -1130,10 +1146,8 @@ fn print_timings_single_rns_composite_bfv_mul() {
     let rk = log_time::<_, _, true, _>("GenRK", |[]| 
         CompositeSingleRNSBFV::gen_rk(&C, &mut rng, &sk, digits)
     );
-    clear_all_timings();
     let res = log_time::<_, _, true, _>("HomMul", |[]| 
         CompositeSingleRNSBFV::hom_mul(&P, &C, &C_mul, CompositeSingleRNSBFV::clone_ct(&C, &ct), CompositeSingleRNSBFV::clone_ct(&C, &ct), &rk)
     );
-    print_all_timings();
     assert_el_eq!(&P, &P.int_hom().map(1), &CompositeSingleRNSBFV::dec(&P, &C, res, &sk));
 }

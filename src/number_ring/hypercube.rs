@@ -36,10 +36,11 @@ use feanor_math::rings::zn::{zn_big, zn_rns, FromModulusCreateableZnRing, ZnRedu
 use feanor_math::seq::sparse::SparseMapVector;
 use feanor_math::seq::*;
 use feanor_math::wrapper::RingElementWrapper;
+use tracing::instrument;
 
 use crate::cyclotomic::{CyclotomicGaloisGroup, CyclotomicGaloisGroupEl, CyclotomicRing, CyclotomicRingStore};
 use crate::euler_phi;
-use crate::profiling::{log_time, print_all_timings};
+use crate::profiling::log_time;
 use crate::ntt::dyn_convolution::*;
 
 use super::interpolate::FastPolyInterpolation;
@@ -582,39 +583,38 @@ impl<R> HypercubeIsomorphism<R>
         self.hypercube_structure.element_iter().map(move |g| self.get_slot_value(el, g))
     }
 
+    #[instrument(skip_all)]
     pub fn from_slot_values<'a, I>(&self, values: I) -> El<R>
         where I: IntoIterator<Item = El<SlotRingOf<R>>>
     {
-        record_time!(CREATE_LINEAR_TRANSFORM_TIME_RECORDER, "from_slot_values", || {
-            let poly_ring = self.slot_to_ring_interpolation.poly_ring();
-            let first_slot_ring: &SlotRingOf<R> = self.slot_ring();
-            let mut values_it = values.into_iter();
-            let wrap = LambdaHom::new(first_slot_ring.base_ring(), poly_ring.base_ring(), |from, to, x| to.get_ring().rev_delegate(from.clone_el(x)));
-            let unwrap = LambdaHom::new(poly_ring.base_ring(), first_slot_ring.base_ring(), |from, _to, x| from.get_ring().delegate(from.clone_el(x)));
+        let poly_ring = self.slot_to_ring_interpolation.poly_ring();
+        let first_slot_ring: &SlotRingOf<R> = self.slot_ring();
+        let mut values_it = values.into_iter();
+        let wrap = LambdaHom::new(first_slot_ring.base_ring(), poly_ring.base_ring(), |from, to, x| to.get_ring().rev_delegate(from.clone_el(x)));
+        let unwrap = LambdaHom::new(poly_ring.base_ring(), first_slot_ring.base_ring(), |from, _to, x| from.get_ring().delegate(from.clone_el(x)));
 
-            let remainders = record_time!(CREATE_LINEAR_TRANSFORM_TIME_RECORDER, "prepare_remainders", || values_it.by_ref().zip(self.hypercube_structure.element_iter()).enumerate().map(|(i, (a, g))| {
-                let f = first_slot_ring.poly_repr(&poly_ring, &a, &wrap);
-                let local_slot_ring = self.slot_ring_at(i);
-                let image_zeta = local_slot_ring.pow(local_slot_ring.canonical_gen(), self.galois_group().representative(g));
-                return local_slot_ring.poly_repr(&poly_ring, &poly_ring.evaluate(&f, &image_zeta, local_slot_ring.inclusion().compose(&unwrap)), &wrap);
-            }).collect::<Vec<_>>());
-            assert!(values_it.next().is_none(), "iterator should only have {} elements", self.slot_count());
-            debug_assert!(remainders.iter().all(|r| poly_ring.degree(r).unwrap_or(0) < self.d()));
+        let remainders = values_it.by_ref().zip(self.hypercube_structure.element_iter()).enumerate().map(|(i, (a, g))| {
+            let f = first_slot_ring.poly_repr(&poly_ring, &a, &wrap);
+            let local_slot_ring = self.slot_ring_at(i);
+            let image_zeta = local_slot_ring.pow(local_slot_ring.canonical_gen(), self.galois_group().representative(g));
+            return local_slot_ring.poly_repr(&poly_ring, &poly_ring.evaluate(&f, &image_zeta, local_slot_ring.inclusion().compose(&unwrap)), &wrap);
+        }).collect::<Vec<_>>();
+        assert!(values_it.next().is_none(), "iterator should only have {} elements", self.slot_count());
+        debug_assert!(remainders.iter().all(|r| poly_ring.degree(r).unwrap_or(0) < self.d()));
 
-            let unreduced_result = record_time!(CREATE_LINEAR_TRANSFORM_TIME_RECORDER, "interpolate_unreduced", || self.slot_to_ring_interpolation.interpolate_unreduced(remainders));
-            let unreduced_result = (0..=poly_ring.degree(&unreduced_result).unwrap_or(0)).map(|i| poly_ring.base_ring().clone_el(poly_ring.coefficient_at(&unreduced_result, i))).collect::<Vec<_>>();
+        let unreduced_result = self.slot_to_ring_interpolation.interpolate_unreduced(remainders);
+        let unreduced_result = (0..=poly_ring.degree(&unreduced_result).unwrap_or(0)).map(|i| poly_ring.base_ring().clone_el(poly_ring.coefficient_at(&unreduced_result, i))).collect::<Vec<_>>();
 
-            let canonical_gen_pow_rank = self.ring().mul(self.ring().canonical_gen(), self.ring().from_canonical_basis((1..self.ring().rank()).map(|_| self.ring().base_ring().zero()).chain([self.ring().base_ring().one()].into_iter())));
-            let mut current = self.ring().one();
-            return record_time!(CREATE_LINEAR_TRANSFORM_TIME_RECORDER, "sum_result", || <_ as RingStore>::sum(&self.ring, unreduced_result.chunks(self.ring.rank()).map(|chunk| self.ring.from_canonical_basis(
-                chunk.iter().map(|a| poly_ring.base_ring().clone_el(a)).chain((0..(self.ring.rank() - chunk.len())).map(|_| poly_ring.base_ring().zero()))
-                    .map(|x| unwrap.map(x))
-            )).map(|x| {
-                let result = self.ring().mul_ref_snd(x, &current);
-                self.ring().mul_assign_ref(&mut current, &canonical_gen_pow_rank);
-                return result;
-            })));
-        })
+        let canonical_gen_pow_rank = self.ring().mul(self.ring().canonical_gen(), self.ring().from_canonical_basis((1..self.ring().rank()).map(|_| self.ring().base_ring().zero()).chain([self.ring().base_ring().one()].into_iter())));
+        let mut current = self.ring().one();
+        return <_ as RingStore>::sum(&self.ring, unreduced_result.chunks(self.ring.rank()).map(|chunk| self.ring.from_canonical_basis(
+            chunk.iter().map(|a| poly_ring.base_ring().clone_el(a)).chain((0..(self.ring.rank() - chunk.len())).map(|_| poly_ring.base_ring().zero()))
+                .map(|x| unwrap.map(x))
+        )).map(|x| {
+            let result = self.ring().mul_ref_snd(x, &current);
+            self.ring().mul_assign_ref(&mut current, &canonical_gen_pow_rank);
+            return result;
+        }));
     }
 }
 
@@ -840,6 +840,10 @@ fn test_hypercube_isomorphism_rotation() {
 #[test]
 #[ignore]
 fn time_from_slot_values_large() {
+    use tracing_subscriber::prelude::*;
+    let (chrome_layer, _guard) = tracing_chrome::ChromeLayerBuilder::new().build();
+    tracing_subscriber::registry().with(chrome_layer).init();
+
     let mut rng = oorandom::Rand64::new(1);
 
     let allocator = feanor_mempool::AllocRc(Rc::new(feanor_mempool::dynsize::DynLayoutMempool::<Global>::new(Alignment::of::<u64>())));
@@ -859,8 +863,6 @@ fn time_from_slot_values_large() {
         H.from_slot_values((0..H.slot_count()).map(|_| slot_ring.random_element(|| rng.rand_u64())))
     });
     std::hint::black_box(value);
-
-    print_all_timings();
 }
 
 #[test]

@@ -1,5 +1,11 @@
+use std::alloc::Allocator;
+use std::alloc::Global;
+use std::marker::PhantomData;
+
 use cooley_tuckey::bitreverse;
 use cooley_tuckey::CooleyTuckeyFFT;
+use tracing::instrument;
+
 use feanor_math::algorithms;
 use feanor_math::algorithms::fft::*;
 use feanor_math::algorithms::miller_rabin::is_prime;
@@ -20,9 +26,6 @@ use feanor_math::rings::zn::FromModulusCreateableZnRing;
 use feanor_math::seq::*;
 use feanor_math::rings::zn::{ZnRing, ZnRingStore, zn_rns};
 use feanor_math::rings::zn::zn_64::Zn;
-use std::alloc::Allocator;
-use std::alloc::Global;
-use std::marker::PhantomData;
 
 use crate::cyclotomic::CyclotomicGaloisGroupEl;
 use crate::ntt::HERingNegacyclicNTT;
@@ -272,38 +275,36 @@ impl<N, A> HENumberRingMod for Pow2CyclotomicDecomposedNumberRing<N, A>
     where N: Send + Sync + HERingNegacyclicNTT<zn_64::Zn>,
         A: Send + Sync + Allocator
 {
+    #[instrument(skip_all)]
     fn mult_basis_to_small_basis<V>(&self, mut data: V)
         where V: SwappableVectorViewMut<zn_64::ZnEl>
     {
-        record_time!(GLOBAL_TIME_RECORDER, "Pow2CyclotomicNumberRing::mult_basis_to_small_basis", || {
-            let mut input = Vec::with_capacity_in(data.len(), &self.allocator);
-            let mut output = Vec::with_capacity_in(data.len(), &self.allocator);
-            for x in data.as_iter() {
-                input.push(self.ntt.ring().clone_el(x));
-            }
-            output.resize_with(data.len(), || self.ntt.ring().zero());
-            self.ntt.bitreversed_negacyclic_fft_base::<true>(&mut input[..], &mut output[..]);
-            for (i, x) in output.into_iter().enumerate() {
-                *data.at_mut(i) = x;
-            }
-        })
+        let mut input = Vec::with_capacity_in(data.len(), &self.allocator);
+        let mut output = Vec::with_capacity_in(data.len(), &self.allocator);
+        for x in data.as_iter() {
+            input.push(self.ntt.ring().clone_el(x));
+        }
+        output.resize_with(data.len(), || self.ntt.ring().zero());
+        self.ntt.bitreversed_negacyclic_fft_base::<true>(&mut input[..], &mut output[..]);
+        for (i, x) in output.into_iter().enumerate() {
+            *data.at_mut(i) = x;
+        }
     }
 
+    #[instrument(skip_all)]
     fn small_basis_to_mult_basis<V>(&self, mut data: V)
         where V: SwappableVectorViewMut<zn_64::ZnEl>
     {
-        record_time!(GLOBAL_TIME_RECORDER, "Pow2CyclotomicNumberRing::small_basis_to_mult_basis", || {
-            let mut input = Vec::with_capacity_in(data.len(), &self.allocator);
-            let mut output = Vec::with_capacity_in(data.len(), &self.allocator);
-            for x in data.as_iter() {
-                input.push(self.ntt.ring().clone_el(x));
-            }
-            output.resize_with(data.len(), || self.ntt.ring().zero());
-            self.ntt.bitreversed_negacyclic_fft_base::<false>(&mut input[..], &mut output[..]);
-            for (i, x) in output.into_iter().enumerate() {
-                *data.at_mut(i) = x;
-            }
-        })
+        let mut input = Vec::with_capacity_in(data.len(), &self.allocator);
+        let mut output = Vec::with_capacity_in(data.len(), &self.allocator);
+        for x in data.as_iter() {
+            input.push(self.ntt.ring().clone_el(x));
+        }
+        output.resize_with(data.len(), || self.ntt.ring().zero());
+        self.ntt.bitreversed_negacyclic_fft_base::<false>(&mut input[..], &mut output[..]);
+        for (i, x) in output.into_iter().enumerate() {
+            *data.at_mut(i) = x;
+        }
     }
 
     fn coeff_basis_to_small_basis<V>(&self, data: V) {}

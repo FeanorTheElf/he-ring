@@ -13,6 +13,7 @@ use feanor_math::rings::zn::zn_64::*;
 use feanor_math::rings::zn::*;
 use feanor_math::assert_el_eq;
 use feanor_math::seq::VectorView;
+use tracing::instrument;
 
 use crate::circuit::PlaintextCircuit;
 use crate::cyclotomic::*;
@@ -262,6 +263,7 @@ fn pow2_bitreversed_dwt<G, NumberRing>(H: &DefaultHypercube<NumberRing>, dim_ind
 ///
 /// Inverse to [`pow2_bitreversed_dwt()`]
 /// 
+#[instrument(skip_all)]
 fn pow2_bitreversed_inv_dwt<G, NumberRing>(H: &DefaultHypercube<NumberRing>, dim_index: usize, row_autos: G) -> Vec<MatmulTransform<NumberRing>>
     where G: Fn(&[usize]) -> CyclotomicGaloisGroupEl,
         NumberRing: HECyclotomicNumberRing + Clone
@@ -300,6 +302,7 @@ fn pow2_bitreversed_inv_dwt<G, NumberRing>(H: &DefaultHypercube<NumberRing>, dim
 /// If `p = 3 mod 4`, the slots are enumerated by `i` with `0 <= i < m` and the transform will put the value of slot `i` into the coefficient
 /// of `X^(bitrev(i, m) * n/(4m))`
 /// 
+#[instrument(skip_all)]
 pub fn slots_to_coeffs_thin<NumberRing>(H: &DefaultHypercube<NumberRing>) -> Vec<MatmulTransform<NumberRing>>
     where NumberRing: HECyclotomicNumberRing + Clone
 {
@@ -357,6 +360,7 @@ pub fn slots_to_coeffs_thin<NumberRing>(H: &DefaultHypercube<NumberRing>) -> Vec
 /// "Coeffs-to-Slots" map, as it does not discard unused factors. However, it is not
 /// too hard to build the "coeffs-to-slots" map from this, see [`coeffs_to_slots_thin()`]. 
 /// 
+#[instrument(skip_all)]
 pub fn slots_to_coeffs_thin_inv<NumberRing>(H: &DefaultHypercube<NumberRing>) -> Vec<MatmulTransform<NumberRing>>
     where NumberRing: HECyclotomicNumberRing + Clone
 {
@@ -405,6 +409,7 @@ pub fn slots_to_coeffs_thin_inv<NumberRing>(H: &DefaultHypercube<NumberRing>) ->
     }
 }
 
+#[instrument(skip_all)]
 pub fn coeffs_to_slots_thin<NumberRing>(H: &DefaultHypercube<NumberRing>) -> PlaintextCircuit<NumberRingQuotientBase<NumberRing, Zn, Global>>
     where NumberRing: HECyclotomicNumberRing + Clone
 {
