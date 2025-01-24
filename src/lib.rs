@@ -199,7 +199,7 @@ pub mod lintransform;
 /// 
 pub mod digitextract;
 
-// pub mod bgv;
+pub mod bgv;
 
 #[cfg(test)]
 use feanor_math::integer::int_cast;
