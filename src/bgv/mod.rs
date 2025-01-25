@@ -391,14 +391,16 @@ impl<A: Allocator + Clone + Send + Sync> BGVParams for CompositeBGV<A> {
     }
 }
 
-pub fn small_basis_repr<Params, NumberRing, A>(C: &CiphertextRing<Params>, ct: Ciphertext<Params>) -> Ciphertext<Params>
+pub fn small_basis_repr<Params, NumberRing, A>(P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, ct: Ciphertext<Params>) -> Ciphertext<Params>
     where Params: BGVParams<CiphertextRing = ManagedDoubleRNSRingBase<NumberRing, A>>,
         NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone
 {
-    C.get_ring().force_small_basis_repr(&ct.c0);
-    C.get_ring().force_small_basis_repr(&ct.c1);
-    return ct;
+    return Ciphertext {
+        c0: C.get_ring().from_small_basis_repr(C.get_ring().to_small_basis(&ct.c0).map(|x| C.get_ring().unmanaged_ring().get_ring().clone_el_non_fft(x)).unwrap_or_else(|| C.get_ring().unmanaged_ring().get_ring().zero_non_fft())), 
+        c1: C.get_ring().from_small_basis_repr(C.get_ring().to_small_basis(&ct.c1).map(|x| C.get_ring().unmanaged_ring().get_ring().clone_el_non_fft(x)).unwrap_or_else(|| C.get_ring().unmanaged_ring().get_ring().zero_non_fft())), 
+        implicit_scale: ct.implicit_scale
+    };
 }
 
 #[cfg(test)]

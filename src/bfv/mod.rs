@@ -828,9 +828,10 @@ pub fn small_basis_repr<Params, NumberRing, A>(C: &CiphertextRing<Params>, ct: C
         NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone
 {
-    C.get_ring().force_small_basis_repr(&ct.0);
-    C.get_ring().force_small_basis_repr(&ct.1);
-    return ct;
+    return (
+        C.get_ring().from_small_basis_repr(C.get_ring().to_small_basis(&ct.0).map(|x| C.get_ring().unmanaged_ring().get_ring().clone_el_non_fft(x)).unwrap_or_else(|| C.get_ring().unmanaged_ring().get_ring().zero_non_fft())), 
+        C.get_ring().from_small_basis_repr(C.get_ring().to_small_basis(&ct.1).map(|x| C.get_ring().unmanaged_ring().get_ring().clone_el_non_fft(x)).unwrap_or_else(|| C.get_ring().unmanaged_ring().get_ring().zero_non_fft())), 
+    );
 }
 
 #[cfg(test)]

@@ -420,7 +420,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
 
         let mut result = self.zero_non_fft();
         let mut result_as_matrix = self.as_matrix_wrt_small_basis_mut(&mut result);
-        let value_as_matrix = self.as_matrix_wrt_small_basis(&value);
+        let value_as_matrix = from.as_matrix_wrt_small_basis(&value);
         let mut i_self = 0;
         for i_from in 0..from.base_ring().len() {
             if drop_factors.contains(&i_from) {
