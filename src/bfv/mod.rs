@@ -650,16 +650,18 @@ impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingNegacyclicNTT<Zn
         assert!(ZZbig.is_gt(&Cmul_rns_base[Cmul_rns_base.len() - 1], &C_rns_base[C_rns_base.len() - 1]));
         Cmul_rns_base.sort_unstable_by(|l, r| ZZbig.cmp(l, r));
 
-        let C = ManagedDoubleRNSRingBase::new_with(
-            self.number_ring(),
-            zn_rns::Zn::new(C_rns_base.iter().map(|p| Zn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect(), ZZbig),
-            self.ciphertext_allocator.clone()
-        );
+        let C_rns_base = zn_rns::Zn::new(C_rns_base.iter().map(|p| Zn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect::<Vec<_>>(), ZZbig);
+        let Cmul_rns_base = zn_rns::Zn::new(Cmul_rns_base.iter().map(|p| Zn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect(), ZZbig);
+
         let Cmul = ManagedDoubleRNSRingBase::new_with(
             number_ring,
-            zn_rns::Zn::new(Cmul_rns_base.iter().map(|p| Zn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect(), ZZbig),
+            Cmul_rns_base,
             self.ciphertext_allocator.clone()
         );
+
+        let dropped_indices = (0..Cmul.base_ring().len()).filter(|i| C_rns_base.as_iter().all(|Zp| Zp.get_ring() != Cmul.base_ring().at(*i).get_ring())).collect::<Vec<_>>();
+        let C = Cmul.get_ring().drop_rns_factor(&dropped_indices);
+        debug_assert!(C.base_ring().get_ring() == C_rns_base.get_ring());
         return (C, Cmul);
     }
 }
@@ -703,16 +705,18 @@ impl<A: Allocator + Clone + Send + Sync> BFVParams for CompositeBFV<A> {
         assert!(ZZbig.is_gt(&Cmul_rns_base[Cmul_rns_base.len() - 1], &C_rns_base[C_rns_base.len() - 1]));
         Cmul_rns_base.sort_unstable_by(|l, r| ZZbig.cmp(l, r));
 
-        let C = ManagedDoubleRNSRingBase::new_with(
-            self.number_ring(),
-            zn_rns::Zn::new(C_rns_base.iter().map(|p| Zn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect(), ZZbig),
-            self.ciphertext_allocator.clone()
-        );
+        let C_rns_base = zn_rns::Zn::new(C_rns_base.iter().map(|p| Zn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect::<Vec<_>>(), ZZbig);
+        let Cmul_rns_base = zn_rns::Zn::new(Cmul_rns_base.iter().map(|p| Zn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect(), ZZbig);
+
         let Cmul = ManagedDoubleRNSRingBase::new_with(
             number_ring,
-            zn_rns::Zn::new(Cmul_rns_base.iter().map(|p| Zn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect(), ZZbig),
+            Cmul_rns_base,
             self.ciphertext_allocator.clone()
         );
+
+        let dropped_indices = (0..Cmul.base_ring().len()).filter(|i| C_rns_base.as_iter().all(|Zp| Zp.get_ring() != Cmul.base_ring().at(*i).get_ring())).collect::<Vec<_>>();
+        let C = Cmul.get_ring().drop_rns_factor(&dropped_indices);
+        debug_assert!(C.base_ring().get_ring() == C_rns_base.get_ring());
         return (C, Cmul);
     }
 }
@@ -769,17 +773,23 @@ impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingConvolution<Zn>>
         let C_rns_base = C_rns_base.iter().map(|p| Zn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect::<Vec<_>>();
         let Cmul_rns_base = Cmul_rns_base.iter().map(|p| Zn::new(int_cast(ZZbig.clone_el(p), ZZ, ZZbig) as u64)).collect::<Vec<_>>();
 
+        let C_convolutions = C_rns_base.iter().map(|Zp| C::new(*Zp, max_log2_n)).map(Arc::new).collect::<Vec<_>>();
+        let Cmul_convolutions = Cmul_rns_base.iter().map(|Zp| match C_rns_base.iter().enumerate().filter(|(_, C_Zp)| C_Zp.get_ring() == Zp.get_ring()).next() {
+            Some((i, _)) => C_convolutions.at(i).clone(),
+            None => Arc::new(C::new(*Zp, max_log2_n))
+        }).collect();
+
         let C = SingleRNSRingBase::new_with(
             self.number_ring(),
             zn_rns::Zn::new(C_rns_base.clone(), ZZbig),
             self.ciphertext_allocator.clone(),
-            C_rns_base.iter().map(|Zp| C::new(*Zp, max_log2_n)).collect()
+            C_convolutions
         );
         let Cmul = SingleRNSRingBase::new_with(
             number_ring,
             zn_rns::Zn::new(Cmul_rns_base.clone(), ZZbig),
             self.ciphertext_allocator.clone(),
-            Cmul_rns_base.iter().map(|Zp| C::new(*Zp, max_log2_n)).collect()
+            Cmul_convolutions
         );
         return (C, Cmul);
     }

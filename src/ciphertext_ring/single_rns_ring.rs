@@ -2,6 +2,7 @@ use std::alloc::{Allocator, Global};
 use std::marker::PhantomData;
 use std::ops::Range;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use feanor_math::algorithms::convolution::{ConvolutionAlgorithm, KaratsubaAlgorithm, PreparedConvolutionAlgorithm, STANDARD_CONVOLUTION};
 use feanor_math::algorithms::cyclotomic::cyclotomic_polynomial;
@@ -61,9 +62,9 @@ pub struct SingleRNSRingBase<NumberRing, A, C>
     // of efficiently computing the galois action image using only coefficient representation
     base: DoubleRNSRing<NumberRing, A>,
     /// Convolution algorithms to use to compute convolutions over each `Fp` in the RNS base
-    convolutions: Vec<Rc<C>>,
+    convolutions: Vec<Arc<C>>,
     /// Used to compute the polynomial division by `Phi_n` when necessary
-    poly_moduli: Vec<CyclotomicPolyReducer<Zn, Rc<C>>>
+    poly_moduli: Vec<Arc<CyclotomicPolyReducer<Zn, Arc<C>>>>
 }
 
 ///
@@ -102,8 +103,37 @@ impl<NumberRing, C> SingleRNSRingBase<NumberRing, Global, C>
     #[instrument(skip_all)]
     pub fn new(number_ring: NumberRing, rns_base: zn_rns::Zn<Zn, BigIntRing>) -> RingValue<Self> {
         let max_log2_n = StaticRing::<i64>::RING.abs_log2_ceil(&(number_ring.n() as i64 * 2)).unwrap();
-        let convolutions = rns_base.as_iter().map(|Zp| C::new(Zp.clone(), max_log2_n)).collect();
+        let convolutions = rns_base.as_iter().map(|Zp| Arc::new(C::new(Zp.clone(), max_log2_n))).collect();
         Self::new_with(number_ring, rns_base, Global, convolutions)
+    }
+}
+
+impl<NumberRing, A, C> Clone for SingleRNSRingBase<NumberRing, A, C>
+    where NumberRing: HECyclotomicNumberRing + Clone,
+        A: Allocator + Clone,
+        C: HERingConvolution<Zn>
+{
+    fn clone(&self) -> Self {
+        Self {
+            base: self.base.clone(),
+            convolutions: self.convolutions.clone(),
+            poly_moduli: self.poly_moduli.clone()
+        }
+    }
+}
+
+impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, A, C> 
+    where NumberRing: HECyclotomicNumberRing + Clone,
+        A: Allocator + Clone,
+        C: HERingConvolution<Zn>
+{
+    #[instrument(skip_all)]
+    pub fn drop_rns_factor(&self, drop_rns_factors: &[usize]) -> RingValue<Self> {
+        RingValue::from(Self {
+            base: self.base.get_ring().drop_rns_factor(drop_rns_factors),
+            convolutions: self.convolutions.iter().enumerate().filter(|(i, _)| !drop_rns_factors.contains(i)).map(|(_, conv)| conv.clone()).collect(),
+            poly_moduli: self.poly_moduli.iter().enumerate().filter(|(i, _)| !drop_rns_factors.contains(i)).map(|(_, modulus)| modulus.clone()).collect()
+        })
     }
 }
 
@@ -113,17 +143,19 @@ impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, A, C>
         C: PreparedConvolutionAlgorithm<ZnBase>
 {
     #[instrument(skip_all)]
-    pub fn new_with(number_ring: NumberRing, rns_base: zn_rns::Zn<Zn, BigIntRing>, allocator: A, convolutions: Vec<C>) -> RingValue<Self> {
+    pub fn new_with(number_ring: NumberRing, rns_base: zn_rns::Zn<Zn, BigIntRing>, allocator: A, convolutions: Vec<Arc<C>>) -> RingValue<Self> {
         assert!(rns_base.len() > 0);
         assert_eq!(rns_base.len(), convolutions.len());
+        for i in 0..rns_base.len() {
+            assert!(convolutions[i].supports_ring(rns_base.at(i)));
+        }
 
         let base = DoubleRNSRingBase::new_with(number_ring, rns_base, allocator);
         let number_ring = base.get_ring().number_ring();
         let rns_base = base.get_ring().rns_base();
-        let convolutions = convolutions.into_iter().map(|conv| Rc::new(conv)).collect::<Vec<_>>();
         
         RingValue::from(Self {
-            poly_moduli: rns_base.as_iter().zip(convolutions.iter()).map(|(Zp, conv)| CyclotomicPolyReducer::new(*Zp, number_ring.n() as i64, conv.clone())).collect::<Vec<_>>(),
+            poly_moduli: rns_base.as_iter().zip(convolutions.iter()).map(|(Zp, conv)| CyclotomicPolyReducer::new(*Zp, number_ring.n() as i64, conv.clone())).map(Arc::new).collect::<Vec<_>>(),
             base: base,
             convolutions: convolutions,
         })
@@ -171,8 +203,8 @@ impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, A, C>
         self.base.get_ring().allocator()
     }
 
-    pub fn convolutions(&self) -> &[Rc<C>] {
-        &self.convolutions
+    pub fn convolutions<'a>(&'a self) -> impl VectorFn<&'a C> + use<'a, NumberRing, A, C> {
+        self.convolutions.as_fn().map_fn(|conv| &**conv)
     }
 }
 
@@ -240,7 +272,7 @@ impl<NumberRing, A, C> BGFVCiphertextRing for SingleRNSRingBase<NumberRing, A, C
     }
 
     #[instrument(skip_all)]
-    fn drop_rns_factor(&self, from: &Self, drop_factors: &[usize], value: Self::Element) -> Self::Element {
+    fn drop_rns_factor_element(&self, from: &Self, drop_factors: &[usize], value: Self::Element) -> Self::Element {
         assert_eq!(self.n(), from.n());
         assert_eq!(self.base_ring().len() + drop_factors.len(), from.base_ring().len());
         assert!(drop_factors.iter().all(|i| *i < from.base_ring().len()));
@@ -863,7 +895,7 @@ pub fn test_with_number_ring<NumberRing: Clone + HECyclotomicNumberRing>(number_
         assert_el_eq!(
             &dropped_rns_factor_ring,
             dropped_rns_factor_ring.from_canonical_basis(ring.wrt_canonical_basis(a).iter().map(|c| dropped_rns_factor_ring.base_ring().from_congruence([*ring.base_ring().get_congruence(&c).at(1)].into_iter()))),
-            dropped_rns_factor_ring.get_ring().drop_rns_factor(ring.get_ring(), &[0], ring.clone_el(a))
+            dropped_rns_factor_ring.get_ring().drop_rns_factor_element(ring.get_ring(), &[0], ring.clone_el(a))
         );
     }
 }

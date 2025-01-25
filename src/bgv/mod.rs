@@ -64,8 +64,16 @@ pub trait BGVParams {
 
     fn max_rns_base(&self) -> zn_rns::Zn<Zn, BigIntRing>;
 
-    fn create_ciphertext_ring<I>(&self, max_rns_base: &zn_rns::Zn<Zn, BigIntRing>, use_primes: I) -> CiphertextRing<Self>
-        where I: Iterator<Item = usize>;
+    fn create_ciphertext_ring(&self, rns_base: zn_rns::Zn<Zn, BigIntRing>) -> CiphertextRing<Self>;
+
+    fn create_initial_ciphertext_ring(&self) -> CiphertextRing<Self> {
+        self.create_ciphertext_ring(self.max_rns_base())
+    }
+
+    fn drop_rns_factor(&self, C: &CiphertextRing<Self>, drop_factor_indices: &[usize]) -> CiphertextRing<Self> {
+        let new_rns_base = zn_rns::Zn::new((0..C.base_ring().len()).filter(|i| !drop_factor_indices.contains(i)).map(|i| *C.base_ring().at(i)).collect(), ZZbig);
+        return self.create_ciphertext_ring(new_rns_base);
+    }
 
     fn number_ring(&self) -> NumberRing<Self>;
 
@@ -129,7 +137,10 @@ pub trait BGVParams {
     fn dec(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: Ciphertext<Self>, sk: &SecretKey<Self>) -> El<PlaintextRing<Self>> {
         let noisy_m = C.add(ct.c0, C.mul_ref_snd(ct.c1, sk));
         let mod_t = P.base_ring().can_hom(&ZZbig).unwrap();
-        return P.from_canonical_basis(C.wrt_canonical_basis(&noisy_m).iter().map(|x| mod_t.map(C.base_ring().smallest_lift(x))));
+        return P.inclusion().mul_map(
+            P.from_canonical_basis(C.wrt_canonical_basis(&noisy_m).iter().map(|x| mod_t.map(C.base_ring().smallest_lift(x)))),
+            P.base_ring().invert(&ct.implicit_scale).unwrap()
+        );
     }
 
     #[instrument(skip_all)]
@@ -219,7 +230,6 @@ pub trait BGVParams {
     fn hom_mul<'a>(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, lhs: Ciphertext<Self>, rhs: Ciphertext<Self>, rk: &RelinKey<'a, Self>, s: Option<&El<CiphertextRing<Self>>>) -> Ciphertext<Self>
         where Self: 'a
     {
-        assert_el_eq!(P.base_ring(), &lhs.implicit_scale, &rhs.implicit_scale);
         let [res0, res1, res2] = C.get_ring().two_by_two_convolution([&lhs.c0, &lhs.c1], [&rhs.c0, &rhs.c1]);
 
         // let s = s.unwrap();
@@ -236,7 +246,25 @@ pub trait BGVParams {
     }
 
     #[instrument(skip_all)]
-    fn modulus_switch(P: &PlaintextRing<Self>, Cold: &CiphertextRing<Self>, Cnew: &CiphertextRing<Self>, dropped_rns_factor_indices: &[usize], ct: Ciphertext<Self>) -> Ciphertext<Self> {
+    fn mod_switch_sk(P: &PlaintextRing<Self>, Cnew: &CiphertextRing<Self>, Cold: &CiphertextRing<Self>, dropped_rns_factor_indices: &[usize], sk: &SecretKey<Self>) -> SecretKey<Self> {
+        assert_eq!(Cold.base_ring().len(), Cnew.base_ring().len() + dropped_rns_factor_indices.len());
+        return Cnew.get_ring().drop_rns_factor_element(Cold.get_ring(), dropped_rns_factor_indices, Cold.clone_el(sk));
+    }
+
+    #[instrument(skip_all)]
+    fn mod_switch_rk<'a, 'b>(P: &PlaintextRing<Self>, Cnew: &'b CiphertextRing<Self>, Cold: &CiphertextRing<Self>, dropped_rns_factor_indices: &[usize], rk: &RelinKey<'a, Self>) -> RelinKey<'b, Self> {
+        assert_eq!(Cold.base_ring().len(), Cnew.base_ring().len() + dropped_rns_factor_indices.len());
+        return (rk.0.clone(Cold.get_ring()).modulus_switch(Cnew.get_ring(), dropped_rns_factor_indices, Cold.get_ring()), rk.1.clone(Cold.get_ring()).modulus_switch(Cnew.get_ring(), dropped_rns_factor_indices, Cold.get_ring()));
+    }
+
+    #[instrument(skip_all)]
+    fn mod_switch_gk<'a, 'b>(P: &PlaintextRing<Self>, Cnew: &'b CiphertextRing<Self>, Cold: &CiphertextRing<Self>, dropped_rns_factor_indices: &[usize], gk: &KeySwitchKey<'a, Self>) -> KeySwitchKey<'b, Self> {
+        assert_eq!(Cold.base_ring().len(), Cnew.base_ring().len() + dropped_rns_factor_indices.len());
+        return (gk.0.clone(Cold.get_ring()).modulus_switch(Cnew.get_ring(), dropped_rns_factor_indices, Cold.get_ring()), gk.1.clone(Cold.get_ring()).modulus_switch(Cnew.get_ring(), dropped_rns_factor_indices, Cold.get_ring()));
+    }
+
+    #[instrument(skip_all)]
+    fn mod_switch(P: &PlaintextRing<Self>, Cnew: &CiphertextRing<Self>, Cold: &CiphertextRing<Self>, dropped_rns_factor_indices: &[usize], ct: Ciphertext<Self>) -> Ciphertext<Self> {
         assert_eq!(Cold.base_ring().len(), Cnew.base_ring().len() + dropped_rns_factor_indices.len());
         let mut i_new = 0;
         for i_old in 0..Cold.base_ring().len() {
@@ -308,15 +336,17 @@ impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingNegacyclicNTT<Zn
     }
 
     #[instrument(skip_all)]
-    fn create_ciphertext_ring<I>(&self, max_rns_base: &zn_rns::Zn<Zn, BigIntRing>, use_primes: I) -> CiphertextRing<Self>
-        where I: Iterator<Item = usize>
-    {
-        let current_rns_base = use_primes.map(|i| *max_rns_base.at(i));
+    fn create_ciphertext_ring(&self, rns_base: zn_rns::Zn<Zn, BigIntRing>) -> CiphertextRing<Self> {
         return ManagedDoubleRNSRingBase::new_with(
             self.number_ring(),
-            zn_rns::Zn::new(current_rns_base.collect(), ZZbig),
+            rns_base,
             self.ciphertext_allocator.clone()
         );
+    }
+    
+    #[instrument(skip_all)]
+    fn drop_rns_factor(&self, C: &CiphertextRing<Self>, drop_factor_indices: &[usize]) -> CiphertextRing<Self> {
+        C.get_ring().drop_rns_factor(drop_factor_indices)
     }
 }
 
@@ -347,15 +377,17 @@ impl<A: Allocator + Clone + Send + Sync> BGVParams for CompositeBGV<A> {
     }
 
     #[instrument(skip_all)]
-    fn create_ciphertext_ring<I>(&self, max_rns_base: &zn_rns::Zn<Zn, BigIntRing>, use_primes: I) -> CiphertextRing<Self>
-        where I: Iterator<Item = usize>
-    {
-        let current_rns_base = use_primes.map(|i| *max_rns_base.at(i));
+    fn create_ciphertext_ring(&self, rns_base: zn_rns::Zn<Zn, BigIntRing>) -> CiphertextRing<Self> {
         return ManagedDoubleRNSRingBase::new_with(
             self.number_ring(),
-            zn_rns::Zn::new(current_rns_base.collect(), ZZbig),
+            rns_base,
             self.ciphertext_allocator.clone()
         );
+    }
+    
+    #[instrument(skip_all)]
+    fn drop_rns_factor(&self, C: &CiphertextRing<Self>, drop_factor_indices: &[usize]) -> CiphertextRing<Self> {
+        C.get_ring().drop_rns_factor(drop_factor_indices)
     }
 }
 
@@ -391,7 +423,7 @@ fn test_pow2_bgv_enc_dec() {
     
     let P = params.create_plaintext_ring(t);
     let max_rns_base = params.max_rns_base();
-    let C = params.create_ciphertext_ring(&max_rns_base, 0..max_rns_base.len());
+    let C = params.create_initial_ciphertext_ring();
     let sk = Pow2BGV::gen_sk(&C, &mut rng);
 
     let input = P.int_hom().map(2);
@@ -416,7 +448,7 @@ fn test_pow2_bgv_mul() {
     
     let P = params.create_plaintext_ring(t);
     let max_rns_base = params.max_rns_base();
-    let C = params.create_ciphertext_ring(&max_rns_base, 0..max_rns_base.len());
+    let C = params.create_initial_ciphertext_ring();
     let sk = Pow2BGV::gen_sk(&C, &mut rng);
     let rk = Pow2BGV::gen_rk(&P, &C, &mut rng, &sk, digits);
 
@@ -425,6 +457,88 @@ fn test_pow2_bgv_mul() {
     let result_ctxt = Pow2BGV::hom_mul(&P, &C, Pow2BGV::clone_ct(&P, &C, &ctxt), ctxt, &rk, None);
     let result = Pow2BGV::dec(&P, &C, result_ctxt, &sk);
     assert_el_eq!(&P, P.int_hom().map(4), result);
+}
+
+#[test]
+fn test_pow2_bgv_modulus_switch() {
+    let mut rng = thread_rng();
+    
+    let params = Pow2BGV {
+        log2_q_min: 500,
+        log2_q_max: 520,
+        log2_N: 7,
+        ciphertext_allocator: DefaultCiphertextAllocator::default(),
+        negacyclic_ntt: PhantomData::<DefaultNegacyclicNTT>
+    };
+    let t = 257;
+    let digits = 3;
+    
+    let P = params.create_plaintext_ring(t);
+    let C0 = params.create_initial_ciphertext_ring();
+    assert_eq!(9, C0.base_ring().len());
+
+    let sk = Pow2BGV::gen_sk(&C0, &mut rng);
+    let rk = Pow2BGV::gen_rk(&P, &C0, &mut rng, &sk, digits);
+
+    let input = P.int_hom().map(2);
+    let ctxt = Pow2BGV::enc_sym(&P, &C0, &mut rng, &input, &sk);
+
+    let C1 = params.drop_rns_factor(&C0, &[0]);
+    let result_ctxt = Pow2BGV::mod_switch(&P, &C1, &C0, &[0], Pow2BGV::clone_ct(&P, &C0, &ctxt));
+    let result = Pow2BGV::dec(&P, &C1, result_ctxt, &Pow2BGV::mod_switch_sk(&P, &C1, &C0, &[0], &sk));
+    assert_el_eq!(&P, P.int_hom().map(2), result);
+
+    let C1 = params.drop_rns_factor(&C0, &[1]);
+    let result_ctxt = Pow2BGV::mod_switch(&P, &C1, &C0, &[1], Pow2BGV::clone_ct(&P, &C0, &ctxt));
+    let result = Pow2BGV::dec(&P, &C1, result_ctxt, &Pow2BGV::mod_switch_sk(&P, &C1, &C0, &[1], &sk));
+    assert_el_eq!(&P, P.int_hom().map(2), result);
+
+    let C1 = params.drop_rns_factor(&C0, &[8]);
+    let result_ctxt = Pow2BGV::mod_switch(&P, &C1, &C0, &[8], Pow2BGV::clone_ct(&P, &C0, &ctxt));
+    let result = Pow2BGV::dec(&P, &C1, result_ctxt, &Pow2BGV::mod_switch_sk(&P, &C1, &C0, &[8], &sk));
+    assert_el_eq!(&P, P.int_hom().map(2), result);
+}
+
+#[test]
+fn test_pow2_bgv_modulus_switch_rk() {
+    let mut rng = thread_rng();
+    
+    let params = Pow2BGV {
+        log2_q_min: 500,
+        log2_q_max: 520,
+        log2_N: 7,
+        ciphertext_allocator: DefaultCiphertextAllocator::default(),
+        negacyclic_ntt: PhantomData::<DefaultNegacyclicNTT>
+    };
+    let t = 257;
+    let digits = 3;
+    
+    let P = params.create_plaintext_ring(t);
+    let C0 = params.create_initial_ciphertext_ring();
+    assert_eq!(9, C0.base_ring().len());
+
+    let sk = Pow2BGV::gen_sk(&C0, &mut rng);
+    let rk = Pow2BGV::gen_rk(&P, &C0, &mut rng, &sk, digits);
+
+    let input = P.int_hom().map(2);
+    let ctxt = Pow2BGV::enc_sym(&P, &C0, &mut rng, &input, &sk);
+
+    for i in [0, 1, 8] {
+        let C1 = params.drop_rns_factor(&C0, &[i]);
+        let new_sk = Pow2BGV::mod_switch_sk(&P, &C1, &C0, &[i], &sk);
+        let new_rk = Pow2BGV::mod_switch_rk(&P, &C1, &C0, &[i], &rk);
+        let ctxt2 = Pow2BGV::enc_sym(&P, &C1, &mut rng, &P.int_hom().map(3), &new_sk);
+        let result_ctxt = Pow2BGV::hom_mul(
+            &P,
+            &C1,
+            Pow2BGV::mod_switch(&P, &C1, &C0, &[i], Pow2BGV::clone_ct(&P, &C0, &ctxt)),
+            ctxt2,
+            &new_rk,
+            None
+        );
+        let result = Pow2BGV::dec(&P, &C1, result_ctxt, &new_sk);
+        assert_el_eq!(&P, P.int_hom().map(6), result);
+    }
 }
 
 #[test]
@@ -450,7 +564,7 @@ fn measure_time_pow2_bgv() {
     );
     let max_rns_base = params.max_rns_base();
     let C = log_time::<_, _, true, _>("CreateCtxtRing", |[]|
-        params.create_ciphertext_ring(&max_rns_base, 0..max_rns_base.len())
+        params.create_initial_ciphertext_ring()
     );
 
     let sk = log_time::<_, _, true, _>("GenSK", |[]| 
@@ -479,7 +593,14 @@ fn measure_time_pow2_bgv() {
     let res = log_time::<_, _, true, _>("HomMul", |[]| 
         Pow2BGV::hom_mul(&P, &C, ct, ct2, &rk, None)
     );
-    assert_el_eq!(&P, &P.int_hom().map(4), &Pow2BGV::dec(&P, &C, res, &sk));
+    assert_el_eq!(&P, &P.int_hom().map(4), &Pow2BGV::dec(&P, &C, Pow2BGV::clone_ct(&P, &C, &res), &sk));
+
+    let C_new = params.drop_rns_factor(&C, &[0]);
+    let sk_new = Pow2BGV::mod_switch_sk(&P, &C_new, &C, &[0], &sk);
+    let res_new = log_time::<_, _, true, _>("ModSwitch", |[]| 
+        Pow2BGV::mod_switch(&P, &C_new, &C, &[0], res)
+    );
+    assert_el_eq!(&P, &P.int_hom().map(4), &Pow2BGV::dec(&P, &C_new, res_new, &sk_new));
 }
 
 #[test]
@@ -505,7 +626,7 @@ fn measure_time_double_rns_composite_bgv() {
     );
     let max_rns_base = params.max_rns_base();
     let C = log_time::<_, _, true, _>("CreateCtxtRing", |[]|
-        params.create_ciphertext_ring(&max_rns_base, 0..max_rns_base.len())
+        params.create_initial_ciphertext_ring()
     );
 
     let sk = log_time::<_, _, true, _>("GenSK", |[]| 
@@ -535,5 +656,12 @@ fn measure_time_double_rns_composite_bgv() {
     let res = log_time::<_, _, true, _>("HomMul", |[]| 
         CompositeBGV::hom_mul(&P, &C, ct, ct2, &rk, None)
     );
-    assert_el_eq!(&P, &P.int_hom().map(1), &CompositeBGV::dec(&P, &C, res, &sk));
+    assert_el_eq!(&P, &P.int_hom().map(1), &CompositeBGV::dec(&P, &C, CompositeBGV::clone_ct(&P, &C, &res), &sk));
+
+    let C_new = params.drop_rns_factor(&C, &[0]);
+    let sk_new = CompositeBGV::mod_switch_sk(&P, &C_new, &C, &[0], &sk);
+    let res_new = log_time::<_, _, true, _>("ModSwitch", |[]| 
+        CompositeBGV::mod_switch(&P, &C_new, &C, &[0], res)
+    );
+    assert_el_eq!(&P, &P.int_hom().map(1), &CompositeBGV::dec(&P, &C_new, res_new, &sk_new));
 }

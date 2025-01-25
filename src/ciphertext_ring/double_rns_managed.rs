@@ -96,6 +96,31 @@ pub struct ManagedDoubleRNSEl<NumberRing, A = Global>
     internal: Rc<DoubleRNSElInternal<NumberRing, A>>
 }
 
+impl<NumberRing, A> Clone for ManagedDoubleRNSRingBase<NumberRing, A>
+    where NumberRing: HENumberRing + Clone,
+        A: Allocator + Clone
+{
+    fn clone(&self) -> Self {
+        Self {
+            base: self.base.clone(),
+            zero: self.base.zero_non_fft()
+        }
+    }
+}
+
+impl<NumberRing, A> ManagedDoubleRNSRingBase<NumberRing, A> 
+    where NumberRing: HENumberRing + Clone,
+        A: Allocator + Clone
+{
+    pub fn drop_rns_factor(&self, drop_rns_factors: &[usize]) -> RingValue<Self> {
+        let new_base = self.base.drop_rns_factor(drop_rns_factors);
+        RingValue::from(Self {
+            zero: new_base.get_ring().zero_non_fft(),
+            base: new_base.into()
+        })
+    }
+}
+
 impl<NumberRing, A> ManagedDoubleRNSRingBase<NumberRing, A>
     where NumberRing: HENumberRing,
         A: Allocator + Clone
@@ -341,13 +366,13 @@ impl<NumberRing, A> BGFVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, 
         self.base.number_ring()
     }
 
-    fn drop_rns_factor(&self, from: &Self, dropped_rns_factors: &[usize], value: Self::Element) -> Self::Element {
+    fn drop_rns_factor_element(&self, from: &Self, dropped_rns_factors: &[usize], value: Self::Element) -> Self::Element {
         match value.internal.get_repr() {
             ManagedDoubleRNSElRepresentation::Zero => self.zero(),
             ManagedDoubleRNSElRepresentation::Sum => ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal {
-                double_rns_repr_or_part: RefCell::new(Some(self.base.drop_rns_factor(&from.base, dropped_rns_factors, value.internal.double_rns_repr_or_part.borrow().as_ref().unwrap()))),
+                double_rns_repr_or_part: RefCell::new(Some(self.base.drop_rns_factor_element(&from.base, dropped_rns_factors, value.internal.double_rns_repr_or_part.borrow().as_ref().unwrap()))),
                 representation: RefCell::new(ManagedDoubleRNSElRepresentation::Sum),
-                small_basis_part: RefCell::new(Some(self.base.drop_rns_factor_non_fft(&from.base, dropped_rns_factors, value.internal.small_basis_part.borrow().as_ref().unwrap()))),
+                small_basis_part: RefCell::new(Some(self.base.drop_rns_factor_non_fft_element(&from.base, dropped_rns_factors, value.internal.small_basis_part.borrow().as_ref().unwrap()))),
                 small_basis_repr: OnceCell::new()
             }) },
             ManagedDoubleRNSElRepresentation::SmallBasis => ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal {
@@ -356,23 +381,23 @@ impl<NumberRing, A> BGFVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, 
                 small_basis_part: RefCell::new(None),
                 small_basis_repr: {
                     let result = OnceCell::new();
-                    result.set(self.base.drop_rns_factor_non_fft(&from.base, dropped_rns_factors, value.internal.small_basis_repr.get().unwrap())).ok().unwrap();
+                    result.set(self.base.drop_rns_factor_non_fft_element(&from.base, dropped_rns_factors, value.internal.small_basis_repr.get().unwrap())).ok().unwrap();
                     result
                 }
             }) },
             ManagedDoubleRNSElRepresentation::DoubleRNS => ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal {
-                double_rns_repr_or_part: RefCell::new(Some(self.base.drop_rns_factor(&from.base, dropped_rns_factors, value.internal.double_rns_repr_or_part.borrow().as_ref().unwrap()))),
+                double_rns_repr_or_part: RefCell::new(Some(self.base.drop_rns_factor_element(&from.base, dropped_rns_factors, value.internal.double_rns_repr_or_part.borrow().as_ref().unwrap()))),
                 representation: RefCell::new(ManagedDoubleRNSElRepresentation::DoubleRNS),
                 small_basis_part: RefCell::new(None),
                 small_basis_repr: OnceCell::new()
             }) },
             ManagedDoubleRNSElRepresentation::Both => ManagedDoubleRNSEl { internal: Rc::new(DoubleRNSElInternal {
-                double_rns_repr_or_part: RefCell::new(Some(self.base.drop_rns_factor(&from.base, dropped_rns_factors, value.internal.double_rns_repr_or_part.borrow().as_ref().unwrap()))),
+                double_rns_repr_or_part: RefCell::new(Some(self.base.drop_rns_factor_element(&from.base, dropped_rns_factors, value.internal.double_rns_repr_or_part.borrow().as_ref().unwrap()))),
                 representation: RefCell::new(ManagedDoubleRNSElRepresentation::Both),
                 small_basis_part: RefCell::new(None),
                 small_basis_repr: {
                     let result = OnceCell::new();
-                    result.set(self.base.drop_rns_factor_non_fft(&from.base, dropped_rns_factors, value.internal.small_basis_repr.get().unwrap())).ok().unwrap();
+                    result.set(self.base.drop_rns_factor_non_fft_element(&from.base, dropped_rns_factors, value.internal.small_basis_repr.get().unwrap())).ok().unwrap();
                     result
                 }
             }) }
@@ -380,7 +405,7 @@ impl<NumberRing, A> BGFVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, 
     }
 
     fn drop_rns_factor_prepared(&self, from: &Self, drop_factors: &[usize], value: Self::PreparedMultiplicant) -> Self::PreparedMultiplicant {
-        self.drop_rns_factor(from, drop_factors, value)
+        self.drop_rns_factor_element(from, drop_factors, value)
     }
 
     fn mul_prepared(&self, lhs: &Self::PreparedMultiplicant, rhs: &Self::PreparedMultiplicant) -> Self::Element {

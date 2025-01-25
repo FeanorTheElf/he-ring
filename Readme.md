@@ -56,10 +56,10 @@ In detail, the following is available:
 
 ### Homomorphic Encryption schemes
 
-This library currently contains an implementation of the BFV scheme, and I hope to soon add an implementation of the CLPX scheme for large integers.
+This library currently contains an implementation of the BFV and BGV schemes, and I hope to soon add an implementation of the CLPX scheme for large integers.
 Note that using the well-abstracted building blocks mentioned before, these implementations are actually a straightforward adaption of the mathematical description of the schemes, so it should be very simple to implement another/custom HE scheme.
 
-This code is contained in the modules [`crate::bfv`].
+This code is contained in the modules [`crate::bfv`] and [`crate::bgv`].
 
 ### Arithmetization and Bootstrapping
 
@@ -67,7 +67,7 @@ We include an implementation of bootstrapping for BFV.
 Again, while the actual implementation is of course scheme-specific, components are, where possible, designed in a generic way.
 In particular, this includes tools for arithmetization and computing arithmetic circuits.
 
-This code is contained in the modules [`crate::bfv::bootstrap`], [`crate::lintransform`] and [`crate::digitextract`].
+This code is contained in the modules [`crate::bfv::bootstrap`], [`crate::lintransform`] and [`crate::digitextract`], which use arithmetic circuits as defined in [`crate::circuit`].
 This in particular contains:
  - Methods for computing linear transforms and representing them as sum of Galois automorphisms (including HElib-style `matmul1d()` and `blockmatmul1d()`)
  - Low-depth Paterson-Stockmeyer to convert polynomials into arithmetic circuits
@@ -80,6 +80,16 @@ When optimizing for performance, please use the Intel HEXL library (by enabling 
 
 Note that while this library is already quite optimized, it may not be fully competitive with other HE libraries that have existed for longer and thus received more optimization effort.
 Also, our goal of providing a modular toolkit of building blocks makes some kinds of optimizations more difficult, since components cannot always make as many assumptions on the input as they could if they only support a single HE scheme.
+
+### Profiling
+
+`he-ring` is instrumented using the framework defined by the Rust library [`tracing`](https://crates.io/crates/tracing).
+Hence, running any `he-ring` functions with an active tracing subscriber will generate corresponding tracing events that the subscriber can use for profiling purposes.
+There are various crates that implement tracing subscribers with profiling functionality.
+
+For tests within this crate, we use [`tracing-chrome`](https://crates.io/crates/tracing-chrome) which generates Perfetto json trace files (can be displayed by Google Chrome without requiring plugins).
+In particular, if you enable ignored tests and run one of the  `measure_time_`-prefixed test in this crate, this will generate a trace file.
+Of course, this is only included on test builds, in library builds, the parent application is free to configure `tracing` as desired.
 
 ## Disclaimer
 

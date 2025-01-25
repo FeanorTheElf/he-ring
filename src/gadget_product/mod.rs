@@ -23,6 +23,10 @@ use crate::DefaultConvolution;
 type UsedBaseConversion<A> = lift::AlmostExactBaseConversion<A>;
 
 pub struct GadgetProductLhsOperand<R: BGFVCiphertextRing> {
+    /// `i`-th entry stores a `i`-th part of the gadget decomposition of the represented element.
+    /// We store the element once as `PreparedMultiplicant` for fast computation of gadget products, and 
+    /// once as the element itself, since there currently is no way of getting the ring element out of
+    /// a `PreparedMultiplicant`
     element_decomposition: Vec<(R::PreparedMultiplicant, R::Element)>
 }
 
@@ -233,7 +237,15 @@ fn gadget_decompose<R, V>(ring: &R, el: &R::Element, digits: V) -> Vec<(R::Prepa
 }
 
 pub struct GadgetProductRhsOperand<R: BGFVCiphertextRing> {
+    /// `i`-th entry stores a (noisy) encryption/encoding/whatever of the represented element,
+    /// scaled by the `i`-th entry of the gadget vector. `None` represents zero. We store the
+    /// element once as `PreparedMultiplicant` for fast computation of gadget products, and once
+    /// as the element itself, since there currently is no way of getting the ring element out of
+    /// a `PreparedMultiplicant`
     scaled_element: Vec<Option<(R::PreparedMultiplicant, R::Element)>>,
+    /// representation of the used gadget vector, the `i`-th entry of the gadget vector is the
+    /// RNS unit vector that is 1 modulo exactly the RNS factors contained in the range at index
+    /// `i` of this list
     digits: Vec<Range<usize>>
 }
 
@@ -251,6 +263,13 @@ fn select_digits(digits: usize, rns_base_len: usize) -> Vec<Range<usize>> {
 }
 
 impl<R: BGFVCiphertextRing> GadgetProductRhsOperand<R> {
+
+    pub fn clone(&self, ring: &R) -> Self {
+        Self {
+            scaled_element: self.scaled_element.iter().map(|el| el.as_ref().map(|el| (ring.prepare_multiplicant(&el.1), ring.clone_el(&el.1)))).collect(),
+            digits: self.digits.clone()
+        }
+    }
 
     pub fn gadget_vector<'b>(&'b self, ring: &'b R) -> impl VectorFn<El<zn_rns::Zn<Zn, BigIntRing>>> + use<'b, R> {
         self.digits.as_fn().map_fn(|digit| ring.base_ring().from_congruence((0..ring.base_ring().len()).map(|i| if digit.contains(&i) { ring.base_ring().at(i).one() } else { ring.base_ring().at(i).zero() })))
@@ -301,7 +320,7 @@ impl<R: BGFVCiphertextRing> GadgetProductRhsOperand<R> {
             result_digits.push(current..(current + old_digit_len - dropped_from_digit));
             current += old_digit_len - dropped_from_digit;
             if let Some((scaled_el_prepared, scaled_el)) = scaled_el {
-                let new_scaled_el = to.drop_rns_factor(from, dropped_rns_factors, scaled_el);
+                let new_scaled_el = to.drop_rns_factor_element(from, dropped_rns_factors, scaled_el);
                 result_scaled_el.push(Some((to.drop_rns_factor_prepared(from, dropped_rns_factors, scaled_el_prepared), new_scaled_el)));
             } else {
                 result_scaled_el.push(None);

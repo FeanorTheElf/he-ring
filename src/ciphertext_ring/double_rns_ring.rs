@@ -1,6 +1,7 @@
 use std::alloc::Allocator;
 use std::alloc::Global;
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 use feanor_math::algorithms::convolution::ConvolutionAlgorithm;
 use feanor_math::algorithms::convolution::PreparedConvolutionAlgorithm;
@@ -50,7 +51,7 @@ pub struct DoubleRNSRingBase<NumberRing, A = Global>
     /// The number ring whose quotient we represent
     number_ring: NumberRing,
     /// The number ring modulo each RNS factor `pi`, use for conversion between small and multiplicative basis
-    ring_decompositions: Vec<<NumberRing as HENumberRing>::Decomposed>,
+    ring_decompositions: Vec<Arc<<NumberRing as HENumberRing>::Decomposed>>,
     /// The current RNS base
     rns_base: zn_rns::Zn<Zn, BigIntRing>,
     /// Use to allocate memory for ring elements
@@ -96,6 +97,35 @@ impl<NumberRing> DoubleRNSRingBase<NumberRing>
     }
 }
 
+impl<NumberRing, A> Clone for DoubleRNSRingBase<NumberRing, A>
+    where NumberRing: HENumberRing + Clone,
+        A: Allocator + Clone
+{
+    fn clone(&self) -> Self {
+        Self {
+            allocator: self.allocator.clone(),
+            number_ring: self.number_ring.clone(),
+            ring_decompositions: self.ring_decompositions.clone(),
+            rns_base: self.rns_base.clone()
+        }
+    }
+}
+
+impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A> 
+    where NumberRing: HENumberRing + Clone,
+        A: Allocator + Clone
+{
+    #[instrument(skip_all)]
+    pub fn drop_rns_factor(&self, drop_rns_factors: &[usize]) -> RingValue<Self> {
+        RingValue::from(Self {
+            ring_decompositions: self.ring_decompositions.iter().enumerate().filter(|(i, _)| !drop_rns_factors.contains(i)).map(|(_, x)| x.clone()).collect(),
+            number_ring: self.number_ring().clone(),
+            rns_base: zn_rns::Zn::new(self.rns_base().as_iter().enumerate().filter(|(i, _)| !drop_rns_factors.contains(i)).map(|(_, x)| x.clone()).collect(), BigIntRing::RING),
+            allocator: self.allocator().clone()
+        })
+    }
+}
+
 impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A> 
     where NumberRing: HENumberRing,
         A: Allocator + Clone
@@ -104,15 +134,15 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
     pub fn new_with(number_ring: NumberRing, rns_base: zn_rns::Zn<Zn, BigIntRing>, allocator: A) -> RingValue<Self> {
         assert!(rns_base.len() > 0);
         RingValue::from(Self {
-            ring_decompositions: rns_base.as_iter().map(|Fp| number_ring.mod_p(Fp.clone())).collect(),
+            ring_decompositions: rns_base.as_iter().map(|Fp| Arc::new(number_ring.mod_p(Fp.clone()))).collect(),
             number_ring: number_ring,
             rns_base: rns_base,
             allocator: allocator
         })
     }
 
-    pub fn ring_decompositions(&self) -> &[<NumberRing as HENumberRing>::Decomposed] {
-        &self.ring_decompositions
+    pub fn ring_decompositions<'a>(&'a self) -> impl VectorFn<&'a <NumberRing as HENumberRing>::Decomposed> + use<'a, NumberRing, A> {
+        self.ring_decompositions.as_fn().map_fn(|x| &**x)
     }
 
     pub fn rns_base(&self) -> &zn_rns::Zn<Zn, BigIntRing> {
@@ -359,7 +389,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
     }
     
     #[instrument(skip_all)]
-    pub fn drop_rns_factor(&self, from: &Self, drop_factors: &[usize], value: &DoubleRNSEl<NumberRing, A>) -> DoubleRNSEl<NumberRing, A> {
+    pub fn drop_rns_factor_element(&self, from: &Self, drop_factors: &[usize], value: &DoubleRNSEl<NumberRing, A>) -> DoubleRNSEl<NumberRing, A> {
         assert!(self.number_ring() == from.number_ring());
         assert_eq!(self.base_ring().len() + drop_factors.len(), from.base_ring().len());
         assert!(drop_factors.iter().all(|i| *i < from.base_ring().len()));
@@ -382,7 +412,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
     }
 
     #[instrument(skip_all)]
-    pub fn drop_rns_factor_non_fft(&self, from: &Self, drop_factors: &[usize], value: &SmallBasisEl<NumberRing, A>) -> SmallBasisEl<NumberRing, A> {
+    pub fn drop_rns_factor_non_fft_element(&self, from: &Self, drop_factors: &[usize], value: &SmallBasisEl<NumberRing, A>) -> SmallBasisEl<NumberRing, A> {
         assert!(self.number_ring() == from.number_ring());
         assert_eq!(self.base_ring().len() + drop_factors.len(), from.base_ring().len());
         assert!(drop_factors.iter().all(|i| *i < from.base_ring().len()));
@@ -565,7 +595,7 @@ impl<NumberRing, A> CyclotomicRing for DoubleRNSRingBase<NumberRing, A>
     fn apply_galois_action(&self, el: &Self::Element, g: CyclotomicGaloisGroupEl) -> Self::Element {
         let mut result = self.zero();
         for (i, _) in self.rns_base().as_iter().enumerate() {
-            <NumberRing::DecomposedAsCyclotomic>::from_ref(&self.ring_decompositions()[i]).permute_galois_action(
+            <NumberRing::DecomposedAsCyclotomic>::from_ref(self.ring_decompositions().at(i)).permute_galois_action(
                 &el.el_wrt_mult_basis[(i * self.rank())..((i + 1) * self.rank())],
                 &mut result.el_wrt_mult_basis[(i * self.rank())..((i + 1) * self.rank())],
                 g
@@ -941,7 +971,7 @@ pub fn test_with_number_ring<NumberRing: Clone + HECyclotomicNumberRing>(number_
         assert_el_eq!(
             &dropped_rns_factor_ring,
             dropped_rns_factor_ring.from_canonical_basis(ring.wrt_canonical_basis(a).iter().map(|c| dropped_rns_factor_ring.base_ring().from_congruence([*ring.base_ring().get_congruence(&c).at(1)].into_iter()))),
-            dropped_rns_factor_ring.get_ring().drop_rns_factor(ring.get_ring(), &[0], a)
+            dropped_rns_factor_ring.get_ring().drop_rns_factor_element(ring.get_ring(), &[0], a)
         );
     }
 }
