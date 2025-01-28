@@ -660,7 +660,7 @@ impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingNegacyclicNTT<Zn
         );
 
         let dropped_indices = (0..Cmul.base_ring().len()).filter(|i| C_rns_base.as_iter().all(|Zp| Zp.get_ring() != Cmul.base_ring().at(*i).get_ring())).collect::<Vec<_>>();
-        let C = Cmul.get_ring().drop_rns_factor(&dropped_indices);
+        let C = RingValue::from(Cmul.get_ring().drop_rns_factor(&dropped_indices));
         debug_assert!(C.base_ring().get_ring() == C_rns_base.get_ring());
         return (C, Cmul);
     }
@@ -715,7 +715,7 @@ impl<A: Allocator + Clone + Send + Sync> BFVParams for CompositeBFV<A> {
         );
 
         let dropped_indices = (0..Cmul.base_ring().len()).filter(|i| C_rns_base.as_iter().all(|Zp| Zp.get_ring() != Cmul.base_ring().at(*i).get_ring())).collect::<Vec<_>>();
-        let C = Cmul.get_ring().drop_rns_factor(&dropped_indices);
+        let C = RingValue::from(Cmul.get_ring().drop_rns_factor(&dropped_indices));
         debug_assert!(C.base_ring().get_ring() == C_rns_base.get_ring());
         return (C, Cmul);
     }

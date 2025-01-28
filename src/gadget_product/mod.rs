@@ -1,5 +1,6 @@
 use std::alloc::Global;
 use std::ops::Range;
+use std::cmp::min;
 
 use feanor_math::integer::BigIntRing;
 use feanor_math::matrix::{OwnedMatrix, Submatrix, SubmatrixMut};
@@ -21,6 +22,24 @@ use crate::rnsconv::{lift, RNSOperation};
 use crate::DefaultConvolution;
 
 type UsedBaseConversion<A> = lift::AlmostExactBaseConversion<A>;
+
+pub fn recommended_rns_factors_to_drop(rns_base_len: usize, gadget_operand_digits: usize, drop_prime_count: usize) -> Vec<usize> {
+    assert!(drop_prime_count <= rns_base_len);
+    let old_digits = select_digits(gadget_operand_digits, rns_base_len);
+    let new_digits = select_digits(gadget_operand_digits, rns_base_len - drop_prime_count);
+    let mut current = 0;
+    let mut result = Vec::with_capacity(drop_prime_count);
+    for (old_digit, new_digit) in old_digits.into_iter().zip(new_digits.into_iter()) {
+        let old_digit_len = old_digit.end - old_digit.start;
+        let new_digit_len = new_digit.end - new_digit.start;
+        debug_assert!(new_digit_len <= old_digit_len);
+        for i in 0..(old_digit_len - new_digit_len) {
+            result.push(current + i);
+        }
+        current += old_digit_len;
+    }
+    return result;
+}
 
 pub struct GadgetProductLhsOperand<R: BGFVCiphertextRing> {
     /// `i`-th entry stores a `i`-th part of the gadget decomposition of the represented element.

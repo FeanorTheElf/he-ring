@@ -38,7 +38,7 @@ pub mod hypercube;
 /// represent the same ring, and also all three basis should coincide (in case of the "mult basis",
 /// it should coincide for every prime `p`).
 /// 
-pub trait HENumberRing: Send + Sync + PartialEq {
+pub trait HENumberRing: Send + Sync + PartialEq + Clone {
 
     type Decomposed: HENumberRingMod;
 

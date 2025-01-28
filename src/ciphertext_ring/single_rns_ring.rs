@@ -123,21 +123,6 @@ impl<NumberRing, A, C> Clone for SingleRNSRingBase<NumberRing, A, C>
 }
 
 impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, A, C> 
-    where NumberRing: HECyclotomicNumberRing + Clone,
-        A: Allocator + Clone,
-        C: HERingConvolution<Zn>
-{
-    #[instrument(skip_all)]
-    pub fn drop_rns_factor(&self, drop_rns_factors: &[usize]) -> RingValue<Self> {
-        RingValue::from(Self {
-            base: self.base.get_ring().drop_rns_factor(drop_rns_factors),
-            convolutions: self.convolutions.iter().enumerate().filter(|(i, _)| !drop_rns_factors.contains(i)).map(|(_, conv)| conv.clone()).collect(),
-            poly_moduli: self.poly_moduli.iter().enumerate().filter(|(i, _)| !drop_rns_factors.contains(i)).map(|(_, modulus)| modulus.clone()).collect()
-        })
-    }
-}
-
-impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, A, C> 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
         C: PreparedConvolutionAlgorithm<ZnBase>
@@ -269,6 +254,15 @@ impl<NumberRing, A, C> BGFVCiphertextRing for SingleRNSRingBase<NumberRing, A, C
             self.reduce_modulus_partly(k, &mut unreduced_result, self.coefficients_as_matrix_mut(&mut result).row_mut_at(k));
         }
         return result;
+    }
+
+    #[instrument(skip_all)]
+    fn drop_rns_factor(&self, drop_rns_factors: &[usize]) -> Self {
+        Self {
+            base: self.base.get_ring().drop_rns_factor(drop_rns_factors),
+            convolutions: self.convolutions.iter().enumerate().filter(|(i, _)| !drop_rns_factors.contains(i)).map(|(_, conv)| conv.clone()).collect(),
+            poly_moduli: self.poly_moduli.iter().enumerate().filter(|(i, _)| !drop_rns_factors.contains(i)).map(|(_, modulus)| modulus.clone()).collect()
+        }
     }
 
     #[instrument(skip_all)]

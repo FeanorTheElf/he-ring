@@ -70,6 +70,8 @@ pub trait BGFVCiphertextRing: RingBase + FreeAlgebra + RingExtension<BaseRing = 
         parts.into_iter().fold(self.zero(), |current, (lhs, rhs)| self.add(current, self.mul_prepared(lhs, rhs)))
     }
 
+    fn drop_rns_factor(&self, drop_rns_factors: &[usize]) -> Self;
+
     ///
     /// Reduces an element of `from` modulo `q`, where `q` must divide the modulus of `from`.
     /// 

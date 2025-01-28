@@ -178,19 +178,6 @@ impl<NumberRing, A> Clone for ManagedDoubleRNSRingBase<NumberRing, A>
     }
 }
 
-impl<NumberRing, A> ManagedDoubleRNSRingBase<NumberRing, A> 
-    where NumberRing: HENumberRing + Clone,
-        A: Allocator + Clone
-{
-    pub fn drop_rns_factor(&self, drop_rns_factors: &[usize]) -> RingValue<Self> {
-        let new_base = self.base.drop_rns_factor(drop_rns_factors);
-        RingValue::from(Self {
-            zero: new_base.get_ring().zero_non_fft(),
-            base: new_base.into()
-        })
-    }
-}
-
 impl<NumberRing, A> ManagedDoubleRNSRingBase<NumberRing, A>
     where NumberRing: HENumberRing,
         A: Allocator + Clone
@@ -469,6 +456,14 @@ impl<NumberRing, A> BGFVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, 
         self.base.number_ring()
     }
 
+    fn drop_rns_factor(&self, drop_rns_factors: &[usize]) -> Self {
+        let new_base = self.base.drop_rns_factor(drop_rns_factors);
+        Self {
+            zero: new_base.get_ring().zero_non_fft(),
+            base: new_base.into()
+        }
+    }
+    
     fn drop_rns_factor_element(&self, from: &Self, dropped_rns_factors: &[usize], value: Self::Element) -> Self::Element {
         match value.internal.get_repr() {
             ManagedDoubleRNSElRepresentation::Zero => self.zero(),

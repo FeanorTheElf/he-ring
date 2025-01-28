@@ -1,8 +1,10 @@
 use std::alloc::{Allocator, Global};
+use std::fmt::Display;
 use std::marker::PhantomData;
 use std::ops::Range;
 use std::ptr::Alignment;
 use std::sync::Arc;
+use std::time::Instant;
 
 use feanor_math::homomorphism::Homomorphism;
 use feanor_math::integer::{int_cast, BigIntRing, IntegerRingStore};
@@ -71,9 +73,9 @@ pub trait BGVParams {
         self.create_ciphertext_ring(self.max_rns_base())
     }
 
+    #[instrument(skip_all)]
     fn drop_rns_factor(&self, C: &CiphertextRing<Self>, drop_factor_indices: &[usize]) -> CiphertextRing<Self> {
-        let new_rns_base = zn_rns::Zn::new((0..C.base_ring().len()).filter(|i| !drop_factor_indices.contains(i)).map(|i| *C.base_ring().at(i)).collect(), ZZbig);
-        return self.create_ciphertext_ring(new_rns_base);
+        RingValue::from(C.get_ring().drop_rns_factor(drop_factor_indices))
     }
 
     fn number_ring(&self) -> NumberRing<Self>;
@@ -116,6 +118,14 @@ pub trait BGVParams {
             c1: C.zero(),
             implicit_scale: P.base_ring().one()
         };
+    }
+
+    #[instrument(skip_all)]
+    fn dec_println(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: &Ciphertext<Self>, sk: &SecretKey<Self>) {
+        let m = Self::dec(P, C, Self::clone_ct(P, C, ct), sk);
+        println!("ciphertext (noise budget: {} / {}):", Self::noise_budget(P, C, ct, sk), ZZbig.abs_log2_ceil(C.base_ring().modulus()).unwrap());
+        P.println(&m);
+        println!();
     }
 
     #[instrument(skip_all)]
@@ -182,7 +192,7 @@ pub trait BGVParams {
             let size = ZZbig.abs_log2_ceil(&c);
             return size.unwrap_or(0);
         })).unwrap();
-        return ZZbig.abs_log2_ceil(C.base_ring().modulus()).unwrap().saturating_sub(size_of_critical_quantity);
+        return ZZbig.abs_log2_ceil(C.base_ring().modulus()).unwrap().saturating_sub(size_of_critical_quantity + 1);
     }
 
     #[instrument(skip_all)]
@@ -249,24 +259,41 @@ pub trait BGVParams {
     #[instrument(skip_all)]
     fn mod_switch_sk(P: &PlaintextRing<Self>, Cnew: &CiphertextRing<Self>, Cold: &CiphertextRing<Self>, dropped_rns_factor_indices: &[usize], sk: &SecretKey<Self>) -> SecretKey<Self> {
         assert_eq!(Cold.base_ring().len(), Cnew.base_ring().len() + dropped_rns_factor_indices.len());
+        if dropped_rns_factor_indices.len() == 0 {
+            assert!(Cnew.base_ring().get_ring() == Cold.base_ring().get_ring());
+            return Cnew.clone_el(sk);
+        }
         return Cnew.get_ring().drop_rns_factor_element(Cold.get_ring(), dropped_rns_factor_indices, Cold.clone_el(sk));
     }
 
     #[instrument(skip_all)]
     fn mod_switch_rk<'a, 'b>(P: &PlaintextRing<Self>, Cnew: &'b CiphertextRing<Self>, Cold: &CiphertextRing<Self>, dropped_rns_factor_indices: &[usize], rk: &RelinKey<'a, Self>) -> RelinKey<'b, Self> {
         assert_eq!(Cold.base_ring().len(), Cnew.base_ring().len() + dropped_rns_factor_indices.len());
+        if dropped_rns_factor_indices.len() == 0 {
+            assert!(Cnew.base_ring().get_ring() == Cold.base_ring().get_ring());
+            return (rk.0.clone(Cnew.get_ring()), rk.1.clone(Cnew.get_ring()));
+        }
         return (rk.0.clone(Cold.get_ring()).modulus_switch(Cnew.get_ring(), dropped_rns_factor_indices, Cold.get_ring()), rk.1.clone(Cold.get_ring()).modulus_switch(Cnew.get_ring(), dropped_rns_factor_indices, Cold.get_ring()));
     }
 
     #[instrument(skip_all)]
     fn mod_switch_gk<'a, 'b>(P: &PlaintextRing<Self>, Cnew: &'b CiphertextRing<Self>, Cold: &CiphertextRing<Self>, dropped_rns_factor_indices: &[usize], gk: &KeySwitchKey<'a, Self>) -> KeySwitchKey<'b, Self> {
         assert_eq!(Cold.base_ring().len(), Cnew.base_ring().len() + dropped_rns_factor_indices.len());
+        if dropped_rns_factor_indices.len() == 0 {
+            assert!(Cnew.base_ring().get_ring() == Cold.base_ring().get_ring());
+            return (gk.0.clone(Cnew.get_ring()), gk.1.clone(Cnew.get_ring()));
+        }
         return (gk.0.clone(Cold.get_ring()).modulus_switch(Cnew.get_ring(), dropped_rns_factor_indices, Cold.get_ring()), gk.1.clone(Cold.get_ring()).modulus_switch(Cnew.get_ring(), dropped_rns_factor_indices, Cold.get_ring()));
     }
 
     #[instrument(skip_all)]
     fn mod_switch(P: &PlaintextRing<Self>, Cnew: &CiphertextRing<Self>, Cold: &CiphertextRing<Self>, dropped_rns_factor_indices: &[usize], ct: Ciphertext<Self>) -> Ciphertext<Self> {
         assert_eq!(Cold.base_ring().len(), Cnew.base_ring().len() + dropped_rns_factor_indices.len());
+        if dropped_rns_factor_indices.len() == 0 {
+            assert!(Cnew.base_ring().get_ring() == Cold.base_ring().get_ring());
+            return ct;
+        }
+
         let mut i_new = 0;
         for i_old in 0..Cold.base_ring().len() {
             if dropped_rns_factor_indices.contains(&i_old) {
@@ -344,11 +371,6 @@ impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingNegacyclicNTT<Zn
             self.ciphertext_allocator.clone()
         );
     }
-    
-    #[instrument(skip_all)]
-    fn drop_rns_factor(&self, C: &CiphertextRing<Self>, drop_factor_indices: &[usize]) -> CiphertextRing<Self> {
-        C.get_ring().drop_rns_factor(drop_factor_indices)
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -358,6 +380,13 @@ pub struct CompositeBGV<A: Allocator + Clone + Send + Sync = DefaultCiphertextAl
     pub n1: usize,
     pub n2: usize,
     pub ciphertext_allocator: A
+}
+
+impl<A: Allocator + Clone + Send + Sync> Display for CompositeBGV<A> {
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "n = {} * {}, log2(q) = {}", self.n1, self.n2, (self.log2_q_min + self.log2_q_max) / 2)
+    }
 }
 
 impl<A: Allocator + Clone + Send + Sync> BGVParams for CompositeBGV<A> {
@@ -384,11 +413,6 @@ impl<A: Allocator + Clone + Send + Sync> BGVParams for CompositeBGV<A> {
             rns_base,
             self.ciphertext_allocator.clone()
         );
-    }
-    
-    #[instrument(skip_all)]
-    fn drop_rns_factor(&self, C: &CiphertextRing<Self>, drop_factor_indices: &[usize]) -> CiphertextRing<Self> {
-        C.get_ring().drop_rns_factor(drop_factor_indices)
     }
 }
 
@@ -442,11 +466,6 @@ impl<A: Allocator + Clone + Send + Sync, C: HERingConvolution<Zn>> BGVParams for
             convolutions
         );
     }
-    
-    #[instrument(skip_all)]
-    fn drop_rns_factor(&self, C: &CiphertextRing<Self>, drop_factor_indices: &[usize]) -> CiphertextRing<Self> {
-        C.get_ring().drop_rns_factor(drop_factor_indices)
-    }
 }
 
 #[cfg(test)]
@@ -455,6 +474,8 @@ use tracing_subscriber::prelude::*;
 use feanor_mempool::dynsize::DynLayoutMempool;
 #[cfg(test)]
 use feanor_mempool::AllocArc;
+#[cfg(test)]
+use std::fmt::Debug;
 
 #[test]
 fn test_pow2_bgv_enc_dec() {
@@ -610,7 +631,6 @@ fn measure_time_pow2_bgv() {
     let P = log_time::<_, _, true, _>("CreatePtxtRing", |[]|
         params.create_plaintext_ring(t)
     );
-    let max_rns_base = params.max_rns_base();
     let C = log_time::<_, _, true, _>("CreateCtxtRing", |[]|
         params.create_initial_ciphertext_ring()
     );
@@ -672,7 +692,6 @@ fn measure_time_double_rns_composite_bgv() {
     let P = log_time::<_, _, true, _>("CreatePtxtRing", |[]|
         params.create_plaintext_ring(t)
     );
-    let max_rns_base = params.max_rns_base();
     let C = log_time::<_, _, true, _>("CreateCtxtRing", |[]|
         params.create_initial_ciphertext_ring()
     );
@@ -736,13 +755,12 @@ fn measure_time_single_rns_composite_bgv() {
     let P = log_time::<_, _, true, _>("CreatePtxtRing", |[]|
         params.create_plaintext_ring(t)
     );
-    let max_rns_base = params.max_rns_base();
     let C = log_time::<_, _, true, _>("CreateCtxtRing", |[]|
         params.create_initial_ciphertext_ring()
     );
 
     let sk = log_time::<_, _, true, _>("GenSK", |[]| 
-    SingleRNSCompositeBGV::gen_sk(&C, &mut rng)
+        SingleRNSCompositeBGV::gen_sk(&C, &mut rng)
     );
     
     let m = P.int_hom().map(3);
@@ -776,4 +794,116 @@ fn measure_time_single_rns_composite_bgv() {
         SingleRNSCompositeBGV::mod_switch(&P, &C_new, &C, &[0], res)
     );
     assert_el_eq!(&P, &P.int_hom().map(1), &SingleRNSCompositeBGV::dec(&P, &C_new, res_new, &sk_new));
+}
+
+#[cfg(test)]
+pub fn tree_mul_benchmark<Params>(params: Params, digits: usize)
+    where Params: BGVParams + Display
+{
+    use crate::gadget_product::recommended_rns_factors_to_drop;
+
+    let mut rng = thread_rng();
+    let t = 4;
+
+    let P = params.create_plaintext_ring(t);
+    let C = params.create_initial_ciphertext_ring();
+    let mut sk = Params::gen_sk(&C, &mut rng);
+    let mut rk = Params::gen_rk(&P, &C, &mut rng, &sk, digits);
+
+    let log2_count = 4;
+    let mut current = (0..(1 << log2_count)).map(|i| Params::enc_sym(&P, &C, &mut rng, &P.int_hom().map(2 * i + 1), &sk)).map(Some).collect::<Vec<_>>();
+    let start = Instant::now();
+    let mut C_current = C;
+
+    for i in 0..log2_count {
+        let mid = current.len() / 2;
+        let (left, right) = current.split_at_mut(mid);
+        assert_eq!(left.len(), right.len());
+        for j in 0..left.len() {
+            left[j] = Some(Params::hom_mul(&P, &C_current, left[j].take().unwrap(), right[j].take().unwrap(), &rk, None));
+        }
+        current.truncate(mid);
+
+        let drop_prime_count = if i == 0 { 4 } else if i + 1 == log2_count { 0 } else { 2 };
+        let drop_rns_base_factors = recommended_rns_factors_to_drop(C_current.base_ring().len(), digits, drop_prime_count);
+        let C_new = RingValue::from(C_current.get_ring().drop_rns_factor(&drop_rns_base_factors));
+        for ct in &mut current {
+            *ct = Some(Params::mod_switch(&P, &C_new, &C_current, &drop_rns_base_factors, ct.take().unwrap()));
+        }
+        sk = Params::mod_switch_sk(&P, &C_new, &C_current, &drop_rns_base_factors, &sk);
+        rk = Params::mod_switch_rk(&P, &C_new, &C_current, &drop_rns_base_factors, &rk);
+        C_current = C_new;
+    }
+    let end = Instant::now();
+
+    println!("{}", params);
+    println!("digits = {}", digits);
+    println!("Tree-wise multiplication of {} inputs took {} ms, so {} ms/mul", 1 << log2_count, (end - start).as_millis(), (end - start).as_millis() / ((1 << log2_count) - 1));
+    println!("Final noise budget: {}", Params::noise_budget(&P, &C_current, current[0].as_ref().unwrap(), &sk));
+    assert_el_eq!(&P, &P.int_hom().map((0..(1 << log2_count)).map(|i| 2 * i + 1).product::<i32>()), Params::dec(&P, &C_current, current[0].take().unwrap(), &sk));
+}
+
+#[cfg(test)]
+pub fn chain_mul_benchmark<Params>(params: Params, digits: usize)
+    where Params: BGVParams + Display
+{
+    use crate::gadget_product::recommended_rns_factors_to_drop;
+
+    let mut rng = thread_rng();
+    let t = 4;
+
+    let P = params.create_plaintext_ring(t);
+    let C = params.create_initial_ciphertext_ring();
+    let mut sk = Params::gen_sk(&C, &mut rng);
+    let mut rk = Params::gen_rk(&P, &C, &mut rng, &sk, digits);
+
+    let count = 4;
+    let mut current = Params::enc_sym(&P, &C, &mut rng, &P.int_hom().map(1), &sk);
+    let start = Instant::now();
+    let mut C_current = C;
+
+    for i in 0..count {
+        let left = Params::clone_ct(&P, &C_current, &current);
+        let right = current;
+        current = Params::hom_mul(&P, &C_current, left, right, &rk, None);
+
+        let drop_prime_count = if i == 0 { 4 } else if i + 1 == count { 0 } else { 2 };
+        let drop_rns_base_factors = recommended_rns_factors_to_drop(C_current.base_ring().len(), digits, drop_prime_count);
+        let C_new = RingValue::from(C_current.get_ring().drop_rns_factor(&drop_rns_base_factors));
+        current = Params::mod_switch(&P, &C_new, &C_current, &drop_rns_base_factors, current);
+        sk = Params::mod_switch_sk(&P, &C_new, &C_current, &drop_rns_base_factors, &sk);
+        rk = Params::mod_switch_rk(&P, &C_new, &C_current, &drop_rns_base_factors, &rk);
+        C_current = C_new;
+    }
+    let end = Instant::now();
+
+    println!("{}", params);
+    println!("digits = {}", digits);
+    println!("Repeated squaring of ciphertext {} times took {} ms, so {} ms/mul", count, (end - start).as_millis(), (end - start).as_millis() / count as u128);
+    println!("Final noise budget: {}", Params::noise_budget(&P, &C_current, &current, &sk));
+    assert_el_eq!(&P, &P.one(), Params::dec(&P, &C_current, current, &sk));
+}
+
+#[test]
+#[ignore]
+fn bgv_mul_benchmark() {
+    let params = CompositeBGV {
+        log2_q_min: 680,
+        log2_q_max: 690,
+        n1: 85,
+        n2: 257,
+        ciphertext_allocator: AllocArc(Arc::new(DynLayoutMempool::<Global>::new(Alignment::of::<u64>()))),
+    };
+    tree_mul_benchmark(params.clone(), 4);
+    chain_mul_benchmark(params, 4);
+
+    let params = CompositeBGV {
+        log2_q_min: 1090,
+        log2_q_max: 1100,
+        n1: 127,
+        n2: 337,
+        ciphertext_allocator: AllocArc(Arc::new(DynLayoutMempool::<Global>::new(Alignment::of::<u64>()))),
+    };
+    tree_mul_benchmark(params.clone(), 4);
+    chain_mul_benchmark(params, 4);
 }
