@@ -326,8 +326,34 @@ impl<NumberRing, A, C> BGFVCiphertextRing for SingleRNSRingBase<NumberRing, A, C
         };
     }
 
-    fn as_representation_wrt_small_generating_set<'a>(&'a self, x: &'a Self::Element) -> Submatrix<'a, AsFirstElement<ZnEl>, ZnEl> {
-        self.coefficients_as_matrix(x)
+    fn small_generating_set_len(&self) -> usize {
+        self.n()
+    }
+
+    fn as_representation_wrt_small_generating_set<V>(&self, x: &Self::Element, mut output: SubmatrixMut<V, ZnEl>)
+        where V: AsPointerToSlice<ZnEl>
+    {
+        let matrix = self.coefficients_as_matrix(x);
+        assert_eq!(output.row_count(), matrix.row_count());
+        assert_eq!(output.col_count(), matrix.col_count());
+        for i in 0..matrix.row_count() {
+            for j in 0..matrix.col_count() {
+                *output.at_mut(i, j) = *matrix.at(i, j);
+            }
+        }
+    }
+
+    fn partial_representation_wrt_small_generating_set<V>(&self, x: &Self::Element, row_indices: &[usize], mut output: SubmatrixMut<V, ZnEl>)
+        where V: AsPointerToSlice<ZnEl>
+    {
+        let matrix = self.coefficients_as_matrix(x);
+        assert_eq!(output.row_count(), row_indices.len());
+        assert_eq!(output.col_count(), matrix.col_count());
+        for (i_out, i_in) in row_indices.iter().enumerate() {
+            for j in 0..matrix.col_count() {
+                *output.at_mut(i_out, j) = *matrix.at(*i_in, j);
+            }
+        }
     }
 
     #[instrument(skip_all)]

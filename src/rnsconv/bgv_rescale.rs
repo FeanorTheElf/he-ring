@@ -179,6 +179,10 @@ impl<A> RNSOperation for CongruencePreservingRescaling<A>
         assert_eq!(output.row_count(), self.output_rings().len());
         assert_eq!(input.col_count(), output.col_count());
 
+        // TODO: possible optimization: We actually only need to convert a part of `x` to "small basis", since
+        //       here we only use `x mod b` for most of the computation - the rest of `x` is only subtracted from
+        //       in the end, which we can also do in NTT repr. Also check whether something similar can be done for BFV
+
         // Compute `x := el * a`, ordered as in `aq_moduli`
         let mut x = Vec::with_capacity_in(self.aq_moduli.len() * input.col_count(), self.allocator.clone());
         x.extend((0..self.aq_moduli.len()).flat_map(|i| (0..input.col_count()).map(move |j| {

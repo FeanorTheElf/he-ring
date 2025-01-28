@@ -19,17 +19,18 @@ use feanor_math::seq::*;
 use tracing::instrument;
 
 use crate::ciphertext_ring::double_rns_managed::ManagedDoubleRNSRingBase;
+use crate::ciphertext_ring::single_rns_ring::{SingleRNSRing, SingleRNSRingBase};
 use crate::ciphertext_ring::{perform_rns_op, BGFVCiphertextRing};
 use crate::cyclotomic::CyclotomicRing;
 use crate::gadget_product::{GadgetProductLhsOperand, GadgetProductRhsOperand};
-use crate::ntt::HERingNegacyclicNTT;
+use crate::ntt::{HERingConvolution, HERingNegacyclicNTT};
 use crate::number_ring::odd_cyclotomic::CompositeCyclotomicNumberRing;
 use crate::number_ring::{largest_prime_leq_congruent_to_one, HECyclotomicNumberRing, HENumberRing};
 use crate::number_ring::pow2_cyclotomic::Pow2CyclotomicNumberRing;
 use crate::number_ring::quotient::{NumberRingQuotient, NumberRingQuotientBase};
 use crate::profiling::log_time;
 use crate::rnsconv::bgv_rescale::CongruencePreservingRescaling;
-use crate::{sample_primes, DefaultCiphertextAllocator, DefaultNegacyclicNTT};
+use crate::{sample_primes, DefaultCiphertextAllocator, DefaultConvolution, DefaultNegacyclicNTT};
 
 use rand_distr::StandardNormal;
 use rand::{thread_rng, CryptoRng, Rng};
@@ -403,6 +404,51 @@ pub fn small_basis_repr<Params, NumberRing, A>(P: &PlaintextRing<Params>, C: &Ci
     };
 }
 
+#[derive(Clone, Debug)]
+pub struct SingleRNSCompositeBGV<A: Allocator + Clone + Send + Sync = DefaultCiphertextAllocator, C: HERingConvolution<Zn> = DefaultConvolution> {
+    pub log2_q_min: usize,
+    pub log2_q_max: usize,
+    pub n1: usize,
+    pub n2: usize,
+    pub ciphertext_allocator: A,
+    pub convolution: PhantomData<C>
+}
+
+impl<A: Allocator + Clone + Send + Sync, C: HERingConvolution<Zn>> BGVParams for SingleRNSCompositeBGV<A, C> {
+
+    type CiphertextRing = SingleRNSRingBase<CompositeCyclotomicNumberRing, A, C>;
+
+    fn number_ring(&self) -> CompositeCyclotomicNumberRing {
+        CompositeCyclotomicNumberRing::new(self.n1, self.n2)
+    }
+
+    fn max_rns_base(&self) -> zn_rns::Zn<Zn, BigIntRing> {
+        let log2_q = self.log2_q_min..self.log2_q_max;
+        let number_ring = self.number_ring();
+        let required_root_of_unity = number_ring.mod_p_required_root_of_unity() as i64;
+        let mut rns_base = sample_primes(log2_q.start, log2_q.end, 56, |bound| largest_prime_leq_congruent_to_one(int_cast(bound, ZZ, ZZbig), required_root_of_unity).map(|p| int_cast(p, ZZbig, ZZ))).unwrap();
+        rns_base.sort_unstable_by(|l, r| ZZbig.cmp(l, r));
+        return zn_rns::Zn::new(rns_base.into_iter().map(|p| Zn::new(int_cast(p, ZZ, ZZbig) as u64)).collect(), ZZbig);
+    }
+
+    #[instrument(skip_all)]
+    fn create_ciphertext_ring(&self, rns_base: zn_rns::Zn<Zn, BigIntRing>) -> CiphertextRing<Self> {
+        let max_log2_n = 1 + ZZ.abs_log2_ceil(&((self.n1 * self.n2) as i64)).unwrap();
+        let convolutions = rns_base.as_iter().map(|Zp| C::new(*Zp, max_log2_n)).map(Arc::new).collect::<Vec<_>>();
+        return SingleRNSRingBase::new_with(
+            self.number_ring(),
+            rns_base,
+            self.ciphertext_allocator.clone(),
+            convolutions
+        );
+    }
+    
+    #[instrument(skip_all)]
+    fn drop_rns_factor(&self, C: &CiphertextRing<Self>, drop_factor_indices: &[usize]) -> CiphertextRing<Self> {
+        C.get_ring().drop_rns_factor(drop_factor_indices)
+    }
+}
+
 #[cfg(test)]
 use tracing_subscriber::prelude::*;
 #[cfg(test)]
@@ -666,4 +712,68 @@ fn measure_time_double_rns_composite_bgv() {
         CompositeBGV::mod_switch(&P, &C_new, &C, &[0], res)
     );
     assert_el_eq!(&P, &P.int_hom().map(1), &CompositeBGV::dec(&P, &C_new, res_new, &sk_new));
+}
+
+#[test]
+#[ignore]
+fn measure_time_single_rns_composite_bgv() {
+    let (chrome_layer, _guard) = tracing_chrome::ChromeLayerBuilder::new().build();
+    tracing_subscriber::registry().with(chrome_layer).init();
+
+    let mut rng = thread_rng();
+    
+    let params = SingleRNSCompositeBGV {
+        log2_q_min: 1090,
+        log2_q_max: 1100,
+        n1: 127,
+        n2: 337,
+        ciphertext_allocator: AllocArc(Arc::new(DynLayoutMempool::<Global>::new(Alignment::of::<u64>()))),
+        convolution: PhantomData::<DefaultConvolution>
+    };
+    let t = 4;
+    let digits = 3;
+    
+    let P = log_time::<_, _, true, _>("CreatePtxtRing", |[]|
+        params.create_plaintext_ring(t)
+    );
+    let max_rns_base = params.max_rns_base();
+    let C = log_time::<_, _, true, _>("CreateCtxtRing", |[]|
+        params.create_initial_ciphertext_ring()
+    );
+
+    let sk = log_time::<_, _, true, _>("GenSK", |[]| 
+    SingleRNSCompositeBGV::gen_sk(&C, &mut rng)
+    );
+    
+    let m = P.int_hom().map(3);
+    let ct = log_time::<_, _, true, _>("EncSym", |[]|
+        SingleRNSCompositeBGV::enc_sym(&P, &C, &mut rng, &m, &sk)
+    );
+    assert_el_eq!(&P, &P.int_hom().map(3), &SingleRNSCompositeBGV::dec(&P, &C, SingleRNSCompositeBGV::clone_ct(&P, &C, &ct), &sk));
+
+    let res = log_time::<_, _, true, _>("HomAddPlain", |[]| 
+        SingleRNSCompositeBGV::hom_add_plain(&P, &C, &m, SingleRNSCompositeBGV::clone_ct(&P, &C, &ct))
+    );
+    assert_el_eq!(&P, &P.int_hom().map(2), &SingleRNSCompositeBGV::dec(&P, &C, res, &sk));
+
+    let res = log_time::<_, _, true, _>("HomMulPlain", |[]| 
+        SingleRNSCompositeBGV::hom_mul_plain(&P, &C, &m, SingleRNSCompositeBGV::clone_ct(&P, &C, &ct))
+    );
+    assert_el_eq!(&P, &P.int_hom().map(1), &SingleRNSCompositeBGV::dec(&P, &C, res, &sk));
+
+    let rk = log_time::<_, _, true, _>("GenRK", |[]| 
+        SingleRNSCompositeBGV::gen_rk(&P, &C, &mut rng, &sk, digits)
+    );
+    let ct2 = SingleRNSCompositeBGV::enc_sym(&P, &C, &mut rng, &m, &sk);
+    let res = log_time::<_, _, true, _>("HomMul", |[]| 
+        SingleRNSCompositeBGV::hom_mul(&P, &C, ct, ct2, &rk, None)
+    );
+    assert_el_eq!(&P, &P.int_hom().map(1), &SingleRNSCompositeBGV::dec(&P, &C, SingleRNSCompositeBGV::clone_ct(&P, &C, &res), &sk));
+
+    let C_new = params.drop_rns_factor(&C, &[0]);
+    let sk_new = SingleRNSCompositeBGV::mod_switch_sk(&P, &C_new, &C, &[0], &sk);
+    let res_new = log_time::<_, _, true, _>("ModSwitch", |[]| 
+        SingleRNSCompositeBGV::mod_switch(&P, &C_new, &C, &[0], res)
+    );
+    assert_el_eq!(&P, &P.int_hom().map(1), &SingleRNSCompositeBGV::dec(&P, &C_new, res_new, &sk_new));
 }

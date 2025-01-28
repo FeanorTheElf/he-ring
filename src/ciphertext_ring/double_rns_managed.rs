@@ -23,6 +23,7 @@ use feanor_math::integer::*;
 use feanor_math::matrix::AsFirstElement;
 use feanor_math::matrix::AsPointerToSlice;
 use feanor_math::matrix::Submatrix;
+use feanor_math::matrix::SubmatrixMut;
 use feanor_math::ring::*;
 use feanor_math::rings::extension::*;
 use feanor_math::rings::finite::FiniteRing;
@@ -500,8 +501,34 @@ impl<NumberRing, A> BGFVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, 
         self.clone_el(x)
     }
 
-    fn as_representation_wrt_small_generating_set<'a>(&'a self, x: &'a Self::Element) -> Submatrix<'a, AsFirstElement<ZnEl>, ZnEl> {
-        self.base.as_matrix_wrt_small_basis(self.to_small_basis(x).unwrap_or(&self.zero))
+    fn small_generating_set_len(&self) -> usize {
+        self.rank()
+    }
+
+    fn as_representation_wrt_small_generating_set<V>(&self, x: &Self::Element, mut output: SubmatrixMut<V, ZnEl>)
+        where V: AsPointerToSlice<ZnEl>
+    {
+        let matrix = self.base.as_matrix_wrt_small_basis(self.to_small_basis(x).unwrap_or(&self.zero));
+        assert_eq!(output.row_count(), matrix.row_count());
+        assert_eq!(output.col_count(), matrix.col_count());
+        for i in 0..matrix.row_count() {
+            for j in 0..matrix.col_count() {
+                *output.at_mut(i, j) = *matrix.at(i, j);
+            }
+        }
+    }
+
+    fn partial_representation_wrt_small_generating_set<V>(&self, x: &Self::Element, row_indices: &[usize], mut output: SubmatrixMut<V, ZnEl>)
+        where V: AsPointerToSlice<ZnEl>
+    {
+        let matrix = self.base.as_matrix_wrt_small_basis(self.to_small_basis(x).unwrap_or(&self.zero));
+        assert_eq!(output.row_count(), row_indices.len());
+        assert_eq!(output.col_count(), matrix.col_count());
+        for (i_out, i_in) in row_indices.iter().enumerate() {
+            for j in 0..matrix.col_count() {
+                *output.at_mut(i_out, j) = *matrix.at(*i_in, j);
+            }
+        }
     }
 
     fn from_representation_wrt_small_generating_set<V>(&self, data: Submatrix<V, ZnEl>) -> Self::Element

@@ -2,7 +2,7 @@ use std::alloc::Global;
 use std::ops::Range;
 
 use feanor_math::integer::BigIntRing;
-use feanor_math::matrix::{Submatrix, SubmatrixMut};
+use feanor_math::matrix::{OwnedMatrix, Submatrix, SubmatrixMut};
 use feanor_math::primitive_int::StaticRing;
 use feanor_math::rings::zn::ZnRingStore;
 use feanor_math::{assert_el_eq, ring::*};
@@ -208,7 +208,9 @@ fn gadget_decompose<R, V>(ring: &R, el: &R::Element, digits: V) -> Vec<(R::Prepa
     let ZZbig = BigIntRing::RING;
     let ZZi64 = StaticRing::<i64>::RING;
     let mut result = Vec::new();
-    let el_as_matrix = ring.as_representation_wrt_small_generating_set(el);
+    let mut el_as_matrix = OwnedMatrix::zero(ring.base_ring().len(), ring.small_generating_set_len(), ring.base_ring().at(0));
+    ring.as_representation_wrt_small_generating_set(el, el_as_matrix.data_mut());
+    
     let homs = ring.base_ring().as_iter().map(|Zp| Zp.can_hom(&ZZi64).unwrap()).collect::<Vec<_>>();
     let mut current_row = Vec::with_capacity(el_as_matrix.col_count());
     current_row.resize_with(homs.len() * el_as_matrix.col_count(), || ring.base_ring().at(0).zero());
@@ -223,7 +225,7 @@ fn gadget_decompose<R, V>(ring: &R, el: &R::Element, digits: V) -> Vec<(R::Prepa
         );
         
         conversion.apply(
-            el_as_matrix.restrict_rows(digit.clone()),
+            el_as_matrix.data().restrict_rows(digit.clone()),
             SubmatrixMut::from_1d(&mut current_row[..], homs.len(), el_as_matrix.col_count())
         );
 

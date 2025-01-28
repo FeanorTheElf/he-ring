@@ -1,7 +1,7 @@
 use std::alloc::Allocator;
 
 use feanor_math::integer::BigIntRing;
-use feanor_math::matrix::{AsFirstElement, AsPointerToSlice, Submatrix, SubmatrixMut};
+use feanor_math::matrix::{AsFirstElement, AsPointerToSlice, OwnedMatrix, Submatrix, SubmatrixMut};
 use feanor_math::ring::*;
 use feanor_math::rings::extension::{FreeAlgebra, FreeAlgebraStore};
 use feanor_math::rings::zn::zn_64::{ZnEl, Zn, ZnBase};
@@ -47,10 +47,22 @@ pub trait BGFVCiphertextRing: RingBase + FreeAlgebra + RingExtension<BaseRing = 
 
     fn number_ring(&self) -> &Self::NumberRing;
 
+    ///
+    /// Converts an element of the ring into a `PreparedMultiplicant`, which can then be used
+    /// to compute multiplications by this element faster.
+    /// 
     fn prepare_multiplicant(&self, x: &Self::Element) -> Self::PreparedMultiplicant;
 
+    ///
+    /// Computes the multiplication of two elements that have previously been "prepared" via
+    /// [`BGFVCiphertextRing::prepare_multiplicant()`].
+    /// 
     fn mul_prepared(&self, lhs: &Self::PreparedMultiplicant, rhs: &Self::PreparedMultiplicant) -> Self::Element;
 
+    ///
+    /// Computes the inner product of two vectors over this ring, whose elements have previously
+    /// been "prepared" via [`BGFVCiphertextRing::prepare_multiplicant()`].
+    /// 
     fn inner_product_prepared<'a, I>(&self, parts: I) -> Self::Element
         where I: IntoIterator<Item = (&'a Self::PreparedMultiplicant, &'a Self::PreparedMultiplicant)>,
             Self: 'a
@@ -58,9 +70,27 @@ pub trait BGFVCiphertextRing: RingBase + FreeAlgebra + RingExtension<BaseRing = 
         parts.into_iter().fold(self.zero(), |current, (lhs, rhs)| self.add(current, self.mul_prepared(lhs, rhs)))
     }
 
+    ///
+    /// Reduces an element of `from` modulo `q`, where `q` must divide the modulus of `from`.
+    /// 
+    /// More concretely, the RNS factors of `q` must be exactly the RNS factors of the modulus of `from`,
+    /// except for the RNS factors whose indices occur in `dropped_rns_factors`.
+    /// 
     fn drop_rns_factor_element(&self, from: &Self, dropped_rns_factors: &[usize], value: Self::Element) -> Self::Element;
 
+    ///
+    /// Reduces a `PreparedMultiplicant` of `from` modulo `q`, where `q` must divide the modulus of `from`.
+    /// 
+    /// More concretely, the RNS factors of `q` must be exactly the RNS factors of the modulus of `from`,
+    /// except for the RNS factors whose indices occur in `dropped_rns_factors`.
+    /// 
     fn drop_rns_factor_prepared(&self, from: &Self, dropped_rns_factors: &[usize], value: Self::PreparedMultiplicant) -> Self::PreparedMultiplicant;
+
+    ///
+    /// Returns the length of the small generating set used for [`BGFVCiphertextRing::as_representation_wrt_small_generating_set()`]
+    /// and [`BGFVCiphertextRing::from_representation_wrt_small_generating_set()`].
+    /// 
+    fn small_generating_set_len(&self) -> usize;
 
     ///
     /// Returns a view on the underlying representation of `x`. 
@@ -74,25 +104,45 @@ pub trait BGFVCiphertextRing: RingBase + FreeAlgebra + RingExtension<BaseRing = 
     /// The order of the rows (corresponding to the RNS factors of `Zq`) is the same as the
     /// order of the RNS factors in `self.base_ring()`.
     /// 
+    /// This function is a compromise between encapsulating the storage of ring elements
+    /// and exposing it (which is sometimes necessary for performance). 
     /// Hence, it is recommended to instead use [`FreeAlgebra::wrt_canonical_basis()`] and
     /// [`FreeAlgebra::from_canonical_basis()`], whose result is uniquely defined. However, note
     /// that these may incur costs for internal representation conversion, which may not always
     /// be acceptable.
     /// 
-    fn as_representation_wrt_small_generating_set<'a>(&'a self, x: &'a Self::Element) -> Submatrix<'a, AsFirstElement<ZnEl>, ZnEl>;
+    /// Concrete representations:
+    ///  - [`single_rns_ring::SingleRNSRing`] will currently return the coefficients of a polynomial
+    ///    of degree `< n` (not necessarily `< phi(n)`) that gives the element when evaluated at `𝝵`
+    ///  - [`double_rns_managed::ManagedDoubleRNSRing`] will currently return the coefficients w.r.t.
+    ///    the powerful basis representation
+    /// 
+    fn as_representation_wrt_small_generating_set<V>(&self, x: &Self::Element, output: SubmatrixMut<V, ZnEl>)
+        where V: AsPointerToSlice<ZnEl>;
+
+    ///
+    /// Computes a subset of the rows of the representation that would be returned by
+    /// [`BGFVCiphertextRing::as_representation_wrt_small_generating_set()`]. Since not all rows
+    /// have to be computed, this may be faster than `as_representation_wrt_small_generating_set()`.
+    /// 
+    /// This function is a compromise between encapsulating the storage of ring elements and exposing 
+    /// it (which is sometimes necessary for performance).
+    /// Hence, it is recommended to instead use [`FreeAlgebra::wrt_canonical_basis()`] and
+    /// [`FreeAlgebra::from_canonical_basis()`], whose result is uniquely defined. However, note
+    /// that these may incur costs for internal representation conversion, which may not always
+    /// be acceptable.
+    /// 
+    fn partial_representation_wrt_small_generating_set<V>(&self, x: &Self::Element, row_indices: &[usize], output: SubmatrixMut<V, ZnEl>)
+        where V: AsPointerToSlice<ZnEl>;
 
     ///
     /// Creates a ring element from its underlying representation.
     /// 
-    /// This is the counterpart of [`BGFVCiphertextRing::as_representation_wrt_small_generating_set()`].
+    /// This is the counterpart of [`BGFVCiphertextRing::as_representation_wrt_small_generating_set()`],
+    /// which contains a more detailed documentation.
     /// 
-    /// More concretely, for some `Zq`-linear generating set `{ a_i | i }` consisting
-    /// of ring elements of small canonical norm, each column of the given matrix is interpreted
-    /// as the RNS representation of some `x_i`, and the returned ring element is then
-    /// `x = sum_i a_i x_i`. The actual choice of the `a_i` is left to the ring implementation, 
-    /// and may change in future releases. The order of the rows (corresponding to the RNS factors of `Zq`) 
-    /// is the same as the order of the RNS factors in `self.base_ring()`.
-    /// 
+    /// This function is a compromise between encapsulating the storage of ring elements
+    /// and exposing it (which is sometimes necessary for performance). 
     /// Hence, it is recommended to instead use [`FreeAlgebra::wrt_canonical_basis()`] and
     /// [`FreeAlgebra::from_canonical_basis()`], whose result is uniquely defined. However, note
     /// that these may incur costs for internal representation conversion, which may not always
@@ -130,11 +180,12 @@ pub fn perform_rns_op<R, Op>(to: &R, from: &R, el: &R::Element, op: &Op) -> R::E
     assert!(op.input_rings().iter().zip(from.base_ring().as_iter()).all(|(l, r)| l.get_ring() == r.get_ring()));
     assert!(op.output_rings().iter().zip(to.base_ring().as_iter()).all(|(l, r)| l.get_ring() == r.get_ring()));
 
-    let el_repr = from.as_representation_wrt_small_generating_set(el);
+    let mut el_repr = OwnedMatrix::zero(from.base_ring().len(), from.small_generating_set_len(), from.base_ring().at(0));
+    from.as_representation_wrt_small_generating_set(el, el_repr.data_mut());
     let mut res_repr = Vec::with_capacity(el_repr.col_count() * to.base_ring().len());
     res_repr.resize(el_repr.col_count() * to.base_ring().len(), to.base_ring().at(0).zero());
     let mut res_repr = SubmatrixMut::from_1d(&mut res_repr, to.base_ring().len(), el_repr.col_count());
-    op.apply(el_repr, res_repr.reborrow());
+    op.apply(el_repr.data(), res_repr.reborrow());
     return to.from_representation_wrt_small_generating_set(res_repr.as_const());
 }
 
