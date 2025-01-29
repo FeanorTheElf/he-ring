@@ -8,6 +8,7 @@ use std::time::Instant;
 
 use feanor_math::homomorphism::Homomorphism;
 use feanor_math::integer::{int_cast, BigIntRing, IntegerRingStore};
+use feanor_math::matrix::OwnedMatrix;
 use feanor_math::ordered::OrderedRingStore;
 use feanor_math::primitive_int::StaticRing;
 use feanor_math::{assert_el_eq, ring::*};
@@ -31,7 +32,8 @@ use crate::number_ring::{largest_prime_leq_congruent_to_one, HECyclotomicNumberR
 use crate::number_ring::pow2_cyclotomic::Pow2CyclotomicNumberRing;
 use crate::number_ring::quotient::{NumberRingQuotient, NumberRingQuotientBase};
 use crate::profiling::log_time;
-use crate::rnsconv::bgv_rescale::CongruencePreservingRescaling;
+use crate::rnsconv::bgv_rescale::{CongruenceAwareAlmostExactBaseConversion, CongruencePreservingRescaling};
+use crate::rnsconv::RNSOperation;
 use crate::{sample_primes, DefaultCiphertextAllocator, DefaultConvolution, DefaultNegacyclicNTT};
 
 use rand_distr::StandardNormal;
@@ -258,7 +260,7 @@ pub trait BGVParams {
 
     #[instrument(skip_all)]
     fn mod_switch_sk(P: &PlaintextRing<Self>, Cnew: &CiphertextRing<Self>, Cold: &CiphertextRing<Self>, dropped_rns_factor_indices: &[usize], sk: &SecretKey<Self>) -> SecretKey<Self> {
-        assert_eq!(Cold.base_ring().len(), Cnew.base_ring().len() + dropped_rns_factor_indices.len());
+        assert_rns_factor_drop_correct::<Self>(Cnew, Cold, dropped_rns_factor_indices);
         if dropped_rns_factor_indices.len() == 0 {
             assert!(Cnew.base_ring().get_ring() == Cold.base_ring().get_ring());
             return Cnew.clone_el(sk);
@@ -268,7 +270,7 @@ pub trait BGVParams {
 
     #[instrument(skip_all)]
     fn mod_switch_rk<'a, 'b>(P: &PlaintextRing<Self>, Cnew: &'b CiphertextRing<Self>, Cold: &CiphertextRing<Self>, dropped_rns_factor_indices: &[usize], rk: &RelinKey<'a, Self>) -> RelinKey<'b, Self> {
-        assert_eq!(Cold.base_ring().len(), Cnew.base_ring().len() + dropped_rns_factor_indices.len());
+        assert_rns_factor_drop_correct::<Self>(Cnew, Cold, dropped_rns_factor_indices);
         if dropped_rns_factor_indices.len() == 0 {
             assert!(Cnew.base_ring().get_ring() == Cold.base_ring().get_ring());
             return (rk.0.clone(Cnew.get_ring()), rk.1.clone(Cnew.get_ring()));
@@ -278,7 +280,7 @@ pub trait BGVParams {
 
     #[instrument(skip_all)]
     fn mod_switch_gk<'a, 'b>(P: &PlaintextRing<Self>, Cnew: &'b CiphertextRing<Self>, Cold: &CiphertextRing<Self>, dropped_rns_factor_indices: &[usize], gk: &KeySwitchKey<'a, Self>) -> KeySwitchKey<'b, Self> {
-        assert_eq!(Cold.base_ring().len(), Cnew.base_ring().len() + dropped_rns_factor_indices.len());
+        assert_rns_factor_drop_correct::<Self>(Cnew, Cold, dropped_rns_factor_indices);
         if dropped_rns_factor_indices.len() == 0 {
             assert!(Cnew.base_ring().get_ring() == Cold.base_ring().get_ring());
             return (gk.0.clone(Cnew.get_ring()), gk.1.clone(Cnew.get_ring()));
@@ -288,36 +290,47 @@ pub trait BGVParams {
 
     #[instrument(skip_all)]
     fn mod_switch(P: &PlaintextRing<Self>, Cnew: &CiphertextRing<Self>, Cold: &CiphertextRing<Self>, dropped_rns_factor_indices: &[usize], ct: Ciphertext<Self>) -> Ciphertext<Self> {
-        assert_eq!(Cold.base_ring().len(), Cnew.base_ring().len() + dropped_rns_factor_indices.len());
+        assert_rns_factor_drop_correct::<Self>(Cnew, Cold, dropped_rns_factor_indices);
         if dropped_rns_factor_indices.len() == 0 {
             assert!(Cnew.base_ring().get_ring() == Cold.base_ring().get_ring());
             return ct;
         }
 
-        let mut i_new = 0;
-        for i_old in 0..Cold.base_ring().len() {
-            if dropped_rns_factor_indices.contains(&i_old) {
-                continue;
-            }
-            assert!(Cold.base_ring().at(i_old).get_ring() == Cnew.base_ring().at(i_new).get_ring());
-            i_new += 1;
-        }
-
-        let rescaling = CongruencePreservingRescaling::new_with(
-            Cold.base_ring().as_iter().copied().collect(),
-            Vec::new(),
-            dropped_rns_factor_indices.to_owned(),
+        let compute_delta = CongruenceAwareAlmostExactBaseConversion::new_with(
+            dropped_rns_factor_indices.iter().map(|i| *Cold.base_ring().at(*i)).collect(),
+            Cnew.base_ring().as_iter().cloned().collect(),
             *P.base_ring(),
             Global
         );
+        let mod_switch_ring_element = |x: El<CiphertextRing<Self>>| {
+            // this logic is slightly complicated, since we want to avoid using `perform_rns_op()`;
+            // in particular, we only need to convert a part of `x` into coefficient/small-basis representation,
+            // while just using `perform_rns_op()` would convert all of `x`.
+            let mut mod_b_part_of_x = OwnedMatrix::zero(dropped_rns_factor_indices.len(), Cold.get_ring().small_generating_set_len(), Cold.base_ring().at(0));
+            Cold.get_ring().partial_representation_wrt_small_generating_set(&x, dropped_rns_factor_indices, mod_b_part_of_x.data_mut());
+            // this is the "correction", subtracting it will make `x` divisible by the moduli to drop
+            let mut delta = OwnedMatrix::zero(Cnew.base_ring().len(), Cnew.get_ring().small_generating_set_len(), Cnew.base_ring().at(0));
+            compute_delta.apply(mod_b_part_of_x.data(), delta.data_mut());
+            let delta = Cnew.get_ring().from_representation_wrt_small_generating_set(delta.data());
+            // now subtract `delta` and scale by the moduli to drop - since `x - delta` is divisible by those,
+            // this is actually a rescaling and not only a division in `Z/qZ`
+            return Cnew.inclusion().mul_map(
+                Cnew.sub(
+                    Cnew.get_ring().drop_rns_factor_element(Cold.get_ring(), dropped_rns_factor_indices, x),
+                    delta
+                ),
+                Cnew.base_ring().invert(&Cnew.base_ring().coerce(&ZZbig, ZZbig.prod(dropped_rns_factor_indices.iter().map(|i| int_cast(*Cold.base_ring().at(*i).modulus(), ZZbig, ZZ))))).unwrap()
+            )
+        };
+        
         let ZZbig_to_Zt = P.base_ring().can_hom(&ZZbig).unwrap();
         let implicit_scale = P.base_ring().checked_div(
             &ZZbig_to_Zt.map_ref(Cnew.base_ring().modulus()),
             &ZZbig_to_Zt.map_ref(&Cold.base_ring().modulus())
         ).unwrap();
         return Ciphertext {
-            c0: perform_rns_op(Cnew.get_ring(), Cold.get_ring(), &ct.c0, &rescaling),
-            c1: perform_rns_op(Cnew.get_ring(), Cold.get_ring(), &ct.c1, &rescaling),
+            c0: mod_switch_ring_element(ct.c0),
+            c1: mod_switch_ring_element(ct.c1),
             implicit_scale: P.base_ring().mul(ct.implicit_scale, implicit_scale)
         };
     }
@@ -385,7 +398,7 @@ pub struct CompositeBGV<A: Allocator + Clone + Send + Sync = DefaultCiphertextAl
 impl<A: Allocator + Clone + Send + Sync> Display for CompositeBGV<A> {
 
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "n = {} * {}, log2(q) = {}", self.n1, self.n2, (self.log2_q_min + self.log2_q_max) / 2)
+        write!(f, "n = {} * {}, log2(q) in {}..{}", self.n1, self.n2, self.log2_q_min, self.log2_q_max)
     }
 }
 
@@ -413,6 +426,20 @@ impl<A: Allocator + Clone + Send + Sync> BGVParams for CompositeBGV<A> {
             rns_base,
             self.ciphertext_allocator.clone()
         );
+    }
+}
+
+fn assert_rns_factor_drop_correct<Params>(Cnew: &CiphertextRing<Params>, Cold: &CiphertextRing<Params>, dropped_rns_factor_indices: &[usize])
+    where Params: ?Sized + BGVParams
+{
+    assert_eq!(Cold.base_ring().len(), Cnew.base_ring().len() + dropped_rns_factor_indices.len());
+    let mut i_new = 0;
+    for i_old in 0..Cold.base_ring().len() {
+        if dropped_rns_factor_indices.contains(&i_old) {
+            continue;
+        }
+        assert!(Cold.base_ring().at(i_old).get_ring() == Cnew.base_ring().at(i_new).get_ring());
+        i_new += 1;
     }
 }
 
@@ -903,6 +930,9 @@ pub fn chain_mul_benchmark<A>(params: CompositeBGV<A>, digits: usize)
 #[test]
 #[ignore]
 fn bgv_mul_benchmark() {
+    let (chrome_layer, _guard) = tracing_chrome::ChromeLayerBuilder::new().build();
+    tracing_subscriber::registry().with(chrome_layer).init();
+    
     let params = CompositeBGV {
         log2_q_min: 680,
         log2_q_max: 690,

@@ -179,6 +179,22 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
         }
     }
 
+    #[instrument(skip_all)]
+    pub fn undo_fft_partial<V>(&self, element: &DoubleRNSEl<NumberRing, A>, required_rns_factors: &[usize], mut output: SubmatrixMut<V, ZnEl>)
+        where V: AsPointerToSlice<ZnEl>
+    {
+        assert_eq!(element.el_wrt_mult_basis.len(), self.element_len());
+        assert_eq!(output.col_count(), self.rank());
+        assert_eq!(output.row_count(), required_rns_factors.len());
+        for (i_out, i_in) in required_rns_factors.iter().copied().enumerate() {
+            assert!(i_in < self.rns_base().len());
+            for j in 0..self.rank() {
+                *output.at_mut(i_out, j) = element.el_wrt_mult_basis[i_in * self.rank() + j];
+            }
+            self.ring_decompositions[i_in].mult_basis_to_small_basis(output.row_mut_at(i_out));
+        }
+    }
+
     pub fn allocator(&self) -> &A {
         &self.allocator
     }

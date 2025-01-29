@@ -516,9 +516,20 @@ impl<NumberRing, A> BGFVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, 
     fn partial_representation_wrt_small_generating_set<V>(&self, x: &Self::Element, row_indices: &[usize], mut output: SubmatrixMut<V, ZnEl>)
         where V: AsPointerToSlice<ZnEl>
     {
-        let matrix = self.base.as_matrix_wrt_small_basis(self.to_small_basis(x).unwrap_or(&self.zero));
         assert_eq!(output.row_count(), row_indices.len());
-        assert_eq!(output.col_count(), matrix.col_count());
+        assert_eq!(output.col_count(), self.base.rank());
+
+        // following rationale: if element is already in small-basis form, we of course just use that;
+        // if the element is in sum repr, it won't help to use a partial conversion only, since we will
+        // at some point go to either double-RNS or small-basis repr, which both take a full conversion
+        // from a sum representation; hence, the only case where we do a partial conversion only is if
+        // we have the element in double-rns representation
+        if let ManagedDoubleRNSElRepresentation::DoubleRNS(double_rns_repr) = x.internal.get_repr() {
+            self.base.undo_fft_partial(double_rns_repr, row_indices, output);
+            return;
+        }
+
+        let matrix = self.base.as_matrix_wrt_small_basis(self.to_small_basis(x).unwrap_or(&self.zero));
         for (i_out, i_in) in row_indices.iter().enumerate() {
             for j in 0..matrix.col_count() {
                 *output.at_mut(i_out, j) = *matrix.at(*i_in, j);
