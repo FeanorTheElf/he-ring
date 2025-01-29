@@ -162,6 +162,10 @@ pub trait HECyclotomicNumberRingMod: HENumberRingMod {
             V2: SwappableVectorViewMut<zn_64::ZnEl>;
 }
 
+///
+/// Returns the largest prime number that is `<= leq_than` and `= 1 mod congruent_to_one_mod`,
+/// or `None` if there is no such prime number.
+/// 
 pub fn largest_prime_leq_congruent_to_one(leq_than: i64, congruent_to_one_mod: i64) -> Option<i64> {
     assert!(leq_than > congruent_to_one_mod);
     let mut current = leq_than - (leq_than - 1) % congruent_to_one_mod;

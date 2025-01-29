@@ -257,26 +257,58 @@ impl HypercubeStructure {
         return result;
     }
 
+    ///
+    /// Applies the hypercube structure map to the unit vector multiple `steps * e_(dim_idx)`,
+    /// i.e. computes the galois automorphism corresponding to the shift by `steps` steps
+    /// along the `dim_idx`-th hypercube dimension.
+    /// 
     pub fn map_1d(&self, dim_idx: usize, steps: i64) -> CyclotomicGaloisGroupEl {
         assert!(dim_idx < self.dim_count());
         self.galois_group.pow(self.gs[dim_idx], steps)
     }
 
+    ///
+    /// Applies the hypercube structure map to the given vector.
+    /// 
+    /// It is not enforced that the entries of the vector are contained in
+    /// `{ 0, ..., m1 - 1 } x ... x { 0, ..., mr - 1 }`, for values outside this
+    /// range the natural extension of `h` to `Z^r` is used, i.e.
+    /// ```text
+    ///   h:       Z^r      ->   (Z/nZ)^*
+    ///      a1,  ...,  ar  -> prod_i gi^ai
+    /// ```
+    /// 
     pub fn map(&self, idxs: &[i64]) -> CyclotomicGaloisGroupEl {
         assert_eq!(self.ms.len(), idxs.len());
         self.galois_group.prod(idxs.iter().zip(self.gs.iter()).map(|(i, g)| self.galois_group.pow(*g, *i)))
     }
 
+    ///
+    /// Same as [`HypercubeStructure::map()`], but for a vector with
+    /// unsigned entries.
+    /// 
     pub fn map_usize(&self, idxs: &[usize]) -> CyclotomicGaloisGroupEl {
         assert_eq!(self.ms.len(), idxs.len());
         self.galois_group.prod(idxs.iter().zip(self.gs.iter()).map(|(i, g)| self.galois_group.pow(*g, *i as i64)))
     }
 
+    ///
+    /// Computes the "standard preimage" of the given `g` under `h`.
+    /// 
+    /// This is the vector `(a0, a1, ..., ar)` such that `g = p^a0 h(a1, ..., ar)` and
+    /// each `ai` is within `{ 0, ..., mi - 1 }`.
+    /// 
     pub fn std_preimage(&self, g: CyclotomicGaloisGroupEl) -> &[usize] {
         let idx = self.representations.binary_search_by_key(&self.galois_group.representative(g), |(g, _)| self.galois_group.representative(*g)).unwrap();
         return &self.representations[idx].1;
     }
 
+    ///
+    /// Returns whether each dimension of the hypercube corresponds to a factor `ni` of
+    /// `n` (with `ni` coprime to `n/ni`). This is the case for the Halevi-Shoup hypercube,
+    /// and very useful in some situations. If this is the case, you can query the factor
+    /// of `n` corresponding to some dimension by [`HypercubeStructure::factor_of_n()`].
+    /// 
     pub fn is_tensor_product_compatible(&self) -> bool {
         match self.choice {
             HypercubeTypeData::CyclotomicTensorProductHypercube(_) => true,
@@ -284,6 +316,12 @@ impl HypercubeStructure {
         }
     }
 
+    ///
+    /// Returns the factor `ni` of `n` (coprime to `n/ni`) which the `i`-th hypercube
+    /// dimension corresponds to. This is only applicable if the hypercube was constructed
+    /// from a (partial) factorization of `n`, i.e. [`HypercubeStructure::is_tensor_product_compatible()`]
+    /// returns true. Otherwise, this function will return `None`.
+    /// 
     pub fn factor_of_n(&self, dim_idx: usize) -> Option<i64> {
         assert!(dim_idx < self.dim_count());
         match &self.choice {
@@ -292,49 +330,90 @@ impl HypercubeStructure {
         }
     }
 
+    ///
+    /// Returns `p` as an element of `(Z/nZ)*`.
+    /// 
     pub fn p(&self) -> CyclotomicGaloisGroupEl {
         self.p
     }
 
+    ///
+    /// Returns the Galois automorphism corresponding to the power-of-`p^power`
+    /// frobenius automorphism of the slot ring.
+    /// 
     pub fn frobenius(&self, power: i64) -> CyclotomicGaloisGroupEl {
         self.galois_group.pow(self.p(), power)
     }
 
+    ///
+    /// Returns the rank `d` of the slot ring.
+    /// 
     pub fn d(&self) -> usize {
         self.d
     }
 
+    ///
+    /// Returns the length `mi` of the `i`-th hypercube dimension.
+    /// 
     pub fn m(&self, i: usize) -> usize {
         assert!(i < self.ms.len());
         self.ms[i]
     }
 
+    ///
+    /// Returns the generator `gi` corresponding to the `i`-th hypercube dimension.
+    /// 
     pub fn g(&self, i: usize) -> CyclotomicGaloisGroupEl {
         assert!(i < self.ms.len());
         self.gs[i]
     }
 
+    ///
+    /// Returns the order of `gi` in the group `(Z/nZ)*`.
+    /// 
     pub fn ord_g(&self, i: usize) -> usize {
         assert!(i < self.ms.len());
         self.ord_gs[i]
     }
 
+    ///
+    /// Returns `n`, i.e. the multiplicative order of the root of unity of the main ring.
+    /// 
     pub fn n(&self) -> usize {
         self.galois_group().n()
     }
 
+    ///
+    /// Returns the number of dimensions in the hypercube.
+    /// 
     pub fn dim_count(&self) -> usize {
         self.gs.len()
     }
 
+    ///
+    /// Returns the Galois group isomorphic to `(Z/nZ)*` that this hypercube
+    /// describes.
+    /// 
     pub fn galois_group(&self) -> &CyclotomicGaloisGroup {
         &self.galois_group
     }
 
+    ///
+    /// Returns the number of elements of `{ 0, ..., m1 - 1 } x ... x { 0, ..., mr - 1 }`
+    /// or equivalently `(Z/nZ)*/<p>`, which is equal to the to the number of slots of 
+    /// `Fp[X]/(Phi_n(X))`.
+    /// 
     pub fn element_count(&self) -> usize {
         ZZi64.prod(self.ms.iter().map(|mi| *mi as i64)) as usize
     }
 
+    ///
+    /// Creates an iterator that yields a value for each element of `{ 0, ..., m1 - 1 } x ... x { 0, ..., mr - 1 }` 
+    /// resp. `(Z/nZ)*/<p>`. Hence, these elements correspond to the slots of `Fp[X]/(Phi_n(X))`.
+    /// 
+    /// The given closure will be called on each element of `{ 0, ..., m1 - 1 } x ... x { 0, ..., mr - 1 }`.
+    /// The returned iterator will iterate over the results of the closure.
+    /// 
     pub fn hypercube_iter<'b, G, T>(&'b self, for_slot: G) -> impl ExactSizeIterator<Item = T> + use<'b, G, T>
         where G: 'b + Clone + FnMut(&[usize]) -> T,
             T: 'b
@@ -347,6 +426,12 @@ impl HypercubeStructure {
         (0..self.element_count()).map(move |_| it.next().unwrap())
     }
 
+    ///
+    /// Creates an iterator that one representative of each element of `(Z/nZ)*/<p>`, which
+    /// also is in the image of this hypercube structure.
+    /// 
+    /// The order is compatible with [`HypercubeStructure::hypercube_iter()`].
+    /// 
     pub fn element_iter<'b>(&'b self) -> impl ExactSizeIterator<Item = CyclotomicGaloisGroupEl> + use<'b> {
         self.hypercube_iter(|idxs| self.map_usize(idxs))
     }
@@ -395,6 +480,8 @@ pub type DecoratedBaseRing<R> = AsLocalPIR<RingValue<BaseRing<R>>>;
 /// where `d` is the order of `p` in `(Z/nZ)*`.
 /// The group `(Z/nZ)*/<p>` is represented by a [`HypercubeStructure`].
 /// 
+/// In fact, the more general case of `(Z/p^eZ)[X]/(Phi_n(X))` is supported.
+/// 
 pub struct HypercubeIsomorphism<R>
     where R: RingStore,
         R::Type: CyclotomicRing,
@@ -414,6 +501,7 @@ impl<R> HypercubeIsomorphism<R>
         <<R::Type as RingExtension>::BaseRing as RingStore>::Type: Clone + ZnRing + CanHomFrom<StaticRingBase<i64>> + CanHomFrom<BigIntRingBase> + LinSolveRing + FromModulusCreateableZnRing,
         AsFieldBase<DecoratedBaseRing<R>>: CanIsoFromTo<<DecoratedBaseRing<R> as RingStore>::Type> + SelfIso
 {
+    #[instrument(skip_all)]
     pub fn new<const LOG: bool>(ring: R, hypercube_structure: HypercubeStructure) -> Self {
         let n = ring.n() as usize;
         let (p, e) = is_prime_power(&ZZi64, &ring.characteristic(&ZZi64).unwrap()).unwrap();
@@ -570,6 +658,7 @@ impl<R> HypercubeIsomorphism<R>
         self.hypercube_structure.element_count()
     }
     
+    #[instrument(skip_all)]
     pub fn get_slot_value(&self, el: &El<R>, slot_index: CyclotomicGaloisGroupEl) -> El<SlotRingOf<R>> {
         let el = self.ring().apply_galois_action(el, self.galois_group().invert(slot_index));
         let poly_ring = DensePolyRing::new(self.ring.base_ring(), "X");
@@ -579,6 +668,7 @@ impl<R> HypercubeIsomorphism<R>
         self.slot_ring().from_canonical_basis((0..self.d()).map(|i| poly_ring.base_ring().clone_el(poly_ring.coefficient_at(&rem, i))))
     }
 
+    #[instrument(skip_all)]
     pub fn get_slot_values<'a>(&'a self, el: &'a El<R>) -> impl ExactSizeIterator<Item = El<SlotRingOf<R>>> + use<'a, R> {
         self.hypercube_structure.element_iter().map(move |g| self.get_slot_value(el, g))
     }

@@ -15,6 +15,10 @@ use crate::euler_phi;
 
 const ZZi64: StaticRing<i64> = StaticRing::RING;
 
+///
+/// Represents the group `(Z/nZ)^*`, which is isomorphic to the Galois
+/// group of a cyclotomic number field.
+/// 
 #[derive(Clone, Copy)]
 pub struct CyclotomicGaloisGroup {
     ring: Zn,
