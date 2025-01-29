@@ -493,7 +493,8 @@ impl<NumberRing, A> BGFVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, 
     }
 
     fn prepare_multiplicant(&self, x: &Self::Element) -> Self::PreparedMultiplicant {
-        self.clone_el(x)
+        _ = self.to_doublerns(x);
+        return self.clone_el(x);
     }
 
     fn small_generating_set_len(&self) -> usize {
