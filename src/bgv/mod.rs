@@ -428,6 +428,18 @@ pub fn small_basis_repr<Params, NumberRing, A>(P: &PlaintextRing<Params>, C: &Ci
     };
 }
 
+pub fn double_rns_repr<Params, NumberRing, A>(P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, ct: Ciphertext<Params>) -> Ciphertext<Params>
+    where Params: BGVParams<CiphertextRing = ManagedDoubleRNSRingBase<NumberRing, A>>,
+        NumberRing: HECyclotomicNumberRing,
+        A: Allocator + Clone
+{
+    return Ciphertext {
+        c0: C.get_ring().from_double_rns_repr(C.get_ring().to_doublerns(&ct.c0).map(|x| C.get_ring().unmanaged_ring().get_ring().clone_el(x)).unwrap_or_else(|| C.get_ring().unmanaged_ring().get_ring().zero())), 
+        c1: C.get_ring().from_double_rns_repr(C.get_ring().to_doublerns(&ct.c1).map(|x| C.get_ring().unmanaged_ring().get_ring().clone_el(x)).unwrap_or_else(|| C.get_ring().unmanaged_ring().get_ring().zero())), 
+        implicit_scale: ct.implicit_scale
+    };
+}
+
 #[derive(Clone, Debug)]
 pub struct SingleRNSCompositeBGV<A: Allocator + Clone + Send + Sync = DefaultCiphertextAllocator, C: HERingConvolution<Zn> = DefaultConvolution> {
     pub log2_q_min: usize,
@@ -797,10 +809,12 @@ fn measure_time_single_rns_composite_bgv() {
 }
 
 #[cfg(test)]
-pub fn tree_mul_benchmark<Params>(params: Params, digits: usize)
-    where Params: BGVParams + Display
+pub fn tree_mul_benchmark<A>(params: CompositeBGV<A>, digits: usize)
+    where A: Allocator + Clone + Send + Sync
 {
     use crate::gadget_product::recommended_rns_factors_to_drop;
+
+    type Params<A> = CompositeBGV<A>;
 
     let mut rng = thread_rng();
     let t = 4;
@@ -811,7 +825,7 @@ pub fn tree_mul_benchmark<Params>(params: Params, digits: usize)
     let mut rk = Params::gen_rk(&P, &C, &mut rng, &sk, digits);
 
     let log2_count = 4;
-    let mut current = (0..(1 << log2_count)).map(|i| Params::enc_sym(&P, &C, &mut rng, &P.int_hom().map(2 * i + 1), &sk)).map(Some).collect::<Vec<_>>();
+    let mut current = (0..(1 << log2_count)).map(|i| double_rns_repr(&P, &C, Params::enc_sym(&P, &C, &mut rng, &P.int_hom().map(2 * i + 1), &sk))).map(Some).collect::<Vec<_>>();
     let start = Instant::now();
     let mut C_current = C;
 
@@ -844,10 +858,12 @@ pub fn tree_mul_benchmark<Params>(params: Params, digits: usize)
 }
 
 #[cfg(test)]
-pub fn chain_mul_benchmark<Params>(params: Params, digits: usize)
-    where Params: BGVParams + Display
+pub fn chain_mul_benchmark<A>(params: CompositeBGV<A>, digits: usize)
+    where A: Allocator + Clone + Send + Sync
 {
     use crate::gadget_product::recommended_rns_factors_to_drop;
+
+    type Params<A> = CompositeBGV<A>;
 
     let mut rng = thread_rng();
     let t = 4;
@@ -858,7 +874,7 @@ pub fn chain_mul_benchmark<Params>(params: Params, digits: usize)
     let mut rk = Params::gen_rk(&P, &C, &mut rng, &sk, digits);
 
     let count = 4;
-    let mut current = Params::enc_sym(&P, &C, &mut rng, &P.int_hom().map(1), &sk);
+    let mut current = double_rns_repr(&P, &C, Params::enc_sym(&P, &C, &mut rng, &P.int_hom().map(1), &sk));
     let start = Instant::now();
     let mut C_current = C;
 
