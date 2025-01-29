@@ -2,10 +2,33 @@ use feanor_math::ring::*;
 use feanor_math::rings::zn::{ZnRing, ZnRingStore};
 use feanor_math::matrix::*;
 
+///
+/// Contains the basic "lift-and-reduce" RNS base conversion, which
+/// can be used to change the RNS modulus without "changing" the representative
+/// of elements.
+/// 
 pub mod lift;
+///
+/// Contains the implementation of the rounded rescaling operations used
+/// during BFV multiplication and modulus-switching.
+/// 
 pub mod bfv_rescale;
+///
+/// Contains the implementation of the rounded rescaling operations used
+/// during BGV modulus-switching.
+/// 
 pub mod bgv_rescale;
+///
+/// Contains a convenience-wrapper around the basic RNS conversion from
+/// [`lift`], which preserves some of the RNS factors without recomputing
+/// them. 
+/// 
 pub mod shared_lift;
+///
+/// Contains another implementation of the basic RNS base conversion
+/// (as in [`lift`]), which explicitly considers the conversion as matrix
+/// multiplication.
+/// 
 pub mod matrix_lift;
 
 ///

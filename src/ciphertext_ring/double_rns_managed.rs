@@ -188,10 +188,22 @@ impl<NumberRing, A> ManagedDoubleRNSRingBase<NumberRing, A>
         ManagedDoubleRNSRing::from(ManagedDoubleRNSRingBase { base: result.into(), zero: zero })
     }
 
+    ///
+    /// Returns a reference to the underlying [`DoubleRNSRing`], which can be used
+    /// to manually manage the representation of elements.
+    /// 
+    /// This is most useful in combination with [`ManagedDoubleRNSRingBase::to_small_basis()`] and
+    /// [`ManagedDoubleRNSRingBase::to_doublerns()`], which can be used to access the underlying
+    /// representation of elements.
+    /// 
     pub fn unmanaged_ring(&self) -> RingRef<DoubleRNSRingBase<NumberRing, A>> {
         RingRef::new(&self.base)
     }
 
+    ///
+    /// Returns the representation of the given element w.r.t. the small basis, possibly computing
+    /// this representation if it is not available. If the element is zero, `None` is returned.
+    /// 
     pub fn to_small_basis<'a>(&self, value: &'a ManagedDoubleRNSEl<NumberRing, A>) -> Option<&'a SmallBasisEl<NumberRing, A>> {
         match value.internal.get_repr() {
             ManagedDoubleRNSElRepresentation::Sum(sum_repr) => {
@@ -228,6 +240,10 @@ impl<NumberRing, A> ManagedDoubleRNSRingBase<NumberRing, A>
         }
     }
 
+    ///
+    /// Returns the representation of the given element w.r.t. the multiplicative basis, possibly computing
+    /// this representation if it is not available. If the element is zero, `None` is returned.
+    /// 
     pub fn to_doublerns<'a>(&self, value: &'a ManagedDoubleRNSEl<NumberRing, A>) -> Option<&'a DoubleRNSEl<NumberRing, A>> {
         match value.internal.get_repr() {
             ManagedDoubleRNSElRepresentation::Sum(sum_repr) => {

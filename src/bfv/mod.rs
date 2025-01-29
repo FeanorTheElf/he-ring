@@ -18,6 +18,7 @@ use feanor_math::algorithms::int_factor::{factor, is_prime_power};
 use feanor_math::algorithms::miller_rabin::is_prime;
 use feanor_math::algorithms::unity_root::{get_prim_root_of_unity, get_prim_root_of_unity_pow2};
 use feanor_math::homomorphism::*;
+use feanor_math::primitive_int::StaticRingBase;
 use feanor_math::ring::*;
 use feanor_math::assert_el_eq;
 use feanor_math::rings::finite::FiniteRing;
@@ -43,7 +44,6 @@ use crate::ciphertext_ring::BGFVCiphertextRing;
 use crate::circuit::Coefficient;
 use crate::circuit::PlaintextCircuit;
 use crate::cyclotomic::*;
-use crate::digitextract::ArithCircuit;
 use crate::euler_phi;
 use crate::extend_sampled_primes;
 use crate::gadget_product::GadgetProductLhsOperand;
@@ -596,6 +596,37 @@ impl<NumberRing> PlaintextCircuit<NumberRingQuotientBase<NumberRing, Zn>>
     }
 }
 
+impl PlaintextCircuit<StaticRingBase<i64>> {
+
+    #[instrument(skip_all)]
+    pub fn evaluate_bfv<Params>(&self, 
+        P: &PlaintextRing<Params>, 
+        C: &CiphertextRing<Params>, 
+        C_mul: Option<&CiphertextRing<Params>>,
+        inputs: &[Ciphertext<Params>], 
+        rk: Option<&RelinKey<Params>>, 
+        gks: &[(CyclotomicGaloisGroupEl, KeySwitchKey<Params>)], 
+        key_switches: &mut usize
+    ) -> Vec<Ciphertext<Params>> 
+        where Params: BFVParams
+    {
+        assert!(!self.has_multiplication_gates() || C_mul.is_some());
+        assert_eq!(C_mul.is_some(), rk.is_some());
+        const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
+        let galois_group = C.galois_group();
+        return self.evaluate_generic(
+            inputs,
+            |x| match x {
+                Coefficient::Zero => Params::transparent_zero(C),
+                x => Params::hom_add_plain(P, C, &P.int_hom().map(x.to_ring_el(ZZ) as i32), Params::transparent_zero(C))
+            },
+            |dst, x, ct| Params::hom_add(C, dst, &Params::hom_mul_plain(P, C, &P.int_hom().map(x.to_ring_el(ZZ) as i32), Params::clone_ct(C, ct))),
+            |lhs, rhs| Params::hom_mul(P, C, C_mul.unwrap(), lhs, rhs, rk.unwrap()),
+            |gs, x| Params::hom_galois_many(C, x, gs, gs.as_fn().map_fn(|expected_g| &gks.iter().filter(|(g, _)| galois_group.eq_el(*g, *expected_g)).next().unwrap().1))
+        );
+    }
+}
+
 ///
 /// Instantiation of BFV in power-of-two cyclotomic rings `Z[X]/(X^N + 1)` for `N`
 /// a power of two.
@@ -793,34 +824,6 @@ impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingConvolution<Zn>>
         );
         return (C, Cmul);
     }
-}
-
-pub fn hom_evaluate_circuit<'a, 'b, Params: BFVParams>(
-    P: &'a PlaintextRing<Params>, 
-    C: &'a CiphertextRing<Params>, 
-    C_mul: &'a CiphertextRing<Params>, 
-    input: &'a Ciphertext<Params>, 
-    circuit: &'a ArithCircuit, 
-    rk: &'a RelinKey<'b, Params>, 
-    key_switches: &'a mut usize
-) -> impl ExactSizeIterator<Item = Ciphertext<Params>> + use<'a, 'b, Params> 
-    where Params: 'b
-{
-    return circuit.evaluate_generic(
-        std::slice::from_ref(input), 
-        |lhs, rhs, factor| {
-            let result = Params::hom_add(C, Params::hom_mul_plain_i64(P, C, factor, Params::clone_ct(C, rhs)), &lhs);
-            return result;
-        }, 
-        |lhs, rhs| {
-            *key_switches += 1;
-            let result =  Params::hom_mul(P, C, C_mul, lhs, rhs, rk);
-            return result;
-        }, 
-        move |x| {
-            Params::hom_add_plain(P, C, &P.inclusion().compose(P.base_ring().can_hom(&ZZ).unwrap()).map(x), Params::transparent_zero(C))
-        }
-    );
 }
 
 pub fn small_basis_repr<Params, NumberRing, A>(C: &CiphertextRing<Params>, ct: Ciphertext<Params>) -> Ciphertext<Params>

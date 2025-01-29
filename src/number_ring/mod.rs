@@ -27,7 +27,7 @@ pub mod hypercube;
 ///    have small canonical norm. This basis will be used for operations that care about
 ///    "smallness" and noise growth.
 ///  - The object should also provide functionality to search for primes `p` modulo which
-///    `R/p` is isomorphic to `Fp^n`, and thus `R/p` has the "mult basis" corresponding
+///    `R/p` is isomorphic to `Fp^n`, and thus `R/p` has the "multiplicative basis" corresponding
 ///    to the unit vectors on the right hand side of `R/p ~ Fp^n`. This basis has the nice
 ///    property that it allows computing multiplications component-wise, however note that it
 ///    is not fixed but depends on `p`.
@@ -35,8 +35,8 @@ pub mod hypercube;
 ///    to the "coeff basis", given by `1, a, a^2, ..., a^(n - 1)`.
 /// 
 /// Two [`HENumberRing`]s that are considered equal as given by [`PartialEq`] should
-/// represent the same ring, and also all three basis should coincide (in case of the "mult basis",
-/// it should coincide for every prime `p`).
+/// represent the same ring, and also all three basis should coincide (in case of the "multiplicative
+/// basis", it should coincide for every prime `p`).
 /// 
 pub trait HENumberRing: Send + Sync + PartialEq + Clone {
 
@@ -106,7 +106,7 @@ pub trait HECyclotomicNumberRing: HENumberRing {
 /// properties:
 ///  - the "small basis" should consist of elements whose shortest lift to `R` has small
 ///    canonical norm
-///  - the "mult basis" should allow for component-wise multiplication, i.e. `bi * bi = bi`
+///  - the "multiplicative basis" should allow for component-wise multiplication, i.e. `bi * bi = bi`
 ///    and `bi * bj = 0` for `i != j`
 ///  - the "coeff basis" should consist of powers of a generator of the ring, which for
 ///    cyclotomic rings should be the root of unity.
@@ -120,7 +120,7 @@ pub trait HECyclotomicNumberRing: HENumberRing {
 /// this case, we need three different basis.
 ///  - The "small basis" is the powerful basis `𝝵^(n/n1 * i1 + ... + n/nr * ir)` with
 ///    `0 <= ij < phi(nj)`, where `nj` runs through pairwise coprime factors of `n`
-///  - The "mult basis" is the preimage of the unit vector basis under `Fp[𝝵] -> Fp^phi(n)`
+///  - The "multiplicative basis" is the preimage of the unit vector basis under `Fp[𝝵] -> Fp^phi(n)`
 ///  - The "coeff basis" is the basis `1, 𝝵, 𝝵^2, ..., 𝝵^phi(n)`
 /// While one could choose "small basis" and "coeff basis" to be equal (after all, the
 /// elements `𝝵^i` are all "small"), staying in "small basis" whenever possible has

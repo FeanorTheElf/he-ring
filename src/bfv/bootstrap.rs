@@ -127,7 +127,7 @@ impl<Params: BFVParams> ThinBootstrapParams<Params>
 /// may be perturbed by an arbitrary value `p^e a`.
 /// 
 pub struct DigitExtract {
-    extraction_circuits: Vec<(Vec<usize>, ArithCircuit)>,
+    extraction_circuits: Vec<(Vec<usize>, PlaintextCircuit<StaticRingBase<i64>>)>,
     v: usize,
     e: usize,
     p: i64
@@ -189,7 +189,7 @@ impl DigitExtract {
     /// 
     /// If you want to use the default choice of circuits, consider using [`DigitExtract::new_default()`].
     /// 
-    pub fn new_with(p: i64, e: usize, r: usize, extraction_circuits: Vec<(Vec<usize>, ArithCircuit)>) -> Self {
+    pub fn new_with(p: i64, e: usize, r: usize, extraction_circuits: Vec<(Vec<usize>, PlaintextCircuit<StaticRingBase<i64>>)>) -> Self {
         assert!(is_prime(&ZZ, &p, 10));
         assert!(e > r);
         for (digits, circuit) in &extraction_circuits {
@@ -252,7 +252,7 @@ impl DigitExtract {
 
             let scale = ring.coerce(&ZZ, ZZ.pow(p, i));
             let current = ring.checked_div(&partial_floor_divs[i], &scale).unwrap();
-            let digit_extracted = use_circuit.evaluate(std::slice::from_ref(&current), ring).collect::<Vec<_>>();
+            let digit_extracted = use_circuit.evaluate_no_galois(std::slice::from_ref(&current), ring.can_hom(&ZZ).unwrap());
 
             ring.sub_assign(&mut floor_div_result, ring.mul_ref(digit_extracted.last().unwrap(), &scale));
             ring.add_assign(&mut mod_result, ring.mul_ref(digit_extracted.last().unwrap(), &scale));
@@ -265,7 +265,7 @@ impl DigitExtract {
         return (floor_div_result, mod_result);
     }
 
-    pub fn evaluate_homomorphic<'a, Params: BFVParams, const LOG: bool>(&self, 
+    pub fn evaluate_bfv<'a, Params: BFVParams, const LOG: bool>(&self, 
         P_base: &PlaintextRing<Params>, 
         P_bootstrap: &[PlaintextRing<Params>], 
         C: &CiphertextRing<Params>, 
@@ -312,7 +312,7 @@ impl DigitExtract {
                     Params::dec_println_slots(P(remaining_digits), C, current, sk);
                 }
 
-                let digit_extracted = hom_evaluate_circuit::<Params>(P(remaining_digits), C, C_mul, current, use_circuit, rk, key_switches).collect::<Vec<_>>();
+                let digit_extracted = use_circuit.evaluate_bfv::<Params>(P(remaining_digits), C, Some(C_mul), std::slice::from_ref(current), Some(rk), &[], key_switches);
                 
                 for (res, modulo_exponent) in digit_extracted.iter().zip(use_circuit_digits.iter()) {
                     if let Some(sk) = debug_sk {
@@ -423,7 +423,7 @@ impl<Params: BFVParams> ThinBootstrapData<Params> {
         }
         let rounding_divisor_half = P_main.base_ring().coerce(&ZZbig, ZZbig.rounded_div(ZZbig.pow(int_cast(self.p(), ZZbig, ZZ), self.v()), &ZZbig.int_hom().map(2)));
         let digit_extraction_input = Params::hom_add_plain(P_main, C, &P_main.inclusion().map(rounding_divisor_half), noisy_decryption_in_slots);
-        let result = self.digit_extract.evaluate_homomorphic::<Params, LOG>(P_base, &self.plaintext_ring_hierarchy, C, C_mul, digit_extraction_input, rk, debug_sk).0;
+        let result = self.digit_extract.evaluate_bfv::<Params, LOG>(P_base, &self.plaintext_ring_hierarchy, C, C_mul, digit_extraction_input, rk, debug_sk).0;
 
         return result;
     }
@@ -582,7 +582,7 @@ fn test_digit_extract_homomorphic() {
 
     let digitextract = DigitExtract::new_default::<false>(17, 2, 1);
 
-    let (ct_high, ct_low) = digitextract.evaluate_homomorphic::<Pow2BFV, true>(&P1, std::slice::from_ref(&P2), &C, &C_mul, ct, &rk, Some(&sk));
+    let (ct_high, ct_low) = digitextract.evaluate_bfv::<Pow2BFV, true>(&P1, std::slice::from_ref(&P2), &C, &C_mul, ct, &rk, Some(&sk));
 
     let m_high = Pow2BFV::dec(&P1, &C, Pow2BFV::clone_ct(&C, &ct_high), &sk);
     assert!(P1.wrt_canonical_basis(&m_high).iter().skip(1).all(|x| P1.base_ring().is_zero(&x)));
@@ -647,60 +647,4 @@ fn test_digit_extract_evaluate_ignore_higher() {
         assert_eq!(((x / 5) * 5) % 125, ring.smallest_positive_lift(actual_high) as i32 % 125);
         assert_eq!(x % 5, ring.smallest_positive_lift(actual_low) as i32 % 125);
     }
-}
-
-#[cfg(test)]
-fn test_circuit() -> ArithCircuit {
-    
-    let id = ArithCircuit::linear_transform(&[1]);
-    let f0 = id.clone();
-    let f1 = id.tensor(&ArithCircuit::mul()).compose(&ArithCircuit::select(1, &[0, 0, 0]).compose(&f0));
-    let f2 = id.tensor(&id).tensor(&ArithCircuit::mul()).compose(&ArithCircuit::select(2, &[0, 1, 1, 1]).compose(&f1));
-    
-    let f3_comp = ArithCircuit::add().compose(&ArithCircuit::linear_transform(&[112]).tensor(
-        &ArithCircuit::mul().compose(&ArithCircuit::linear_transform(&[94, 121]).output_twice())
-    )).compose(&ArithCircuit::select(2, &[0, 0, 1]));
-    let f3 = id.tensor(&id).tensor(&id).tensor(&f3_comp).compose(&ArithCircuit::select(3, &[0, 1, 2, 1, 2]).compose(&f2));
-
-    let f4_comp = ArithCircuit::add().compose(&ArithCircuit::linear_transform(&[1984, 528, 22620]).tensor(
-        &ArithCircuit::mul().compose(&ArithCircuit::linear_transform(&[226, 113]).tensor(&ArithCircuit::linear_transform(&[8, 2, 301])))
-    )).compose(&ArithCircuit::select(3, &[0, 1, 2, 1, 2, 0, 1, 2]));
-    let f4 = id.tensor(&id).tensor(&id).tensor(&id).tensor(&f4_comp).compose(&ArithCircuit::select(4, &[0, 1, 2, 3, 1, 2, 3]).compose(&f3));
-
-    return f4;
-}
-
-#[test]
-fn test_evaluate_circuit() {
-    let mut rng = thread_rng();
-    let params = CompositeSingleRNSBFV {
-        log2_q_max: 800,
-        log2_q_min: 780,
-        n1: 11,
-        n2: 31,
-        ciphertext_allocator: DefaultCiphertextAllocator::default(),
-        convolution: PhantomData::<DefaultConvolution>
-    };
-    let t = ZZ.pow(2, 15);
-    let digits = 4;
-    
-    let P = params.create_plaintext_ring(t);
-    let (C, C_mul) = params.create_ciphertext_rings();
-
-    let sk = CompositeSingleRNSBFV::gen_sk(&C, &mut rng);
-    let mul_rescale = CompositeSingleRNSBFV::create_multiplication_rescale(&P, &C, &C_mul);
-    let rk = CompositeSingleRNSBFV::gen_rk(&C, &mut rng, &sk, digits);
-
-    let m = P.zero();
-    let ct = CompositeSingleRNSBFV::enc_sym(&P, &C, &mut rng, &m, &sk);
-
-    let circuit = test_circuit();
-    let mut key_switches = 0;
-    let result = hom_evaluate_circuit::<CompositeSingleRNSBFV>(&P, &C, &C_mul, &ct, &circuit, &rk, &mut key_switches);
-
-    let result_dec = result.map(|ct| CompositeSingleRNSBFV::dec(&P, &C, ct, &sk)).collect::<Vec<_>>();
-    assert_el_eq!(&P, P.zero(), &result_dec[0]);
-    assert_el_eq!(&P, P.zero(), &result_dec[1]);
-    assert_el_eq!(&P, P.zero(), &result_dec[2]);
-    assert_el_eq!(&P, P.zero(), &result_dec[4]);
 }

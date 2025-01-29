@@ -64,16 +64,16 @@ pub struct DoubleRNSRingBase<NumberRing, A = Global>
 pub type DoubleRNSRing<NumberRing, A = Global> = RingValue<DoubleRNSRingBase<NumberRing, A>>;
 
 ///
-/// A [`DoubleRNSRing`] element, stored by its coefficients w.r.t. the "mult basis".
+/// A [`DoubleRNSRing`] element, stored by its coefficients w.r.t. the multiplicative basis.
 /// In particular, this is the only representation that allows for multiplications.
 /// 
 pub struct DoubleRNSEl<NumberRing, A = Global>
     where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
-    pub(super) number_ring: PhantomData<NumberRing>,
-    pub(super) allocator: PhantomData<A>,
-    pub(super) el_wrt_mult_basis: Vec<ZnEl, A>
+    number_ring: PhantomData<NumberRing>,
+    allocator: PhantomData<A>,
+    el_wrt_mult_basis: Vec<ZnEl, A>
 }
 
 ///
@@ -161,10 +161,23 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
         SubmatrixMut::from_1d(&mut element.el_wrt_small_basis, self.rns_base().len(), self.rank())
     }
 
+    pub fn as_matrix_wrt_mult_basis<'a>(&self, element: &'a DoubleRNSEl<NumberRing, A>) -> Submatrix<'a, AsFirstElement<ZnEl>, ZnEl> {
+        Submatrix::from_1d(&element.el_wrt_mult_basis, self.rns_base().len(), self.rank())
+    }
+
+    pub fn as_matrix_wrt_mult_basis_mut<'a>(&self, element: &'a mut DoubleRNSEl<NumberRing, A>) -> SubmatrixMut<'a, AsFirstElement<ZnEl>, ZnEl> {
+        SubmatrixMut::from_1d(&mut element.el_wrt_mult_basis, self.rns_base().len(), self.rank())
+    }
+
     pub fn number_ring(&self) -> &NumberRing {
         &self.number_ring
     }
 
+    ///
+    /// Converts the element to its representation w.r.t. the small basis.
+    /// 
+    /// The coefficients w.r.t. this basis can be accessed using [`DoubleRNSRingBase::as_matrix_wrt_small_basis()`].
+    /// 
     #[instrument(skip_all)]
     pub fn undo_fft(&self, element: DoubleRNSEl<NumberRing, A>) -> SmallBasisEl<NumberRing, A> {
         assert_eq!(element.el_wrt_mult_basis.len(), self.element_len());
@@ -224,6 +237,12 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
         }
     }
 
+    ///
+    /// Converts the element to its representation w.r.t. the multiplicative basis.
+    /// 
+    /// The main use of this basis is to compute multiplications (via [`RingBase::mul()`] etc.).
+    /// You can also access the coefficients w.r.t. the multiplicative basis using [`DoubleRNSRingBase::as_matrix_wrt_mult_basis()`].
+    /// 
     #[instrument(skip_all)]
     pub fn do_fft(&self, element: SmallBasisEl<NumberRing, A>) -> DoubleRNSEl<NumberRing, A> {
         assert_eq!(element.el_wrt_small_basis.len(), self.element_len());
@@ -238,6 +257,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
         }
     }
 
+    #[instrument(skip_all)]
     pub fn sample_from_coefficient_distribution<G: FnMut() -> i32>(&self, mut distribution: G) -> SmallBasisEl<NumberRing, A> {
         let mut result = self.zero_non_fft().el_wrt_small_basis;
         for j in 0..self.rank() {
@@ -256,6 +276,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
         };
     }
 
+    #[instrument(skip_all)]
     pub fn clone_el_non_fft(&self, val: &SmallBasisEl<NumberRing, A>) -> SmallBasisEl<NumberRing, A> {
         assert_eq!(self.element_len(), val.el_wrt_small_basis.len());
         let mut result = Vec::with_capacity_in(self.element_len(), self.allocator.clone());
@@ -267,6 +288,7 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
         }
     }
 
+    #[instrument(skip_all)]
     pub fn eq_el_non_fft(&self, lhs: &SmallBasisEl<NumberRing, A>, rhs: &SmallBasisEl<NumberRing, A>) -> bool {
         assert_eq!(self.element_len(), lhs.el_wrt_small_basis.len());
         assert_eq!(self.element_len(), rhs.el_wrt_small_basis.len());

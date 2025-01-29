@@ -1,3 +1,5 @@
+use std::cmp::max;
+
 use feanor_math::rings::extension::FreeAlgebraStore;
 use feanor_math::{algorithms::matmul::ComputeInnerProduct, rings::zn::zn_64::Zn};
 use feanor_math::homomorphism::Homomorphism;
@@ -10,9 +12,35 @@ use crate::number_ring::{HECyclotomicNumberRing, HENumberRing};
 use crate::number_ring::quotient::{NumberRingQuotient, NumberRingQuotientBase};
 use crate::number_ring::hypercube::HypercubeIsomorphism;
 
+///
+/// A coefficient used in a [`PlaintextCircuit`].
+/// 
+/// Generally speaking, this always represents an element of `R`
+/// (which can be retrieved via [`Coefficient::to_ring_el()`]), but
+/// special cases are stored separately for a more efficient evaluation.
+/// 
 pub enum Coefficient<R: ?Sized + RingBase> {
     Zero, One, Integer(i32), Other(R::Element)
 }
+
+impl<R> Clone for Coefficient<R>
+    where R: ?Sized + RingBase,
+        R::Element: Clone
+{
+    fn clone(&self) -> Self {
+        match self {
+            Coefficient::Zero => Coefficient::Zero,
+            Coefficient::One => Coefficient::One,
+            Coefficient::Integer(x) => Coefficient::Integer(*x),
+            Coefficient::Other(x) => Coefficient::Other(x.clone())
+        }
+    }
+}
+
+impl<R> Copy for Coefficient<R>
+    where R: ?Sized + RingBase,
+        R::Element: Copy
+{}
 
 impl<R: ?Sized + RingBase> Coefficient<R> {
 
@@ -44,6 +72,13 @@ impl<R: ?Sized + RingBase> Coefficient<R> {
             Coefficient::One => target,
             Coefficient::Integer(x) => ring.int_hom().mul_map(target, *x),
             Coefficient::Other(x) => ring.mul_ref_snd(target, x)
+        }
+    }
+
+    fn is_zero(&self) -> bool {
+        match self {
+            Coefficient::Zero => true,
+            _ => false
         }
     }
 
@@ -91,6 +126,11 @@ impl<R: ?Sized + RingBase> Coefficient<R> {
     }
 }
 
+///
+/// A "linear combination" gate, which takes an affine linear combination
+/// of an arbitrary number of inputs with coefficients in the ring, and produces
+/// a single output.
+/// 
 struct LinearCombination<R: ?Sized + RingBase> {
     factors: Vec<Coefficient<R>>,
     constant: Coefficient<R>
@@ -151,6 +191,9 @@ impl<R: RingBase + Default> PartialEq for LinearCombination<R> {
     }
 }
 
+///
+/// A nonlinear gate of a [`PlaintextCircuit`].
+/// 
 enum PlainCircuitGate<R: ?Sized + RingBase> {
     Mul(LinearCombination<R>, LinearCombination<R>),
     Gal(Vec<CyclotomicGaloisGroupEl>, LinearCombination<R>)
@@ -176,6 +219,23 @@ impl<R: RingBase + Default> PartialEq for PlainCircuitGate<R> {
     }
 }
 
+///
+/// Represents an arithmetic circuit (possibly including Galois gates) over
+/// a ring of type `R`. 
+/// 
+/// In a sense, such a circuit can be considered to be a "HE program" that can
+/// be run on encrypted inputs from the ring `R`. Of course, using a circuit for
+/// HE computations is completely optional, the computations can also be performed
+/// by directly operating on ciphertexts. At the very least, explicitly creating
+/// a circuit will allow for much simpler testing, since it can also be executed
+/// on unencrypted data.
+/// 
+/// Simple ways to create circuits are by using [`crate::digitextract::polys::low_depth_paterson_stockmeyer()`]
+/// and [`crate::lintransform::matmul::MatmulTransform::matmul1d()`].
+/// 
+/// Note that the ring is not stored by the circuit, but the same ring must be provided 
+/// with every circuit operation that requires ring arithmetic. 
+/// 
 pub struct PlaintextCircuit<R: ?Sized + RingBase> {
     input_count: usize,
     gates: Vec<PlainCircuitGate<R>>,
@@ -245,17 +305,17 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
     ///    |
     /// ```
     /// 
-    pub fn constant_i32<S: RingStore<Type = R>>(el: i32, ring: S) -> Self {
+    pub fn constant_i32<S: RingStore<Type = R>>(c: i32, ring: S) -> Self {
         let result = Self {
             input_count: 0,
             gates: Vec::new(),
             output_transforms: vec![LinearCombination {
-                constant: if el == 0{
+                constant: if c == 0{
                     Coefficient::Zero
-                } else if el == 1 {
+                } else if c == 1 {
                     Coefficient::One
                 } else {
-                    Coefficient::Integer(el)
+                    Coefficient::Integer(c)
                 },
                 factors: Vec::new()
             }]
@@ -676,14 +736,18 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
     pub fn output_count(&self) -> usize {
         self.output_transforms.len()
     }
-
-    pub fn mul_count(&self) -> usize {
-        self.gates.iter().filter(|gate| match gate {
-            PlainCircuitGate::Mul(_, _) => true,
-            _ => false
-        }).count()
-    }
     
+    ///
+    /// Evaluates the circuit on inputs of type `T`, which support all necessary operations
+    /// through the passed functions.
+    /// 
+    /// In particular
+    ///  - `constant(c)` should return a `T` representing the ring element `c`
+    ///  - `add_prod(y, c, x)` should return a `T` representing `y + c * x`
+    ///  - `mul(x, y)` should return a `T` representing `x * y`
+    ///  - `gal(gs, x)` should return a list of `T`s, with the `i`-th one representing `σx` for `σ: 𝝵 -> 𝝵^gs[i]` 
+    ///    the Galois automorphism defined by `gs[i]`  
+    /// 
     pub fn evaluate_generic<T, ContantFn, AddProductFn, MulFn, GaloisFn>(&self, inputs: &[T], mut constant: ContantFn, mut add_prod: AddProductFn, mut mul: MulFn, mut gal: GaloisFn) -> Vec<T>
         where ContantFn: FnMut(&Coefficient<R>) -> T,
             AddProductFn: FnMut(T, &Coefficient<R>, &T) -> T,
@@ -707,6 +771,12 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
         return self.output_transforms.iter().map(|t| t.evaluate_generic(inputs, &current, &mut constant, &mut add_prod)).collect()
     }
 
+    ///
+    /// Evaluates the given circuit on inputs from a ring into which we can
+    /// embed the circuit constants.
+    /// 
+    /// Panics if the circuit contains galois gates.
+    /// 
     pub fn evaluate_no_galois<S, H>(&self, inputs: &[S::Element], hom: H) -> Vec<S::Element>
         where S: ?Sized + RingBase,
             H: Homomorphism<R, S>
@@ -721,6 +791,14 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
         )
     }
 
+    ///
+    /// Evaluates the given circuit on inputs from a ring into which we can
+    /// embed the circuit constants.
+    /// 
+    /// Note that the circuit might contain Galois gates, thus the given ring
+    /// must support evaluation of Galois automorphisms. In case that it doesn't,
+    /// you can use [`PlaintextCircuit::evaluate_no_galois()`].
+    /// 
     pub fn evaluate<S, H>(&self, inputs: &[S::Element], hom: H) -> Vec<S::Element>
         where S: ?Sized + RingBase + CyclotomicRing,
             H: Homomorphism<R, S>
@@ -755,6 +833,14 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
         }).count()
     }
 
+    ///
+    /// Returns all galois automorphisms which are evaluated by some
+    /// gate in this circuit.
+    /// 
+    /// This directly corresponds to those Galois automorphisms for which
+    /// we require a Galois key when evaluating the circuit on encrypted
+    /// inputs.
+    /// 
     pub fn required_galois_keys(&self, galois_group: &CyclotomicGaloisGroup) -> Vec<CyclotomicGaloisGroupEl> {
         let mut result = self.gates.iter().flat_map(|gate| match gate {
             PlainCircuitGate::Gal(gs, _) => gs.iter().copied(),
@@ -765,8 +851,44 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
         return result;
     }
     
+    ///
+    /// Returns whether the circuit computes a linear map.
+    /// 
+    /// This is false if the circuit contains any multiplication gates.
+    /// 
     pub fn is_linear(&self) -> bool {
         !self.has_multiplication_gates()
+    }
+
+    ///
+    /// Returns the multiplicative depth of the `i`-th output, i.e.
+    /// the maximal number of multiplication gates on a path from some input
+    /// to the given output.
+    /// 
+    pub fn mul_depth(&self, i: usize) -> usize {
+        let mut multiplicative_depths = Vec::new();
+        multiplicative_depths.resize(self.input_count(), 0);
+        let mult_depth_of_linear_combination = |lin_combination: &LinearCombination<_>, multiplicative_depths: &[usize]| {
+            assert_eq!(lin_combination.factors.len(), multiplicative_depths.len());
+            lin_combination.factors.iter().zip(multiplicative_depths.iter()).filter(|(factor, _)| !factor.is_zero()).map(|(_, d)| *d).max().unwrap_or(0)
+        };
+        for gate in &self.gates {
+            let (new_depth, count) = match gate {
+                PlainCircuitGate::Mul(lhs, rhs) => (max(mult_depth_of_linear_combination(lhs, &multiplicative_depths), mult_depth_of_linear_combination(rhs, &multiplicative_depths)) + 1, 1),
+                PlainCircuitGate::Gal(gs, input) => (mult_depth_of_linear_combination(input, &multiplicative_depths), gs.len())
+            };
+            multiplicative_depths.extend((0..count).map(|_| new_depth));
+        }
+        return mult_depth_of_linear_combination(&self.output_transforms[i], &multiplicative_depths);
+    }
+
+    ///
+    /// Returns the maximal multiplicative depth of an output, i.e.
+    /// the maximal number of multiplication gates on a path from some input
+    /// to some output.
+    /// 
+    pub fn max_mul_depth(&self) -> usize {
+        (0..self.output_count()).map(|i| self.mul_depth(i)).max().unwrap_or(0)
     }
 }
 

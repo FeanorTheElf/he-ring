@@ -165,6 +165,9 @@ pub mod cyclotomic;
 /// 
 pub mod rnsconv;
 
+///
+/// Contains an HE-specific abstraction for number rings.
+/// 
 pub mod number_ring;
 
 ///
@@ -172,6 +175,11 @@ pub mod number_ring;
 /// 
 pub mod ciphertext_ring;
 
+///
+/// Contains an implementation of "gadget products", which are a form of inner
+/// products that are commonly used in HE to compute multiplications of noisy values
+/// in a way that reduces the increase in noise.
+/// 
 pub mod gadget_product;
 
 ///
@@ -199,6 +207,9 @@ pub mod lintransform;
 /// 
 pub mod digitextract;
 
+///
+/// Contains an implementation of the BGV scheme.
+/// 
 pub mod bgv;
 
 #[cfg(test)]
