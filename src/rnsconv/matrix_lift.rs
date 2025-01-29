@@ -9,6 +9,7 @@ use feanor_math::divisibility::DivisibilityRingStore;
 use feanor_math::primitive_int::*;
 use feanor_math::ring::*;
 use feanor_math::ordered::OrderedRingStore;
+use tracing::instrument;
 
 use std::alloc::Allocator;
 use std::alloc::Global;
@@ -67,6 +68,7 @@ impl<A> AlmostExactMatrixBaseConversion<A>
     /// Creates a new [`AlmostExactBaseConversion`] from `q` to `q'`. The moduli belonging to `q'`
     /// are expected to be sorted.
     /// 
+    #[instrument(skip_all)]
     pub fn new_with(in_rings: Vec<Zn>, out_rings: Vec<Zn>, allocator: A) -> Self {
         
         let Q = ZZbig.prod((0..in_rings.len()).map(|i| int_cast(*in_rings.at(i).modulus(), ZZbig, ZZi64)));
@@ -140,6 +142,7 @@ impl<A> RNSOperation for AlmostExactMatrixBaseConversion<A>
     /// Furthermore, if the shortest lift of the input is bounded by `Q/4`,
     /// then the result is guaranteed to be exact.
     /// 
+    #[instrument(skip_all)]
     fn apply<V1, V2>(&self, input: Submatrix<V1, El<Self::Ring>>, mut output: SubmatrixMut<V2, El<Self::Ring>>)
         where V1: AsPointerToSlice<El<Self::Ring>>,
             V2: AsPointerToSlice<El<Self::Ring>>

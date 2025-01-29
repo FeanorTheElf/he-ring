@@ -11,6 +11,7 @@ use feanor_math::integer::*;
 use feanor_math::ring::*;
 use feanor_math::ordered::OrderedRingStore;
 use feanor_math::seq::*;
+use tracing::instrument;
 
 use super::sort_unstable_permutation;
 use super::RNSOperation;
@@ -78,6 +79,7 @@ impl<A> CongruencePreservingRescaling<A>
     ///  - `a` is the product of `num_moduli`
     ///  - `b` is the product of the moduli of `in_moduli` indexed by `den_moduli_indices`
     /// 
+    #[instrument(skip_all)]
     pub fn new_with(in_moduli: Vec<Zn>, num_moduli: Vec<Zn>, den_moduli_indices: Vec<usize>, plaintext_modulus: Zn, allocator: A) -> Self {
         let ZZ = plaintext_modulus.integer_ring();
         for ring in &in_moduli {
@@ -179,6 +181,7 @@ impl<A> RNSOperation for CongruencePreservingRescaling<A>
     /// if we used [`crate::rnsconv::bfv_rescale::AlmostExactRescaling`]. Also, we currently lift to `aq`
     /// instead of `aq/b`, but I am not sure if that is really necessary.
     /// 
+    #[instrument(skip_all)]
     fn apply<V1, V2>(&self, input: Submatrix<V1, El<Self::Ring>>, mut output: SubmatrixMut<V2, El<Self::Ring>>)
         where V1: AsPointerToSlice<El<Self::Ring>>,
             V2: AsPointerToSlice<El<Self::Ring>>
@@ -298,6 +301,7 @@ impl<A> CongruenceAwareAlmostExactBaseConversion<A>
     ///  - `q` is the product of `in_moduli` and `out_moduli`
     ///  - `b` is the product of the moduli of `in_moduli`
     /// 
+    #[instrument(skip_all)]
     pub fn new_with(in_moduli: Vec<Zn>, out_moduli: Vec<Zn>, plaintext_modulus: Zn, allocator: A) -> Self {
         let ZZ = plaintext_modulus.integer_ring();
         for ring in &in_moduli {
@@ -356,6 +360,7 @@ impl<A> RNSOperation for CongruenceAwareAlmostExactBaseConversion<A>
         &self.output_moduli_unordered
     }
 
+    #[instrument(skip_all)]
     fn apply<V1, V2>(&self, input: Submatrix<V1, El<Self::Ring>>, mut output: SubmatrixMut<V2, El<Self::Ring>>)
         where V1: AsPointerToSlice<El<Self::Ring>>,
             V2: AsPointerToSlice<El<Self::Ring>>

@@ -8,6 +8,7 @@ use feanor_math::ring::*;
 use feanor_math::homomorphism::*;
 use feanor_math::seq::*;
 use feanor_math::ordered::OrderedRingStore;
+use tracing::instrument;
 
 use std::alloc::Allocator;
 use std::alloc::Global;
@@ -57,6 +58,7 @@ impl<A> AlmostExactRescalingConvert<A>
     ///  - `b` is the product of the first `den_moduli_count` elements of `in_moduli`
     /// At least the moduli belonging to `b` are expected to be sorted.
     /// 
+    #[instrument(skip_all)]
     pub fn new_with(in_moduli: Vec<Zn>, num_moduli: Vec<Zn>, den_moduli_count: usize, allocator: A) -> Self {
         let rescaling = AlmostExactRescaling::new_with(in_moduli.clone(), num_moduli, (0..den_moduli_count).collect(), allocator.clone());
         let convert = UsedBaseConversion::new_with(
@@ -91,6 +93,7 @@ impl<A> RNSOperation for AlmostExactRescalingConvert<A>
         self.convert.output_rings()
     }
 
+    #[instrument(skip_all)]
     fn apply<V1, V2>(&self, input: Submatrix<V1, El<Self::Ring>>, output: SubmatrixMut<V2, El<Self::Ring>>)
             where V1: AsPointerToSlice<El<Self::Ring>>,
                 V2: AsPointerToSlice<El<Self::Ring>>
@@ -217,6 +220,7 @@ impl<A> AlmostExactRescaling<A>
     ///  - `a` is the product of `num_moduli`
     ///  - `b` is the product of the first `den_moduli_count` elements of `in_moduli`
     /// 
+    #[instrument(skip_all)]
     pub fn new_with(in_moduli: Vec<Zn>, num_moduli: Vec<Zn>, den_moduli_indices: Vec<usize>, allocator: A) -> Self {
         let a_moduli_count = num_moduli.len();
         let ZZ = in_moduli[0].integer_ring();
@@ -297,6 +301,7 @@ impl<A> RNSOperation for AlmostExactRescaling<A>
         &self.output_moduli_unordered
     }
 
+    #[instrument(skip_all)]
     fn apply<V1, V2>(&self, input: Submatrix<V1, El<Self::Ring>>, mut output: SubmatrixMut<V2, El<Self::Ring>>)
         where V1: AsPointerToSlice<El<Self::Ring>>,
             V2: AsPointerToSlice<El<Self::Ring>>

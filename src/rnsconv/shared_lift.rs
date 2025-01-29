@@ -4,6 +4,7 @@ use std::alloc::Global;
 use feanor_math::matrix::*;
 use feanor_math::rings::zn::zn_64::*;
 use feanor_math::ring::*;
+use tracing::instrument;
 
 use super::RNSOperation;
 
@@ -32,6 +33,7 @@ pub struct AlmostExactSharedBaseConversion<A = Global>
 impl<A> AlmostExactSharedBaseConversion<A>
     where A: Allocator + Clone
 {
+    #[instrument(skip_all)]
     pub fn new_with(shared_moduli: Vec<Zn>, additional_in_moduli: Vec<Zn>, additional_out_moduli: Vec<Zn>, allocator: A) -> Self {
         let in_moduli = shared_moduli.iter().cloned().chain(additional_in_moduli.into_iter()).collect::<Vec<_>>();
         let out_moduli = shared_moduli.into_iter().chain(additional_out_moduli.iter().cloned()).collect::<Vec<_>>();
@@ -61,6 +63,7 @@ impl<A> RNSOperation for AlmostExactSharedBaseConversion<A>
         &self.out_moduli
     }
 
+    #[instrument(skip_all)]
     fn apply<V1, V2>(&self, input: Submatrix<V1, El<Self::Ring>>, mut output: SubmatrixMut<V2, El<Self::Ring>>)
         where V1: AsPointerToSlice<El<Self::Ring>>,
             V2: AsPointerToSlice<El<Self::Ring>>

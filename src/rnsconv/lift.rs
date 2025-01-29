@@ -12,6 +12,7 @@ use feanor_math::divisibility::DivisibilityRingStore;
 use feanor_math::primitive_int::*;
 use feanor_math::ring::*;
 use feanor_math::ordered::OrderedRingStore;
+use tracing::instrument;
 
 use super::sort_unstable_permutation;
 use super::RNSOperation;
@@ -65,6 +66,7 @@ impl<A> AlmostExactBaseConversion<A>
     /// Creates a new [`AlmostExactBaseConversion`] from `q` to `q'`. The moduli belonging to `q'`
     /// are expected to be sorted.
     /// 
+    #[instrument(skip_all)]
     pub fn new_with(in_rings: Vec<Zn>, out_rings: Vec<Zn>, allocator: A) -> Self {
         for i in 0..in_rings.len() {
             assert!(in_rings.at(i).integer_ring().get_ring() == ZZ.get_ring());
@@ -135,6 +137,7 @@ impl<A> RNSOperation for AlmostExactBaseConversion<A>
     /// Furthermore, if the shortest lift of the input is bounded by `Q/4`,
     /// then the result is guaranteed to be exact.
     /// 
+    #[instrument(skip_all)]
     fn apply<V1, V2>(&self, input: Submatrix<V1, El<Self::Ring>>, mut output: SubmatrixMut<V2, El<Self::Ring>>)
         where V1: AsPointerToSlice<El<Self::Ring>>,
             V2: AsPointerToSlice<El<Self::Ring>>
