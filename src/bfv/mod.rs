@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use std::ops::Range;
 use std::cmp::max;
+use std::fmt::Display;
 
 use feanor_math::algorithms::convolution::PreparedConvolutionAlgorithm;
 use feanor_math::algorithms::eea::signed_lcm;
@@ -643,6 +644,13 @@ pub struct Pow2BFV<A: Allocator + Clone + Send + Sync = DefaultCiphertextAllocat
     pub negacyclic_ntt: PhantomData<C>
 }
 
+impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingNegacyclicNTT<Zn>> Display for Pow2BFV<A, C> {
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "BFV(n = {}, log2(q) in {}..{})", 1 << self.log2_N, self.log2_q_min, self.log2_q_max)
+    }
+}
+
 impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingNegacyclicNTT<Zn>> Clone for Pow2BFV<A, C> {
 
     fn clone(&self) -> Self {
@@ -666,6 +674,15 @@ impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingNegacyclicNTT<Zn
 
     fn ciphertext_modulus_bits(&self) -> Range<usize> {
         self.log2_q_min..self.log2_q_max
+    }
+
+    #[instrument(skip_all)]
+    fn enc_sym_zero<R: Rng + CryptoRng>(C: &CiphertextRing<Self>, mut rng: R, sk: &SecretKey<Self>) -> Ciphertext<Self> {
+        let a = C.random_element(|| rng.next_u64());
+        let mut b = C.negate(C.mul_ref(&a, &sk));
+        let e = C.from_canonical_basis((0..C.rank()).map(|_| C.base_ring().int_hom().map((rng.sample::<f64, _>(StandardNormal) * 3.2).round() as i32)));
+        C.add_assign(&mut b, e);
+        return small_basis_repr::<Self, _, _>(C, (b, a));
     }
 
     #[instrument(skip_all)]
@@ -723,6 +740,15 @@ impl<A: Allocator + Clone + Send + Sync> BFVParams for CompositeBFV<A> {
         CompositeCyclotomicNumberRing::new(self.n1, self.n2)
     }
 
+    #[instrument(skip_all)]
+    fn enc_sym_zero<R: Rng + CryptoRng>(C: &CiphertextRing<Self>, mut rng: R, sk: &SecretKey<Self>) -> Ciphertext<Self> {
+        let a = C.random_element(|| rng.next_u64());
+        let mut b = C.negate(C.mul_ref(&a, &sk));
+        let e = C.from_canonical_basis((0..C.rank()).map(|_| C.base_ring().int_hom().map((rng.sample::<f64, _>(StandardNormal) * 3.2).round() as i32)));
+        C.add_assign(&mut b, e);
+        return small_basis_repr::<Self, _, _>(C, (b, a));
+    }
+    
     #[instrument(skip_all)]
     fn create_ciphertext_rings(&self) -> (CiphertextRing<Self>, CiphertextRing<Self>)  {
         let log2_q = self.ciphertext_modulus_bits();
@@ -1179,4 +1205,91 @@ fn measure_time_single_rns_composite_bfv() {
         CompositeSingleRNSBFV::hom_mul(&P, &C, &C_mul, ct, ct2, &rk)
     );
     assert_el_eq!(&P, &P.int_hom().map(1), &CompositeSingleRNSBFV::dec(&P, &C, res, &sk));
+}
+
+#[cfg(test)]
+pub fn tree_mul_benchmark<Params>(params: Params, digits: usize)
+    where Params: BFVParams + Display
+{
+    use crate::gadget_product::recommended_rns_factors_to_drop;
+
+    let mut rng = thread_rng();
+    let t = 4;
+
+    let P = params.create_plaintext_ring(t);
+    let (C, Cmul) = params.create_ciphertext_rings();
+    println!("rns base: {:?}", C.base_ring().as_iter().map(|Zp| *Zp.modulus()).collect::<Vec<_>>());
+    let sk = Params::gen_sk(&C, &mut rng);
+    let rk = Params::gen_rk(&C, &mut rng, &sk, digits);
+
+    let log2_count = 4;
+    let mut current = (0..(1 << log2_count)).map(|i| Params::enc_sym(&P, &C, &mut rng, &P.int_hom().map(2 * i + 1), &sk)).map(Some).collect::<Vec<_>>();
+    let start = Instant::now();
+
+    for i in 0..log2_count {
+        let mid = current.len() / 2;
+        let (left, right) = current.split_at_mut(mid);
+        assert_eq!(left.len(), right.len());
+        for j in 0..left.len() {
+            left[j] = Some(Params::hom_mul(&P, &C, &Cmul, left[j].take().unwrap(), right[j].take().unwrap(), &rk));
+        }
+        current.truncate(mid);
+    }
+    let end = Instant::now();
+
+    println!("{}", params);
+    println!("digits = {}", digits);
+    println!("Tree-wise multiplication of {} inputs took {} ms, so {} ms/mul", 1 << log2_count, (end - start).as_millis(), (end - start).as_millis() / ((1 << log2_count) - 1));
+    println!("Final noise budget: {}", Params::noise_budget(&P, &C, current[0].as_ref().unwrap(), &sk));
+    assert_el_eq!(&P, &P.int_hom().map((0..(1 << log2_count)).map(|i| 2 * i + 1).product::<i32>()), Params::dec(&P, &C, current[0].take().unwrap(), &sk));
+}
+
+#[cfg(test)]
+pub fn chain_mul_benchmark<Params>(params: Params, digits: usize)
+    where Params: BFVParams + Display
+{
+    use crate::gadget_product::recommended_rns_factors_to_drop;
+
+    let mut rng = thread_rng();
+    let t = 4;
+
+    let P = params.create_plaintext_ring(t);
+    let (C, Cmul) = params.create_ciphertext_rings();
+    let sk = Params::gen_sk(&C, &mut rng);
+    let rk = Params::gen_rk(&C, &mut rng, &sk, digits);
+
+    let count = 4;
+    let mut current = Params::enc_sym(&P, &C, &mut rng, &P.int_hom().map(1), &sk);
+    let start = Instant::now();
+
+    for i in 0..count {
+        let left = Params::clone_ct(&C, &current);
+        let right = current;
+        current = Params::hom_mul(&P, &C, &Cmul, left, right, &rk);
+    }
+    let end = Instant::now();
+
+    println!("{}", params);
+    println!("digits = {}", digits);
+    println!("Repeated squaring of ciphertext {} times took {} ms, so {} ms/mul", count, (end - start).as_millis(), (end - start).as_millis() / count as u128);
+    println!("Final noise budget: {}", Params::noise_budget(&P, &C, &current, &sk));
+    assert_el_eq!(&P, &P.one(), Params::dec(&P, &C, current, &sk));
+}
+
+#[ignore]
+#[test]
+fn bfv_mul_benchmark() {
+    let (chrome_layer, _guard) = tracing_chrome::ChromeLayerBuilder::new().build();
+    tracing_subscriber::registry().with(chrome_layer).init();
+
+    let params = Pow2BFV {
+        log2_q_min: 790,
+        log2_q_max: 800,
+        log2_N: 15,
+        ciphertext_allocator: AllocArc(Arc::new(DynLayoutMempool::<Global>::new(Alignment::of::<u64>()))),
+        negacyclic_ntt: PhantomData::<DefaultNegacyclicNTT>
+    };
+    let digits = 3;
+    tree_mul_benchmark(params.clone(), digits);
+    chain_mul_benchmark(params, digits);
 }

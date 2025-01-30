@@ -18,7 +18,7 @@ use super::RNSOperation;
 
 const ZZbig: BigIntRing = BigIntRing::RING;
 
-type UsedBaseConversion<A> = super::matrix_lift::AlmostExactMatrixBaseConversion<A>;
+type UsedBaseConversion<A> = super::lift::AlmostExactBaseConversion<A>;
 
 ///
 /// Computes the almost exact rescaling that "preserves" congruence modulo `t`,

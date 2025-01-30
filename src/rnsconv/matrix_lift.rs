@@ -167,7 +167,6 @@ impl<A> RNSOperation for AlmostExactMatrixBaseConversion<A>
                     // it currently does, so this is currently fine
                     *lifts.at_mut(i, j) = self.from_summands[i].any_lift(self.from_summands[i].mul_ref(input.at(i, j), self.q_over_Q.at(i))) as i128;
                     debug_assert!(*lifts.at(i, 0) >= 0 && *lifts.at(i, 0) <= ZN_ANY_LIFT_FACTOR as i128 * *self.from_summands[i].modulus() as i128);
-                    *lifts.at_mut(i, j) = self.from_summands[i].smallest_positive_lift(self.from_summands[i].mul_ref(input.at(i, j), self.q_over_Q.at(i))) as i128;
                 }
             }
 

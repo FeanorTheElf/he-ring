@@ -16,6 +16,9 @@ use std::alloc::Global;
 use super::sort_unstable_permutation;
 use super::RNSOperation;
 
+#[cfg(feature = "fastest_rnsconv")]
+type UsedBaseConversion<A> = super::matrix_lift::AlmostExactMatrixBaseConversion<A>;
+#[cfg(not(feature = "fastest_rnsconv"))]
 type UsedBaseConversion<A> = super::lift::AlmostExactBaseConversion<A>;
 
 const ZZbig: BigIntRing = BigIntRing::RING;

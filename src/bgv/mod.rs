@@ -240,13 +240,10 @@ pub trait BGVParams {
     }
 
     #[instrument(skip_all)]
-    fn hom_mul<'a>(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, lhs: Ciphertext<Self>, rhs: Ciphertext<Self>, rk: &RelinKey<'a, Self>, s: Option<&El<CiphertextRing<Self>>>) -> Ciphertext<Self>
+    fn hom_mul<'a>(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, lhs: Ciphertext<Self>, rhs: Ciphertext<Self>, rk: &RelinKey<'a, Self>) -> Ciphertext<Self>
         where Self: 'a
     {
         let [res0, res1, res2] = C.get_ring().two_by_two_convolution([&lhs.c0, &lhs.c1], [&rhs.c0, &rhs.c1]);
-
-        // let s = s.unwrap();
-        // C.println(&C.add(C.clone_el(&res0), C.add(C.mul_ref(&res1, s), C.mul_ref(&res2, &C.pow(C.clone_el(s), 2)))));
         
         let op = GadgetProductLhsOperand::from_element_with(C.get_ring(), &res2, rk.0.gadget_vector_moduli_indices());
         let (s0, s1) = &rk;
@@ -367,6 +364,18 @@ impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingNegacyclicNTT<Zn
     }
 
     #[instrument(skip_all)]
+    fn enc_sym_zero<R: Rng + CryptoRng>(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, rng: R, sk: &SecretKey<Self>) -> Ciphertext<Self> {
+        let t = C.base_ring().coerce(&ZZ, *P.base_ring().modulus());
+        let (a, b) = Self::rlwe_sample(C, rng, sk);
+        let result = Ciphertext {
+            c0: C.inclusion().mul_ref_snd_map(b, &t),
+            c1: C.inclusion().mul_ref_snd_map(a, &t),
+            implicit_scale: P.base_ring().one()
+        };
+        return double_rns_repr::<Self, _, _>(P, C, result);
+    }
+
+    #[instrument(skip_all)]
     fn max_rns_base(&self) -> zn_rns::Zn<Zn, BigIntRing> {
         let log2_q = self.log2_q_min..self.log2_q_max;
         let number_ring = self.number_ring();
@@ -398,13 +407,25 @@ pub struct CompositeBGV<A: Allocator + Clone + Send + Sync = DefaultCiphertextAl
 impl<A: Allocator + Clone + Send + Sync> Display for CompositeBGV<A> {
 
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "n = {} * {}, log2(q) in {}..{}", self.n1, self.n2, self.log2_q_min, self.log2_q_max)
+        write!(f, "BGV(n = {} * {}, log2(q) in {}..{})", self.n1, self.n2, self.log2_q_min, self.log2_q_max)
     }
 }
 
 impl<A: Allocator + Clone + Send + Sync> BGVParams for CompositeBGV<A> {
 
     type CiphertextRing = ManagedDoubleRNSRingBase<CompositeCyclotomicNumberRing, A>;
+
+    #[instrument(skip_all)]
+    fn enc_sym_zero<R: Rng + CryptoRng>(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, rng: R, sk: &SecretKey<Self>) -> Ciphertext<Self> {
+        let t = C.base_ring().coerce(&ZZ, *P.base_ring().modulus());
+        let (a, b) = Self::rlwe_sample(C, rng, sk);
+        let result = Ciphertext {
+            c0: C.inclusion().mul_ref_snd_map(b, &t),
+            c1: C.inclusion().mul_ref_snd_map(a, &t),
+            implicit_scale: P.base_ring().one()
+        };
+        return double_rns_repr::<Self, _, _>(P, C, result);
+    }
 
     fn number_ring(&self) -> CompositeCyclotomicNumberRing {
         CompositeCyclotomicNumberRing::new(self.n1, self.n2)
@@ -562,7 +583,7 @@ fn test_pow2_bgv_mul() {
 
     let input = P.int_hom().map(2);
     let ctxt = Pow2BGV::enc_sym(&P, &C, &mut rng, &input, &sk);
-    let result_ctxt = Pow2BGV::hom_mul(&P, &C, Pow2BGV::clone_ct(&P, &C, &ctxt), ctxt, &rk, None);
+    let result_ctxt = Pow2BGV::hom_mul(&P, &C, Pow2BGV::clone_ct(&P, &C, &ctxt), ctxt, &rk);
     let result = Pow2BGV::dec(&P, &C, result_ctxt, &sk);
     assert_el_eq!(&P, P.int_hom().map(4), result);
 }
@@ -641,8 +662,7 @@ fn test_pow2_bgv_modulus_switch_rk() {
             &C1,
             Pow2BGV::mod_switch(&P, &C1, &C0, &[i], Pow2BGV::clone_ct(&P, &C0, &ctxt)),
             ctxt2,
-            &new_rk,
-            None
+            &new_rk
         );
         let result = Pow2BGV::dec(&P, &C1, result_ctxt, &new_sk);
         assert_el_eq!(&P, P.int_hom().map(6), result);
@@ -698,7 +718,7 @@ fn measure_time_pow2_bgv() {
     );
     let ct2 = Pow2BGV::enc_sym(&P, &C, &mut rng, &m, &sk);
     let res = log_time::<_, _, true, _>("HomMul", |[]| 
-        Pow2BGV::hom_mul(&P, &C, ct, ct2, &rk, None)
+        Pow2BGV::hom_mul(&P, &C, ct, ct2, &rk)
     );
     assert_el_eq!(&P, &P.int_hom().map(4), &Pow2BGV::dec(&P, &C, Pow2BGV::clone_ct(&P, &C, &res), &sk));
 
@@ -760,7 +780,7 @@ fn measure_time_double_rns_composite_bgv() {
     );
     let ct2 = CompositeBGV::enc_sym(&P, &C, &mut rng, &m, &sk);
     let res = log_time::<_, _, true, _>("HomMul", |[]| 
-        CompositeBGV::hom_mul(&P, &C, ct, ct2, &rk, None)
+        CompositeBGV::hom_mul(&P, &C, ct, ct2, &rk)
     );
     assert_el_eq!(&P, &P.int_hom().map(1), &CompositeBGV::dec(&P, &C, CompositeBGV::clone_ct(&P, &C, &res), &sk));
 
@@ -823,7 +843,7 @@ fn measure_time_single_rns_composite_bgv() {
     );
     let ct2 = SingleRNSCompositeBGV::enc_sym(&P, &C, &mut rng, &m, &sk);
     let res = log_time::<_, _, true, _>("HomMul", |[]| 
-        SingleRNSCompositeBGV::hom_mul(&P, &C, ct, ct2, &rk, None)
+        SingleRNSCompositeBGV::hom_mul(&P, &C, ct, ct2, &rk)
     );
     assert_el_eq!(&P, &P.int_hom().map(1), &SingleRNSCompositeBGV::dec(&P, &C, SingleRNSCompositeBGV::clone_ct(&P, &C, &res), &sk));
 
@@ -836,12 +856,10 @@ fn measure_time_single_rns_composite_bgv() {
 }
 
 #[cfg(test)]
-pub fn tree_mul_benchmark<A>(params: CompositeBGV<A>, digits: usize)
-    where A: Allocator + Clone + Send + Sync
+pub fn tree_mul_benchmark<Params>(params: Params, digits: usize)
+    where Params: Display + BGVParams
 {
     use crate::gadget_product::recommended_rns_factors_to_drop;
-
-    type Params<A> = CompositeBGV<A>;
 
     let mut rng = thread_rng();
     let t = 4;
@@ -852,7 +870,7 @@ pub fn tree_mul_benchmark<A>(params: CompositeBGV<A>, digits: usize)
     let mut rk = Params::gen_rk(&P, &C, &mut rng, &sk, digits);
 
     let log2_count = 4;
-    let mut current = (0..(1 << log2_count)).map(|i| double_rns_repr(&P, &C, Params::enc_sym(&P, &C, &mut rng, &P.int_hom().map(2 * i + 1), &sk))).map(Some).collect::<Vec<_>>();
+    let mut current = (0..(1 << log2_count)).map(|i| Params::enc_sym(&P, &C, &mut rng, &P.int_hom().map(2 * i + 1), &sk)).map(Some).collect::<Vec<_>>();
     let start = Instant::now();
     let mut C_current = C;
 
@@ -861,7 +879,7 @@ pub fn tree_mul_benchmark<A>(params: CompositeBGV<A>, digits: usize)
         let (left, right) = current.split_at_mut(mid);
         assert_eq!(left.len(), right.len());
         for j in 0..left.len() {
-            left[j] = Some(Params::hom_mul(&P, &C_current, left[j].take().unwrap(), right[j].take().unwrap(), &rk, None));
+            left[j] = Some(Params::hom_mul(&P, &C_current, left[j].take().unwrap(), right[j].take().unwrap(), &rk));
         }
         current.truncate(mid);
 
@@ -885,12 +903,10 @@ pub fn tree_mul_benchmark<A>(params: CompositeBGV<A>, digits: usize)
 }
 
 #[cfg(test)]
-pub fn chain_mul_benchmark<A>(params: CompositeBGV<A>, digits: usize)
-    where A: Allocator + Clone + Send + Sync
+pub fn chain_mul_benchmark<Params>(params: Params, digits: usize)
+    where Params: Display + BGVParams
 {
     use crate::gadget_product::recommended_rns_factors_to_drop;
-
-    type Params<A> = CompositeBGV<A>;
 
     let mut rng = thread_rng();
     let t = 4;
@@ -901,14 +917,14 @@ pub fn chain_mul_benchmark<A>(params: CompositeBGV<A>, digits: usize)
     let mut rk = Params::gen_rk(&P, &C, &mut rng, &sk, digits);
 
     let count = 4;
-    let mut current = double_rns_repr(&P, &C, Params::enc_sym(&P, &C, &mut rng, &P.int_hom().map(1), &sk));
+    let mut current = Params::enc_sym(&P, &C, &mut rng, &P.int_hom().map(1), &sk);
     let start = Instant::now();
     let mut C_current = C;
 
     for i in 0..count {
         let left = Params::clone_ct(&P, &C_current, &current);
         let right = current;
-        current = Params::hom_mul(&P, &C_current, left, right, &rk, None);
+        current = Params::hom_mul(&P, &C_current, left, right, &rk);
 
         let drop_prime_count = if i == 0 { 4 } else if i + 1 == count { 0 } else { 2 };
         let drop_rns_base_factors = recommended_rns_factors_to_drop(C_current.base_ring().len(), digits, drop_prime_count);
