@@ -21,10 +21,8 @@ use serde::{de, Deserializer, Serializer};
 use serde_json::Number;
 
 use crate::cyclotomic::{CyclotomicGaloisGroupEl, CyclotomicRing};
-use crate::sample_primes;
-use crate::IsEq;
 use super::pow2_cyclotomic::Pow2CyclotomicNumberRing;
-use super::{largest_prime_leq_congruent_to_one, HECyclotomicNumberRing, HENumberRing, HENumberRingMod, HECyclotomicNumberRingMod};
+use super::{sample_primes, largest_prime_leq_congruent_to_one, HECyclotomicNumberRing, HENumberRing, HENumberRingMod, HECyclotomicNumberRingMod};
 
 ///
 /// Implementation of `R/tR` for any modulus `t` (without restriction on the
@@ -167,7 +165,7 @@ impl<NumberRing, ZnTy, A> NumberRingQuotientBase<NumberRing, ZnTy, A>
                 }
                 self.ring_decompositions[i].coeff_basis_to_small_basis(&mut tmp[..]);
                 self.ring_decompositions[i].small_basis_to_mult_basis(&mut tmp[..]);
-                <_ as HECyclotomicNumberRingMod>::permute_galois_action(<NumberRing::DecomposedAsCyclotomic>::from_ref(&self.ring_decompositions[i]), &tmp[..], &mut tmp_perm[..], g);
+                <_ as HECyclotomicNumberRingMod>::permute_galois_action(&self.ring_decompositions[i], &tmp[..], &mut tmp_perm[..], g);
                 for j in 0..self.rank() {
                     Zp.add_assign_ref(&mut unreduced_result[i * self.rank() + j], &tmp_perm[j]);
                 }
@@ -207,7 +205,7 @@ impl<NumberRing, ZnTy, A> CyclotomicRing for NumberRingQuotientBase<NumberRing, 
         A: Allocator + Clone
 {
     fn n(&self) -> usize {
-        <NumberRing::DecomposedAsCyclotomic>::from_ref(&self.ring_decompositions()[0]).n()
+        self.ring_decompositions()[0].n()
     }
 
     fn apply_galois_action(&self, el: &<Self as RingBase>::Element, g: CyclotomicGaloisGroupEl) -> <Self as RingBase>::Element {
@@ -226,7 +224,7 @@ impl<NumberRing, ZnTy, A> CyclotomicRing for NumberRingQuotientBase<NumberRing, 
             }
             self.ring_decompositions[i].coeff_basis_to_small_basis(&mut tmp[..]);
             self.ring_decompositions[i].small_basis_to_mult_basis(&mut tmp[..]);
-            <NumberRing::DecomposedAsCyclotomic>::from_ref(&self.ring_decompositions()[i]).permute_galois_action(&tmp[..], &mut unreduced_result[(i * self.rank())..((i + 1) * self.rank())], g);
+            self.ring_decompositions()[i].permute_galois_action(&tmp[..], &mut unreduced_result[(i * self.rank())..((i + 1) * self.rank())], g);
             self.ring_decompositions[i].mult_basis_to_small_basis(&mut unreduced_result[(i * self.rank())..((i + 1) * self.rank())]);
             self.ring_decompositions[i].small_basis_to_coeff_basis(&mut unreduced_result[(i * self.rank())..((i + 1) * self.rank())]);
         }

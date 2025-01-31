@@ -46,26 +46,21 @@ use crate::circuit::Coefficient;
 use crate::circuit::PlaintextCircuit;
 use crate::cyclotomic::*;
 use crate::euler_phi;
-use crate::extend_sampled_primes;
 use crate::gadget_product::GadgetProductLhsOperand;
 use crate::gadget_product::GadgetProductRhsOperand;
 use crate::lintransform::composite::powcoeffs_to_slots_fat;
 use crate::ntt::{HERingNegacyclicNTT, HERingConvolution};
 use crate::ciphertext_ring::double_rns_managed::*;
 use crate::number_ring::hypercube::{HypercubeStructure, HypercubeIsomorphism};
-use crate::number_ring::largest_prime_leq_congruent_to_one;
+use crate::number_ring::{largest_prime_leq_congruent_to_one, sample_primes, extend_sampled_primes, HECyclotomicNumberRing, HENumberRing};
 use crate::number_ring::quotient::*;
-use crate::number_ring::{HECyclotomicNumberRing, HENumberRing};
 use crate::number_ring::pow2_cyclotomic::*;
 use crate::number_ring::odd_cyclotomic::*;
-use crate::profiling::*;
 use crate::ciphertext_ring::single_rns_ring::SingleRNSRingBase;
 use crate::rnsconv::bfv_rescale::{AlmostExactRescaling, AlmostExactRescalingConvert};
 use crate::rnsconv::shared_lift::AlmostExactSharedBaseConversion;
 use crate::DefaultCiphertextAllocator;
-use crate::sample_primes;
-use crate::DefaultConvolution;
-use crate::DefaultNegacyclicNTT;
+use crate::*;
 
 use rand::thread_rng;
 use rand::{Rng, CryptoRng};
@@ -111,17 +106,22 @@ pub struct MulConversionData {
 /// but can be overloaded in case a specific instantiation allows for
 /// a more efficient implementation.
 /// 
-/// ## Combining different ring implementations
+/// ## Combining different ring implementations, or why all BFV functions are associated
 /// 
 /// I'm not yet completely sure what is the best way to handle this.
+/// 
 /// Currently, each implementor of [`BFVParams`] fixes the type of the
-/// ciphertext ring to be used. However, since the different possible
-/// ciphertext ring implementations have different performance characteristics,
-/// it may be sensible to switch the implementation during working with the
-/// scheme. Currently, this requires either creating two different `BFVParams`-
-/// instantiations (recommended), or manually creating the ciphertext ring.
-/// Note that mapping the ring elements between the implementations can be
-/// done using [`feanor_math::homomorphism::CanIso`].
+/// rings to be used, and defines all BFV functions (in terms of these ring
+/// types) as associated functions. The advantage is obviously that certain
+/// BFV parameters can overwrite the default implementations, and perform
+/// BFV operations in a way that uses the rings in the most efficient way.
+/// 
+/// The disadvantage is also clear: We cannot (easily) mix rings or BFV
+/// objects created w.r.t. different [`BFVParams`] implementations. For example,
+/// if we want to use a ciphertext w.r.t. (say) [`CompositeBFV`] in a function
+/// of [`CompositeSingleRNSBFV`], an explicit conversion is necessary. In this
+/// case, this could for example be achieved by using the isomorphism between
+/// these rings, as given by [`feanor_math::ring::RingStore::can_iso()`];
 ///  
 pub trait BFVParams {
     
@@ -694,7 +694,7 @@ impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingNegacyclicNTT<Zn
         let mut C_rns_base = sample_primes(log2_q.start, log2_q.end, 56, |bound| largest_prime_leq_congruent_to_one(int_cast(bound, ZZ, ZZbig), required_root_of_unity).map(|p| int_cast(p, ZZbig, ZZ))).unwrap();
         C_rns_base.sort_unstable_by(|l, r| ZZbig.cmp(l, r));
 
-        let mut Cmul_rns_base = extend_sampled_primes(&C_rns_base, log2_q.end * 2, log2_q.end * 2 + 57, 57, |bound| largest_prime_leq_congruent_to_one(int_cast(bound, ZZ, ZZbig), required_root_of_unity).map(|p| int_cast(p, ZZbig, ZZ))).unwrap();
+        let mut Cmul_rns_base = extend_sampled_primes(&C_rns_base, log2_q.end * 2 + 10, log2_q.end * 2 + 67, 57, |bound| largest_prime_leq_congruent_to_one(int_cast(bound, ZZ, ZZbig), required_root_of_unity).map(|p| int_cast(p, ZZbig, ZZ))).unwrap();
         assert!(ZZbig.is_gt(&Cmul_rns_base[Cmul_rns_base.len() - 1], &C_rns_base[C_rns_base.len() - 1]));
         Cmul_rns_base.sort_unstable_by(|l, r| ZZbig.cmp(l, r));
 

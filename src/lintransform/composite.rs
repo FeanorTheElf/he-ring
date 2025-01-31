@@ -20,7 +20,7 @@ use crate::number_ring::hypercube::HypercubeStructure;
 use crate::number_ring::hypercube::SlotRingOver;
 use crate::number_ring::odd_cyclotomic::CompositeCyclotomicNumberRing;
 use crate::number_ring::quotient::NumberRingQuotientBase;
-use crate::profiling::log_time;
+use crate::log_time;
 use crate::number_ring::{HECyclotomicNumberRing, HENumberRing};
 use crate::number_ring::quotient::NumberRingQuotient;
 use crate::number_ring::hypercube::HypercubeIsomorphism;

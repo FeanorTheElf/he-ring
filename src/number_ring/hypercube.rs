@@ -39,8 +39,7 @@ use feanor_math::wrapper::RingElementWrapper;
 use tracing::instrument;
 
 use crate::cyclotomic::{CyclotomicGaloisGroup, CyclotomicGaloisGroupEl, CyclotomicRing, CyclotomicRingStore};
-use crate::euler_phi;
-use crate::profiling::log_time;
+use crate::{euler_phi, log_time};
 use crate::ntt::dyn_convolution::*;
 
 use super::interpolate::FastPolyInterpolation;

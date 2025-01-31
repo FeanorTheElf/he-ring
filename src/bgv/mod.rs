@@ -28,13 +28,12 @@ use crate::cyclotomic::CyclotomicRing;
 use crate::gadget_product::{GadgetProductLhsOperand, GadgetProductRhsOperand};
 use crate::ntt::{HERingConvolution, HERingNegacyclicNTT};
 use crate::number_ring::odd_cyclotomic::CompositeCyclotomicNumberRing;
-use crate::number_ring::{largest_prime_leq_congruent_to_one, HECyclotomicNumberRing, HENumberRing};
+use crate::number_ring::{sample_primes, largest_prime_leq_congruent_to_one, HECyclotomicNumberRing, HENumberRing};
 use crate::number_ring::pow2_cyclotomic::Pow2CyclotomicNumberRing;
 use crate::number_ring::quotient::{NumberRingQuotient, NumberRingQuotientBase};
-use crate::profiling::log_time;
 use crate::rnsconv::bgv_rescale::{CongruenceAwareAlmostExactBaseConversion, CongruencePreservingRescaling};
 use crate::rnsconv::RNSOperation;
-use crate::{sample_primes, DefaultCiphertextAllocator, DefaultConvolution, DefaultNegacyclicNTT};
+use crate::{log_time, DefaultCiphertextAllocator, DefaultConvolution, DefaultNegacyclicNTT};
 
 use rand_distr::StandardNormal;
 use rand::{thread_rng, CryptoRng, Rng};

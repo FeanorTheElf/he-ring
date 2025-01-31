@@ -26,7 +26,7 @@ use zn_static::Fp;
 use crate::feanor_math::rings::extension::*;
 use feanor_math::seq::*;
 
-use crate::{euler_phi, euler_phi_squarefree, sample_primes};
+use crate::{euler_phi, euler_phi_squarefree};
 use crate::cyclotomic::{CyclotomicGaloisGroupEl, CyclotomicRing, CyclotomicRingStore};
 use super::{quotient, HECyclotomicNumberRing, HECyclotomicNumberRingMod, HENumberRing, HENumberRingMod};
 
@@ -188,8 +188,6 @@ impl HENumberRing for OddCyclotomicNumberRing {
 
 impl HECyclotomicNumberRing for OddCyclotomicNumberRing {
 
-    type DecomposedAsCyclotomic = OddCyclotomicDecomposedNumberRing<BluesteinFFT<zn_64::ZnBase, zn_64::ZnBase, Identity<zn_64::Zn>>>;
-
     fn n(&self) -> usize {
         self.n_factorization_squarefree.iter().copied().product::<i64>() as usize
     }
@@ -229,8 +227,6 @@ impl PartialEq for CompositeCyclotomicNumberRing {
 }
 
 impl HECyclotomicNumberRing for CompositeCyclotomicNumberRing {
-
-    type DecomposedAsCyclotomic = CompositeCyclotomicDecomposedNumberRing<BluesteinFFT<zn_64::ZnBase, zn_64::ZnBase, Identity<zn_64::Zn>>>;
 
     fn n(&self) -> usize {
         <_ as HECyclotomicNumberRing>::n(&self.tensor_factor1) * <_ as HECyclotomicNumberRing>::n(&self.tensor_factor2)

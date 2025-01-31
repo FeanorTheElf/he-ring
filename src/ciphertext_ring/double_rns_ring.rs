@@ -28,7 +28,6 @@ use tracing::instrument;
 use crate::cyclotomic::{CyclotomicGaloisGroupEl, CyclotomicRing};
 use crate::number_ring::*;
 use crate::rnsconv::*;
-use crate::IsEq;
 use super::single_rns_ring::*;
 use super::BGFVCiphertextRing;
 
@@ -633,7 +632,7 @@ impl<NumberRing, A> CyclotomicRing for DoubleRNSRingBase<NumberRing, A>
     fn apply_galois_action(&self, el: &Self::Element, g: CyclotomicGaloisGroupEl) -> Self::Element {
         let mut result = self.zero();
         for (i, _) in self.rns_base().as_iter().enumerate() {
-            <NumberRing::DecomposedAsCyclotomic>::from_ref(self.ring_decompositions().at(i)).permute_galois_action(
+            self.ring_decompositions().at(i).permute_galois_action(
                 &el.el_wrt_mult_basis[(i * self.rank())..((i + 1) * self.rank())],
                 &mut result.el_wrt_mult_basis[(i * self.rank())..((i + 1) * self.rank())],
                 g

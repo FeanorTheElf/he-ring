@@ -29,11 +29,10 @@ use feanor_math::rings::zn::zn_64::Zn;
 
 use crate::cyclotomic::CyclotomicGaloisGroupEl;
 use crate::ntt::HERingNegacyclicNTT;
-use crate::sample_primes;
 use crate::cyclotomic::CyclotomicRing;
 
 use super::quotient;
-use super::{HECyclotomicNumberRing, HECyclotomicNumberRingMod, HENumberRing, HENumberRingMod};
+use super::{sample_primes, HECyclotomicNumberRing, HECyclotomicNumberRingMod, HENumberRing, HENumberRingMod};
 
 pub struct Pow2CyclotomicNumberRing<N = RustNegacyclicNTT<Zn>> {
     log2_n: usize,
@@ -119,8 +118,6 @@ impl<N> HENumberRing for Pow2CyclotomicNumberRing<N>
 impl<N> HECyclotomicNumberRing for Pow2CyclotomicNumberRing<N>
     where N: Send + Sync + HERingNegacyclicNTT<zn_64::Zn>
 {
-    type DecomposedAsCyclotomic = Pow2CyclotomicDecomposedNumberRing<N, Global>;
-
     fn n(&self) -> usize {
         1 << self.log2_n
     }
