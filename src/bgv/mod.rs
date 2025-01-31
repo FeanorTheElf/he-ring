@@ -49,7 +49,7 @@ const ZZbig: BigIntRing = BigIntRing::RING;
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
 
 ///
-/// A BGV ciphertext w.r.t. some [`BFVParams`]. Note that this implementation
+/// A BGV ciphertext w.r.t. some [`BGVParams`]. Note that this implementation
 /// does not include an automatic management of the ciphertext modulus chain,
 /// it is up to the user to keep track of the RNS base used for each 
 /// ciphertext.

@@ -88,7 +88,7 @@ impl OddCyclotomicNumberRing {
     ///   sup_(x in R \ {0}) | x |'_inf / | x |_can
     /// ```
     /// For the distinction of standard inf-norm and powerful inf-norm, see
-    /// the doc of [`OddCyclotomicDecomposableNumberRing::powful_inf_to_can_norm_expansion_factor()`].
+    /// the doc of [`OddCyclotomicNumberRing::powful_inf_to_can_norm_expansion_factor()`].
     /// 
     pub fn can_to_powful_inf_norm_expansion_factor(&self) -> f64 {
         // if `n = p` is a prime, we can give an explicit inverse to the matrix
@@ -106,7 +106,7 @@ impl OddCyclotomicNumberRing {
     ///   sup_(x in R \ {0}) | x |_inf / | x |'_inf
     /// ```
     /// For the distinction of standard inf-norm and powerful inf-norm, see
-    /// the doc of [`OddCyclotomicDecomposableNumberRing::powful_inf_to_can_norm_expansion_factor()`].
+    /// the doc of [`OddCyclotomicNumberRing::powful_inf_to_can_norm_expansion_factor()`].
     /// 
     pub fn powful_inf_to_inf_norm_expansion_factor(&self) -> f64 {
         // TODO: Fix

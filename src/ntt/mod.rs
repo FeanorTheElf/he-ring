@@ -2,6 +2,10 @@ use feanor_math::algorithms::convolution::PreparedConvolutionAlgorithm;
 use feanor_math::ring::*;
 use feanor_math::rings::zn::ZnRing;
 
+///
+/// A convolution as in [`PreparedConvolutionAlgorithm`], that can additionally be created for
+/// a given ring and length. This is required in many use cases within HE-Ring.
+/// 
 pub trait HERingConvolution<R>: PreparedConvolutionAlgorithm<R::Type>
     where R: RingStore
 {
@@ -22,6 +26,10 @@ impl HERingConvolution<feanor_math::rings::zn::zn_64::Zn> for feanor_math_hexl::
     }
 }
 
+///
+/// An object that supports computing a negacyclic NTT, i.e the evaluation of a polynomial
+/// at all primitive `n`-th roots of unity, where `n` is a power of two.
+/// 
 pub trait HERingNegacyclicNTT<R>: PartialEq
     where R: RingStore
 {
@@ -41,5 +49,14 @@ pub trait HERingNegacyclicNTT<R>: PartialEq
     fn new(ring: R, log2_rank: usize) -> Self;
 }
 
+///
+/// Contains an implementation of [`HERingConvolution`] based on NTTs.
+/// 
 pub mod ntt_convolution;
+
+///
+/// Contains a dyn-compatible variant of [`PreparedConvolutionAlgorithm`].
+/// This is useful if you want to create a ring but only know the type
+/// of the convolution algorithm at runtime.
+/// 
 pub mod dyn_convolution;

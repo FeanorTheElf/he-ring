@@ -66,6 +66,9 @@ use rand::thread_rng;
 use rand::{Rng, CryptoRng};
 use rand_distr::StandardNormal;
 
+///
+/// Contains the implementation of bootstrapping for BFV.
+/// 
 pub mod bootstrap;
 
 pub type NumberRing<Params: BFVParams> = <Params::CiphertextRing as BGFVCiphertextRing>::NumberRing;
@@ -673,6 +676,7 @@ impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingNegacyclicNTT<Zn
     }
 
     fn ciphertext_modulus_bits(&self) -> Range<usize> {
+        assert!(self.log2_q_min < self.log2_q_max);
         self.log2_q_min..self.log2_q_max
     }
 

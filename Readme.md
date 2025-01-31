@@ -10,7 +10,7 @@ Instead, the goal is to provide a toolkit for researchers that simplifies implem
 
 In short, he-ring contains the following:
  - multiple efficient implementations of arithmetic in the ring `R_q`, which provide different performance characteristics (supporting arbitrary `n`)
- - an implementation of the isomorphism `R/(p^e) = GR(p, e, d) x ... x GR(p, e, d)` via "hypercube structures" (compare ["Bootstrapping for HElib"](https://ia.cr/2014/873))
+ - an implementation of the isomorphism `R/(p^e) = GR(p, e, d) x ... x GR(p, e, d)` via "hypercube structures" (compare "Bootstrapping for HElib" by Halevi and Shoup, <https://ia.cr/2014/873>)
  - an implementation of "gadget products", i.e. the certain kind of inner product that is used in HE schemes to multiply ciphertexts with lower noise growth
  - implementations of the BFV and BGV encryption schemes
  - bootstrapping for BFV

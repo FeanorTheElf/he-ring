@@ -292,7 +292,7 @@ fn pow2_bitreversed_inv_dwt<G, NumberRing>(H: &DefaultHypercube<NumberRing>, dim
 }
 
 ///
-/// Computes the [https://ia.cr/2024/153]-style Slots-to-Coeffs linear transform for the thin-bootstrapping case,
+/// Computes the <https://ia.cr/2024/153>-style Slots-to-Coeffs linear transform for the thin-bootstrapping case,
 /// i.e. where all slots contain elements in `Z/pZ`.
 /// 
 /// In the case `p = 1 mod 4`, the slots are enumerated by `i, j` with `0 <= i < m/2` and `j in {0, 1}`. If `p = 1 mod 4`.
@@ -409,6 +409,21 @@ pub fn slots_to_coeffs_thin_inv<NumberRing>(H: &DefaultHypercube<NumberRing>) ->
     }
 }
 
+///
+/// Computes the <https://ia.cr/2024/153>-style Coeffs-to-Slots linear transform for the thin-bootstrapping case,
+/// i.e. where all slots contain elements in `Z/pZ`.
+/// 
+/// In the case `p = 1 mod 4`, the slots are enumerated by `i, j` with `0 <= i < m/2` and `j in {0, 1}`. If `p = 1 mod 4`.
+/// Then the returned linear transform will put the value of the coefficient of `X^(i * n/(2m))` into slot `(bitrev(i, m/2), 0)` 
+/// and the value the coefficient of `X^(i * n/(2m) + n/4)` into slot `(bitrev(i, m/2), 1)`.
+/// 
+/// If `p = 3 mod 4`, the slots are enumerated by `i` with `0 <= i < m` and the transform will put the value of the coefficient
+/// of `X^(i * n/(4m))` into slot `bitrev(i, m)`.
+/// 
+/// Note that the values of all other coefficients are discarded, hence this transform is not the inverse of [`slots_to_coeffs_thin()`].
+/// However, `coeff_to_slots_thin()(slots_to_coeffs_thin()(x))` does give `x` for all thinly-packed plaintexts `x`, i.e. `x` where
+/// each slot only contains an element in `Z/pZ`. 
+/// 
 #[instrument(skip_all)]
 pub fn coeffs_to_slots_thin<NumberRing>(H: &DefaultHypercube<NumberRing>) -> PlaintextCircuit<NumberRingQuotientBase<NumberRing, Zn, Global>>
     where NumberRing: HECyclotomicNumberRing + Clone

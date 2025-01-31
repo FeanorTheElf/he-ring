@@ -20,7 +20,7 @@ type UsedBaseConversion<A> = super::lift::AlmostExactBaseConversion<A>;
 /// lift of the input is bounded by `aq/4`, in which case the result
 /// is always correct.
 /// 
-/// The functionality is exactly as for [`AlmostExactBaseConversion`],
+/// The functionality is exactly as for [`super::lift::AlmostExactBaseConversion`],
 /// except that it might be faster by reusing the shared factor `a`.
 /// 
 pub struct AlmostExactSharedBaseConversion<A = Global>

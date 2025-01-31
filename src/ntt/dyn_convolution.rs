@@ -8,11 +8,12 @@ use feanor_math::seq::VectorView;
 
 ///
 /// Trait for algorithms that compute convolutions. This mirrors
-/// [`feanor_math::algorithms::convolution::ConvolutionAlgorithm`], but
-/// is dyn-compatible.
+/// [`ConvolutionAlgorithm`], but is dyn-compatible. This is useful 
+/// if you want to create a ring but only know the type of the 
+/// convolution algorithm at runtime.
 /// 
 /// Wrap a `dyn DynConvolutionAlgorithm<R>` in [`DynConvolutionAlgorithmConvolution`]
-/// to use it as a [`feanor_math::algorithms::convolution::ConvolutionAlgorithm`].
+/// to use it as a [`ConvolutionAlgorithm`].
 /// 
 pub trait DynConvolutionAlgorithm<R>
     where R: ?Sized + RingBase
@@ -44,7 +45,7 @@ impl<R, C> DynConvolutionAlgorithm<R> for C
 
 ///
 /// Wraps a [`DynConvolutionAlgorithm`] trait object to use it as a 
-/// [`feanor_math::algorithms::convolution::ConvolutionAlgorithm`].
+/// [`ConvolutionAlgorithm`].
 /// 
 pub struct DynConvolutionAlgorithmConvolution<R, C = Box<dyn DynConvolutionAlgorithm<R>>>
     where C: Deref,

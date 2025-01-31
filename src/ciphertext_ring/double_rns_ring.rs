@@ -32,16 +32,24 @@ use super::single_rns_ring::*;
 use super::BGFVCiphertextRing;
 
 ///
-/// The ring `R/qR` specified by a collection of [`HENumberRingMod`] for all prime factors `p | q`. 
+/// Implementation of the ring `Z[𝝵_n]/(q)`, where `q = p1 ... pr` is a product of "RNS factors".
 /// Elements are (by default) stored in double-RNS-representation for efficient arithmetic.
 /// 
-/// When necessary, it is also possible by using [`DoubleRNSRingBase::do_fft()`] and
-/// [`DoubleRNSRingBase::undo_fft()`] to work with ring elements not in double-RNS-representation,
-/// but note that multiplication is not available for those. These elements are then stored w.r.t.
-/// the small basis (as defined by [`HENumberRingMod`], usually the powerful basis), which does
-/// not have to be the coefficient basis. Of course, the coefficient basis is used for functions that
-/// operate on the coefficients, e.g. [`FreeAlgebra::from_canonical_basis()`] and
-/// [`FreeAlgebra::wrt_canonical_basis()`].
+/// As opposed to [`SingleRNSRing`], this means multiplications are very cheap, but non-arithmetic
+/// operations like [`FreeAlgebra::from_canonical_basis()`] and [`FreeAlgebra::wrt_canonical_basis()`] 
+/// are expensive, and in some cases only supported for elements that have explicitly been converted 
+/// to [`SmallBasisEl`] via [`DoubleRNSRingBase::undo_fft()`]. This conversion is expensive in terms of
+/// performance.
+/// 
+/// # Mathematical details
+/// 
+/// The "double-RNS representation" refers to the representation of an element via its value modulo
+/// each prime ideal of `Z[𝝵_n]/(q)`. Since we require each `Z/(pi)` to have a primitive `n`-th root
+/// of unity `z`, these prime ideals are of the form `(pi, 𝝵_n - z^j)` with `j in (Z/nZ)*`.
+/// In other words, the double-RNS representation refers to the evaluation of an element (considered
+/// as polyomial in `𝝵_n`) at all primitive `n`-th roots of unity, modulo each `pi`.
+/// This is also the multiplicative basis, as specified by [`HENumberRingMod`].
+/// In particular, multiplication of elements refers to component-wise multiplication of these vectors.
 /// 
 pub struct DoubleRNSRingBase<NumberRing, A = Global> 
     where NumberRing: HENumberRing,
@@ -90,6 +98,12 @@ pub struct SmallBasisEl<NumberRing, A = Global>
 impl<NumberRing> DoubleRNSRingBase<NumberRing> 
     where NumberRing: HENumberRing
 {
+    ///
+    /// Creates a new [`DoubleRNSRing`].
+    /// 
+    /// Each RNS factor `Z/(pi)` in `rns_base` must have suitable roots of unity,
+    /// as specified by [`HENumberRing::mod_p_required_root_of_unity()`].
+    /// 
     #[instrument(skip_all)]
     pub fn new(number_ring: NumberRing, rns_base: zn_rns::Zn<Zn, BigIntRing>) -> RingValue<Self> {
         Self::new_with(number_ring, rns_base, Global)
@@ -129,6 +143,12 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
     where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
+    ///
+    /// Creates a new [`DoubleRNSRing`].
+    /// 
+    /// Each RNS factor `Z/(pi)` in `rns_base` must have suitable roots of unity,
+    /// as specified by [`HENumberRing::mod_p_required_root_of_unity()`].
+    /// 
     #[instrument(skip_all)]
     pub fn new_with(number_ring: NumberRing, rns_base: zn_rns::Zn<Zn, BigIntRing>, allocator: A) -> RingValue<Self> {
         assert!(rns_base.len() > 0);

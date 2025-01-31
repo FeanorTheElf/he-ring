@@ -28,7 +28,7 @@ use super::RNSOperation;
 /// 
 /// # Implementation
 /// 
-/// Similar to [`super::approx_lift::AlmostExactBaseConversion`], but this
+/// Similar to [`super::lift::AlmostExactBaseConversion`], but this
 /// implementation makes some assumptions on the sizes of the moduli, which allows
 /// to use a matrix multiplication for the performance-critical section.
 /// 
@@ -65,7 +65,7 @@ impl<A> AlmostExactMatrixBaseConversion<A>
     where A: Allocator + Clone
 {
     ///
-    /// Creates a new [`AlmostExactBaseConversion`] from `q` to `q'`. The moduli belonging to `q'`
+    /// Creates a new [`AlmostExactMatrixBaseConversion`] from `q` to `q'`. The moduli belonging to `q'`
     /// are expected to be sorted.
     /// 
     #[instrument(skip_all)]

@@ -147,9 +147,8 @@ pub mod gadget_product;
 pub mod bfv;
 
 ///
-/// The new implementation of arithmetic-galois circuits (i.e. circuits built
-/// from linear combination, multiplication and galois gates) that will soon
-/// replace [`digitextract::ArithCircuit`] and [`lintransform::matmul::CompiledLinearTransform`].
+/// The implementation of arithmetic-galois circuits (i.e. circuits built
+/// from linear combination, multiplication and galois gates).
 /// 
 pub mod circuit;
 
@@ -170,3 +169,19 @@ pub mod digitextract;
 /// Contains an implementation of the BGV scheme.
 /// 
 pub mod bgv;
+
+///
+/// Hacky workaround for displaying examples on `docs.rs`.
+/// 
+/// Contains an empty submodule for each example, whose documentation gives
+/// a guide to the corresponding concepts of HE-Ring.
+/// 
+#[cfg(any(doc, doctest))]
+pub mod examples {
+    #[doc = include_str!("../examples/bfv_basics/Readme.md")]
+    pub mod bfv_basics {}
+    #[doc = include_str!("../examples/bfv_impl_v1/Readme.md")]
+    pub mod bfv_impl_v1 {}
+    #[doc = include_str!("../examples/bfv_impl_v2/Readme.md")]
+    pub mod bfv_impl_v2 {}
+}

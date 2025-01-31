@@ -39,6 +39,23 @@ use crate::number_ring::quotient::NumberRingQuotient;
 use crate::number_ring::hypercube::HypercubeIsomorphism;
 use crate::cyclotomic::*;
 
+///
+/// Generates a circuit that computes a relative trace in a ring with the given Galois group.
+/// 
+/// The most important case is that `relative_galois_group_gen` generates `galois_group`, in which case this is the absolute
+/// trace over the prime field.
+/// 
+/// In more detail, given the Galois group `G` of a ring `R` and the "relative Galois group generator" `σ in G`, the returned
+/// circuit computes the trace in the ring extension `R/S`, where `S` is the subring of `R` whose elements are fixed by `<σ> <= G`.
+/// The value `relative_degree` must be equal to the order of `σ` in `G`.
+/// The given ring `ring` is completely irrelevant for this discussion, it is only used to provide the constants used to build the
+/// circuit (in particular, it is not required to have a well-defined Galois group, and can e.g. be `StaticRing::<i64>::RING`).
+/// 
+/// Formally, the returned circuit computes the map
+/// ```text
+///   x  ->  sum_(0 <= k < relative_degree) σ^k(x)
+/// ```
+/// 
 pub fn trace_circuit<R>(ring: &R, galois_group: &CyclotomicGaloisGroup, relative_galois_group_gen: CyclotomicGaloisGroupEl, relative_degree: usize) -> PlaintextCircuit<R>
     where R: ?Sized + RingBase
 {
@@ -90,7 +107,7 @@ pub fn trace_circuit<R>(ring: &R, galois_group: &CyclotomicGaloisGroup, relative
 }
 
 ///
-/// Computes `a` such that `Tr(aY)` is the given `Fp`-linear map `GR(p, e, d) -> Z/p^eZ`.
+/// Computes `a` such that `y -> Tr(ay)` is the given `Fp`-linear map `GR(p, e, d) -> Z/p^eZ`.
 /// 
 /// We assume that the frobenius automorphism in the given ring is given by `X -> X^p`
 /// where `X` is its canonical generator. At the moment this always true, since we currently

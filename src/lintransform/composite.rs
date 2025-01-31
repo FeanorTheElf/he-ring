@@ -113,7 +113,7 @@ fn slots_to_powcoeffs_fat_fst_step<NumberRing>(H: &DefaultHypercube<NumberRing>,
 }
 
 ///
-/// Computes the [https://ia.cr/2014/873]-style linear transform for fat bootstrapping with composite moduli.
+/// Computes the <https://ia.cr/2014/873>-style linear transform for fat bootstrapping with composite moduli.
 /// 
 /// If for the linear transform input, the slot `(i1, ..., ir)` contains `sum_j a_(j, i1, ..., ir) 𝝵^j`, this
 /// this transform "puts" `a_(j, i1, ..., ir)` into the powerful-basis coefficient of `X1^(j * m1 + i1) X2^i2 ... Xr^ir`.
@@ -150,7 +150,7 @@ pub fn slots_to_powcoeffs_fat<NumberRing>(H: &DefaultHypercube<NumberRing>) -> V
 }
 
 ///
-/// Inverse [https://ia.cr/2014/873]-style linear transform, i.e. the inverse of [`slots_to_powcoeffs_fat()`].
+/// Inverse <https://ia.cr/2014/873>-style linear transform, i.e. the inverse of [`slots_to_powcoeffs_fat()`].
 /// 
 /// In other words, this moves the powerful-basis coefficient of `X1^(j * m1 + i1) X2^i2 ... Xr^ir`
 /// to the coefficient of `𝝵^j` within the slot `(i1, ..., ir)`.
@@ -190,7 +190,7 @@ pub fn powcoeffs_to_slots_fat<NumberRing>(H: &DefaultHypercube<NumberRing>) -> V
 }
 
 ///
-/// Computes the [https://ia.cr/2014/873]-style linear transform for thin bootstrapping with composite moduli.
+/// Computes the <https://ia.cr/2014/873>-style linear transform for thin bootstrapping with composite moduli.
 /// 
 /// If for the linear transform input, the slot `(i1, ..., ir)` contains a scalar `a_(i1, ..., ir)`, this
 /// transform "puts" `a_(i1, ..., ir)` into the powerful-basis coefficient of `X1^i1 ... Xr^ir`.

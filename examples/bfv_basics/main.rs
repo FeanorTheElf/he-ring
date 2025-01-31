@@ -2,6 +2,9 @@
 #![feature(allocator_api)]
 #![allow(non_snake_case)]
 
+// For a guided explanation of this example, see the doc
+#![doc = include_str!("Readme.md")]
+
 use std::{alloc::Global, marker::PhantomData};
 
 use feanor_math::assert_el_eq;
@@ -37,7 +40,7 @@ fn main() {
         // an exactly fixed size;
         // according to the HE standard (https://homomorphicencryption.org/wp-content/uploads/2018/11/HomomorphicEncryptionStandardv1.1.pdf),
         // choosing `q` to have 110 bits gives 128 bits of security (for `N = 2^12` and noise standard deviation 3.2)
-        log2_q_min: 100,
+        log2_q_min: 105,
         log2_q_max: 110,
         // to compute the ring arithmetic, we need an NTT implementation; multiple instance of
         // this NTT will be created for different moduli, so here only its type is relevant (this
@@ -51,7 +54,7 @@ fn main() {
     // has to be somewhat aware of the internal structure of BFV. In particular:
     //  - ciphertexts consist of two elements of `R_q = Z[X]/(Phi_n(X), q)`, which we call "ciphertext ring"
     //  - plaintexts are elements of `R_t = Z[X]/(Phi_n(X), t)` where `t` is the "plaintext modulus"
-    //  - for multiplication, we also require the ring `R_q'` for a `q' >> q` (more on that later)
+    //  - for multiplication, we also require the ring `R_qq'` for a `q' >> q` (more on that later)
     //  - the secret key is an element of `R_q`
     //  - to perform homomorphic multiplication, we require relinearization keys
     // hence, let's create all those components - note that their type depends on the type of the BFV parameters
@@ -104,7 +107,7 @@ fn main() {
 
     // perform homomorphic multiplication;
     // here we require `C_for_multiplication`, since BFV homomorphic multiplication internally requires arithmetic
-    // that does not wrap around `q`. `create_ciphertext_rings()` will choose the modulus `q'` large enough that
+    // that does not wrap around `q`. `create_ciphertext_rings()` will choose the modulus `qq'` large enough that
     // there is no wrap-around when doing this arithmetic in `C_for_multiplication`
     let enc_x_sqr = ChosenBFVParamType::hom_mul(&P, &C, &C_for_multiplication, ChosenBFVParamType::clone_ct(&C, &enc_x), enc_x, &rk);
 

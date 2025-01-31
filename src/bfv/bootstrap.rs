@@ -157,7 +157,7 @@ impl DigitExtract {
     ///
     /// Creates a [`DigitExtract`] for a scalar ring `Z/p^eZ`.
     /// 
-    /// Uses the Chen-Han digit retain polynomials [https://ia.cr/2018/067] together with
+    /// Uses the Chen-Han digit retain polynomials <https://ia.cr/2018/067> together with
     /// a heuristic method to compile them into an arithmetic circuit, based on the
     /// Paterson-Stockmeyer method.
     /// 

@@ -103,7 +103,7 @@ pub trait HECyclotomicNumberRing: HENumberRing<Decomposed: HECyclotomicNumberRin
 }
 
 ///
-/// A [`DecomposableNumberRing`] `R` modulo a prime `p` that splits completely in `R`.
+/// A [`HENumberRing`] `R` modulo a prime `p` that splits completely in `R`.
 /// 
 /// This object may define up to three different basis of `R / p`, with the following
 /// properties:

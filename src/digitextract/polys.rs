@@ -25,7 +25,7 @@ const ZZ: StaticRing<i64> = StaticRing::RING;
 /// that satisfies `digitex(x)[i] = (x mod 2) mod 2^(2^i)`.
 /// `e` must be a power of two.
 /// 
-/// Uses a lookup-table, consisting mainly of the values from [https://ia.cr/2022/1364], except for
+/// Uses a lookup-table, consisting mainly of the values from <https://ia.cr/2022/1364>, except for
 /// `e > 8`, where there seemed to be a mistake in the paper.
 /// 
 pub fn precomputed_p_2(e: usize) -> IntegerCircuit {

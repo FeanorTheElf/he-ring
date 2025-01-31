@@ -271,6 +271,7 @@ pub struct GadgetProductRhsOperand<R: BGFVCiphertextRing> {
 }
 
 fn select_digits(digits: usize, rns_base_len: usize) -> Vec<Range<usize>> {
+    assert!(digits <= rns_base_len, "the number of gadget product digits may not exceed the number of RNS factors");
     let moduli_per_small_digit = rns_base_len / digits;
     let large_digits = rns_base_len % digits;
     let small_digits = digits - large_digits;

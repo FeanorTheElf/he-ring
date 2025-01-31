@@ -54,7 +54,7 @@ pub trait BGFVCiphertextRing: RingBase + FreeAlgebra + RingExtension<BaseRing = 
     fn prepare_multiplicant(&self, x: &Self::Element) -> Self::PreparedMultiplicant;
 
     ///
-    /// Computes the multiplication of two elements that have previously been "prepared" via
+    /// Computes the product of two elements that have previously been "prepared" via
     /// [`BGFVCiphertextRing::prepare_multiplicant()`].
     /// 
     fn mul_prepared(&self, lhs: &Self::PreparedMultiplicant, rhs: &Self::PreparedMultiplicant) -> Self::Element;
@@ -70,12 +70,16 @@ pub trait BGFVCiphertextRing: RingBase + FreeAlgebra + RingExtension<BaseRing = 
         parts.into_iter().fold(self.zero(), |current, (lhs, rhs)| self.add(current, self.mul_prepared(lhs, rhs)))
     }
 
+    ///
+    /// Computes the ring `R_q'`, where `q'` is the product of all RNS factors of `q`,
+    /// except those whose indices are mentioned in `drop_rns_factors`.
+    /// 
     fn drop_rns_factor(&self, drop_rns_factors: &[usize]) -> Self;
 
     ///
     /// Reduces an element of `from` modulo `q`, where `q` must divide the modulus of `from`.
     /// 
-    /// More concretely, the RNS factors of `q` must be exactly the RNS factors of the modulus of `from`,
+    /// More concretely, the RNS factors of `q` must be exactly the RNS factors of `from.rns_base()`,
     /// except for the RNS factors whose indices occur in `dropped_rns_factors`.
     /// 
     fn drop_rns_factor_element(&self, from: &Self, dropped_rns_factors: &[usize], value: Self::Element) -> Self::Element;
@@ -83,7 +87,7 @@ pub trait BGFVCiphertextRing: RingBase + FreeAlgebra + RingExtension<BaseRing = 
     ///
     /// Reduces a `PreparedMultiplicant` of `from` modulo `q`, where `q` must divide the modulus of `from`.
     /// 
-    /// More concretely, the RNS factors of `q` must be exactly the RNS factors of the modulus of `from`,
+    /// More concretely, the RNS factors of `q` must be exactly the RNS factors of `from.rns_base()`,
     /// except for the RNS factors whose indices occur in `dropped_rns_factors`.
     /// 
     fn drop_rns_factor_prepared(&self, from: &Self, dropped_rns_factors: &[usize], value: Self::PreparedMultiplicant) -> Self::PreparedMultiplicant;

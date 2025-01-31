@@ -41,6 +41,14 @@ use super::BGFVCiphertextRing;
 
 ///
 /// Implementation of the ring `Z[𝝵_n]/(q)`, where `q = p1 ... pr` is a product of "RNS factors".
+/// Elements are stored in single-RNS-representation, using NTTs for multiplication.
+/// 
+/// As opposed to [`DoubleRNSRing`], this means multiplications are more expensive, but non-arithmetic
+/// operations like [`FreeAlgebra::wrt_canonical_basis()`] or [`BGFVCiphertextRing::as_representation_wrt_small_generating_set()`]
+/// are faster. Note that repeated multiplications with a fixed element will get significantly faster when using
+/// [`BGFVCiphertextRing::prepare_multiplicant()`] and [`BGFVCiphertextRing::mul_prepared()`].
+///  
+/// # Mathematical details
 /// 
 /// Elements are stored as polynomials, with coefficients represented w.r.t. this RNS base.
 /// In other words, the coefficients are stored by their cosets modulo each `pi`. Multiplication
@@ -100,6 +108,12 @@ impl<NumberRing, C> SingleRNSRingBase<NumberRing, Global, C>
     where NumberRing: HECyclotomicNumberRing,
         C: HERingConvolution<Zn>
 {
+    ///
+    /// Creates a new [`SingleRNSRing`].
+    /// 
+    /// It must be possible to create a convolution of type `C` for each RNS factors 
+    /// `Z/(pi)` in `rns_base`.
+    /// 
     #[instrument(skip_all)]
     pub fn new(number_ring: NumberRing, rns_base: zn_rns::Zn<Zn, BigIntRing>) -> RingValue<Self> {
         let max_log2_n = StaticRing::<i64>::RING.abs_log2_ceil(&(number_ring.n() as i64 * 2)).unwrap();
@@ -127,6 +141,14 @@ impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, A, C>
         A: Allocator + Clone,
         C: PreparedConvolutionAlgorithm<ZnBase>
 {
+    ///
+    /// Creates a new [`SingleRNSRing`].
+    /// 
+    /// The list of convolutions `convolutions` must contain one convolution for each RNS factor
+    /// `Z/(pi)` in `rns_base`. If there is one convolution object that supports computing convolutions
+    /// over every `Z/(pi)` (like [`STANDARD_CONVOLUTION`]), `convolutions` should contain multiple `Arc`s 
+    /// all pointing to this one convolution object.
+    /// 
     #[instrument(skip_all)]
     pub fn new_with(number_ring: NumberRing, rns_base: zn_rns::Zn<Zn, BigIntRing>, allocator: A, convolutions: Vec<Arc<C>>) -> RingValue<Self> {
         assert!(rns_base.len() > 0);
@@ -146,6 +168,9 @@ impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, A, C>
         })
     }
 
+    ///
+    /// Performs reduction modulo `X^n - 1`.
+    /// 
     #[instrument(skip_all)]
     pub(super) fn reduce_modulus_partly(&self, k: usize, buffer: &mut [ZnEl], output: &mut [ZnEl]) {
         assert_eq!(self.n(), output.len());
@@ -155,6 +180,9 @@ impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, A, C>
         }
     }
 
+    ///
+    /// Performs reduction modulo `Phi_n`.
+    /// 
     #[instrument(skip_all)]
     pub(super) fn reduce_modulus_complete(&self, el: &mut SingleRNSRingEl<NumberRing, A, C>) {
         let mut el_matrix = self.coefficients_as_matrix_mut(el);
