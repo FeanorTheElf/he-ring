@@ -182,7 +182,7 @@ fn main() {
     let ciphertext_sqr = hom_mul_three_component(&P, &C, &ciphertext, &ciphertext);
     let ciphertext_sqr_relin = relinearize(&C, &ciphertext_sqr, &relin_key, &B, digits);
     let end = Instant::now();
-    println!("Multiplication done in dimension N = {} within {} ms", C.rank(), (end - start).as_millis());
+    println!("bfv_impl_v1: Multiplication done in dimension N = {} within {} ms", C.rank(), (end - start).as_millis());
 
     let result = dec(&P, &C, &ciphertext_sqr_relin, &sk);
     assert_el_eq!(&P, P.pow(message, 2), result);

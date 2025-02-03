@@ -19,7 +19,7 @@ With these parameters, the scheme can be described as follows:
  - `HomAdd((c0, c1), (c0', c1'))`: return `(c0 + c0', c1 + c1')`
  - `HomMul((c0, c1), (c0', c1'), rk)`: compute the 3-component intermediate ciphertext `(round(t c0 c0' / q), round(t (c0 c1' + c1 c0') / q), round(t c1 c1' / q))`, where the multiplication of `ci` and `cj'` does not wrap around `q`, i.e. is performed using their shortest lift;
     To convert this 3-component ciphertext into a standard 2-component ciphertext, use `Relin((c0, c1, c2), rk)`
- - `Relin((c0, c1, c2), rk)`: Represent `c2` w.r.t. a gadget vector `g`, as `c2 = sum_i g[i] c[i]` with smaller ring elements `c[i]`; then return `(sum_i c[i] rk[i, 0], sum_i c[i] rk[i, 1])`
+ - `Relin((c0, c1, c2), rk)`: Represent `c2` w.r.t. a gadget vector `g`, as `c2 = sum_i g[i] c[i]` with smaller ring elements `c[i]`; then return `(c0 + sum_i c[i] rk[i, 0], c1 + sum_i c[i] rk[i, 1])`
  - `RelinKeyGen(sk)`: Take a gadget vector `g` as before, and return `rk[i, 0] = (a[i] * sk + e[i] + g[i] * sk^2)` and `rk[i, 1] = -a[i]` for uniformly random `a[i] in R_q` and small noises `e[i] in R_q`
 
 ## Choosing the rings
@@ -32,14 +32,16 @@ For `R_t`, we have the following options:
  - Use [`feanor_math::rings::extension::extension_impl::FreeAlgebraImpl`], this is a general implementation of ring extensions of the form `BaseRing[X]/(f(X))`. By choosing `BaseRing` to be `Z/(t)` and `f(X) = Phi_n(X)`, we get the desired ring.
  - Use [`crate::number_ring::quotient::NumberRingQuotient`], which is an implementation of `R/(t)` for any integer `t` and ring `R` that is represented abstractly using [`crate::number_ring::HENumberRing`].
  - Implement our own ring!
+
 Perhaps unsurprisingly, `NumberRingQuotient` is actually perfectly suited for this purpose (after all, this is what it was designed to do).
 
 For `R_q`, we again have some options:
  - The same options as before - indeed, none of those makes assumptions on `t` that would cause a problem when we replace it by `q`
  - However, we have additional options: Since we can choose `q` freely, we can use an RNS representation, implementations of which are provided by [`crate::ciphertext_ring::double_rns_ring::DoubleRNSRing`] and [`crate::ciphertext_ring::single_rns_ring::SingleRNSRing`].
+
 For practical purposes, it turns out that we should absolutely use an RNS-based implementation, since those are much faster than general ones.
 However, for our first "unoptimized" implementation of BFV, we will in fact use again `NumberRingQuotient`.
-For an example on how to use an RNS basis representation, see the example `bfv_impl_v2`.
+For an example on how to use an RNS basis representation, see the example [`crate::examples::bfv_impl_v2`].
 
 Based on this, we can create type aliases for our ring types.
 ```rust
@@ -405,7 +407,7 @@ The first question is, how do we actually compute the products `c0 * c0'` withou
 After all, multiplication in the ciphertext ring will wrap around `q`.
 
 The most natural option is of course to perform arithmetic in the ring `R = Z[X]/(Phi_n)`.
-This is not supported by `NumberRingQuotient` (which only represents `R/(q)` for some integer `q`), but would be supported by `FreeAlgebraImpl`.
+This is not supported by `NumberRingQuotient` (which only represents `R/(q)` for some integer `q`), but is supported by `FreeAlgebraImpl`.
 In particular, we could create a `FreeAlgebraImpl` using `BigIntRing::RING` as base ring and the `n`-th cyclotomic polynomial as modulus.
 
 If we want to try this, note that we have to pass the cyclotomic polynomial `Phi_n` to `FreeAlgebraImpl::new()`.

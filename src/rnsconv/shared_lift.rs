@@ -33,6 +33,16 @@ pub struct AlmostExactSharedBaseConversion<A = Global>
 impl<A> AlmostExactSharedBaseConversion<A>
     where A: Allocator + Clone
 {
+    ///
+    /// Creates a new [`AlmostExactSharedBaseConversion`], where
+    ///  - `a` is the product of `shared_moduli`
+    ///  - `q` is the product of `additional_in_moduli`
+    ///  - `a'` is the product of `additional_out_moduli`
+    /// 
+    /// Currently, the list `[shared_moduli ..., additional_out_moduli ...]` must be sorted ascendingly.
+    /// This is actually quite an annoying and unnecessary constraint, and I hope I can get rid of it in
+    /// the future.
+    /// 
     #[instrument(skip_all)]
     pub fn new_with(shared_moduli: Vec<Zn>, additional_in_moduli: Vec<Zn>, additional_out_moduli: Vec<Zn>, allocator: A) -> Self {
         let in_moduli = shared_moduli.iter().cloned().chain(additional_in_moduli.into_iter()).collect::<Vec<_>>();

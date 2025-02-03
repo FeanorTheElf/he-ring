@@ -1,22 +1,23 @@
-use std::alloc::Global;
+use std::alloc::{Allocator, Global};
 use std::ops::Range;
 use std::cmp::min;
 
 use feanor_math::integer::BigIntRing;
 use feanor_math::matrix::{OwnedMatrix, Submatrix, SubmatrixMut};
 use feanor_math::primitive_int::StaticRing;
-use feanor_math::rings::zn::ZnRingStore;
+use feanor_math::rings::zn::{zn_64, ZnRingStore};
 use feanor_math::{assert_el_eq, ring::*};
 use feanor_math::rings::zn::{zn_64::Zn, zn_rns};
 use feanor_math::seq::subvector::SubvectorView;
 use feanor_math::seq::{VectorFn, VectorView};
 use feanor_math::homomorphism::Homomorphism;
 
-use crate::ciphertext_ring::double_rns_ring::DoubleRNSRingBase;
+use crate::ciphertext_ring::double_rns_ring::{DoubleRNSRing, DoubleRNSRingBase, SmallBasisEl};
 use crate::ciphertext_ring::single_rns_ring::SingleRNSRingBase;
-use crate::ciphertext_ring::BGFVCiphertextRing;
+use crate::ciphertext_ring::{BGFVCiphertextRing, PreparedMultiplicationRing};
 use crate::cyclotomic::{CyclotomicGaloisGroupEl, CyclotomicRing};
 use crate::number_ring::pow2_cyclotomic::Pow2CyclotomicNumberRing;
+use crate::number_ring::HENumberRing;
 use crate::rnsconv::bfv_rescale::AlmostExactRescaling;
 use crate::rnsconv::{lift, RNSOperation};
 use crate::DefaultConvolution;
@@ -41,7 +42,17 @@ pub fn recommended_rns_factors_to_drop(rns_base_len: usize, gadget_operand_digit
     return result;
 }
 
-pub struct GadgetProductLhsOperand<R: BGFVCiphertextRing> {
+///
+/// Represents the left-hand side operand of a gadget product.
+/// 
+/// In other words, this stores a "gadget-decomposition" of a single ring element `x`,
+/// i.e. small ring elements `x[i]` such that `x = sum_i g[i] x[i]` for a gadget vector
+/// `g`. The only supported gadget vectors are RNS-based gadget vectors, see 
+/// [`GadgetProductRhsOperand::gadget_vector_moduli_indices()`].
+/// 
+/// For more details, see [`GadgetProductLhsOperand::gadget_product()`].
+/// 
+pub struct GadgetProductLhsOperand<R: PreparedMultiplicationRing> {
     /// `i`-th entry stores a `i`-th part of the gadget decomposition of the represented element.
     /// We store the element once as `PreparedMultiplicant` for fast computation of gadget products, and 
     /// once as the element itself, since there currently is no way of getting the ring element out of
@@ -71,6 +82,35 @@ impl<R: BGFVCiphertextRing> GadgetProductLhsOperand<R> {
     pub fn from_element(ring: &R, el: &R::Element, digits: usize) -> Self {
         Self::from_element_with(ring, el, select_digits(digits, ring.base_ring().len()).clone_els())
     }
+}
+
+impl<NumberRing, A> GadgetProductLhsOperand<DoubleRNSRingBase<NumberRing, A>> 
+    where NumberRing: HENumberRing,
+        A: Allocator + Clone
+{
+    ///
+    /// Creates a [`GadgetProductLhsOperand`] w.r.t. the gadget vector given by `digits`.
+    /// For an explanation of gadget products, see [`GadgetProductLhsOperand::gadget_product()`].
+    /// 
+    pub fn from_double_rns_ring_with<V>(ring: &DoubleRNSRingBase<NumberRing, A>, el: &SmallBasisEl<NumberRing, A>, digits: V) -> Self
+        where V: VectorFn<Range<usize>>
+    {
+        let decomposition = gadget_decompose_doublerns(ring, el, digits);
+        return Self {
+            element_decomposition: decomposition
+        };
+    }
+
+    /// 
+    /// Creates a [`GadgetProductLhsOperand`] w.r.t. the RNS gadget vector that has `digits` digits.
+    /// For an explanation of gadget products, see [`GadgetProductLhsOperand::gadget_product()`].
+    /// 
+    pub fn from_double_rns_ring(ring: &DoubleRNSRingBase<NumberRing, A>, el: &SmallBasisEl<NumberRing, A>, digits: usize) -> Self {
+        Self::from_double_rns_ring_with(ring, el, select_digits(digits, ring.base_ring().len()).clone_els())
+    }
+}
+
+impl<R: PreparedMultiplicationRing> GadgetProductLhsOperand<R> {
 
     pub fn apply_galois_action(&self, ring: &R, g: CyclotomicGaloisGroupEl) -> Self 
         where R: CyclotomicRing
@@ -231,8 +271,9 @@ fn gadget_decompose<R, V>(ring: &R, el: &R::Element, digits: V) -> Vec<(R::Prepa
     ring.as_representation_wrt_small_generating_set(el, el_as_matrix.data_mut());
     
     let homs = ring.base_ring().as_iter().map(|Zp| Zp.can_hom(&ZZi64).unwrap()).collect::<Vec<_>>();
-    let mut current_row = Vec::with_capacity(el_as_matrix.col_count());
+    let mut current_row = Vec::new();
     current_row.resize_with(homs.len() * el_as_matrix.col_count(), || ring.base_ring().at(0).zero());
+    let mut current_row = SubmatrixMut::from_1d(&mut current_row[..], homs.len(), el_as_matrix.col_count());
     
     for i in 0..digits.len() {
         
@@ -245,10 +286,10 @@ fn gadget_decompose<R, V>(ring: &R, el: &R::Element, digits: V) -> Vec<(R::Prepa
         
         conversion.apply(
             el_as_matrix.data().restrict_rows(digit.clone()),
-            SubmatrixMut::from_1d(&mut current_row[..], homs.len(), el_as_matrix.col_count())
+            current_row.reborrow()
         );
 
-        let decomposition_part = ring.from_representation_wrt_small_generating_set(Submatrix::from_1d(&current_row[..], homs.len(), el_as_matrix.col_count()));
+        let decomposition_part = ring.from_representation_wrt_small_generating_set(current_row.as_const());
         result.push((
             ring.prepare_multiplicant(&decomposition_part),
             decomposition_part
@@ -257,7 +298,51 @@ fn gadget_decompose<R, V>(ring: &R, el: &R::Element, digits: V) -> Vec<(R::Prepa
     return result;
 }
 
-pub struct GadgetProductRhsOperand<R: BGFVCiphertextRing> {
+fn gadget_decompose_doublerns<NumberRing, A, V>(ring: &DoubleRNSRingBase<NumberRing, A>, el: &SmallBasisEl<NumberRing, A>, digits: V) -> Vec<(<DoubleRNSRingBase<NumberRing, A> as PreparedMultiplicationRing>::PreparedMultiplicant, El<DoubleRNSRing<NumberRing, A>>)>
+    where NumberRing: HENumberRing,
+        A: Allocator + Clone,
+        V: VectorFn<Range<usize>>
+{
+    let ZZbig = BigIntRing::RING;
+    let ZZi64 = StaticRing::<i64>::RING;
+    let mut result = Vec::new();
+    let el_as_matrix = ring.as_matrix_wrt_small_basis(el);
+    let homs = ring.base_ring().as_iter().map(|Zp| Zp.can_hom(&ZZi64).unwrap()).collect::<Vec<_>>();
+    
+    for i in 0..digits.len() {
+        
+        let digit = digits.at(i);
+        let conversion = UsedBaseConversion::new_with(
+            digit.iter().map(|idx| *ring.base_ring().at(idx)).collect::<Vec<_>>(),
+            homs.iter().map(|h| **h.codomain()).collect::<Vec<_>>(),
+            Global
+        );
+        
+        let mut decomposition_part = ring.zero_non_fft();
+        conversion.apply(
+            el_as_matrix.restrict_rows(digit.clone()),
+            ring.as_matrix_wrt_small_basis_mut(&mut decomposition_part)
+        );
+
+        let decomposition_part = ring.do_fft(decomposition_part);
+        result.push((
+            ring.prepare_multiplicant(&decomposition_part),
+            decomposition_part
+        ));
+    }
+    return result;
+}
+
+///
+/// Represents the right-hand side operand of a gadget product.
+/// 
+/// In other words, this stores a multiple "noisy" approximations to a `g[i] * x`, for
+/// a ring element `x` and a gadget vector `g`. The only supported gadget vectors
+/// are RNS-based gadget vectors, see [`GadgetProductRhsOperand::gadget_vector_moduli_indices()`].
+/// 
+/// For more details, see [`GadgetProductLhsOperand::gadget_product()`].
+/// 
+pub struct GadgetProductRhsOperand<R: PreparedMultiplicationRing> {
     /// `i`-th entry stores a (noisy) encryption/encoding/whatever of the represented element,
     /// scaled by the `i`-th entry of the gadget vector. `None` represents zero. We store the
     /// element once as `PreparedMultiplicant` for fast computation of gadget products, and once
@@ -284,7 +369,7 @@ fn select_digits(digits: usize, rns_base_len: usize) -> Vec<Range<usize>> {
         }).collect();
 }
 
-impl<R: BGFVCiphertextRing> GadgetProductRhsOperand<R> {
+impl<R: PreparedMultiplicationRing> GadgetProductRhsOperand<R> {
 
     pub fn clone(&self, ring: &R) -> Self {
         Self {
@@ -293,31 +378,74 @@ impl<R: BGFVCiphertextRing> GadgetProductRhsOperand<R> {
         }
     }
 
-    pub fn gadget_vector<'b>(&'b self, ring: &'b R) -> impl VectorFn<El<zn_rns::Zn<Zn, BigIntRing>>> + use<'b, R> {
-        self.digits.as_fn().map_fn(|digit| ring.base_ring().from_congruence((0..ring.base_ring().len()).map(|i| if digit.contains(&i) { ring.base_ring().at(i).one() } else { ring.base_ring().at(i).zero() })))
+    ///
+    /// Returns the gadget vector `g` that this gadget product operand has been created for.
+    /// 
+    /// More concretely, the returned vectors `g` consists of values of `Z/(q)`, and this
+    /// gadget product operand then stored `g[i] * x` for all `i` and a ring element `x`. The
+    /// gadget vector should have the propery that any ring element `y` can be represented as
+    /// a linear combination `sum_i g[i] * y[i]` with small ring elements `y[i]`.
+    /// 
+    pub fn gadget_vector<'b>(&'b self, ring: &'b R) -> impl VectorFn<El<zn_rns::Zn<Zn, BigIntRing>>> + use<'b, R>
+        where R: RingExtension,
+            R::BaseRing: RingStore<Type = zn_rns::ZnBase<zn_64::Zn, BigIntRing>>
+    {
+        self.digits.as_fn().map_fn(|digit| ring.base_ring().get_ring().from_congruence((0..ring.base_ring().get_ring().len()).map(|i| if digit.contains(&i) {
+            ring.base_ring().get_ring().at(i).one()
+        } else {
+            ring.base_ring().get_ring().at(i).zero()
+        })))
     }
 
+    ///
+    /// Returns the RNS factor indices that correspond to each entry of the underlying
+    /// gadget vector.
+    /// 
+    /// More concretely, [`GadgetProductLhsOperand`] and [`GadgetProductRhsOperand`] use
+    /// gadget vectors that are based on the RNS representation of `q = p1 ... pr`. In other
+    /// words, the gadget vector `g` is defined as
+    /// ```text
+    ///   g[i] = 1 mod pj    if j in g_indices[i]
+    ///   g[i] = 0 mod pj    otherwise
+    /// ```
+    /// where `g_indices` is the vector of ranges that is returned by this function.
+    /// 
     pub fn gadget_vector_moduli_indices<'b>(&'b self) -> impl VectorFn<Range<usize>> + use<'b, R> {
         self.digits.as_fn().map_fn(|digit| digit.clone())
     }
 
+    ///
+    /// Sets the noisy approximation to `g[i] * x` to the given element.
+    /// 
+    /// This will change the element represented by this [`GadgetProductRhsOperand`].
+    /// 
     pub fn set_rns_factor(&mut self, ring: &R, i: usize, el: R::Element) {
         self.scaled_element[i] = Some((ring.prepare_multiplicant(&el), el));
     }
     
     /// 
-    /// Creates a [`GadgetProductRhsOperand`] representing `0` w.r.t. the RNS gadget vector that has `digits` digits.
+    /// Creates a [`GadgetProductRhsOperand`] representing `0` w.r.t. the RNS-based gadget vector that has `digits` digits.
+    /// 
     /// For an explanation of gadget products, see [`GadgetProductLhsOperand::gadget_product()`].
     /// 
-    pub fn new(ring: &R, digits: usize) -> Self {
-        Self::new_with(ring, select_digits(digits, ring.base_ring().len()))
+    pub fn new(ring: &R, digits: usize) -> Self 
+        where R: RingExtension,
+            R::BaseRing: RingStore<Type = zn_rns::ZnBase<zn_64::Zn, BigIntRing>>
+    {
+        Self::new_with(ring, select_digits(digits, ring.base_ring().get_ring().len()))
     }
 
     /// 
-    /// Creates a [`GadgetProductRhsOperand`] representing `0` w.r.t. the RNS gadget given by `digits`.
+    /// Creates a [`GadgetProductRhsOperand`] representing `0` w.r.t. the RNS-based gadget vector given by `digits`.
+    /// For the exact description how the gadget vector is constructed based on `digits`, see 
+    /// [`GadgetProductRhsOperand::gadget_vector_moduli_indices()`].
+    /// 
     /// For an explanation of gadget products, see [`GadgetProductLhsOperand::gadget_product()`].
     /// 
-    pub fn new_with(ring: &R, digits: Vec<Range<usize>>) -> Self {
+    pub fn new_with(ring: &R, digits: Vec<Range<usize>>) -> Self 
+        where R: RingExtension,
+            R::BaseRing: RingStore<Type = zn_rns::ZnBase<zn_64::Zn, BigIntRing>>
+    {
         let mut operands = Vec::with_capacity(digits.len());
         operands.extend((0..digits.len()).map(|_| None));
         return Self {
@@ -325,9 +453,12 @@ impl<R: BGFVCiphertextRing> GadgetProductRhsOperand<R> {
             digits: digits
         };
     }
+}
+
+impl<R: BGFVCiphertextRing> GadgetProductRhsOperand<R> {
 
     pub fn modulus_switch(self, to: &R, dropped_rns_factors: &[usize], from: &R) -> Self {
-        assert_eq!(to.base_ring().len() + dropped_rns_factors.len(), from.base_ring().len());
+        assert_eq!(to.base_ring().get_ring().len() + dropped_rns_factors.len(), from.base_ring().get_ring().len());
         debug_assert_eq!(self.digits.len(), self.scaled_element.len());
         let mut result_scaled_el = Vec::new();
         let mut result_digits = Vec::new();

@@ -35,17 +35,9 @@ pub mod single_rns_ring;
 ///  
 pub mod double_rns_managed;
 
-///
-/// Trait for rings `R/qR` with a number ring `R` and modulus `q = p1 ... pr` represented as 
-/// RNS basis, which provide all necessary operations for use as ciphertext ring in BFV/BGV-style
-/// HE schemes.
-/// 
-pub trait BGFVCiphertextRing: RingBase + FreeAlgebra + RingExtension<BaseRing = zn_rns::Zn<Zn, BigIntRing>> {
+pub trait PreparedMultiplicationRing: RingBase {
 
-    type NumberRing: HECyclotomicNumberRing;
     type PreparedMultiplicant;
-
-    fn number_ring(&self) -> &Self::NumberRing;
 
     ///
     /// Converts an element of the ring into a `PreparedMultiplicant`, which can then be used
@@ -55,13 +47,13 @@ pub trait BGFVCiphertextRing: RingBase + FreeAlgebra + RingExtension<BaseRing = 
 
     ///
     /// Computes the product of two elements that have previously been "prepared" via
-    /// [`BGFVCiphertextRing::prepare_multiplicant()`].
+    /// [`PreparedMultiplicationRing::prepare_multiplicant()`].
     /// 
     fn mul_prepared(&self, lhs: &Self::PreparedMultiplicant, rhs: &Self::PreparedMultiplicant) -> Self::Element;
 
     ///
     /// Computes the inner product of two vectors over this ring, whose elements have previously
-    /// been "prepared" via [`BGFVCiphertextRing::prepare_multiplicant()`].
+    /// been "prepared" via [`PreparedMultiplicationRing::prepare_multiplicant()`].
     /// 
     fn inner_product_prepared<'a, I>(&self, parts: I) -> Self::Element
         where I: IntoIterator<Item = (&'a Self::PreparedMultiplicant, &'a Self::PreparedMultiplicant)>,
@@ -69,6 +61,18 @@ pub trait BGFVCiphertextRing: RingBase + FreeAlgebra + RingExtension<BaseRing = 
     {
         parts.into_iter().fold(self.zero(), |current, (lhs, rhs)| self.add(current, self.mul_prepared(lhs, rhs)))
     }
+}
+
+///
+/// Trait for rings `R/qR` with a number ring `R` and modulus `q = p1 ... pr` represented as 
+/// RNS basis, which provide all necessary operations for use as ciphertext ring in BFV/BGV-style
+/// HE schemes.
+/// 
+pub trait BGFVCiphertextRing: PreparedMultiplicationRing + FreeAlgebra + RingExtension<BaseRing = zn_rns::Zn<Zn, BigIntRing>> {
+
+    type NumberRing: HECyclotomicNumberRing;
+
+    fn number_ring(&self) -> &Self::NumberRing;
 
     ///
     /// Computes the ring `R_q'`, where `q'` is the product of all RNS factors of `q`,

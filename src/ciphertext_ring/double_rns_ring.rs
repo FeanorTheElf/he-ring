@@ -30,6 +30,7 @@ use crate::number_ring::*;
 use crate::rnsconv::*;
 use super::single_rns_ring::*;
 use super::BGFVCiphertextRing;
+use super::PreparedMultiplicationRing;
 
 ///
 /// Implementation of the ring `Z[𝝵_n]/(q)`, where `q = p1 ... pr` is a product of "RNS factors".
@@ -782,6 +783,21 @@ impl<NumberRing, A> RingExtension for DoubleRNSRingBase<NumberRing, A>
                 Zp.mul_assign_ref(&mut lhs.el_wrt_mult_basis[i * self.rank() + j], x_congruence.at(i));
             }
         }
+    }
+}
+
+impl<NumberRing, A> PreparedMultiplicationRing for DoubleRNSRingBase<NumberRing, A> 
+    where NumberRing: HENumberRing,
+        A: Allocator + Clone
+{
+    type PreparedMultiplicant = Self::Element;
+
+    fn prepare_multiplicant(&self, x: &Self::Element) -> Self::PreparedMultiplicant {
+        self.clone_el(x)
+    }
+
+    fn mul_prepared(&self, lhs: &Self::PreparedMultiplicant, rhs: &Self::PreparedMultiplicant) -> Self::Element {
+        self.mul_ref(lhs, rhs)
     }
 }
 

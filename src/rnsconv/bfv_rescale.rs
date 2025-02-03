@@ -59,6 +59,7 @@ impl<A> AlmostExactRescalingConvert<A>
     ///  - `q` is the product of `in_moduli`
     ///  - `a` is the product of `num_moduli`
     ///  - `b` is the product of the first `den_moduli_count` elements of `in_moduli`
+    /// 
     /// At least the moduli belonging to `b` are expected to be sorted.
     /// 
     #[instrument(skip_all)]

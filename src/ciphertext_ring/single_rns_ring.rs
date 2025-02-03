@@ -37,7 +37,7 @@ use crate::rnsconv::RNSOperation;
 use crate::ntt::HERingConvolution;
 use crate::ntt::ntt_convolution::NTTConv;
 
-use super::BGFVCiphertextRing;
+use super::{BGFVCiphertextRing, PreparedMultiplicationRing};
 
 ///
 /// Implementation of the ring `Z[𝝵_n]/(q)`, where `q = p1 ... pr` is a product of "RNS factors".
@@ -46,7 +46,7 @@ use super::BGFVCiphertextRing;
 /// As opposed to [`DoubleRNSRing`], this means multiplications are more expensive, but non-arithmetic
 /// operations like [`FreeAlgebra::wrt_canonical_basis()`] or [`BGFVCiphertextRing::as_representation_wrt_small_generating_set()`]
 /// are faster. Note that repeated multiplications with a fixed element will get significantly faster when using
-/// [`BGFVCiphertextRing::prepare_multiplicant()`] and [`BGFVCiphertextRing::mul_prepared()`].
+/// [`PreparedMultiplicationRing::prepare_multiplicant()`] and [`PreparedMultiplicationRing::mul_prepared()`].
 ///  
 /// # Mathematical details
 /// 
@@ -221,17 +221,12 @@ impl<NumberRing, A, C> SingleRNSRingBase<NumberRing, A, C>
     }
 }
 
-impl<NumberRing, A, C> BGFVCiphertextRing for SingleRNSRingBase<NumberRing, A, C> 
+impl<NumberRing, A, C> PreparedMultiplicationRing for SingleRNSRingBase<NumberRing, A, C> 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
         C: PreparedConvolutionAlgorithm<ZnBase>
 {
-    type NumberRing = NumberRing;
     type PreparedMultiplicant = SingleRNSRingPreparedMultiplicant<NumberRing, A, C>;
-    
-    fn number_ring(&self) -> &NumberRing {
-        self.base.get_ring().number_ring()
-    }
 
     #[instrument(skip_all)]
     fn prepare_multiplicant(&self, el: &SingleRNSRingEl<NumberRing, A, C>) -> SingleRNSRingPreparedMultiplicant<NumberRing, A, C> {
@@ -282,6 +277,18 @@ impl<NumberRing, A, C> BGFVCiphertextRing for SingleRNSRingBase<NumberRing, A, C
             self.reduce_modulus_partly(k, &mut unreduced_result, self.coefficients_as_matrix_mut(&mut result).row_mut_at(k));
         }
         return result;
+    }
+}
+
+impl<NumberRing, A, C> BGFVCiphertextRing for SingleRNSRingBase<NumberRing, A, C> 
+    where NumberRing: HECyclotomicNumberRing,
+        A: Allocator + Clone,
+        C: PreparedConvolutionAlgorithm<ZnBase>
+{
+    type NumberRing = NumberRing;
+    
+    fn number_ring(&self) -> &NumberRing {
+        self.base.get_ring().number_ring()
     }
 
     #[instrument(skip_all)]

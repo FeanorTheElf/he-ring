@@ -16,6 +16,10 @@ In short, he-ring contains the following:
  - bootstrapping for BFV
  - tools for arithmetization, including modelling of arithmetic circuits, polynomial-to-circuit conversion via Paterson-Stockmeyer and HElib-style linear transforms
 
+## Examples
+
+In addition to the API documentation, detailed guides and examples to some parts of HE-Ring can be found in [`crate::examples`].
+
 ## Performance
 
 When optimizing for performance, please use the Intel HEXL library (by enabling the feature `use_hexl` and providing a build of HEXL, as described in more detail in the documentation of [`feanor-math-hexl`](https://github.com/FeanorTheElf/feanor-math-hexl)), since the default NTT does not provide SOTA performance. Also note that `he-ring` is currently single-threaded.

@@ -46,6 +46,7 @@ use super::double_rns_ring;
 use super::double_rns_ring::*;
 use super::single_rns_ring::*;
 use super::BGFVCiphertextRing;
+use super::PreparedMultiplicationRing;
 
 ///
 /// Like [`DoubleRNSRing`] but stores element in whatever representation they
@@ -461,12 +462,27 @@ impl<NumberRing, A> ManagedDoubleRNSRingBase<NumberRing, A>
     }
 }
 
+impl<NumberRing, A> PreparedMultiplicationRing for ManagedDoubleRNSRingBase<NumberRing, A> 
+    where NumberRing: HECyclotomicNumberRing,
+        A: Allocator + Clone
+{
+    type PreparedMultiplicant = Self::Element;
+
+    fn mul_prepared(&self, lhs: &Self::PreparedMultiplicant, rhs: &Self::PreparedMultiplicant) -> Self::Element {
+        self.mul_ref(lhs, rhs)
+    }
+
+    fn prepare_multiplicant(&self, x: &Self::Element) -> Self::PreparedMultiplicant {
+        _ = self.to_doublerns(x);
+        return self.clone_el(x);
+    }
+}
+
 impl<NumberRing, A> BGFVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, A> 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone
 {
     type NumberRing = NumberRing;
-    type PreparedMultiplicant = Self::Element;
 
     fn number_ring(&self) -> &NumberRing {
         self.base.number_ring()
@@ -502,15 +518,6 @@ impl<NumberRing, A> BGFVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, 
 
     fn drop_rns_factor_prepared(&self, from: &Self, drop_factors: &[usize], value: Self::PreparedMultiplicant) -> Self::PreparedMultiplicant {
         self.drop_rns_factor_element(from, drop_factors, value)
-    }
-
-    fn mul_prepared(&self, lhs: &Self::PreparedMultiplicant, rhs: &Self::PreparedMultiplicant) -> Self::Element {
-        self.mul_ref(lhs, rhs)
-    }
-
-    fn prepare_multiplicant(&self, x: &Self::Element) -> Self::PreparedMultiplicant {
-        _ = self.to_doublerns(x);
-        return self.clone_el(x);
     }
 
     fn small_generating_set_len(&self) -> usize {
