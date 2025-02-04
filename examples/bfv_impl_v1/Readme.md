@@ -1,6 +1,8 @@
 # Implementing BFV using HE-Ring, version 1
 
 HE-Ring is designed to facilitate the implementation of new, or variants of known HE schemes. To demonstrate which features come in useful in this case, this example walks you through a simple implementation of the BFV scheme.
+In this first example, we will not optimize for performance, we defer this to the follow-up [`crate::examples::bfv_impl_v2`].
+If you are just interested in how to use BFV, have a look at [`crate::examples::bfv_basics`].
 
 ## Description of BFV
 

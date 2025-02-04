@@ -773,6 +773,6 @@ Nevertheless, there does remain some optimization potential:
    You can use the HEXL library (using the `feanor-math-hexl` library), which will give you an even faster NTT!
  - Apart from multiplication, decryption can also profit from a careful use of RNS conversions.
  - When doing the first RNS conversion `q -> qq'` during multiplication, note that the `mod q` part of the result is the same as the input.
-   Hence, one can replace [`he_ring::rns_conv::lift::AlmostExactBaseConversion`] with [`he_ring::rns_conv::shared_lift::AlmostExactSharedBaseConversion`] which avoids recomputing these values and thus is slightly faster.
+   Hence, one can replace [`crate::rnsconv::lift::AlmostExactBaseConversion`] with [`crate::rnsconv::shared_lift::AlmostExactSharedBaseConversion`] which avoids recomputing these values and thus is slightly faster.
 
 Implementing these points is left as an exercise.
