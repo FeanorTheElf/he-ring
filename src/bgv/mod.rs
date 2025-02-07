@@ -354,6 +354,13 @@ impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingNegacyclicNTT<Zn
     }
 }
 
+impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingNegacyclicNTT<Zn>> Display for Pow2BGV<A, C> {
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "BGV(n = 2^{}, log2(q) in {}..{})", self.log2_N + 1, self.log2_q_min, self.log2_q_max)
+    }
+}
+
 impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingNegacyclicNTT<Zn>> BGVParams for Pow2BGV<A, C> {
 
     type CiphertextRing = ManagedDoubleRNSRingBase<Pow2CyclotomicNumberRing<C>, A>;
@@ -379,7 +386,9 @@ impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingNegacyclicNTT<Zn
         let log2_q = self.log2_q_min..self.log2_q_max;
         let number_ring = self.number_ring();
         let required_root_of_unity = number_ring.mod_p_required_root_of_unity() as i64;
-        let mut rns_base = sample_primes(log2_q.start, log2_q.end, 56, |bound| largest_prime_leq_congruent_to_one(int_cast(bound, ZZ, ZZbig), required_root_of_unity).map(|p| int_cast(p, ZZbig, ZZ))).unwrap();
+        println!("{}", required_root_of_unity);
+        let max_bits_per_modulus = 57;
+        let mut rns_base = sample_primes(log2_q.start, log2_q.end, max_bits_per_modulus, |bound| largest_prime_leq_congruent_to_one(int_cast(bound, ZZ, ZZbig), required_root_of_unity).map(|p| int_cast(p, ZZbig, ZZ))).unwrap();
         rns_base.sort_unstable_by(|l, r| ZZbig.cmp(l, r));
         return zn_rns::Zn::new(rns_base.into_iter().map(|p| Zn::new(int_cast(p, ZZ, ZZbig) as u64)).collect(), ZZbig);
     }
@@ -434,7 +443,8 @@ impl<A: Allocator + Clone + Send + Sync> BGVParams for CompositeBGV<A> {
         let log2_q = self.log2_q_min..self.log2_q_max;
         let number_ring = self.number_ring();
         let required_root_of_unity = number_ring.mod_p_required_root_of_unity() as i64;
-        let mut rns_base = sample_primes(log2_q.start, log2_q.end, 56, |bound| largest_prime_leq_congruent_to_one(int_cast(bound, ZZ, ZZbig), required_root_of_unity).map(|p| int_cast(p, ZZbig, ZZ))).unwrap();
+        let max_bits_per_modulus = 57;
+        let mut rns_base = sample_primes(log2_q.start, log2_q.end, max_bits_per_modulus, |bound| largest_prime_leq_congruent_to_one(int_cast(bound, ZZ, ZZbig), required_root_of_unity).map(|p| int_cast(p, ZZbig, ZZ))).unwrap();
         rns_base.sort_unstable_by(|l, r| ZZbig.cmp(l, r));
         return zn_rns::Zn::new(rns_base.into_iter().map(|p| Zn::new(int_cast(p, ZZ, ZZbig) as u64)).collect(), ZZbig);
     }
@@ -509,7 +519,8 @@ impl<A: Allocator + Clone + Send + Sync, C: HERingConvolution<Zn>> BGVParams for
         let log2_q = self.log2_q_min..self.log2_q_max;
         let number_ring = self.number_ring();
         let required_root_of_unity = number_ring.mod_p_required_root_of_unity() as i64;
-        let mut rns_base = sample_primes(log2_q.start, log2_q.end, 56, |bound| largest_prime_leq_congruent_to_one(int_cast(bound, ZZ, ZZbig), required_root_of_unity).map(|p| int_cast(p, ZZbig, ZZ))).unwrap();
+        let max_bits_per_modulus = 57;
+        let mut rns_base = sample_primes(log2_q.start, log2_q.end, max_bits_per_modulus, |bound| largest_prime_leq_congruent_to_one(int_cast(bound, ZZ, ZZbig), required_root_of_unity).map(|p| int_cast(p, ZZbig, ZZ))).unwrap();
         rns_base.sort_unstable_by(|l, r| ZZbig.cmp(l, r));
         return zn_rns::Zn::new(rns_base.into_iter().map(|p| Zn::new(int_cast(p, ZZ, ZZbig) as u64)).collect(), ZZbig);
     }
@@ -882,8 +893,9 @@ pub fn tree_mul_benchmark<Params>(params: Params, digits: usize)
         }
         current.truncate(mid);
 
-        let drop_prime_count = if i == 0 { 4 } else if i + 1 == log2_count { 0 } else { 2 };
-        let drop_rns_base_factors = recommended_rns_factors_to_drop(C_current.base_ring().len(), digits, drop_prime_count);
+        let drop_prime_count = C_current.base_ring().len() / rk.0.gadget_vector_moduli_indices().len();
+        println!("dropping {} primes", drop_prime_count);
+        let drop_rns_base_factors = recommended_rns_factors_to_drop(C_current.base_ring().len(), rk.0.gadget_vector_moduli_indices(), drop_prime_count);
         let C_new = RingValue::from(C_current.get_ring().drop_rns_factor(&drop_rns_base_factors));
         for ct in &mut current {
             *ct = Some(Params::mod_switch(&P, &C_new, &C_current, &drop_rns_base_factors, ct.take().unwrap()));
@@ -925,8 +937,8 @@ pub fn chain_mul_benchmark<Params>(params: Params, digits: usize)
         let right = current;
         current = Params::hom_mul(&P, &C_current, left, right, &rk);
 
-        let drop_prime_count = if i == 0 { 4 } else if i + 1 == count { 0 } else { 2 };
-        let drop_rns_base_factors = recommended_rns_factors_to_drop(C_current.base_ring().len(), digits, drop_prime_count);
+        let drop_prime_count = C_current.base_ring().len() / rk.0.gadget_vector_moduli_indices().len();
+        let drop_rns_base_factors = recommended_rns_factors_to_drop(C_current.base_ring().len(), rk.0.gadget_vector_moduli_indices(), drop_prime_count);
         let C_new = RingValue::from(C_current.get_ring().drop_rns_factor(&drop_rns_base_factors));
         current = Params::mod_switch(&P, &C_new, &C_current, &drop_rns_base_factors, current);
         sk = Params::mod_switch_sk(&P, &C_new, &C_current, &drop_rns_base_factors, &sk);
@@ -947,10 +959,12 @@ pub fn chain_mul_benchmark<Params>(params: Params, digits: usize)
 fn bgv_mul_benchmark() {
     let (chrome_layer, _guard) = tracing_chrome::ChromeLayerBuilder::new().build();
     tracing_subscriber::registry().with(chrome_layer).init();
+
+    // all params should give 128 bits of security
     
     let params = CompositeBGV {
-        log2_q_min: 680,
-        log2_q_max: 690,
+        log2_q_min: 420,
+        log2_q_max: 430,
         n1: 85,
         n2: 257,
         ciphertext_allocator: AllocArc(Arc::new(DynLayoutMempool::<Global>::new(Alignment::of::<u64>()))),
@@ -958,9 +972,19 @@ fn bgv_mul_benchmark() {
     tree_mul_benchmark(params.clone(), 4);
     chain_mul_benchmark(params, 4);
 
+    let params = Pow2BGV {
+        log2_q_min: 850,
+        log2_q_max: 865,
+        log2_N: 15,
+        ciphertext_allocator: AllocArc(Arc::new(DynLayoutMempool::<Global>::new(Alignment::of::<u64>()))),
+        negacyclic_ntt: PhantomData::<DefaultNegacyclicNTT>
+    };
+    tree_mul_benchmark(params.clone(), 4);
+    chain_mul_benchmark(params, 4);
+
     let params = CompositeBGV {
-        log2_q_min: 1090,
-        log2_q_max: 1100,
+        log2_q_min: 1110,
+        log2_q_max: 1120,
         n1: 127,
         n2: 337,
         ciphertext_allocator: AllocArc(Arc::new(DynLayoutMempool::<Global>::new(Alignment::of::<u64>()))),

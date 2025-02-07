@@ -24,22 +24,65 @@ use crate::DefaultConvolution;
 
 type UsedBaseConversion<A> = lift::AlmostExactBaseConversion<A>;
 
-pub fn recommended_rns_factors_to_drop(rns_base_len: usize, gadget_operand_digits: usize, drop_prime_count: usize) -> Vec<usize> {
-    assert!(drop_prime_count <= rns_base_len);
-    let old_digits = select_digits(gadget_operand_digits, rns_base_len);
-    let new_digits = select_digits(gadget_operand_digits, rns_base_len - drop_prime_count);
-    let mut current = 0;
-    let mut result = Vec::with_capacity(drop_prime_count);
-    for (old_digit, new_digit) in old_digits.into_iter().zip(new_digits.into_iter()) {
-        let old_digit_len = old_digit.end - old_digit.start;
-        let new_digit_len = new_digit.end - new_digit.start;
-        debug_assert!(new_digit_len <= old_digit_len);
-        for i in 0..(old_digit_len - new_digit_len) {
-            result.push(current + i);
+fn is_cover<V>(len: usize, ranges: V) -> bool
+    where V: VectorFn<Range<usize>>
+{
+    let mut considered_ranges = Vec::new();
+    if let Some(mut current_i) = (0..ranges.len()).filter(|i| ranges.at(*i).start == 0).next() {
+        considered_ranges.push(current_i);
+        while ranges.at(current_i).end != len {
+            if let Some(next_i) = (0..ranges.len()).filter(|i| ranges.at(*i).start == ranges.at(current_i).end).next() {
+                considered_ranges.push(next_i);
+                current_i = next_i;
+            } else {
+                return false;
+            }
         }
-        current += old_digit_len;
+        considered_ranges.sort_unstable();
+        if considered_ranges.len() != ranges.len() {
+            return false;
+        }
+        if considered_ranges.iter().enumerate().any(|(l, r)| l != *r) {
+            return false;
+        }
+        return true;
+    } else {
+        return false;
     }
+}
+
+fn select_digits(digits: usize, rns_base_len: usize) -> Vec<Range<usize>> {
+    assert!(digits <= rns_base_len, "the number of gadget product digits may not exceed the number of RNS factors");
+    let moduli_per_small_digit = rns_base_len / digits;
+    let large_digits = rns_base_len % digits;
+    let small_digits = digits - large_digits;
+    let result = (0..large_digits).map(|_| moduli_per_small_digit + 1)
+        .chain((0..small_digits).map(|_| moduli_per_small_digit))
+        .scan(0, |current, next| {
+            let result = *current..(*current + next);
+            *current += next;
+            return Some(result);
+        }).collect::<Vec<_>>();
+    debug_assert!(is_cover(rns_base_len, result.clone_els()));
     return result;
+}
+
+pub fn recommended_rns_factors_to_drop<V>(rns_base_len: usize, old_digits: V, drop_prime_count: usize) -> Vec<usize>
+    where V: VectorFn<Range<usize>>
+{
+    assert!(drop_prime_count <= rns_base_len);
+    assert!(is_cover(rns_base_len, &old_digits));
+
+    let mut digits = old_digits.iter().collect::<Vec<_>>();
+    digits.sort_unstable_by_key(|digit| digit.start);
+    let mut drop_from_digit = (0..digits.len()).map(|_| 0).collect::<Vec<_>>();
+
+    for _ in 0..drop_prime_count {
+        let largest_digit_idx = (0..digits.len()).max_by_key(|i| digits[*i].end - digits[*i].start - drop_from_digit[*i]).unwrap();
+        drop_from_digit[largest_digit_idx] += 1;
+    }
+
+    return (0..digits.len()).flat_map(|i| digits[i].start..(digits[i].start + drop_from_digit[i])).collect();
 }
 
 ///
@@ -353,20 +396,6 @@ pub struct GadgetProductRhsOperand<R: PreparedMultiplicationRing> {
     /// RNS unit vector that is 1 modulo exactly the RNS factors contained in the range at index
     /// `i` of this list
     digits: Vec<Range<usize>>
-}
-
-fn select_digits(digits: usize, rns_base_len: usize) -> Vec<Range<usize>> {
-    assert!(digits <= rns_base_len, "the number of gadget product digits may not exceed the number of RNS factors");
-    let moduli_per_small_digit = rns_base_len / digits;
-    let large_digits = rns_base_len % digits;
-    let small_digits = digits - large_digits;
-    return (0..large_digits).map(|_| moduli_per_small_digit + 1)
-        .chain((0..small_digits).map(|_| moduli_per_small_digit))
-        .scan(0, |current, next| {
-            let result = *current..(*current + next);
-            *current += next;
-            return Some(result);
-        }).collect();
 }
 
 impl<R: PreparedMultiplicationRing> GadgetProductRhsOperand<R> {

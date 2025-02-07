@@ -1284,8 +1284,19 @@ fn bfv_mul_benchmark() {
     tracing_subscriber::registry().with(chrome_layer).init();
 
     let params = Pow2BFV {
-        log2_q_min: 790,
-        log2_q_max: 800,
+        log2_q_min: 420,
+        log2_q_max: 430,
+        log2_N: 14,
+        ciphertext_allocator: AllocArc(Arc::new(DynLayoutMempool::<Global>::new(Alignment::of::<u64>()))),
+        negacyclic_ntt: PhantomData::<DefaultNegacyclicNTT>
+    };
+    let digits = 3;
+    tree_mul_benchmark(params.clone(), digits);
+    chain_mul_benchmark(params, digits);
+
+    let params = Pow2BFV {
+        log2_q_min: 850,
+        log2_q_max: 865,
         log2_N: 15,
         ciphertext_allocator: AllocArc(Arc::new(DynLayoutMempool::<Global>::new(Alignment::of::<u64>()))),
         negacyclic_ntt: PhantomData::<DefaultNegacyclicNTT>
