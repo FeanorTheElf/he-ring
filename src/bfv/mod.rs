@@ -1215,7 +1215,7 @@ pub fn tree_mul_benchmark<Params>(params: Params, digits: usize)
     use crate::gadget_product::recommended_rns_factors_to_drop;
 
     let mut rng = thread_rng();
-    let t = 4;
+    let t = 5;
 
     let P = params.create_plaintext_ring(t);
     let (C, Cmul) = params.create_ciphertext_rings();
@@ -1252,7 +1252,7 @@ pub fn chain_mul_benchmark<Params>(params: Params, digits: usize)
     use crate::gadget_product::recommended_rns_factors_to_drop;
 
     let mut rng = thread_rng();
-    let t = 4;
+    let t = 5;
 
     let P = params.create_plaintext_ring(t);
     let (C, Cmul) = params.create_ciphertext_rings();

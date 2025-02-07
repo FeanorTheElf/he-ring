@@ -386,7 +386,6 @@ impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingNegacyclicNTT<Zn
         let log2_q = self.log2_q_min..self.log2_q_max;
         let number_ring = self.number_ring();
         let required_root_of_unity = number_ring.mod_p_required_root_of_unity() as i64;
-        println!("{}", required_root_of_unity);
         let max_bits_per_modulus = 57;
         let mut rns_base = sample_primes(log2_q.start, log2_q.end, max_bits_per_modulus, |bound| largest_prime_leq_congruent_to_one(int_cast(bound, ZZ, ZZbig), required_root_of_unity).map(|p| int_cast(p, ZZbig, ZZ))).unwrap();
         rns_base.sort_unstable_by(|l, r| ZZbig.cmp(l, r));
@@ -872,7 +871,7 @@ pub fn tree_mul_benchmark<Params>(params: Params, digits: usize)
     use crate::gadget_product::recommended_rns_factors_to_drop;
 
     let mut rng = thread_rng();
-    let t = 4;
+    let t = 7;
 
     let P = params.create_plaintext_ring(t);
     let C = params.create_initial_ciphertext_ring();
@@ -880,7 +879,7 @@ pub fn tree_mul_benchmark<Params>(params: Params, digits: usize)
     let mut rk = Params::gen_rk(&P, &C, &mut rng, &sk, digits);
 
     let log2_count = 4;
-    let mut current = (0..(1 << log2_count)).map(|i| Params::enc_sym(&P, &C, &mut rng, &P.int_hom().map(2 * i + 1), &sk)).map(Some).collect::<Vec<_>>();
+    let mut current = (0..(1 << log2_count)).map(|i| Params::enc_sym(&P, &C, &mut rng, &P.int_hom().map(2), &sk)).map(Some).collect::<Vec<_>>();
     let start = Instant::now();
     let mut C_current = C;
 
@@ -910,7 +909,7 @@ pub fn tree_mul_benchmark<Params>(params: Params, digits: usize)
     println!("digits = {}", digits);
     println!("Tree-wise multiplication of {} inputs took {} ms, so {} ms/mul", 1 << log2_count, (end - start).as_millis(), (end - start).as_millis() / ((1 << log2_count) - 1));
     println!("Final noise budget: {}", Params::noise_budget(&P, &C_current, current[0].as_ref().unwrap(), &sk));
-    assert_el_eq!(&P, &P.int_hom().map((0..(1 << log2_count)).map(|i| 2 * i + 1).product::<i32>()), Params::dec(&P, &C_current, current[0].take().unwrap(), &sk));
+    assert_el_eq!(&P, &P.int_hom().map(65536), Params::dec(&P, &C_current, current[0].take().unwrap(), &sk));
 }
 
 #[cfg(test)]
@@ -920,7 +919,7 @@ pub fn chain_mul_benchmark<Params>(params: Params, digits: usize)
     use crate::gadget_product::recommended_rns_factors_to_drop;
 
     let mut rng = thread_rng();
-    let t = 4;
+    let t = 7;
 
     let P = params.create_plaintext_ring(t);
     let C = params.create_initial_ciphertext_ring();
