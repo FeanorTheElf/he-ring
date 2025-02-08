@@ -282,8 +282,8 @@ However, we can decrease the noise growth that happens during the second multipl
 Note that finding the right size of `q'` is, in general, not so easy, since it requires an estimate of the current size of the noise in `enc_x_sqr`. 
 In particular, this depends on the size of the ring we work in, and also on the number of digits chosen for relinearization.
 
-Once we decided on the number of factors to drop, we can use the convenience function [`he_ring::gadget_product::recommended_rns_factors_to_drop()`] to choose the exact factors to drop in a way as to preserve the quality of the relinearization key.
-Alternatively, these can also determined manually, [`BGVParams::modulus_switch()`] takes a list of indices, which refer to the indices of the factors of `q` that will be dropped.
+Once we decided on the number of factors to drop, we can use the convenience function [`crate::gadget_product::recommended_rns_factors_to_drop()`] to choose the exact factors to drop in a way as to preserve the quality of the relinearization key.
+Alternatively, these can also determined manually, [`crate::bgv::BGVParams::mod_switch()`] takes a list of indices, which refer to the indices of the factors of `q` that will be dropped.
 ```rust
 #![feature(allocator_api)]
 # use he_ring::bgv::{BGVParams, CiphertextRing, PlaintextRing, Pow2BGV};
