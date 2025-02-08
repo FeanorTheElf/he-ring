@@ -16,7 +16,7 @@ More concretely, an instantiation of BFV consists of the following:
 
 While there is no central object storing all of this, HE-Ring does provide a simple way of creating these objects from a set of parameters.
 There are multiple structs that represent a set of parameters for BFV each, since each of them will lead to a different type for the involved rings.
-For example, to setup BFV in a power-of-two cyclotomic number ring, we could proceed as follows:
+For example, to setup BFV in a power-of-two cyclotomic number ring `Z[X]/(X^N + 1)`, we could proceed as follows:
 ```rust
 #![feature(allocator_api)]
 # use he_ring::bfv::{BFVParams, CiphertextRing, PlaintextRing, Pow2BFV};
@@ -43,6 +43,12 @@ Once we setup the parameters, we can create plaintext and ciphertext rings:
 # use he_ring::DefaultNegacyclicNTT;
 # use std::alloc::Global;
 # use std::marker::PhantomData;
+# use feanor_math::integer::*;
+# use feanor_math::primitive_int::*;
+# use feanor_math::ring::RingExtensionStore;
+# use feanor_math::rings::zn::ZnRingStore;
+# use feanor_math::ring::RingStore;
+# use feanor_math::algorithms::eea::signed_gcd;
 # type ChosenBFVParamType = Pow2BFV;
 # let params = ChosenBFVParamType {
 #     ciphertext_allocator: Global,
@@ -54,8 +60,11 @@ Once we setup the parameters, we can create plaintext and ciphertext rings:
 let (C, C_for_multiplication): (CiphertextRing<ChosenBFVParamType>, CiphertextRing<ChosenBFVParamType>) = params.create_ciphertext_rings();
 let plaintext_modulus = 17;
 let P: PlaintextRing<ChosenBFVParamType> = params.create_plaintext_ring(plaintext_modulus);
+assert!(BigIntRing::RING.is_one(&signed_gcd(BigIntRing::RING.clone_el(C.base_ring().modulus()), int_cast(plaintext_modulus, BigIntRing::RING, StaticRing::<i64>::RING), BigIntRing::RING)));
 ```
 Note here that the plaintext modulus `t` was not part of the BFV parameters - the rationale behind this is that a BFV ciphertext often is a valid ciphertext (encrypting a different message) for multiple different plaintext moduli.
+Moreover, it is important that `t` must be coprime to `q`, otherwise there is no security.
+However, due to the way how `q` is sampled, this is unlikely to be a problem.
 
 After we set this up, we actually won't need the parameter object anymore - to demonstrate this, we delete it here.
 ```rust
@@ -162,7 +171,7 @@ For more info on how to create and operate on ring elements, see `feanor-math`.
 BFV supports three types of homomorphic operations on ciphertexts:
  - Addition
  - Multiplication, requires a relinearization key
- - Galois automorphisms,  requires a corresponding Galois key
+ - Galois automorphisms, requires a corresponding Galois key
 
 Since we already have a relinearization key, we can perform a homomorphic multiplication.
 ```rust

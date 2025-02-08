@@ -7,9 +7,11 @@
 
 use std::{alloc::Global, marker::PhantomData};
 
+use feanor_math::algorithms::eea::signed_gcd;
 use feanor_math::assert_el_eq;
 use feanor_math::homomorphism::Homomorphism;
-use feanor_math::integer::{BigIntRing, IntegerRingStore};
+use feanor_math::integer::{int_cast, BigIntRing, IntegerRingStore};
+use feanor_math::primitive_int::StaticRing;
 use feanor_math::ring::{RingExtensionStore, RingStore};
 use feanor_math::rings::extension::FreeAlgebraStore;
 use feanor_math::rings::zn::ZnRingStore;
@@ -37,8 +39,9 @@ fn main() {
     println!("log2(q)  = {}", BigIntRing::RING.abs_log2_ceil(C.base_ring().modulus()).unwrap());
     println!("log2(q') = {}", BigIntRing::RING.abs_log2_ceil(C_for_multiplication.base_ring().modulus()).unwrap());
 
-    let t = 17;
-    let P: PlaintextRing<ChosenBFVParamType> = params.create_plaintext_ring(t);
+    let plaintext_modulus = 17;
+    let P: PlaintextRing<ChosenBFVParamType> = params.create_plaintext_ring(plaintext_modulus);
+    assert!(BigIntRing::RING.is_one(&signed_gcd(BigIntRing::RING.clone_el(C.base_ring().modulus()), int_cast(plaintext_modulus, BigIntRing::RING, StaticRing::<i64>::RING), BigIntRing::RING)));
 
     let mut rng = thread_rng();
 

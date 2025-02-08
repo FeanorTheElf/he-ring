@@ -180,6 +180,8 @@ pub mod bgv;
 pub mod examples {
     #[doc = include_str!("../examples/bfv_basics/Readme.md")]
     pub mod bfv_basics {}
+    #[doc = include_str!("../examples/bgv_basics/Readme.md")]
+    pub mod bgv_basics {}
     #[doc = include_str!("../examples/bfv_impl_v1/Readme.md")]
     pub mod bfv_impl_v1 {}
     #[doc = include_str!("../examples/bfv_impl_v2/Readme.md")]

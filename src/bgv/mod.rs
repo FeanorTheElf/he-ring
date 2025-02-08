@@ -62,6 +62,22 @@ pub struct Ciphertext<Params: ?Sized + BGVParams> {
     pub c1: El<CiphertextRing<Params>>
 }
 
+///
+/// Trait for types that represent an instantiation of BGV.
+/// 
+/// The design is very similar to [`super::bfv::BFVParams`], for details
+/// have a look at that. In particular, the plaintext modulus is not a part
+/// of the [`super::bfv::BFVParams`], but the (initial) ciphertext modulus size
+/// is. Note however that BGV requires many ciphertext rings, with progressively
+/// smaller ciphertext moduli.
+/// 
+/// Also, we note that as opposed to other HE libraries (like HElib), this BGV
+/// implementation  does currently not perform automatic modulus management.
+/// In particular, it is up to the user to perform modulus-switches at the correct
+/// places to prevent multiplicative noise growth.
+/// 
+/// For a few more details on how this works, see [`crate::examples::bgv_basics`].
+/// 
 pub trait BGVParams {
     
     type CiphertextRing: BGFVCiphertextRing + CyclotomicRing + FiniteRing;
