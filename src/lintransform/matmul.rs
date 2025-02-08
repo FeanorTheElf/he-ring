@@ -354,7 +354,9 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
     }
 
     ///
-    /// Creates the linear transform that maps
+    /// This is the most general way to create a [`MatmulTransform`].
+    /// 
+    /// More concretely, this creates the linear transform that maps
     /// ```text
     ///   x  ->  sum_(i1, ..., ir, c) c σ_(i1, ..., ir)(x)
     /// ```
@@ -464,6 +466,13 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
         };
     }
 
+    ///
+    /// Computes a [`PlaintextCircuit`] (using only linear gates), which evaluates this linear
+    /// transform in a baby-step-giant-step manner.
+    /// 
+    /// Parameters are chosen to make the evaluation of the resulting circuit as efficient
+    /// as possible.
+    /// 
     #[instrument(skip_all)]
     pub fn to_circuit(self, H: &DefaultHypercube<NumberRing, A>) -> PlaintextCircuit<NumberRingQuotientBase<NumberRing, Zn, A>> {
         self.check_valid(H);
@@ -480,11 +489,26 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
         return self.to_circuit_with_baby_steps(H, preferred_baby_steps);
     }
 
+    ///
+    /// Computes a [`PlaintextCircuit`] (using only linear gates), which sequentially evaluates
+    /// every transform in the given list of transforms (from first to last element).
+    /// 
+    /// Parameters are chosen to make the evaluation of the resulting circuit as efficient
+    /// as possible.
+    /// 
     #[instrument(skip_all)]
     pub fn to_circuit_many(transforms: Vec<Self>, H: &DefaultHypercube<NumberRing, A>) -> PlaintextCircuit<NumberRingQuotientBase<NumberRing, Zn, A>> {
         transforms.into_iter().fold(PlaintextCircuit::identity(1, H.ring()), |current, next| next.to_circuit(H).compose(current, H.ring()))
     }
 
+    ///
+    /// Computes a [`PlaintextCircuit`] (using only linear gates), which evaluates this linear
+    /// transform in a baby-step-giant-step manner.
+    /// 
+    /// The number of baby-steps is chosen to be as close to `preferred_baby_steps` as possible.
+    /// If you don't want to provide this number manually, use [`MatmulTransform::to_circuit()`]
+    /// which automatically chooses the best number of baby steps.
+    /// 
     #[instrument(skip_all)]
     pub fn to_circuit_with_baby_steps(self, H: &DefaultHypercube<NumberRing, A>, preferred_baby_steps: usize) -> PlaintextCircuit<NumberRingQuotientBase<NumberRing, Zn, A>> {
         self.check_valid(H);

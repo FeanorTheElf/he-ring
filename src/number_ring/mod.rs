@@ -180,12 +180,39 @@ pub fn largest_prime_leq_congruent_to_one(leq_than: i64, congruent_to_one_mod: i
     }
     return Some(current);
 }
+
+///
+/// Attempts to find a list of distinct primes, each smaller than `2^max_bits_each_modulus`, whose 
+/// product is between `2^min_bits` and `2^max_bits`.
+/// 
+/// Only primes that are returned by the given function are used, which allows the caller to sample
+/// a list of primes that satisfy additional constraints, like being `= 1 mod n` for some integer `n`.
+/// More concretely, the given function `largest_prime_leq` should, on input `B`, return the largest
+/// prime that satisfies all desired constraint and is `<= B`, or `None` if no such prime exists.
+/// 
+/// This function operates on a best-effort basis, it might not find an accepted result in extreme cases
+/// where `min_bits` and `max_bits` are very small or very close together, even if a result theoretically
+/// exists. It is, however, quite reliable in most situations.
+/// 
 pub fn sample_primes<F>(min_bits: usize, max_bits: usize, max_bits_each_modulus: usize, largest_prime_leq: F) -> Option<Vec<El<BigIntRing>>>
     where F: FnMut(El<BigIntRing>) -> Option<El<BigIntRing>>
 {
     extend_sampled_primes(&[], min_bits, max_bits, max_bits_each_modulus, largest_prime_leq)
 }
 
+///
+/// Like [`sample_primes()`], but starts with a non-empty list of primes. All added primes are distinct
+/// from every prime that is already in the starting list.
+/// 
+/// Only primes that are returned by the given function are used, which allows the caller to sample
+/// a list of primes that satisfy additional constraints, like being `= 1 mod n` for some integer `n`.
+/// More concretely, the given function `largest_prime_leq` should, on input `B`, return the largest
+/// prime that satisfies all desired constraint and is `<= B`, or `None` if no such prime exists.
+/// 
+/// This function operates on a best-effort basis, it might not find an accepted result in extreme cases
+/// where `min_bits` and `max_bits` are very small or very close together, even if a result theoretically
+/// exists. It is, however, quite reliable in most situations.
+/// 
 pub fn extend_sampled_primes<F>(begin_with: &[El<BigIntRing>], min_bits: usize, max_bits: usize, max_bits_each_modulus: usize, mut largest_prime_leq: F) -> Option<Vec<El<BigIntRing>>>
     where F: FnMut(El<BigIntRing>) -> Option<El<BigIntRing>>
 {

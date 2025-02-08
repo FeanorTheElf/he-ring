@@ -67,6 +67,35 @@ fn select_digits(digits: usize, rns_base_len: usize) -> Vec<Range<usize>> {
     return result;
 }
 
+///
+/// Chooses `drop_prime_count` indices from `0..rns_base_len`, in a way such that removing these indices from
+/// each range in the given list of "digits", the result is as balanced as possible.
+///  
+/// # The standard use case 
+/// 
+/// This hopefully becomes clearer once we consider the main use case:
+/// When we do modulus-switching (e.g. during BGV), we remove RNS factors from the ciphertext modulus.
+/// For the ciphertexts itself, it is (almost) irrelevant which of these RNS factors are removed, but it makes
+/// a huge difference when mod-switching key-switching keys (e.g. relinearization keys). This is because
+/// the used gadget vector relies is based on a decomposition of RNS factors into groups, and removing a single
+/// RNS factor from every group will give a very different behavior from removing a single, whole group and
+/// leaving the other groups unchanged.
+/// 
+/// This function will choose the indices of the RNS factors to achieve the former, i.e. remove RNS factors
+/// from every group, with the goal that the resulting groups all have (close to) equal size. This means that
+/// the number of digits of the key-switching keys remains constant. 
+/// 
+/// This is probably the desired behavior in most cases, but other behaviors might as well be reasonable in 
+/// certain scenarios. 
+/// 
+/// # Example
+/// ```
+/// # use feanor_math::seq::*;
+/// # use he_ring::gadget_product::*;
+/// // remove the first two indices from 0..3, and the first index from 3..5 - the resulting ranges both have length 1
+/// assert_eq!(vec![0, 1, 3], recommended_rns_factors_to_drop(5, vec![0..3, 3..5].clone_els(), 3));
+/// ```
+/// 
 pub fn recommended_rns_factors_to_drop<V>(rns_base_len: usize, old_digits: V, drop_prime_count: usize) -> Vec<usize>
     where V: VectorFn<Range<usize>>
 {

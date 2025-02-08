@@ -39,6 +39,13 @@ pub mod pow2;
 /// 
 // pub mod broadcast;
 
+///
+/// Provides access to arbitrary powers of a single element of a finite ring,
+/// caching intermediate powers for faster access.
+/// 
+/// The main use case are HE-style rings, in which multiplication can be quite
+/// expensive.
+/// 
 pub struct PowerTable<R>
     where R: RingStore
 {
