@@ -896,9 +896,9 @@ pub fn tree_mul_benchmark<Params>(params: Params, digits: usize)
 
     let log2_count = 4;
     let mut current = (0..(1 << log2_count)).map(|i| Params::enc_sym(&P, &C, &mut rng, &P.int_hom().map(2), &sk)).map(Some).collect::<Vec<_>>();
-    let start = Instant::now();
     let mut C_current = C;
 
+    let start = Instant::now();
     for i in 0..log2_count {
         let mid = current.len() / 2;
         let (left, right) = current.split_at_mut(mid);
@@ -909,7 +909,6 @@ pub fn tree_mul_benchmark<Params>(params: Params, digits: usize)
         current.truncate(mid);
 
         let drop_prime_count = C_current.base_ring().len() / rk.0.gadget_vector_moduli_indices().len();
-        println!("dropping {} primes", drop_prime_count);
         let drop_rns_base_factors = recommended_rns_factors_to_drop(C_current.base_ring().len(), rk.0.gadget_vector_moduli_indices(), drop_prime_count);
         let C_new = RingValue::from(C_current.get_ring().drop_rns_factor(&drop_rns_base_factors));
         for ct in &mut current {
@@ -944,9 +943,9 @@ pub fn chain_mul_benchmark<Params>(params: Params, digits: usize)
 
     let count = 4;
     let mut current = Params::enc_sym(&P, &C, &mut rng, &P.int_hom().map(1), &sk);
-    let start = Instant::now();
     let mut C_current = C;
 
+    let start = Instant::now();
     for i in 0..count {
         let left = Params::clone_ct(&P, &C_current, &current);
         let right = current;

@@ -19,6 +19,8 @@ use crate::rnsconv::RNSOperation;
 /// 
 pub mod poly_remainder;
 
+pub mod serialization;
+
 ///
 /// Contains [`double_rns_ring::DoubleRNSRing`], an implementation of the ring `R/qR` for suitable `q`.
 ///  

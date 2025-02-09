@@ -1,39 +1,24 @@
-use std::alloc::Allocator;
-use std::alloc::Global;
-use std::cell::OnceCell;
-use std::cell::Ref;
-use std::cell::RefCell;
+use std::alloc::{Allocator, Global};
+use std::cell::*;
 use std::rc::Rc;
 use std::sync::atomic::AtomicU64;
-use std::sync::Arc;
-use std::sync::Barrier;
-use std::sync::MappedRwLockReadGuard;
-use std::sync::MappedRwLockWriteGuard;
-use std::sync::OnceLock;
-use std::sync::RwLock;
-use std::sync::RwLockReadGuard;
+use std::sync::*;
 use std::thread::spawn;
 
-use feanor_math::algorithms::convolution::ConvolutionAlgorithm;
-use feanor_math::algorithms::convolution::PreparedConvolutionAlgorithm;
+use feanor_math::algorithms::convolution::{ConvolutionAlgorithm, PreparedConvolutionAlgorithm};
 use feanor_math::assert_el_eq;
 use feanor_math::delegate::DelegateRing;
 use feanor_math::homomorphism::*;
 use feanor_math::integer::*;
-use feanor_math::matrix::AsFirstElement;
-use feanor_math::matrix::AsPointerToSlice;
-use feanor_math::matrix::Submatrix;
-use feanor_math::matrix::SubmatrixMut;
+use feanor_math::matrix::*;
 use feanor_math::ring::*;
 use feanor_math::rings::extension::*;
 use feanor_math::rings::finite::FiniteRing;
 use feanor_math::rings::zn::*;
 use feanor_math::seq::VectorView;
-use feanor_math::specialization::FiniteRingOperation;
-use feanor_math::specialization::FiniteRingSpecializable;
-use zn_64::Zn;
-use zn_64::ZnBase;
-use zn_64::ZnEl;
+use feanor_math::serialization::{deserialize_newtype_struct_helper, serialize_newtype_struct_helper, DeserializeWithRing, SerializableElementRing, SerializeWithRing};
+use feanor_math::specialization::{FiniteRingOperation, FiniteRingSpecializable};
+use serde::{Deserialize, Serialize};
 
 use crate::cyclotomic::CyclotomicGaloisGroupEl;
 use crate::cyclotomic::CyclotomicRing;
@@ -524,8 +509,8 @@ impl<NumberRing, A> BGFVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, 
         self.rank()
     }
 
-    fn as_representation_wrt_small_generating_set<V>(&self, x: &Self::Element, mut output: SubmatrixMut<V, ZnEl>)
-        where V: AsPointerToSlice<ZnEl>
+    fn as_representation_wrt_small_generating_set<V>(&self, x: &Self::Element, mut output: SubmatrixMut<V, zn_64::ZnEl>)
+        where V: AsPointerToSlice<zn_64::ZnEl>
     {
         let matrix = self.base.as_matrix_wrt_small_basis(self.to_small_basis(x).unwrap_or(&self.zero));
         assert_eq!(output.row_count(), matrix.row_count());
@@ -537,8 +522,8 @@ impl<NumberRing, A> BGFVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, 
         }
     }
 
-    fn partial_representation_wrt_small_generating_set<V>(&self, x: &Self::Element, row_indices: &[usize], mut output: SubmatrixMut<V, ZnEl>)
-        where V: AsPointerToSlice<ZnEl>
+    fn partial_representation_wrt_small_generating_set<V>(&self, x: &Self::Element, row_indices: &[usize], mut output: SubmatrixMut<V, zn_64::ZnEl>)
+        where V: AsPointerToSlice<zn_64::ZnEl>
     {
         assert_eq!(output.row_count(), row_indices.len());
         assert_eq!(output.col_count(), self.base.rank());
@@ -561,8 +546,8 @@ impl<NumberRing, A> BGFVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, 
         }
     }
 
-    fn from_representation_wrt_small_generating_set<V>(&self, data: Submatrix<V, ZnEl>) -> Self::Element
-        where V: AsPointerToSlice<ZnEl>
+    fn from_representation_wrt_small_generating_set<V>(&self, data: Submatrix<V, zn_64::ZnEl>) -> Self::Element
+        where V: AsPointerToSlice<zn_64::ZnEl>
     {
         let mut x = self.base.zero_non_fft();
         let mut x_as_matrix = self.base.as_matrix_wrt_small_basis_mut(&mut x);
@@ -950,11 +935,110 @@ impl<NumberRing, A> FiniteRing for ManagedDoubleRNSRingBase<NumberRing, A>
     }
 }
 
+impl<NumberRing, A> SerializableElementRing for ManagedDoubleRNSRingBase<NumberRing, A>
+    where NumberRing: HENumberRing,
+        A: Allocator + Clone
+{
+    fn serialize<S>(&self, el: &Self::Element, serializer: S) -> Result<S::Ok, S::Error>
+        where S: serde::Serializer
+    {
+        if serializer.is_human_readable() {
+            return serialize_newtype_struct_helper(serializer, "ManagedDoubleRNSEl", &self.base.serializable_non_fft(self.base.clone_el_non_fft(self.to_small_basis(el).unwrap_or(&self.zero))));
+        }
+        if let ManagedDoubleRNSElRepresentation::DoubleRNS(double_rns_repr) = el.internal.get_repr() {
+            serializer.serialize_newtype_variant("ManagedDoubleRNSEl", 0, "DoubleRNS", &SerializeWithRing::new(double_rns_repr, RingRef::new(&self.base)))
+        } else if let Some(small_basis_repr) = self.to_small_basis(el) {
+            serializer.serialize_newtype_variant("ManagedDoubleRNSEl", 1, "SmallBasis", &self.base.serializable_non_fft(self.base.clone_el_non_fft(small_basis_repr)))
+        } else {
+            serializer.serialize_newtype_variant("ManagedDoubleRNSEl", 2, "Zero", &())
+        }
+    }
+
+    fn deserialize<'de, D>(&self, deserializer: D) -> Result<Self::Element, D::Error>
+        where D: serde::Deserializer<'de>
+    {
+        use serde::de::EnumAccess;
+        use serde::de::VariantAccess;
+
+        if deserializer.is_human_readable() {
+            return deserialize_newtype_struct_helper(deserializer, "ManagedDoubleRNSEl", self.base.deserialize_seed_non_fft()).map(|small_basis_repr| self.from_small_basis_repr(small_basis_repr));
+        }
+
+        struct ResultVisitor<'a, NumberRing, A>
+            where NumberRing: HENumberRing,
+                A: Allocator + Clone
+        {
+            ring: &'a ManagedDoubleRNSRingBase<NumberRing, A>,
+        }
+        impl<'a, 'de, NumberRing, A> serde::de::Visitor<'de> for ResultVisitor<'a, NumberRing, A>
+            where NumberRing: HENumberRing,
+                A: Allocator + Clone
+        {
+            type Value = ManagedDoubleRNSEl<NumberRing, A>;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(f, "either ManagedDoubleRNSEl::DoubleRNS, ManagedDoubleRNSEl::SmallBasis or ManagedDoubleRNSEl::Zero")
+            }
+    
+            fn visit_enum<E>(self, data: E) -> Result<Self::Value, E::Error>
+                where E: EnumAccess<'de>
+            {
+                enum Discriminant {
+                    DoubleRNS,
+                    SmallBasis,
+                    Zero
+                }
+                struct DiscriminantVisitor;
+                impl<'de> serde::de::Visitor<'de> for DiscriminantVisitor {
+                    type Value = Discriminant;
+                    fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                        write!(f, "one of the enum discriminants `DoubleRNS` = 0, `SmallBasis` = 1 or `Zero` = 2")
+                    }
+                    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+                        where E: serde::de::Error
+                    {
+                        match v {
+                            "DoubleRNS" => Ok(Discriminant::DoubleRNS),
+                            "SmallBasis" => Ok(Discriminant::SmallBasis),
+                            "Zero" => Ok(Discriminant::Zero),
+                            _ => Err(serde::de::Error::unknown_variant(v, &["DoubleRNS", "SmallBasis", "Zero"]))
+                        }
+                    }
+                    fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+                        where E: serde::de::Error
+                    {
+                        match v {
+                            0 => Ok(Discriminant::DoubleRNS),
+                            1 => Ok(Discriminant::SmallBasis),
+                            2 => Ok(Discriminant::Zero),
+                            _ => Err(serde::de::Error::unknown_variant(format!("{}", v).as_str(), &["0", "1", "2"]))
+                        }
+                    }
+                }
+                impl<'de> Deserialize<'de> for Discriminant {
+                    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+                        where D: serde::Deserializer<'de>
+                    {
+                        deserializer.deserialize_identifier(DiscriminantVisitor)
+                    }
+                }
+                let (discriminant, variant): (Discriminant, _) = data.variant()?;
+                match discriminant {
+                    Discriminant::DoubleRNS => variant.newtype_variant_seed(DeserializeWithRing::new(self.ring.unmanaged_ring())).map(|double_rns_repr| self.ring.from_double_rns_repr(double_rns_repr)),
+                    Discriminant::SmallBasis => variant.newtype_variant_seed(self.ring.unmanaged_ring().get_ring().deserialize_seed_non_fft()).map(|small_basis_repr| self.ring.from_small_basis_repr(small_basis_repr)),
+                    Discriminant::Zero => variant.unit_variant().map(|()| self.ring.zero())
+                }
+            }
+        }
+        return deserializer.deserialize_enum("ManagedDoubleRNSEl", &["DoubleRNS", "SmallBasis", "Zero"], ResultVisitor { ring: self });
+    }
+}
+
 impl<NumberRing, A1, A2, C> CanHomFrom<SingleRNSRingBase<NumberRing, A1, C>> for ManagedDoubleRNSRingBase<NumberRing, A2>
     where NumberRing: HECyclotomicNumberRing,
         A1: Allocator + Clone,
         A2: Allocator + Clone,
-        C: PreparedConvolutionAlgorithm<ZnBase>
+        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
 {
     type Homomorphism = <DoubleRNSRingBase<NumberRing, A2> as CanHomFrom<SingleRNSRingBase<NumberRing, A1, C>>>::Homomorphism;
 
@@ -1017,7 +1101,7 @@ impl<NumberRing, A1, A2, C> CanIsoFromTo<SingleRNSRingBase<NumberRing, A1, C>> f
     where NumberRing: HECyclotomicNumberRing,
         A1: Allocator + Clone,
         A2: Allocator + Clone,
-        C: PreparedConvolutionAlgorithm<ZnBase>
+        C: PreparedConvolutionAlgorithm<zn_64::ZnBase>
 {
     type Isomorphism = <DoubleRNSRingBase<NumberRing, A2> as CanIsoFromTo<SingleRNSRingBase<NumberRing, A1, C>>>::Isomorphism;
 
@@ -1070,9 +1154,9 @@ impl<NumberRing, A1, A2> CanIsoFromTo<ManagedDoubleRNSRingBase<NumberRing, A1>> 
     }
 }
 
-#[test]
-fn test_ring_axioms() {
-    let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
+#[cfg(test)]
+fn ring_and_elements() -> (ManagedDoubleRNSRing<Pow2CyclotomicNumberRing>, Vec<El<ManagedDoubleRNSRing<Pow2CyclotomicNumberRing>>>) {
+    let rns_base = zn_rns::Zn::new(vec![zn_64::Zn::new(17), zn_64::Zn::new(97)], BigIntRing::RING);
     let ring = ManagedDoubleRNSRingBase::new(Pow2CyclotomicNumberRing::new(16), rns_base);
     
     let elements = vec![
@@ -1087,14 +1171,19 @@ fn test_ring_axioms() {
         ring.int_hom().mul_map(ring.pow(ring.canonical_gen(), 15), 17),
         ring.add(ring.canonical_gen(), ring.one())
     ];
+    return (ring, elements);
+}
 
+#[test]
+fn test_ring_axioms() {
+    let (ring, elements) = ring_and_elements();
     feanor_math::ring::generic_tests::test_ring_axioms(&ring, elements.iter().map(|x| ring.clone_el(x)));
     feanor_math::ring::generic_tests::test_self_iso(&ring, elements.iter().map(|x| ring.clone_el(x)));
 }
 
 #[test]
 fn test_thread_safe() {
-    let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
+    let rns_base = zn_rns::Zn::new(vec![zn_64::Zn::new(17), zn_64::Zn::new(97)], BigIntRing::RING);
     let ring = Arc::new(ManagedDoubleRNSRingBase::new(Pow2CyclotomicNumberRing::new(16), rns_base));
 
     let test_element = Arc::new(ring.get_ring().new_element_sum(
@@ -1120,7 +1209,7 @@ fn test_thread_safe() {
 
 #[test]
 fn test_canonical_hom_from_doublerns() {
-    let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
+    let rns_base = zn_rns::Zn::new(vec![zn_64::Zn::new(17), zn_64::Zn::new(97)], BigIntRing::RING);
     let ring = ManagedDoubleRNSRingBase::new(Pow2CyclotomicNumberRing::new(16), rns_base);
 
     let doublerns_ring = RingRef::new(&ring.get_ring().base);
@@ -1142,7 +1231,7 @@ fn test_canonical_hom_from_doublerns() {
 
 #[test]
 fn test_canonical_hom_from_singlerns() {
-    let rns_base = zn_rns::Zn::new(vec![Zn::new(97), Zn::new(193)], BigIntRing::RING);
+    let rns_base = zn_rns::Zn::new(vec![zn_64::Zn::new(97), zn_64::Zn::new(193)], BigIntRing::RING);
     let ring = ManagedDoubleRNSRingBase::new(Pow2CyclotomicNumberRing::new(16), rns_base.clone());
 
     let singlerns_ring = SingleRNSRingBase::<_, _, DefaultConvolution>::new(Pow2CyclotomicNumberRing::new(16), rns_base);
@@ -1164,7 +1253,7 @@ fn test_canonical_hom_from_singlerns() {
 
 #[test]
 fn test_add_result_independent_of_repr() {
-    let rns_base = zn_rns::Zn::new(vec![Zn::new(17), Zn::new(97)], BigIntRing::RING);
+    let rns_base = zn_rns::Zn::new(vec![zn_64::Zn::new(17), zn_64::Zn::new(97)], BigIntRing::RING);
     let ring = ManagedDoubleRNSRingBase::new(Pow2CyclotomicNumberRing::new(4), rns_base);
     let base = &ring.get_ring().base;
     let reprs_of_11: [Box<dyn Fn() -> ManagedDoubleRNSEl<_, _>>; 4] = [
@@ -1211,5 +1300,60 @@ fn test_add_result_independent_of_repr() {
             let y = b();
             assert!(base.eq_el_non_fft(&base.from_non_fft(base.base_ring().int_hom().map(1122)), &*ring.get_ring().to_small_basis(&ring.mul_ref(&x, &y)).unwrap()));
         }
+    }
+}
+
+#[test]
+fn test_serialization() {
+    let (ring, elements) = ring_and_elements();
+    feanor_math::serialization::generic_tests::test_serialization(&ring, elements.iter().map(|x| ring.clone_el(x)));
+
+    for a in &elements {
+        if ring.is_zero(a) {
+            continue;
+        }
+        let a_small_basis = ring.get_ring().from_small_basis_repr(ring.get_ring().unmanaged_ring().get_ring().clone_el_non_fft(ring.get_ring().to_small_basis(a).unwrap()));
+        let serializer = serde_assert::Serializer::builder().is_human_readable(true).build();
+        let tokens = ring.get_ring().serialize(&a_small_basis, &serializer).unwrap();
+        let mut deserializer = serde_assert::Deserializer::builder(tokens).is_human_readable(true).build();
+        let result = ring.get_ring().deserialize(&mut deserializer).unwrap();
+        assert_el_eq!(ring, &a_small_basis, &result);
+        match result.internal.get_repr() {
+            ManagedDoubleRNSElRepresentation::SmallBasis(_) => {},
+            _ => panic!("wrong representation")
+        };
+
+        let a_small_basis = ring.get_ring().from_small_basis_repr(ring.get_ring().unmanaged_ring().get_ring().clone_el_non_fft(ring.get_ring().to_small_basis(a).unwrap()));
+        let serializer = serde_assert::Serializer::builder().is_human_readable(false).build();
+        let tokens = ring.get_ring().serialize(&a_small_basis, &serializer).unwrap();
+        let mut deserializer = serde_assert::Deserializer::builder(tokens).is_human_readable(false).build();
+        let result = ring.get_ring().deserialize(&mut deserializer).unwrap();
+        assert_el_eq!(ring, &a_small_basis, &result);
+        match result.internal.get_repr() {
+            ManagedDoubleRNSElRepresentation::SmallBasis(_) => {},
+            _ => panic!("wrong representation")
+        };
+
+        let a_doublerns = ring.get_ring().from_double_rns_repr(ring.get_ring().unmanaged_ring().clone_el(ring.get_ring().to_doublerns(a).unwrap()));
+        let serializer = serde_assert::Serializer::builder().is_human_readable(true).build();
+        let tokens = ring.get_ring().serialize(&a_doublerns, &serializer).unwrap();
+        let mut deserializer = serde_assert::Deserializer::builder(tokens).is_human_readable(true).build();
+        let result = ring.get_ring().deserialize(&mut deserializer).unwrap();
+        assert_el_eq!(ring, &a_doublerns, &result);
+        match result.internal.get_repr() {
+            ManagedDoubleRNSElRepresentation::SmallBasis(_) => {},
+            _ => panic!("wrong representation")
+        };
+
+        let a_doublerns = ring.get_ring().from_double_rns_repr(ring.get_ring().unmanaged_ring().clone_el(ring.get_ring().to_doublerns(a).unwrap()));
+        let serializer = serde_assert::Serializer::builder().is_human_readable(false).build();
+        let tokens = ring.get_ring().serialize(&a_doublerns, &serializer).unwrap();
+        let mut deserializer = serde_assert::Deserializer::builder(tokens).is_human_readable(false).build();
+        let result = ring.get_ring().deserialize(&mut deserializer).unwrap();
+        assert_el_eq!(ring, &a_doublerns, &result);
+        match result.internal.get_repr() {
+            ManagedDoubleRNSElRepresentation::DoubleRNS(_) => {},
+            _ => panic!("wrong representation")
+        };
     }
 }

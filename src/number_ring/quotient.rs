@@ -695,6 +695,7 @@ pub fn test_with_number_ring<NumberRing: HENumberRing>(number_ring: NumberRing) 
     feanor_math::ring::generic_tests::test_ring_axioms(&ring, elements.iter().map(|x| ring.clone_el(x)));
     feanor_math::ring::generic_tests::test_self_iso(&ring, elements.iter().map(|x| ring.clone_el(x)));
     feanor_math::rings::extension::generic_tests::test_free_algebra_axioms(&ring);
+    feanor_math::serialization::generic_tests::test_serialization(&ring, elements.iter().map(|x| ring.clone_el(x)));
 }
 
 #[test]

@@ -20,14 +20,19 @@ use feanor_math::rings::zn::*;
 use feanor_math::rings::zn::zn_64::*;
 use feanor_math::homomorphism::*;
 use feanor_math::seq::*;
-use feanor_math::specialization::FiniteRingOperation;
-use feanor_math::specialization::FiniteRingSpecializable;
+use feanor_math::serialization::*;
+use feanor_math::specialization::{FiniteRingOperation, FiniteRingSpecializable};
+
+use serde::de;
 use serde_json::Number;
+use tracing::field::Visit;
 use tracing::instrument;
 
 use crate::cyclotomic::{CyclotomicGaloisGroupEl, CyclotomicRing};
 use crate::number_ring::*;
 use crate::rnsconv::*;
+use super::serialization::deserialize_rns_data;
+use super::serialization::serialize_rns_data;
 use super::single_rns_ring::*;
 use super::BGFVCiphertextRing;
 use super::PreparedMultiplicationRing;
@@ -401,6 +406,41 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
             ring: self,
             el_wrt_coeff_basis: result
         };
+    }
+
+    pub fn serialize_non_fft<S>(&self, el: SmallBasisEl<NumberRing, A>, serializer: S) -> Result<S::Ok, S::Error>
+        where S: serde::Serializer
+    {
+        if serializer.is_human_readable() {
+            serialize_seq_helper(serializer, self.wrt_canonical_basis_non_fft(el).iter().enumerate().map(|(i, c)| SerializeOwnedWithRing::new(c, self.base_ring())))
+        } else {
+            serialize_newtype_struct_helper(serializer, "SmallBasisEl", &serialize_rns_data(self.base_ring(), self.as_matrix_wrt_small_basis(&el)))
+        }
+    }
+
+    pub fn serializable_non_fft<'a>(&'a self, el: SmallBasisEl<NumberRing, A>) -> SerializeSmallBasisElWithRing<'a, NumberRing, A> {
+        return SerializeSmallBasisElWithRing { ring: self, el }
+    }
+
+    pub fn deserialize_non_fft<'de, D>(&self, deserializer: D) -> Result<SmallBasisEl<NumberRing, A>, D::Error>
+        where D: serde::Deserializer<'de>
+    {
+        if deserializer.is_human_readable() {
+            let mut data = Vec::with_capacity_in(self.rank(), &self.allocator);
+            deserialize_seq_helper(deserializer, |c| data.push(c), DeserializeWithRing::new(self.base_ring()))?;
+            if data.len() != self.rank() {
+                return Err(de::Error::invalid_length(data.len(), &format!("expected a sequence of {} elements of Z/qZ", self.rank()).as_str()));
+            }
+            return Ok(self.from_canonical_basis_non_fft(data.into_iter()));
+        } else {
+            let mut result = self.zero_non_fft();
+            deserialize_newtype_struct_helper(deserializer, "SmallBasisEl", deserialize_rns_data(self.base_ring(), self.as_matrix_wrt_small_basis_mut(&mut result)))?;
+            return Ok(result);
+        }
+    }
+
+    pub fn deserialize_seed_non_fft<'a>(&'a self) -> DeserializeSeedSmallBasisElWithRing<'a, NumberRing, A> {
+        return DeserializeSeedSmallBasisElWithRing { ring: self }
     }
 
     #[instrument(skip_all)]
@@ -892,6 +932,71 @@ impl<NumberRing, A> FiniteRing for DoubleRNSRingBase<NumberRing, A>
     }
 }
 
+pub struct SerializeSmallBasisElWithRing<'a, NumberRing, A>
+    where NumberRing: HENumberRing,
+        A: Allocator + Clone
+{
+    ring: &'a DoubleRNSRingBase<NumberRing, A>,
+    el: SmallBasisEl<NumberRing, A>
+}
+
+impl<'a, NumberRing, A> serde::Serialize for SerializeSmallBasisElWithRing<'a, NumberRing, A>
+    where NumberRing: HENumberRing,
+        A: Allocator + Clone
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where S: serde::Serializer 
+    {
+        self.ring.serialize_non_fft(self.ring.clone_el_non_fft(&self.el), serializer)
+    }
+}
+pub struct DeserializeSeedSmallBasisElWithRing<'a, NumberRing, A>
+    where NumberRing: HENumberRing,
+        A: Allocator + Clone
+{
+    ring: &'a DoubleRNSRingBase<NumberRing, A>,
+}
+
+impl<'a, 'de, NumberRing, A> serde::de::DeserializeSeed<'de> for DeserializeSeedSmallBasisElWithRing<'a, NumberRing, A>
+    where NumberRing: HENumberRing,
+        A: Allocator + Clone
+{
+    type Value = SmallBasisEl<NumberRing, A>;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+        where D: de::Deserializer<'de>
+    {
+        self.ring.deserialize_non_fft(deserializer)
+    }
+}
+
+impl<NumberRing, A> SerializableElementRing for DoubleRNSRingBase<NumberRing, A> 
+    where NumberRing: HENumberRing,
+        A: Allocator + Clone
+{
+    fn serialize<S>(&self, el: &Self::Element, serializer: S) -> Result<S::Ok, S::Error>
+        where S: serde::Serializer
+    {
+        if serializer.is_human_readable() {
+            self.serialize_non_fft(self.undo_fft(self.clone_el(el)), serializer)
+        } else {
+            serialize_newtype_struct_helper(serializer, "DoubleRNSEl", &serialize_rns_data(self.base_ring(), self.as_matrix_wrt_mult_basis(el)))
+        }
+    }
+
+    fn deserialize<'de, D>(&self, deserializer: D) -> Result<Self::Element, D::Error>
+        where D: serde::Deserializer<'de>
+    {
+        if deserializer.is_human_readable() {
+            self.deserialize_non_fft(deserializer).map(|x| self.do_fft(x))
+        } else {
+            let mut result = self.zero();
+            deserialize_newtype_struct_helper(deserializer, "DoubleRNSEl", deserialize_rns_data(self.base_ring(), self.as_matrix_wrt_mult_basis_mut(&mut result)))?;
+            return Ok(result);
+        }
+    }
+}
+
 impl<NumberRing, A1, A2> CanHomFrom<DoubleRNSRingBase<NumberRing, A2>> for DoubleRNSRingBase<NumberRing, A1>
     where NumberRing: HENumberRing,
         A1: Allocator + Clone,
@@ -1047,4 +1152,6 @@ pub fn test_with_number_ring<NumberRing: Clone + HECyclotomicNumberRing>(number_
             dropped_rns_factor_ring.get_ring().drop_rns_factor_element(ring.get_ring(), &[0], a)
         );
     }
+
+    feanor_math::serialization::generic_tests::test_serialization(&ring, elements.iter().map(|x| ring.clone_el(x)));
 }

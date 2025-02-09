@@ -30,6 +30,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ace50bade8e6234aa140d9a2f552bbee1db4d353f69b8217bc503490fc1a9f26"
 
 [[package]]
+name = "bytemuck"
+version = "1.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef657dfab802224e671f5818e9a4935f9b1957ed18e58292690cc39e7a4092a3"
+
+[[package]]
 name = "byteorder"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -133,12 +139,13 @@ checksum = "60b1af1c220855b6ceac025d3f6ecdd2b7c4894bfe9cd9bda4fbb4bc7c0d4cf0"
 
 [[package]]
 name = "feanor-math"
-version = "3.0.8"
+version = "3.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16ef52a9211b20d75d06c9c0f41dfe0a9656754ec19f2b886e1e3eb622759a4d"
+checksum = "75a195196ec719b2fd7e5d5428ffed42e778c3d929d8be2388579c9325614dd9"
 dependencies = [
  "append-only-vec",
  "atomicbox",
+ "bytemuck",
  "libc",
  "oorandom",
  "serde",
@@ -192,6 +199,7 @@ dependencies = [
  "rand_distr",
  "rayon",
  "serde",
+ "serde_assert",
  "serde_json",
  "take_mut",
  "thread_local",

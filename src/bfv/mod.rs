@@ -1225,8 +1225,8 @@ pub fn tree_mul_benchmark<Params>(params: Params, digits: usize)
 
     let log2_count = 4;
     let mut current = (0..(1 << log2_count)).map(|i| Params::enc_sym(&P, &C, &mut rng, &P.int_hom().map(2 * i + 1), &sk)).map(Some).collect::<Vec<_>>();
-    let start = Instant::now();
 
+    let start = Instant::now();
     for i in 0..log2_count {
         let mid = current.len() / 2;
         let (left, right) = current.split_at_mut(mid);
@@ -1261,8 +1261,8 @@ pub fn chain_mul_benchmark<Params>(params: Params, digits: usize)
 
     let count = 4;
     let mut current = Params::enc_sym(&P, &C, &mut rng, &P.int_hom().map(1), &sk);
-    let start = Instant::now();
 
+    let start = Instant::now();
     for i in 0..count {
         let left = Params::clone_ct(&C, &current);
         let right = current;
