@@ -42,6 +42,21 @@ use crate::number_ring::quotient::NumberRingQuotient;
 use crate::number_ring::hypercube::HypercubeIsomorphism;
 use crate::lintransform::trace::*;
 
+///
+/// A linear transform of the ring `R_t = Z[X]/(Phi_n(X), t)`, written in the form
+/// ```text
+///   x  ->  sum_σ c_σ σ(x)
+/// ```
+/// where `σ` runs through the Galois automorphisms of `R_t`. In particular, this
+/// form is compatible with homomorphic evaluation, and consequently, [`MatmulTransform`]
+/// provides the function [`MatmulTransform::to_circuit()`] to convert it to an efficient
+/// Galois circuit, which can be evaluated on encrypted ring elements.
+/// 
+/// As a result, creating a [`MatmulTransform`] is usually an intermediate step when
+/// performing any linear transform on encrypted data. It can be created in a relatively
+/// straightforward way (e.g. using [`MatmulTransform::matmul1d()`] and [`MatmulTransform::blockmatmul1d()`]),
+/// and then compiled into circuit.
+/// 
 pub struct MatmulTransform<NumberRing, A = Global>
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone
