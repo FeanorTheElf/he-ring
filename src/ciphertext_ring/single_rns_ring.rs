@@ -11,7 +11,7 @@ use feanor_math::algorithms::matmul::ComputeInnerProduct;
 use feanor_math::algorithms::poly_gcd::factor;
 use feanor_math::iters::{multi_cartesian_product, MultiProduct};
 use feanor_math::primitive_int::{StaticRing, StaticRingBase};
-use feanor_math::serialization::{deserialize_newtype_struct_helper, deserialize_seq_helper, serialize_newtype_struct_helper, serialize_seq_helper, DeserializeWithRing, SerializableElementRing, SerializeOwnedWithRing};
+use feanor_math::serialization::{DeserializeSeedNewtype, DeserializeSeedSeq, DeserializeWithRing, SerializableElementRing, SerializableNewtype, SerializableSeq, SerializeOwnedWithRing};
 use feanor_math::specialization::{FiniteRingOperation, FiniteRingSpecializable};
 use feanor_math::{assert_el_eq, ring::*};
 use feanor_math::homomorphism::*;
@@ -22,12 +22,14 @@ use feanor_math::rings::poly::dense_poly::DensePolyRing;
 use feanor_math::rings::poly::sparse_poly::SparsePolyRing;
 use feanor_math::rings::poly::*;
 use feanor_math::rings::zn::*;
+use feanor_math::rings::zn::zn_64::*;
 use feanor_math::seq::sparse::SparseMapVector;
 use feanor_math::seq::*;
 use feanor_math::matrix::*;
+
+use serde::Serialize;
+use serde::de::DeserializeSeed;
 use tracing::instrument;
-use zn_64::{ZnBase, Zn, ZnEl};
-use zn_static::Fp;
 
 use crate::number_ring::odd_cyclotomic::OddCyclotomicNumberRing;
 use crate::number_ring::HECyclotomicNumberRing;
@@ -768,13 +770,12 @@ impl<NumberRing, A, C> SerializableElementRing for SingleRNSRingBase<NumberRing,
         where S: serde::Serializer
     {
         if serializer.is_human_readable() {
-            return serialize_seq_helper(serializer, self.wrt_canonical_basis(el).iter().enumerate().map(|(i, c)| SerializeOwnedWithRing::new(c, self.base_ring())));
+            return SerializableNewtype::new("RingEl", SerializableSeq::new(self.wrt_canonical_basis(el).map_fn(|c| SerializeOwnedWithRing::new(c, self.base_ring())))).serialize(serializer);
         } else {
             let mut reduced = self.clone_el(el);
             self.reduce_modulus_complete(&mut reduced);
             let reduced_as_matrix = self.coefficients_as_matrix(&reduced).restrict_cols(0..self.rank());
-            let result = serialize_newtype_struct_helper(serializer, "SingleRNSEl", &serialize_rns_data(self.base_ring(), reduced_as_matrix));
-            return result;
+            return SerializableNewtype::new("SingleRNSEl", &serialize_rns_data(self.base_ring(), reduced_as_matrix)).serialize(serializer);
         }
     }
 
@@ -782,15 +783,19 @@ impl<NumberRing, A, C> SerializableElementRing for SingleRNSRingBase<NumberRing,
         where D: serde::Deserializer<'de>
     {
         if deserializer.is_human_readable() {
-            let mut data = Vec::with_capacity_in(self.rank(), self.allocator());
-            deserialize_seq_helper(deserializer, |c| data.push(c), DeserializeWithRing::new(self.base_ring()))?;
+            let data = DeserializeSeedNewtype::new("RingEl", DeserializeSeedSeq::new(
+                (0..self.rank()).map(|_| DeserializeWithRing::new(self.base_ring())),
+                Vec::with_capacity_in(self.rank(), self.allocator()),
+                |mut current, next| { current.push(next); current }
+            )).deserialize(deserializer)?;
             if data.len() != self.rank() {
                 return Err(serde::de::Error::invalid_length(data.len(), &format!("expected a sequence of {} elements of Z/qZ", self.rank()).as_str()));
             }
             return Ok(self.from_canonical_basis(data.into_iter()));
         } else {
             let mut result = self.zero();
-            deserialize_newtype_struct_helper(deserializer, "SingleRNSEl", deserialize_rns_data(self.base_ring(), self.coefficients_as_matrix_mut(&mut result)))?;
+            let result_as_matrix = self.coefficients_as_matrix_mut(&mut result).restrict_cols(0..self.rank());
+            DeserializeSeedNewtype::new("SingleRNSEl", deserialize_rns_data(self.base_ring(), result_as_matrix)).deserialize(deserializer)?;
             return Ok(result);
         }
     }

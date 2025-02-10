@@ -16,9 +16,10 @@ use feanor_math::rings::extension::*;
 use feanor_math::rings::finite::FiniteRing;
 use feanor_math::rings::zn::*;
 use feanor_math::seq::VectorView;
-use feanor_math::serialization::{deserialize_newtype_struct_helper, serialize_newtype_struct_helper, DeserializeWithRing, SerializableElementRing, SerializeWithRing};
+use feanor_math::serialization::{DeserializeSeedNewtype, DeserializeWithRing, SerializableElementRing, SerializableNewtype, SerializeWithRing};
 use feanor_math::specialization::{FiniteRingOperation, FiniteRingSpecializable};
 use serde::{Deserialize, Serialize};
+use serde::de::DeserializeSeed;
 
 use crate::cyclotomic::CyclotomicGaloisGroupEl;
 use crate::cyclotomic::CyclotomicRing;
@@ -943,12 +944,12 @@ impl<NumberRing, A> SerializableElementRing for ManagedDoubleRNSRingBase<NumberR
         where S: serde::Serializer
     {
         if serializer.is_human_readable() {
-            return serialize_newtype_struct_helper(serializer, "ManagedDoubleRNSEl", &self.base.serializable_non_fft(self.base.clone_el_non_fft(self.to_small_basis(el).unwrap_or(&self.zero))));
+            return SerializableNewtype::new("ManagedDoubleRNSEl", &SerializableSmallBasisElWithRing::new(&self.base, self.to_small_basis(el).unwrap_or(&self.zero))).serialize(serializer);
         }
         if let ManagedDoubleRNSElRepresentation::DoubleRNS(double_rns_repr) = el.internal.get_repr() {
             serializer.serialize_newtype_variant("ManagedDoubleRNSEl", 0, "DoubleRNS", &SerializeWithRing::new(double_rns_repr, RingRef::new(&self.base)))
         } else if let Some(small_basis_repr) = self.to_small_basis(el) {
-            serializer.serialize_newtype_variant("ManagedDoubleRNSEl", 1, "SmallBasis", &self.base.serializable_non_fft(self.base.clone_el_non_fft(small_basis_repr)))
+            serializer.serialize_newtype_variant("ManagedDoubleRNSEl", 1, "SmallBasis", &SerializableSmallBasisElWithRing::new(&self.base, small_basis_repr))
         } else {
             serializer.serialize_newtype_variant("ManagedDoubleRNSEl", 2, "Zero", &())
         }
@@ -961,7 +962,7 @@ impl<NumberRing, A> SerializableElementRing for ManagedDoubleRNSRingBase<NumberR
         use serde::de::VariantAccess;
 
         if deserializer.is_human_readable() {
-            return deserialize_newtype_struct_helper(deserializer, "ManagedDoubleRNSEl", self.base.deserialize_seed_non_fft()).map(|small_basis_repr| self.from_small_basis_repr(small_basis_repr));
+            return DeserializeSeedNewtype::new("ManagedDoubleRNSEl", DeserializeSeedSmallBasisElWithRing::new(&self.base)).deserialize(deserializer).map(|small_basis_repr| self.from_small_basis_repr(small_basis_repr));
         }
 
         struct ResultVisitor<'a, NumberRing, A>
@@ -1025,7 +1026,7 @@ impl<NumberRing, A> SerializableElementRing for ManagedDoubleRNSRingBase<NumberR
                 let (discriminant, variant): (Discriminant, _) = data.variant()?;
                 match discriminant {
                     Discriminant::DoubleRNS => variant.newtype_variant_seed(DeserializeWithRing::new(self.ring.unmanaged_ring())).map(|double_rns_repr| self.ring.from_double_rns_repr(double_rns_repr)),
-                    Discriminant::SmallBasis => variant.newtype_variant_seed(self.ring.unmanaged_ring().get_ring().deserialize_seed_non_fft()).map(|small_basis_repr| self.ring.from_small_basis_repr(small_basis_repr)),
+                    Discriminant::SmallBasis => variant.newtype_variant_seed(DeserializeSeedSmallBasisElWithRing::new(self.ring.unmanaged_ring().get_ring())).map(|small_basis_repr| self.ring.from_small_basis_repr(small_basis_repr)),
                     Discriminant::Zero => variant.unit_variant().map(|()| self.ring.zero())
                 }
             }

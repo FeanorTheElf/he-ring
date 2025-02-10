@@ -109,6 +109,11 @@ pub fn log_time<F, T, const LOG: bool, const COUNTER_VAR_COUNT: usize>(descripti
 }
 
 ///
+/// Contains some macros that mimic `#[derive(Deserialize)]` but for [`serde::de::DeserializeSeed`].
+/// 
+mod serialization_helper;
+
+///
 /// Contains an abstraction for NTTs and convolutions, which can then be
 /// used to configure the ring implementations in this crate.
 /// 

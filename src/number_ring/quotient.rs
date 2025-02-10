@@ -10,15 +10,14 @@ use feanor_math::rings::finite::FiniteRing;
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
 use feanor_math::rings::zn::{zn_64, zn_big, zn_rns, FromModulusCreateableZnRing, ZnRing, ZnRingStore};
 use feanor_math::ring::*;
-use feanor_math::seq::{CloneElFn, CloneRingEl};
-use feanor_math::seq::VectorView;
-use feanor_math::serialization::{DeserializeWithRing, SerializableElementRing, SerializeWithRing};
+use feanor_math::seq::*;
+use feanor_math::serialization::{DeserializeSeedNewtype, DeserializeSeedSeq, DeserializeWithRing, SerializableElementRing, SerializableNewtype, SerializableSeq, SerializeWithRing};
 use feanor_math::ordered::OrderedRingStore;
 use feanor_math::rings::finite::*;
-
 use feanor_math::specialization::{FiniteRingOperation, FiniteRingSpecializable};
-use serde::{de, Deserializer, Serializer};
-use serde_json::Number;
+
+use serde::{Deserializer, Serialize, Serializer};
+use crate::serde::de::DeserializeSeed;
 
 use crate::cyclotomic::{CyclotomicGaloisGroupEl, CyclotomicRing};
 use super::pow2_cyclotomic::Pow2CyclotomicNumberRing;
@@ -589,18 +588,19 @@ impl<NumberRing, ZnTy, A> SerializableElementRing for NumberRingQuotientBase<Num
     fn serialize<S>(&self, el: &Self::Element, serializer: S) -> Result<S::Ok, S::Error>
         where S: Serializer
     {
-        feanor_math::serialization::serialize_seq_helper(serializer, el.data.iter().map(|x| SerializeWithRing::new(x, self.base_ring())))
+        SerializableNewtype::new("RingEl", SerializableSeq::new(el.data.as_fn().map_fn(|x| SerializeWithRing::new(x, self.base_ring())))).serialize(serializer)
     }
 
     fn deserialize<'de, D>(&self, deserializer: D) -> Result<Self::Element, D::Error>
         where D: Deserializer<'de> 
     {
-        let mut result = Vec::with_capacity_in(self.rank(), self.allocator.clone());
-        feanor_math::serialization::deserialize_seq_helper(deserializer, |x| {
-            result.push(x);
-        }, DeserializeWithRing::new(self.base_ring()))?;
+        let result = DeserializeSeedNewtype::new("RingEl", DeserializeSeedSeq::new(
+            (0..self.rank()).map(|_| DeserializeWithRing::new(self.base_ring())),
+            Vec::with_capacity_in(self.rank(), self.allocator.clone()),
+            |mut current, next| { current.push(next); current }
+        )).deserialize(deserializer)?;
         if result.len() != self.rank() {
-            return Err(de::Error::custom(format!("expected {} elements, got {}", self.rank(), result.len())));
+            return Err(serde::de::Error::custom(format!("expected {} elements, got {}", self.rank(), result.len())));
         }
         return Ok(NumberRingQuotientEl {
             data: result,

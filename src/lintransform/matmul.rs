@@ -57,6 +57,10 @@ use crate::lintransform::trace::*;
 /// straightforward way (e.g. using [`MatmulTransform::matmul1d()`] and [`MatmulTransform::blockmatmul1d()`]),
 /// and then compiled into circuit.
 /// 
+/// As opposed to a [`PlaintextCircuit`], using a [`MatmulTransform`] usually requires a
+/// description of the ring in question via a [`HypercubeIsomorphism`]. The `HypercubeIsomorphism`
+/// is not stored by the transform, but has to be provided to all functions that require it.
+/// 
 pub struct MatmulTransform<NumberRing, A = Global>
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone

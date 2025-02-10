@@ -57,21 +57,28 @@ impl<R: ?Sized + RingBase> Coefficient<R> {
         ring.eq_el(&self.clone(ring).to_ring_el(ring), &other.clone(ring).to_ring_el(ring))
     }
 
-    pub fn add_to<S: RingStore<Type = R> + Copy>(&self, target: El<S>, ring: S) -> El<S> {
+    ///
+    /// Computes `self + x`, but avoids a full ring addition if `self` is zero.
+    /// 
+    pub fn add_to<S: RingStore<Type = R> + Copy>(&self, x: El<S>, ring: S) -> El<S> {
         match self {
-            Coefficient::Zero => target,
-            Coefficient::One => ring.add(target, ring.one()),
-            Coefficient::Integer(x) => ring.add(target, ring.int_hom().map(*x)),
-            Coefficient::Other(x) => ring.add_ref_snd(target, x)
+            Coefficient::Zero => x,
+            Coefficient::One => ring.add(x, ring.one()),
+            Coefficient::Integer(y) => ring.add(x, ring.int_hom().map(*y)),
+            Coefficient::Other(y) => ring.add_ref_snd(x, y)
         }
     }
 
-    pub fn mul_to<S: RingStore<Type = R> + Copy>(&self, target: El<S>, ring: S) -> El<S> {
+    ///
+    /// Computes `self * x`, but avoids a full ring multiplication if `self`
+    /// is stored as an integer.
+    /// 
+    pub fn mul_to<S: RingStore<Type = R> + Copy>(&self, x: El<S>, ring: S) -> El<S> {
         match self {
             Coefficient::Zero => ring.zero(),
-            Coefficient::One => target,
-            Coefficient::Integer(x) => ring.int_hom().mul_map(target, *x),
-            Coefficient::Other(x) => ring.mul_ref_snd(target, x)
+            Coefficient::One => x,
+            Coefficient::Integer(y) => ring.int_hom().mul_map(x, *y),
+            Coefficient::Other(y) => ring.mul_ref_snd(x, y)
         }
     }
 
@@ -231,7 +238,12 @@ impl<R: RingBase + Default> PartialEq for PlainCircuitGate<R> {
 /// on unencrypted data.
 /// 
 /// Simple ways to create circuits are by using [`crate::digitextract::polys::low_depth_paterson_stockmeyer()`]
-/// and [`crate::lintransform::matmul::MatmulTransform::matmul1d()`].
+/// and [`crate::lintransform::matmul::MatmulTransform::matmul1d()`]. However, you 
+/// can also manually build a circuit using the functions of [`PlaintextCircuit`], in
+/// particular [`PlaintextCircuit::linear_transform()`], [`PlaintextCircuit::select()`],
+/// [`PlaintextCircuit::tensor()`] and [`PlaintextCircuit::compose()`].
+/// This allows specifying a circuit exactly, but is usually much more complicated than
+/// computing a circuit from a linear transform or a set of polynomials.
 /// 
 /// Note that the ring is not stored by the circuit, but the same ring must be provided 
 /// with every circuit operation that requires ring arithmetic. 
@@ -738,15 +750,37 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
     }
     
     ///
-    /// Evaluates the circuit on inputs of type `T`, which support all necessary operations
-    /// through the passed functions.
+    /// Evaluates the circuit on inputs of type `T`, which in some sense encrypt/encode/represent
+    /// elements of a ring, into which we can also embed the circuit constants.
     /// 
-    /// In particular
+    /// More concretely, the ring whose elements are represented by `T` should support
+    /// the following operations:
     ///  - `constant(c)` should return a `T` representing the ring element `c`
     ///  - `add_prod(y, c, x)` should return a `T` representing `y + c * x`
     ///  - `mul(x, y)` should return a `T` representing `x * y`
-    ///  - `gal(gs, x)` should return a list of `T`s, with the `i`-th one representing `σx` for `σ: 𝝵 -> 𝝵^gs[i]` 
+    ///  - `gal(gs, x)` should return a list of `T`s, with the `i`-th one representing `σ(x)` for `σ: 𝝵 -> 𝝵^gs[i]` 
     ///    the Galois automorphism defined by `gs[i]`  
+    /// 
+    /// Naturally, if the circuit does not contain multiplication gates (can be checked e.g. via [`PlaintextCircuit::has_multiplication_gates()`]),
+    /// `add_prod` will never be called, and similarly for galois gates.
+    /// 
+    /// # Example
+    /// 
+    /// ```
+    /// # use he_ring::circuit::*;
+    /// # use feanor_math::ring::*;
+    /// # use feanor_math::primitive_int::*;
+    /// let circuit = PlaintextCircuit::add(StaticRing::<i64>::RING);
+    /// assert_eq!(vec![3], circuit.evaluate_generic(
+    ///     &[1 as i32, 2 as i32], 
+    ///     |x| x.to_ring_el(StaticRing::<i64>::RING) as i32, 
+    ///     |x, c, y| x + c.mul_to(*y as i64, StaticRing::<i64>::RING) as i32, 
+    ///     |_, _| unreachable!("circuit should have no multiplication gates"), 
+    ///     |_, _| unreachable!("circuit should have no Galois gates")
+    /// ));
+    /// ```
+    /// Of course, this example could have been more easily implemented using [`PlaintextCircuit::evaluate()`], since
+    /// the operations used here exactly match the ones of `StaticRing::<i32>::RING`.
     /// 
     pub fn evaluate_generic<T, ContantFn, AddProductFn, MulFn, GaloisFn>(&self, inputs: &[T], mut constant: ContantFn, mut add_prod: AddProductFn, mut mul: MulFn, mut gal: GaloisFn) -> Vec<T>
         where ContantFn: FnMut(&Coefficient<R>) -> T,

@@ -1,4 +1,5 @@
 use std::fmt::Debug;
+use std::marker::PhantomData;
 
 use feanor_math::algorithms::discrete_log::order;
 use feanor_math::ring::*;
@@ -8,8 +9,16 @@ use feanor_math::rings::zn::zn_64::*;
 use feanor_math::rings::zn::*;
 use feanor_math::algorithms::int_factor::factor;
 use feanor_math::primitive_int::StaticRing;
+use feanor_math::serialization::DeserializeSeedNewtype;
+use feanor_math::serialization::DeserializeWithRing;
+use feanor_math::serialization::SerializableNewtype;
+use feanor_math::serialization::SerializeOwnedWithRing;
+use feanor_math::serialization::SerializeWithRing;
 use feanor_math::wrapper::RingElementWrapper;
 use feanor_math::divisibility::DivisibilityRingStore;
+use serde::de::DeserializeSeed;
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::euler_phi;
 
@@ -123,6 +132,58 @@ impl CyclotomicGaloisGroup {
 impl Debug for CyclotomicGaloisGroup {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "(Z/{}Z)*", self.ring.modulus())
+    }
+}
+
+pub struct SerializableCyclotomicGaloisGroupEl<'a>(&'a CyclotomicGaloisGroup, CyclotomicGaloisGroupEl);
+
+impl<'a> SerializableCyclotomicGaloisGroupEl<'a> {
+    pub fn new(galois_group: &'a CyclotomicGaloisGroup, el: CyclotomicGaloisGroupEl) -> Self {
+        Self(galois_group, el)
+    }
+}
+
+impl<'a> Serialize for SerializableCyclotomicGaloisGroupEl<'a> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        SerializableNewtype::new("CyclotomicGaloisGroupEl", &SerializeOwnedWithRing::new(self.1.value, &self.0.ring)).serialize(serializer)
+    }
+}
+
+#[derive(Copy, Clone)]
+pub struct DeserializeSeedCyclotomicGaloisGroupEl<'a>(&'a CyclotomicGaloisGroup);
+
+impl<'a> DeserializeSeedCyclotomicGaloisGroupEl<'a> {
+    pub fn new(galois_group: &'a CyclotomicGaloisGroup) -> Self {
+        Self(galois_group)
+    }
+}
+
+impl<'a, 'de> DeserializeSeed<'de> for DeserializeSeedCyclotomicGaloisGroupEl<'a> {
+    type Value = CyclotomicGaloisGroupEl;
+
+    fn deserialize<D: serde::Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+        DeserializeSeedNewtype::new("CyclotomicGaloisGroupEl", DeserializeWithRing::new(&self.0.ring)).deserialize(deserializer).map(|g| CyclotomicGaloisGroupEl { value: g })
+    }
+}
+
+impl Serialize for CyclotomicGaloisGroup {
+    
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where S: serde::Serializer
+    {
+        SerializableNewtype::new("CyclotomicGaloisGroup", self.ring.modulus()).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for CyclotomicGaloisGroup {
+
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where D: serde::Deserializer<'de>
+    {
+        DeserializeSeedNewtype::new("CyclotomicGaloisGroup", PhantomData::<i64>).deserialize(deserializer).map(|n| Self {
+            ring: Zn::new(n as u64),
+            order: euler_phi(&factor(ZZi64, n as i64)) as usize
+        })
     }
 }
 

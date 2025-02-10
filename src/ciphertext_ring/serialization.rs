@@ -53,6 +53,7 @@ pub fn deserialize_rns_data<'a, V>(rns_base: &'a zn_rns::Zn<Zn, BigIntRing>, res
         rns_base: &'a zn_rns::Zn<Zn, BigIntRing>,
         result: SubmatrixMut<'a, V, ZnEl>
     }
+
     impl<'a, 'de, V> Visitor<'de> for ResultVisitor<'a, V>
         where V: AsPointerToSlice<ZnEl>
     {

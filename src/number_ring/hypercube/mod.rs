@@ -1,5 +1,6 @@
 use std::alloc::Global;
 use std::fmt::Debug;
+use std::marker::PhantomData;
 use std::ptr::Alignment;
 use std::rc::Rc;
 use std::cmp::max;
@@ -35,17 +36,25 @@ use feanor_math::ring::*;
 use feanor_math::rings::zn::{zn_big, zn_rns, FromModulusCreateableZnRing, ZnReductionMap, ZnRing, ZnRingStore};
 use feanor_math::seq::sparse::SparseMapVector;
 use feanor_math::seq::*;
+use feanor_math::serialization::{DeserializeSeedNewtype, SerializableNewtype, SerializableSeq};
 use feanor_math::wrapper::RingElementWrapper;
+
+use serde::{Deserialize, Serialize};
+use serde::de::DeserializeSeed;
 use tracing::instrument;
 
-use crate::cyclotomic::{CyclotomicGaloisGroup, CyclotomicGaloisGroupEl, CyclotomicRing, CyclotomicRingStore};
+use crate::cyclotomic::{CyclotomicGaloisGroup, CyclotomicGaloisGroupEl, CyclotomicRing, CyclotomicRingStore, SerializableCyclotomicGaloisGroupEl};
+use crate::serialization_helper::DeserializeSeedDependentTuple;
 use crate::{euler_phi, log_time};
 use crate::ntt::dyn_convolution::*;
+use serialization::{HypercubeStructureDataDeserializer, SerializableHypercubeStructureData};
 
 use super::interpolate::FastPolyInterpolation;
 use super::odd_cyclotomic::CompositeCyclotomicNumberRing;
 use super::pow2_cyclotomic::Pow2CyclotomicNumberRing;
 use super::quotient::*;
+
+mod serialization;
 
 const ZZi64: StaticRing<i64> = StaticRing::RING;
 
@@ -105,7 +114,7 @@ pub struct HypercubeStructure {
     choice: HypercubeTypeData
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum HypercubeTypeData {
     Generic, 
     /// if the hypercube dimensions correspond directly to prime power factors of `n`, 
@@ -433,6 +442,31 @@ impl HypercubeStructure {
     /// 
     pub fn element_iter<'b>(&'b self) -> impl ExactSizeIterator<Item = CyclotomicGaloisGroupEl> + use<'b> {
         self.hypercube_iter(|idxs| self.map_usize(idxs))
+    }
+}
+
+impl Serialize for HypercubeStructure {
+
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where S: serde::Serializer
+    {
+        SerializableNewtype::new("HypercubeStructure", (&self.galois_group, SerializableHypercubeStructureData::new(self))).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for HypercubeStructure {
+
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where D: serde::Deserializer<'de>
+    {
+        DeserializeSeedNewtype::new("HypercubeStructure", DeserializeSeedDependentTuple::new(
+            PhantomData::<CyclotomicGaloisGroup>,
+            |galois_group| HypercubeStructureDataDeserializer::new(*galois_group)
+        )).deserialize(deserializer).map(|(galois_group, data)| {
+            let mut result = HypercubeStructure::new(galois_group, data.p, data.d, data.ms, data.gs);
+            result.choice = data.choice;
+            return result;
+        })
     }
 }
 
@@ -978,4 +1012,44 @@ fn test_halevi_shoup_hypercube() {
 
     assert_eq!(4, hypercube_structure.m(0));
     assert_eq!(2, hypercube_structure.m(1));
+}
+
+#[test]
+fn test_serialization() {
+    for hypercube in [
+        HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(11 * 31), 2),
+        HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(32), 7),
+        HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(32), 17),
+        test_ring1().1,
+        test_ring2().1,
+        test_ring3().1
+    ] {
+        let serializer = serde_assert::Serializer::builder().is_human_readable(true).build();
+        let tokens = hypercube.serialize(&serializer).unwrap();
+        let mut deserializer = serde_assert::Deserializer::builder(tokens).is_human_readable(true).build();
+        let deserialized_hypercube = HypercubeStructure::deserialize(&mut deserializer).unwrap();
+
+        assert!(hypercube.galois_group() == deserialized_hypercube.galois_group());
+        assert_eq!(hypercube.dim_count(), deserialized_hypercube.dim_count());
+        assert_eq!(hypercube.is_tensor_product_compatible(), deserialized_hypercube.is_tensor_product_compatible());
+        for i in 0..hypercube.dim_count() {
+            assert_eq!(hypercube.m(i), deserialized_hypercube.m(i));
+            assert!(hypercube.galois_group().eq_el(hypercube.g(i), deserialized_hypercube.g(i)));
+            assert_eq!(hypercube.ord_g(i), deserialized_hypercube.ord_g(i));
+        }
+
+        let serializer = serde_assert::Serializer::builder().is_human_readable(false).build();
+        let tokens = hypercube.serialize(&serializer).unwrap();
+        let mut deserializer = serde_assert::Deserializer::builder(tokens).is_human_readable(false).build();
+        let deserialized_hypercube = HypercubeStructure::deserialize(&mut deserializer).unwrap();
+
+        assert!(hypercube.galois_group() == deserialized_hypercube.galois_group());
+        assert_eq!(hypercube.dim_count(), deserialized_hypercube.dim_count());
+        assert_eq!(hypercube.is_tensor_product_compatible(), deserialized_hypercube.is_tensor_product_compatible());
+        for i in 0..hypercube.dim_count() {
+            assert_eq!(hypercube.m(i), deserialized_hypercube.m(i));
+            assert!(hypercube.galois_group().eq_el(hypercube.g(i), deserialized_hypercube.g(i)));
+            assert_eq!(hypercube.ord_g(i), deserialized_hypercube.ord_g(i));
+        }
+    }
 }
