@@ -11,6 +11,7 @@ use feanor_math::algorithms::matmul::ComputeInnerProduct;
 use feanor_math::algorithms::poly_gcd::factor;
 use feanor_math::iters::{multi_cartesian_product, MultiProduct};
 use feanor_math::primitive_int::{StaticRing, StaticRingBase};
+use feanor_math::serialization::{deserialize_newtype_struct_helper, deserialize_seq_helper, serialize_newtype_struct_helper, serialize_seq_helper, DeserializeWithRing, SerializableElementRing, SerializeOwnedWithRing};
 use feanor_math::specialization::{FiniteRingOperation, FiniteRingSpecializable};
 use feanor_math::{assert_el_eq, ring::*};
 use feanor_math::homomorphism::*;
@@ -37,6 +38,7 @@ use crate::rnsconv::RNSOperation;
 use crate::ntt::HERingConvolution;
 use crate::ntt::ntt_convolution::NTTConv;
 
+use super::serialization::{deserialize_rns_data, serialize_rns_data};
 use super::{BGFVCiphertextRing, PreparedMultiplicationRing};
 
 ///
@@ -757,6 +759,43 @@ impl<NumberRing, A, C> FiniteRingSpecializable for SingleRNSRingBase<NumberRing,
     }
 }
 
+impl<NumberRing, A, C> SerializableElementRing for SingleRNSRingBase<NumberRing, A, C> 
+    where NumberRing: HECyclotomicNumberRing,
+        A: Allocator + Clone,
+        C: PreparedConvolutionAlgorithm<ZnBase>
+{
+    fn serialize<S>(&self, el: &Self::Element, serializer: S) -> Result<S::Ok, S::Error>
+        where S: serde::Serializer
+    {
+        if serializer.is_human_readable() {
+            return serialize_seq_helper(serializer, self.wrt_canonical_basis(el).iter().enumerate().map(|(i, c)| SerializeOwnedWithRing::new(c, self.base_ring())));
+        } else {
+            let mut reduced = self.clone_el(el);
+            self.reduce_modulus_complete(&mut reduced);
+            let reduced_as_matrix = self.coefficients_as_matrix(&reduced).restrict_cols(0..self.rank());
+            let result = serialize_newtype_struct_helper(serializer, "SingleRNSEl", &serialize_rns_data(self.base_ring(), reduced_as_matrix));
+            return result;
+        }
+    }
+
+    fn deserialize<'de, D>(&self, deserializer: D) -> Result<Self::Element, D::Error>
+        where D: serde::Deserializer<'de>
+    {
+        if deserializer.is_human_readable() {
+            let mut data = Vec::with_capacity_in(self.rank(), self.allocator());
+            deserialize_seq_helper(deserializer, |c| data.push(c), DeserializeWithRing::new(self.base_ring()))?;
+            if data.len() != self.rank() {
+                return Err(serde::de::Error::invalid_length(data.len(), &format!("expected a sequence of {} elements of Z/qZ", self.rank()).as_str()));
+            }
+            return Ok(self.from_canonical_basis(data.into_iter()));
+        } else {
+            let mut result = self.zero();
+            deserialize_newtype_struct_helper(deserializer, "SingleRNSEl", deserialize_rns_data(self.base_ring(), self.coefficients_as_matrix_mut(&mut result)))?;
+            return Ok(result);
+        }
+    }
+}
+
 impl<NumberRing, A, C> FiniteRing for SingleRNSRingBase<NumberRing, A, C> 
     where NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone,
@@ -953,6 +992,8 @@ pub fn test_with_number_ring<NumberRing: Clone + HECyclotomicNumberRing>(number_
             dropped_rns_factor_ring.get_ring().drop_rns_factor_element(ring.get_ring(), &[0], ring.clone_el(a))
         );
     }
+
+    feanor_math::serialization::generic_tests::test_serialization(&ring, elements.iter().map(|x| ring.clone_el(x)));
 }
 
 #[test]
