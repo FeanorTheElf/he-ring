@@ -12,6 +12,8 @@ use crate::number_ring::{HECyclotomicNumberRing, HENumberRing};
 use crate::number_ring::quotient::{NumberRingQuotient, NumberRingQuotientBase};
 use crate::number_ring::hypercube::HypercubeIsomorphism;
 
+mod serialization;
+
 ///
 /// A coefficient used in a [`PlaintextCircuit`].
 /// 

@@ -1,5 +1,6 @@
 use feanor_math::matrix::*;
 use feanor_math::pid::EuclideanRingStore;
+use feanor_math::rings::rust_bigint::RustBigintRing;
 use feanor_math::rings::zn::*;
 use feanor_math::rings::zn::zn_64::*;
 use feanor_math::integer::*;
@@ -12,6 +13,7 @@ use tracing::instrument;
 
 use std::alloc::Allocator;
 use std::alloc::Global;
+use std::cmp::min;
 
 use super::sort_unstable_permutation;
 use super::RNSOperation;
@@ -105,7 +107,9 @@ impl<A> RNSOperation for AlmostExactRescalingConvert<A>
         assert_eq!(input.col_count(), output.col_count());
         #[cfg(debug_assertions)] {
             let rns_ring = zn_rns::Zn::new(self.input_rings().iter().cloned().collect(), ZZbig);
-            for j in 0..input.col_count() {
+            // unfortunately, checking all the inputs takes a lot of time, and even though we only do it on debug builds,
+            // it is not good to extremely blow up the test times. Hence, check only some input elements 
+            for j in (0..min(500, input.col_count())).step_by(7) {
                 debug_assert!(
                     ZZbig.is_leq(&ZZbig.int_hom().mul_map(ZZbig.abs(rns_ring.smallest_lift(rns_ring.from_congruence((0..input.row_count()).map(|i| self.input_rings().at(i).clone_el(input.at(i, j)))))), 4), rns_ring.modulus()),
                     "Input is not <= q/4 in absolute value"
