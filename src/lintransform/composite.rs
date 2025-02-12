@@ -233,6 +233,9 @@ pub fn powcoeffs_to_slots_thin<NumberRing>(H: &DefaultHypercube<NumberRing>) -> 
     return result;
 }
 
+#[cfg(test)]
+use crate::ring_literal;
+
 #[test]
 fn test_slots_to_powcoeffs_thin() {
     // F11[X]/Phi_35(X) ~ F_(11^3)^8
@@ -241,7 +244,7 @@ fn test_slots_to_powcoeffs_thin() {
     let H = HypercubeIsomorphism::new::<false>(&ring, hypercube);
 
     // first test very simple case
-    let mut current = ring_literal!(&ring, [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    let mut current = ring_literal(&ring, &[1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     for transform in slots_to_powcoeffs_thin(&H) {
         current = ring.get_ring().compute_linear_transform(&H, &current, &transform);
     }
@@ -298,7 +301,7 @@ fn test_powcoeffs_to_slots_thin() {
     assert_eq!(5, H.hypercube().factor_of_n(1).unwrap());
     assert_eq!(4, H.hypercube().m(1));
 
-    let mut current = ring_literal!(&ring, [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    let mut current = ring_literal(&ring, &[1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     for transform in powcoeffs_to_slots_thin(&H) {
         current = ring.get_ring().compute_linear_transform(&H, &current, &transform);
     }
@@ -334,7 +337,7 @@ fn test_slots_to_powcoeffs_fat() {
     let H = HypercubeIsomorphism::new::<false>(&ring, hypercube);
 
     // first test very simple case
-    let mut current = ring_literal!(&ring, [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    let mut current = ring_literal(&ring, &[1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     for transform in slots_to_powcoeffs_fat(&H) {
         current = ring.get_ring().compute_linear_transform(&H, &current, &transform);
     }

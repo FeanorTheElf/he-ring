@@ -44,6 +44,16 @@ I did not have practical considerations (like side-channel resistance) in mind, 
 
 ## How to cite HE-Ring
 
+Please use the following bibtex entry to cite HE-Ring:
+```text
+@misc{hering,
+    title = {{HE-Ring}: A homomorphic encryption library},
+    url = {https://github.com/FeanorTheElf/he-ring},
+    author = {Hiroki Okada and Rachel Player and Simon Pohmann},
+    year = {2025}
+}
+```
+
 ## License
 
 `he-ring` is licensed under the [MIT license](https://choosealicense.com/licenses/mit/).

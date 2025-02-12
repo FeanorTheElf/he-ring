@@ -440,6 +440,9 @@ pub fn coeffs_to_slots_thin<NumberRing>(H: &DefaultHypercube<NumberRing>) -> Pla
     return trace_circuit.compose(result_circuit, H.ring());
 }
 
+#[cfg(test)]
+use crate::ring_literal;
+
 #[test]
 fn test_slots_to_coeffs_thin() {
     // `F97[X]/(X^32 + 1) ~ F_(97^2)^16`
@@ -455,10 +458,10 @@ fn test_slots_to_coeffs_thin() {
     let mut expected = [0; 32];
     for i in 0..8 {
         for j in 0..2 {
-            expected[bitreverse(i, 3) * 2 + j * 16] = i * 2 + j + 1;
+            expected[bitreverse(i, 3) * 2 + j * 16] = (i * 2 + j + 1) as i32;
         }
     }
-    assert_el_eq!(&ring, &ring_literal!(&ring, expected), &current);
+    assert_el_eq!(&ring, &ring_literal(&ring, &expected), &current);
 
     // `F23[X]/(X^32 + 1) ~ F_(23^8)^4`
     let ring = NumberRingQuotientBase::new(Pow2CyclotomicNumberRing::new(64), Zn::new(23));
@@ -472,9 +475,9 @@ fn test_slots_to_coeffs_thin() {
 
     let mut expected = [0; 32];
     for i in 0..4 {
-        expected[bitreverse(i, 2) * 4] = i + 1;
+        expected[bitreverse(i, 2) * 4] = (i + 1) as i32;
     }
-    assert_el_eq!(&ring, &ring_literal!(&ring, expected), &current);
+    assert_el_eq!(&ring, &ring_literal(&ring, &expected), &current);
 }
 
 #[test]
@@ -510,11 +513,11 @@ fn test_coeffs_to_slots_thin() {
     let mut input = [0; 32];
     for i in 0..8 {
         for j in 0..2 {
-            input[bitreverse(i, 3) * 2 + j * 16] = i * 2 + j + 1;
-            input[bitreverse(i, 3) * 2 + j * 16 + 1] = i * 2 + j + 1 + 16;
+            input[bitreverse(i, 3) * 2 + j * 16] = (i * 2 + j + 1) as i32;
+            input[bitreverse(i, 3) * 2 + j * 16 + 1] = (i * 2 + j + 1 + 16) as i32;
         }
     }
-    let current = ring_literal!(&ring, input);
+    let current = ring_literal(&ring, &input);
     let circuit = coeffs_to_slots_thin(&H);
     let actual = circuit.evaluate(std::slice::from_ref(&current), ring.identity()).pop().unwrap();
     let expected = H.from_slot_values((1..17).map(|n| H.slot_ring().int_hom().map(n)));
@@ -529,7 +532,7 @@ fn test_coeffs_to_slots_thin() {
     input[4] = 1;
     input[16] = 1;
 
-    let current = ring_literal!(&ring, input);
+    let current = ring_literal(&ring, &input);
     let circuit = coeffs_to_slots_thin(&H);
     let actual = circuit.evaluate(std::slice::from_ref(&current), ring.identity()).pop().unwrap();
     let expected = H.from_slot_values([0, 0, 1, 0].into_iter().map(|n| H.slot_ring().int_hom().map(n)));
@@ -537,15 +540,15 @@ fn test_coeffs_to_slots_thin() {
 
     let mut input = [0; 32];
     for i in 0..4 {
-        input[bitreverse(i, 2) * 4] = i + 1;
+        input[bitreverse(i, 2) * 4] = (i + 1) as i32;
         for k in 1..4 {
-            input[bitreverse(i, 2) * 4 + k] = i + 1 + 4 * k;
+            input[bitreverse(i, 2) * 4 + k] = (i + 1 + 4 * k) as i32;
         }
         for k in 0..4 {
-            input[bitreverse(i, 2) * 4 + k + 16] = i + 1 + 4 * k + 16;
+            input[bitreverse(i, 2) * 4 + k + 16] = (i + 1 + 4 * k + 16) as i32;
         }
     }
-    let current = ring_literal!(&ring, input);
+    let current = ring_literal(&ring, &input);
     let circuit = coeffs_to_slots_thin(&H);
     let actual = circuit.evaluate(std::slice::from_ref(&current), ring.identity()).pop().unwrap();
     let expected = H.from_slot_values([1, 2, 3, 4].into_iter().map(|n| H.slot_ring().int_hom().map(n)));

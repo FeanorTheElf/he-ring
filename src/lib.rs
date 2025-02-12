@@ -24,33 +24,20 @@ use std::alloc::Global;
 use std::time::Instant;
 
 use feanor_math::algorithms::miller_rabin::is_prime;
-use feanor_math::integer::BigIntRing;
-use feanor_math::integer::BigIntRingBase;
-use feanor_math::integer::IntegerRingStore;
+use feanor_math::integer::*;
 use feanor_math::ordered::OrderedRingStore;
 use feanor_math::pid::EuclideanRingStore;
-use feanor_math::primitive_int::StaticRing;
-use feanor_math::primitive_int::StaticRingBase;
+use feanor_math::primitive_int::*;
 use feanor_math::ring::*;
 use feanor_math::homomorphism::*;
 use feanor_math::rings::extension::galois_field::GaloisField;
+use feanor_math::rings::extension::{FreeAlgebra, FreeAlgebraStore};
 use feanor_math::rings::field::AsFieldBase;
 use feanor_math::rings::local::AsLocalPIRBase;
 use feanor_math::rings::zn::zn_64;
 use feanor_math::rings::zn::zn_64::Zn;
 use feanor_math::rings::zn::{FromModulusCreateableZnRing, ZnRing};
 use feanor_math::serialization::SerializableElementRing;
-
-#[macro_export]
-macro_rules! ring_literal {
-    ($ring:expr, $iter:expr) => {
-        {
-            let ring = $ring;
-            let base_ring = ring.base_ring();
-            <_ as feanor_math::rings::extension::FreeAlgebraStore>::from_canonical_basis(&ring, $iter.into_iter().map(|x| <_ as feanor_math::homomorphism::Homomorphism<_, _>>::map(&base_ring.int_hom(), x as i32)))
-        }
-    };
-}
 
 extern crate feanor_math;
 #[cfg(feature = "use_hexl")]
@@ -60,6 +47,17 @@ extern crate thread_local;
 extern crate serde;
 extern crate rand;
 extern crate rand_distr;
+
+///
+/// Simple way to create a ring element from a list of its coefficients as `i32`.
+/// 
+#[cfg(test)]
+fn ring_literal<R>(ring: R, data: &[i32]) -> El<R>
+    where R: RingStore,
+        R::Type: FreeAlgebra
+{
+    ring.from_canonical_basis(data.iter().map(|x| ring.base_ring().int_hom().map(*x)))
+}
 
 ///
 /// The default convolution algorithm that will be used by all tests and benchmarks.

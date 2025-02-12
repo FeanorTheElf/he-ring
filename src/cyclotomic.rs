@@ -249,36 +249,30 @@ impl<R: RingStore> CyclotomicRingStore for R
     where R::Type: CyclotomicRing
 {}
 
-#[cfg(test)]
-use feanor_math::assert_el_eq;
-#[cfg(test)]
-use feanor_math::primitive_int::*;
-#[cfg(test)]
-use feanor_math::algorithms;
-#[cfg(test)]
-use feanor_math::rings::poly::*;
-#[cfg(test)]
-use feanor_math::rings::poly::sparse_poly::SparsePolyRing;
-#[cfg(test)]
-use feanor_math::seq::*;
-
 #[cfg(any(test, feature = "generic_tests"))]
 pub fn generic_test_cyclotomic_ring_axioms<R: CyclotomicRingStore>(ring: R)
     where R::Type: CyclotomicRing
 {
+    use feanor_math::assert_el_eq;
+    use feanor_math::primitive_int::*;
+    use feanor_math::algorithms::int_factor::factor;
+    use feanor_math::algorithms::cyclotomic::cyclotomic_polynomial;
+    use feanor_math::rings::poly::*;
+    use feanor_math::rings::poly::sparse_poly::SparsePolyRing;
+    use feanor_math::seq::*;
     use feanor_math::homomorphism::Homomorphism;
 
     let zeta = ring.canonical_gen();
     let n = ring.n();
     
     assert_el_eq!(&ring, &ring.one(), &ring.pow(ring.clone_el(&zeta), n as usize));
-    for (p, _) in algorithms::int_factor::factor(&StaticRing::<i64>::RING, n as i64) {
+    for (p, _) in factor(&StaticRing::<i64>::RING, n as i64) {
         assert!(!ring.eq_el(&ring.one(), &ring.pow(ring.clone_el(&zeta), n as usize / p as usize)));
     }
 
     // test minimal polynomial of zeta
     let poly_ring = SparsePolyRing::new(&StaticRing::<i64>::RING, "X");
-    let cyclo_poly = algorithms::cyclotomic::cyclotomic_polynomial(&poly_ring, n as usize);
+    let cyclo_poly = cyclotomic_polynomial(&poly_ring, n as usize);
 
     let x = ring.pow(ring.clone_el(&zeta), ring.rank());
     let x_vec = ring.wrt_canonical_basis(&x);

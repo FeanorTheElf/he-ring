@@ -647,8 +647,12 @@ impl<F, A> HECyclotomicNumberRingMod for CompositeCyclotomicDecomposedNumberRing
 
 #[cfg(test)]
 use feanor_math::assert_el_eq;
+#[cfg(test)]
 use crate::ciphertext_ring::double_rns_ring;
+#[cfg(test)]
 use crate::ciphertext_ring::single_rns_ring;
+#[cfg(test)]
+use crate::ring_literal;
 
 #[test]
 fn test_odd_cyclotomic_double_rns_ring() {
@@ -737,16 +741,16 @@ fn test_permute_galois_automorphism() {
     let R = quotient::NumberRingQuotientBase::new(OddCyclotomicNumberRing::new(7), Fp);
     let gal_el = |x: i64| R.galois_group().from_representative(x);
 
-    assert_el_eq!(R, ring_literal!(&R, [0, 0, 1, 0, 0, 0]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 1, 0, 0, 0, 0]), gal_el(2)));
-    assert_el_eq!(R, ring_literal!(&R, [0, 0, 0, 1, 0, 0]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 1, 0, 0, 0, 0]), gal_el(3)));
-    assert_el_eq!(R, ring_literal!(&R, [0, 0, 0, 0, 1, 0]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 0, 1, 0, 0, 0]), gal_el(2)));
-    assert_el_eq!(R, ring_literal!(&R, [-1, -1, -1, -1, -1, -1]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 0, 1, 0, 0, 0]), gal_el(3)));
+    assert_el_eq!(R, ring_literal(&R, &[0, 0, 1, 0, 0, 0]), R.get_ring().apply_galois_action(&ring_literal(&R, &[0, 1, 0, 0, 0, 0]), gal_el(2)));
+    assert_el_eq!(R, ring_literal(&R, &[0, 0, 0, 1, 0, 0]), R.get_ring().apply_galois_action(&ring_literal(&R, &[0, 1, 0, 0, 0, 0]), gal_el(3)));
+    assert_el_eq!(R, ring_literal(&R, &[0, 0, 0, 0, 1, 0]), R.get_ring().apply_galois_action(&ring_literal(&R, &[0, 0, 1, 0, 0, 0]), gal_el(2)));
+    assert_el_eq!(R, ring_literal(&R, &[-1, -1, -1, -1, -1, -1]), R.get_ring().apply_galois_action(&ring_literal(&R, &[0, 0, 1, 0, 0, 0]), gal_el(3)));
 
     let R = quotient::NumberRingQuotientBase::new(CompositeCyclotomicNumberRing::new(5, 3), Fp);
     let gal_el = |x: i64| R.galois_group().from_representative(x);
 
-    assert_el_eq!(R, ring_literal!(&R, [0, 0, 1, 0, 0, 0, 0, 0]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 1, 0, 0, 0, 0, 0, 0]), gal_el(2)));
-    assert_el_eq!(R, ring_literal!(&R, [0, 0, 0, 0, 1, 0, 0, 0]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 1, 0, 0, 0, 0, 0, 0]), gal_el(4)));
-    assert_el_eq!(R, ring_literal!(&R, [-1, 1, 0, -1, 1, -1, 0, 1]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 1, 0, 0, 0, 0, 0, 0]), gal_el(8)));
-    assert_el_eq!(R, ring_literal!(&R, [-1, 1, 0, -1, 1, -1, 0, 1]), R.get_ring().apply_galois_action(&ring_literal!(&R, [0, 0, 0, 0, 1, 0, 0, 0]), gal_el(2)));
+    assert_el_eq!(R, ring_literal(&R, &[0, 0, 1, 0, 0, 0, 0, 0]), R.get_ring().apply_galois_action(&ring_literal(&R, &[0, 1, 0, 0, 0, 0, 0, 0]), gal_el(2)));
+    assert_el_eq!(R, ring_literal(&R, &[0, 0, 0, 0, 1, 0, 0, 0]), R.get_ring().apply_galois_action(&ring_literal(&R, &[0, 1, 0, 0, 0, 0, 0, 0]), gal_el(4)));
+    assert_el_eq!(R, ring_literal(&R, &[-1, 1, 0, -1, 1, -1, 0, 1]), R.get_ring().apply_galois_action(&ring_literal(&R, &[0, 1, 0, 0, 0, 0, 0, 0]), gal_el(8)));
+    assert_el_eq!(R, ring_literal(&R, &[-1, 1, 0, -1, 1, -1, 0, 1]), R.get_ring().apply_galois_action(&ring_literal(&R, &[0, 0, 0, 0, 1, 0, 0, 0]), gal_el(2)));
 }
