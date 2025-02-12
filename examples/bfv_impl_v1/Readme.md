@@ -19,7 +19,7 @@ With these parameters, the scheme can be described as follows:
  - `SymEnc(x, sk)`: sample a uniform `a in R_q` and a small noise `e in R_q`, and return `(a * sk + e + Δ * x, -a)`, where `Δ = round(q/t)`
  - `Dec((c0, c1), sk)`: return `round(t (c0 + c1 * sk) / q)`
  - `HomAdd((c0, c1), (c0', c1'))`: return `(c0 + c0', c1 + c1')`
- - `HomMul((c0, c1), (c0', c1'), rk)`: compute the 3-component intermediate ciphertext `(round(t c0 c0' / q), round(t (c0 c1' + c1 c0') / q), round(t c1 c1' / q))`, where the multiplication of `ci` and `cj'` does not wrap around `q`, i.e. is performed using their shortest lift;
+ - `HomMul((c0, c1), (c0', c1'), rk)`: return the 3-component intermediate ciphertext `(round(t c0 c0' / q), round(t (c0 c1' + c1 c0') / q), round(t c1 c1' / q))`, where the multiplication of `ci` and `cj'` does not wrap around `q`, i.e. is performed using their shortest lift;
     To convert this 3-component ciphertext into a standard 2-component ciphertext, use `Relin((c0, c1, c2), rk)`
  - `Relin((c0, c1, c2), rk)`: Represent `c2` w.r.t. a gadget vector `g`, as `c2 = sum_i g[i] c[i]` with smaller ring elements `c[i]`; then return `(c0 + sum_i c[i] rk[i, 0], c1 + sum_i c[i] rk[i, 1])`
  - `RelinKeyGen(sk)`: Take a gadget vector `g` as before, and return `rk[i, 0] = (a[i] * sk + e[i] + g[i] * sk^2)` and `rk[i, 1] = -a[i]` for uniformly random `a[i] in R_q` and small noises `e[i] in R_q`
@@ -475,11 +475,8 @@ fn hom_mul_three_component(
     );
 }
 ```
-Before we implement relinearization, we test multiplication so far.
-The idea behind this three-component result of multiplication is that `c0 + c1 * sk + c2 * s^2` is `q m / t`, up to some error - hence, it takes the place of `c0 + c1 * sk`.
-This means that, if we know the secret key, we can convert `(c0, c1, c2)` into a normal ciphertext `(c0 + c2 * sk^2, c1)`.
-In fact, this is already very similar to the idea of relinearization, which achieves the same, but by using an encryption of `sk^2` instead of the actual value.
-Anyway, let's do the test first.
+Before we implement relinearization, we want to test the multiplication that we have so far.
+We do this by using the formula `round( t (c0 + c1 * sk + c2 * sk^2) / q )` to decrypt the three-component ciphertext.
 ```rust
 # use feanor_math::ring::*;
 # use feanor_math::rings::zn::*;
@@ -795,7 +792,7 @@ fn relinearize(
     );
 }
 ```
-And then to the final test!
+Finally, let's test that decrypting the result of a homomorphic multiplication with relinearization gives the correct result!
 ```rust
 # use feanor_math::ring::*;
 # use feanor_math::rings::zn::*;
@@ -959,9 +956,9 @@ Taking all these functions together gives the code in `main.rs`.
 
 # Performance
 
-On my system, a slight modification of the above test with `N = 16384` and `q = 2^100` performs homomorphic multiplication and relinearization in about 7.7 seconds (of course, you need to compile it with `--release`).
+On my desktop PC, a slight modification of the above test with `N = 16384` and `q = 2^100` performs homomorphic multiplication and relinearization in about 7.7 seconds (of course, you need to compile it with `--release`).
 This might be suitable for prototyping, but is far behind what one can achieve with a more careful implementation.
-In particular, we loose a lot of time due to the following points:
+In particular, we lose a lot of time due to the following points:
  - Without further configuration, `FreeAlgebraImpl` (which we use during `hom_mul_three_component()`) uses Karatsuba's algorithm for multiplication.
    However, if we perform the multiplication during `hom_mul_three_component()` modulo a special, large enough modulus, it is possible to use NTT-based techniques, which are much faster.
  - Similarly, if we choose a special `q` (for security and correctness of BFV, only the approximate size matters), we can use this technique also for all other multiplications in `R_q`. 

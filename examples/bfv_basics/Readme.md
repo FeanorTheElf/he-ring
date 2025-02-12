@@ -7,7 +7,7 @@ For more details on how BFV works and can be implemented, see the original paper
 ## Setting up BFV
 
 In many libraries, there is a central context object that stores all parameters and data associated to the currently used HE scheme.
-In HE-Ring, we intentionally avoid this approach, and instead have the use manage these parts themselves - don't worry, it's not that much.
+In HE-Ring, we intentionally avoid this approach, and instead have the user manage these parts themselves - don't worry, it's not that much.
 More concretely, an instantiation of BFV consists of the following:
  - A ciphertext ring
  - An extended-modulus ciphertext ring, which is only used for intermediate results during homomorphic multiplication
@@ -32,7 +32,7 @@ let params = ChosenBFVParamType {
     negacyclic_ntt: PhantomData::<DefaultNegacyclicNTT>
 };
 ```
-Here, we set the RLWE dimension to `2^log2_N = 2^12 = 4096` and the size of the RLWE modulus `q` to be between `105` and `110` bits - these choices give 128 bits of security, according to the HE standard <https://homomorphicencryption.org/wp-content/uploads/2018/11/HomomorphicEncryptionStandardv1.1.pdf>.
+Here, we set the RLWE dimension to `2^log2_N = 2^12 = 4096` and the size of the RLWE modulus `q` to be between `105` and `110` bits - these choices give 128 bits of security, according to "Security Guidelines for Implementing Homomorphic Encryption" <https://ia.cr/2024/463>.
 Furthermore, we can also specify an allocator - here simply the global allocator [`std::alloc::Global`] - that will be used to allocate memory for ciphertexts, and the type of the NTT implementation to use.
 Here, we choose [`crate::DefaultNegacyclicNTT`], which will point either to the (somewhat slow) native NTT, or the HEXL-based NTT (if the feature `use_hexl`) is enabled.
 
@@ -60,11 +60,8 @@ Once we setup the parameters, we can create plaintext and ciphertext rings:
 let (C, C_for_multiplication): (CiphertextRing<ChosenBFVParamType>, CiphertextRing<ChosenBFVParamType>) = params.create_ciphertext_rings();
 let plaintext_modulus = 17;
 let P: PlaintextRing<ChosenBFVParamType> = params.create_plaintext_ring(plaintext_modulus);
-assert!(BigIntRing::RING.is_one(&signed_gcd(BigIntRing::RING.clone_el(C.base_ring().modulus()), int_cast(plaintext_modulus, BigIntRing::RING, StaticRing::<i64>::RING), BigIntRing::RING)));
 ```
 Note here that the plaintext modulus `t` was not part of the BFV parameters - the rationale behind this is that a BFV ciphertext often is a valid ciphertext (encrypting a different message) for multiple different plaintext moduli.
-Moreover, it is important that `t` must be coprime to `q`, otherwise there is no security.
-However, due to the way how `q` is sampled, this is unlikely to be a problem.
 
 After we set this up, we actually won't need the parameter object anymore - to demonstrate this, we delete it here.
 ```rust
@@ -88,8 +85,7 @@ drop(params);
 ```
 Next, let's generate the keys we will require later.
 Since the type of the ciphertext ring depends on the type of the chosen parameters, all further functions are associated functions of `ChosenBFVParamType`.
-This is actually a choice I am not completely happy with, since I don't want BFV to be tied to any specific parameter object, but would love to allow users to create plain-and ciphertext ring completely themselves.
-However, this would also cause some problems, see the doc of [`crate::bfv::BFVParams`].
+While it would be preferable for the BFV implementation not to be tied to any specific parameter object, not doing this would cause problems, see the doc of [`crate::bfv::BFVParams`].
 ```rust
 #![feature(allocator_api)]
 # use he_ring::bfv::{BFVParams, CiphertextRing, PlaintextRing, Pow2BFV};
@@ -128,7 +124,7 @@ Hence, it would be optimal to use a high value for `digits` for the first operat
 
 Next, let's encrypt a message.
 The plaintext space of BFV is the ring `R_t = Z[X]/(Phi_n(X), t)`, which we already have created previously.
-Therefore, we encrypt elements of this ring - which we can create for example using the function [`feanor_math::rings::extension::FreeAlgebra::from_canonical_basis()`] from `feanor-math`.
+To encrypt, we now need to encode whatever data we have as an element of this ring (e.g. via [`feanor_math::rings::extension::FreeAlgebra::from_canonical_basis()`] ), and can then encrypt it as follows:
 ```rust
 #![feature(allocator_api)]
 # use feanor_math::rings::extension::FreeAlgebraStore;

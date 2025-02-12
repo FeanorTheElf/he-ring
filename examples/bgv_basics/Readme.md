@@ -1,6 +1,6 @@
 # Homomorphic operations using the BGV scheme in HE-Ring
 
-BGV was proposed in "Leveled fully homomorphic encryption without bootstrapping" by . Brakerski, C. Gentry, and V. Vaikuntanathan (<https://dl.acm.org/doi/10.1145/2090236.2090262>), and is the foundation of the family of "second generation" HE schemes.
+BGV was proposed in "Leveled fully homomorphic encryption without bootstrapping" by Z. Brakerski, C. Gentry, and V. Vaikuntanathan (<https://dl.acm.org/doi/10.1145/2090236.2090262>), and is the foundation of the family of "second generation" HE schemes.
 In this example, we will show how to use the provided implementation of BGV, without going deep into the mathematical details of the scheme.
 In comparison to BFV (for a short introduction, see [`crate::examples::bfv_basics`]), BGV allows for a somewhat more efficient implementation, but the necessity for the user to manually manage the modulus chain introduces significant additional complexity.
 We note that some libraries (like HElib) support automatic management of the modulus chain, but this is not implemented in HE-Ring.
@@ -13,7 +13,7 @@ However, homomorphic operations increase the size of `e`.
 In the case of addition or multiplication with a plaintext, these operations are just applied to `e`, hence the *relative error* `|e| / q` increases at most by a constant factor.
 The same is the case for homomorphic multiplication in BFV, i.e. multiplying two ciphertexts with noise terms `e` and `e'` results in a ciphertext with noise of size `C (|e| + |e'|)`, for a (rather large) constant `C`.
 
-However, without further action, in BGV the noise of homomorphic multiplication result will have size `|e| |e'|`, i.e. grow multiplicatively.
+However, without further action, in BGV the noise of homomorphic multiplication result will have size `|e| |e'|`, i.e. it grows multiplicatively.
 Once `|e|` resp. `|e'|` get somewhat large, this results in catastrophic noise growth, and decryption failures.
 Fortunately, this can be fixed - using modulus-switching as proposed by the original authors.
 More concretely, modulus-switching reduces the absolute size of `e` while keeping the relative noise `|e| / q` constant - by changing the ciphertext modulus `q` to some smaller ciphertext modulus `q'`.
@@ -51,7 +51,7 @@ let params = ChosenBGVParamType {
     negacyclic_ntt: PhantomData::<DefaultNegacyclicNTT>
 };
 ```
-Here, we set the RLWE dimension to `2^log2_N = 2^13 = 8192` and the size of the RLWE modulus `q` to be between `210` and `220` bits - these choices give 128 bits of security, according to the HE standard <https://homomorphicencryption.org/wp-content/uploads/2018/11/HomomorphicEncryptionStandardv1.1.pdf>.
+Here, we set the RLWE dimension to `2^log2_N = 2^13 = 8192` and the size of the RLWE modulus `q` to be between `210` and `220` bits - these choices give 128 bits of security, according to "Security Guidelines for Implementing Homomorphic Encryption" <https://ia.cr/2024/463>.
 Furthermore, we can also specify an allocator - here simply the global allocator [`std::alloc::Global`] - that will be used to allocate memory for ciphertexts, and the type of the NTT implementation to use.
 Moreover, we choose [`crate::DefaultNegacyclicNTT`], which will point either to the (somewhat slow) native NTT, or the HEXL-based NTT (if the feature `use_hexl`) is enabled.
 Finally, `log2_q_min` and `log2_q_max` refer to the allowed range for the bitlength of the largest ciphertext modulus `q`, i.e. the first one in the modulus chain `q > q' > q'' > ...`.
@@ -87,12 +87,11 @@ assert!(BigIntRing::RING.is_one(&signed_gcd(BigIntRing::RING.clone_el(C_initial.
 ```
 Note here that the plaintext modulus `t` was not part of the BGV parameters - the rationale behind this is that a BGV ciphertext often is a valid ciphertext (encrypting a different message) for multiple different plaintext moduli.
 Moreover, it is important that `t` must be coprime to `q`, otherwise there is no security.
-However, due to the way how `q` is sampled, this is unlikely to be a problem.
+However, since `q` is sampled using large primes of up to 56 bits, this is unlikely to be a problem.
 
 Next, let's generate the keys we will require later.
 Since the type of the ciphertext ring depends on the type of the chosen parameters, all further functions are associated functions of `ChosenBGVParamType`.
-This is actually a choice I am not completely happy with, since I don't want BGV to be tied to any specific parameter object, but would love to allow users to create plain-and ciphertext ring completely themselves.
-However, this would also cause some problems, I have discussed this somewhat in the docs for BFV [`crate::bfv::BFVParams`].
+While it would be preferable for the BFV implementation not to be tied to any specific parameter object, not doing this would cause problems, see the doc of [`crate::bfv::BFVParams`].
 ```rust
 #![feature(allocator_api)]
 # use he_ring::bgv::{BGVParams, CiphertextRing, PlaintextRing, Pow2BGV};
@@ -138,7 +137,7 @@ Hence, it would be optimal to use a high value for `digits` for the first operat
 
 Next, let's encrypt a message.
 The plaintext space of BGV is the ring `R_t = Z[X]/(Phi_n(X), t)`, which we already have created previously.
-Therefore, we encrypt elements of this ring - which we can create for example using the function [`feanor_math::rings::extension::FreeAlgebra::from_canonical_basis()`] from `feanor-math`.
+To encrypt, we now need to encode whatever data we have as an element of this ring (e.g. via [`feanor_math::rings::extension::FreeAlgebra::from_canonical_basis()`] ), and can then encrypt it as follows:
 ```rust
 #![feature(allocator_api)]
 # use he_ring::bgv::{BGVParams, CiphertextRing, PlaintextRing, Pow2BGV};
@@ -282,8 +281,8 @@ However, we can decrease the noise growth that happens during the second multipl
 Note that finding the right size of `q'` is, in general, not so easy, since it requires an estimate of the current size of the noise in `enc_x_sqr`. 
 In particular, this depends on the size of the ring we work in, and also on the number of digits chosen for relinearization.
 
-Once we decided on the number of factors to drop, we can use the convenience function [`crate::gadget_product::recommended_rns_factors_to_drop()`] to choose the exact factors to drop in a way as to preserve the quality of the relinearization key.
-Alternatively, these can also determined manually, [`crate::bgv::BGVParams::mod_switch()`] takes a list of indices, which refer to the indices of the factors of `q` that will be dropped.
+Once we decided on the number of factors to drop, we can use the convenience function [`crate::gadget_product::recommended_rns_factors_to_drop()`] to choose the exact factors to drop in such a way as to preserve the quality of the relinearization key.
+Alternatively, these can also determined manually: [`crate::bgv::BGVParams::mod_switch()`] takes a list of indices, which refer to the indices of the factors of `q` that will be dropped.
 ```rust
 #![feature(allocator_api)]
 # use he_ring::bgv::{BGVParams, CiphertextRing, PlaintextRing, Pow2BGV};
@@ -340,5 +339,5 @@ assert_el_eq!(&P, P.pow(P.clone_el(&x), 4), &dec_x_pow4);
 ```
 Unfortunately, the current implementation currently cannot handle cases where we drop half of more of the prime factors of `q`.
 This is in particular a problem in cases where `digits` is very small (like the `2` in our case), since this means the first multiplication causes a large noise growth, and we have to greatly reduce the ciphertext modulus before the next multiplication.
-I want to improve the behavior in such cases in the future, but this is not so simple, since some of the underlying algorithms require modifications in these settings.
+Improvements for these cases are planned for future versions of HE-Ring.
 For now, if you really have to work with such small HE parameters, consider using BFV instead.

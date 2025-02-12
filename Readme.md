@@ -41,3 +41,9 @@ Of course, this is only included on test builds, in library builds, the parent a
 
 This library has been designed for research on homomorphic encryption.
 I did not have practical considerations (like side-channel resistance) in mind, and advise against using using it in production.
+
+## How to cite HE-Ring
+
+## License
+
+`he-ring` is licensed under the [MIT license](https://choosealicense.com/licenses/mit/).

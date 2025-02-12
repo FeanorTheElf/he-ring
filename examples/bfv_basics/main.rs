@@ -7,11 +7,9 @@
 
 use std::{alloc::Global, marker::PhantomData};
 
-use feanor_math::algorithms::eea::signed_gcd;
 use feanor_math::assert_el_eq;
 use feanor_math::homomorphism::Homomorphism;
-use feanor_math::integer::{int_cast, BigIntRing, IntegerRingStore};
-use feanor_math::primitive_int::StaticRing;
+use feanor_math::integer::{BigIntRing, IntegerRingStore};
 use feanor_math::ring::{RingExtensionStore, RingStore};
 use feanor_math::rings::extension::FreeAlgebraStore;
 use feanor_math::rings::zn::ZnRingStore;
@@ -41,8 +39,7 @@ fn main() {
 
     let plaintext_modulus = 17;
     let P: PlaintextRing<ChosenBFVParamType> = params.create_plaintext_ring(plaintext_modulus);
-    assert!(BigIntRing::RING.is_one(&signed_gcd(BigIntRing::RING.clone_el(C.base_ring().modulus()), int_cast(plaintext_modulus, BigIntRing::RING, StaticRing::<i64>::RING), BigIntRing::RING)));
-
+    
     let mut rng = thread_rng();
 
     let sk = ChosenBFVParamType::gen_sk(&C, &mut rng);

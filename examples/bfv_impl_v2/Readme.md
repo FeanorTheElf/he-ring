@@ -1,10 +1,10 @@
 # Implementing BFV using HE-Ring, version 2
 
 In this example, we will again implement the BFV scheme, but this time aiming for good performance.
-Perhaps unsurprisingly, the result will look quite similar to [`crate::bfv`].
+Perhaps unsurprisingly, the result will look quite similar to [`crate::bfv`] - the main difference is that [`crate::bfv`] is defined more generically, and allows more configuration and different parameters.
 
-If you are unsure about the details of BFV, have a peek into the version 1 implementation [`crate::examples::bfv_impl_v1`] of BFV first.
-At the end of [`crate::examples::bfv_impl_v1`], we list some points that have to be considered when aiming for SOTA performance - these will be the main points for this example.
+If you are unsure about the details of BFV, refer to the version 1 of our BFV implementation [`crate::examples::bfv_impl_v1`] first.
+At the end of [`crate::examples::bfv_impl_v1`], we list some points that have to be considered when aiming for state-of-the-art performance - these will be the main points for this example.
 Mostly, this boils down to two points: Use a Residue Number System, and a Number-Theoretic Transform-based multiplication.
 
 ## The computational and mathematical foundations
@@ -38,12 +38,13 @@ On a mathematical level, the Number-Theoretic Transform (NTT) is quite similar t
 In more down-to-the-earth terms, the NTT is the evaluation of a polynomial at all `n`-th roots of unity.
 In other words, we say it is the map
 ```text
-  NTT: Fp^n  ->  Fp^n,  (a[0], ..., a[n - 1])  ->  (sum_i a[i] z_n^i)
+  NTT: Fp^n  ->  Fp^n,  (a[0], ..., a[n - 1])  ->  (sum_i a[i] ξ_n^i)
 ```
-where `z` is a `n`-th root of unity in the finite field `Fp` - note that for `z` to exist, we require `p = 1 mod n`.
+where `ξ` is a `n`-th root of unity in the finite field `Fp` - note that for `ξ` to exist, we require `p = 1 mod n`.
+
 The NTT is important, because of two well-known facts:
  - The NTT can be computed very fast using a "Fast Fourier Transform" (FFT), in time `O(n log n)`; The same holds for the inverse map, which we call `InvNTT()`.
- - Addition and multiplication are component-wise for elements in NTT form. With NTT form, we refer to the values `NTT(x[0], ..., x[n - 1])` of an element `x = sum_i x[i] 𝝵^n` in `R/(p)`.
+ - Addition and multiplication are component-wise for elements in NTT form. With NTT form, we refer to the values `NTT(x[0], ..., x[n - 1])` of an element `x = sum_i x[i] X^n` in the ring `R_p = Z[X]/(Phi_n(X), p)`.
 
 In other words, if we store each element `x` in `R/(p)` using the values `(x'[0], ..., x'[n - 1]) = NTT(x[0], ..., x[n - 1])`, we can compute the multiplication of elements `x, y` by
 ```text
@@ -51,7 +52,7 @@ In other words, if we store each element `x` in `R/(p)` using the values `(x'[0]
 ```
 The individual multiplications here are very fast, since they are performed on values of `Fp`.
 
-Note here a little mismatch: We can actually represent an element `x` in `R/(p)` by a sum `x[0] + x[1] 𝝵 + ... + x[phi(n) - 1] 𝝵^(phi(n) - 1)` of only `phi(n)` summands. However, padding this to `n` when necessary does not pose a significant problem.
+Note here a little mismatch: We can actually represent an element `x` in `R/(p)` by a sum `x[0] + x[1] X + ... + x[phi(n) - 1] X^(phi(n) - 1)` of only `phi(n)` summands. However, padding this to `n` when necessary does not pose a significant problem.
 
 ### The Double-RNS representation
 
@@ -158,13 +159,13 @@ fn create_plaintext_ring(ring_degree: usize, t: u64) -> PlaintextRing {
 #     ); 
 }
 ```
-There are two little quirks here, which I hope I can get rid off in a future version of HE-Ring.
+There are two little quirks here, which I hope to address in a future version of HE-Ring.
 In particular, we currently have to sort the RNS factors belonging to `q`, and we choose RNS factors having 56 bits (while `zn_64::Zn` would support 57 bits).
-Both of these are actually not yet necessary for creating the ciphertext ring, but skipping this would make problems once we come to RNS conversion later. 
+These choices are currently needed to avoid issues with RNS conversions, which we will consider soon.
 
 Once we have this, key-generation, encryption and decryption can actually be implemented exactly as before.
 It might be possible to optimize decryption somewhat (leveraging the RNS representation), but we skip that here.
-Instead, we will use similar (but more impactfull) techniques when implementing homomorphic multiplication.
+Instead, we will use similar (but more impactful) techniques when implementing homomorphic multiplication.
 
 ```rust
 # use feanor_math::algorithms::miller_rabin::*;
@@ -277,7 +278,7 @@ fn hom_add(
 
 ## Homomorphic multiplication
 
-As before, homomorphic multiplication is the most interesting operation.
+As in [`crate::examples::bfv_impl_v1`], homomorphic multiplication is the most interesting operation.
 The first question is, which ring do we use to evaluate `c0 * c0'` etc. without wrapping around `q`?
 Previously, we worked without any modulus in `Z[X]/(Phi_n(X))`, which certainly works, but means we cannot use the double-RNS representation.
 Instead, it makes sense to choose a larger modulus - say `qq'` - and perform the multiplication in `R_(qq')`.
@@ -324,9 +325,9 @@ fn create_multiplication_ring(ciphertext_ring: &CiphertextRing) -> CiphertextRin
 }
 ```
 The choice of the multiplication ring RNS factors here is more complicated than it should be.
-In particular, we later use [`crate::rnsconv::bfv_rescale::AlmostExactRescalingConvert`], which requires that the RNS factors of `multiplication_ring` are sorted ascendingly, and that the RNS factors of `ciphertext_ring` are a prefix of those of `multiplication_ring`.
+In particular, we will use [`crate::rnsconv::bfv_rescale::AlmostExactRescalingConvert`], which requires that the RNS factors of `multiplication_ring` are sorted ascendingly by modulus, and that the RNS factors of `ciphertext_ring` are a prefix of those of `multiplication_ring`.
 Our implementation ensures that, since we choose the RNS factors of `ciphertext_ring` to have at most 56 bits, and add only RNS factors of 57 bits to this list to get the RNS base for `multiplication_ring`.
-However, this constraint actually has no real reason, and I intend to change the implementation of [`crate::rnsconv::bfv_rescale::AlmostExactRescalingConvert`] to allow for arbitrary RNS bases in the future.
+However, we intend to change the implementation of [`crate::rnsconv::bfv_rescale::AlmostExactRescalingConvert`] to allow for arbitrary RNS bases in the future.
 This will then allow for a much simpler implementation of `create_multiplication_ring()`, since we can just use `sample_primes()` for a bitlength `> 2 * log2(q) + log2(n)` to generate the RNS base.
 
 Next, we turn to the question on how to map the elements of `R_q` to `R_(qq')`.
@@ -351,9 +352,9 @@ If we now want to apply such an RNS conversion to an element of `R_q`, we need t
 This requires a relatively costly NTT, but no way of avoiding this is known.
 Note however that it actually is not required to get the actual coefficients `x[i]` in the representatation `x = x[0] + x[1] X + ... + x[phi(n) - 1] X^(phi(n) - 1)`, but the coefficients w.r.t. any basis that consists of "short" elements suffice.
 The reason for this is that the noise growth during multiplication depends on the size of `c0, c1, c0', c1'` w.r.t. the *canonical norm* of the number ring `R`.
-Going into the mathematical details of this would carry us too far way, so if you are interested, have a look at the original BFV paper.
+More details on the mathematical background can be found in teh original BFV paper.
 
-Anyway, we can access the coefficients w.r.t. some "short-element" basis of an element of `R_q` using the functions [`crate::ciphertext_ring::double_rns_ring::DoubleRNSRingBase::undo_fft()`] and [`crate::ciphertext_ring::double_rns_ring::DoubleRNSRingBase::as_matrix_wrt_small_basis()`].
+We can access the coefficients w.r.t. some "short-element" basis of an element of `R_q` using the functions [`crate::ciphertext_ring::double_rns_ring::DoubleRNSRingBase::undo_fft()`] and [`crate::ciphertext_ring::double_rns_ring::DoubleRNSRingBase::as_matrix_wrt_small_basis()`].
 Fortunately for us, the returned data is exactly in the right format.
 This leaves us to implement BFV multiplication as follows.
 ```rust
@@ -766,7 +767,7 @@ assert_el_eq!(&P, P.pow(message, 2), result);
 Plugging in larger values in the above example, we see that homomorphic multiplication for `N = 16384` and `q ~ 2^100` takes only 50 ms!
 This is clearly an impressive speedup compared to the 7.7 seconds we got in the first example [`crate::examples::bfv_impl_v1`].
 In fact, a little more benchmarking shows that our implementation almost matches state-of-the-art HE libraries!
-For example, for `N = 32768` and `q ~ 800`, I get 0.88 seconds, which is close to the 0.5 seconds that SEAL takes on my system.
+For example, for `N = 32768` and `q ~ 800`, I get 0.88 seconds, which is close to the 0.5 seconds that SEAL version 4.1.2 takes on my system.
 
 Nevertheless, there does remain some optimization potential:
  - Currently, the native NTT of HE-Ring is the same as in `feanor-math`, and it is not quite as fast as others.
