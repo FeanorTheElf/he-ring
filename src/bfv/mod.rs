@@ -559,7 +559,7 @@ pub trait BFVParams {
         AlmostExactRescalingConvert::new_with(
             Cmul.base_ring().as_iter().map(|R| Zn::new(*R.modulus() as u64)).collect::<Vec<_>>(), 
             vec![ Zn::new(*P.base_ring().modulus() as u64) ], 
-            C.base_ring().len(),
+            (0..C.base_ring().len()).collect(),
             Global
         )
     }

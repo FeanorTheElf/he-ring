@@ -16,7 +16,6 @@ use feanor_math::seq::VectorFn;
 use feanor_math::seq::VectorView;
 use feanor_math::rings::finite::FiniteRingStore;
 use feanor_math::primitive_int::StaticRing;
-use feanor_math::ordered::OrderedRingStore;
 use rand::{Rng, RngCore, thread_rng};
 use rand_distr::StandardNormal;
 use he_ring::number_ring::*;
@@ -35,13 +34,12 @@ type RelinKey = (GadgetProductRhsOperand<<CiphertextRing as RingStore>::Type>, G
 
 fn create_ciphertext_ring(ring_degree: usize, bitlength_of_q: usize) -> CiphertextRing {
     let number_ring = Pow2CyclotomicNumberRing::new(ring_degree * 2);
-    let mut rns_factors = sample_primes(
+    let rns_factors = sample_primes(
         bitlength_of_q - 10, 
         bitlength_of_q, 
-        56, 
+        57, 
         |bound| largest_prime_leq_congruent_to_one(int_cast(bound, StaticRing::<i64>::RING, BigIntRing::RING), number_ring. mod_p_required_root_of_unity() as i64).map(|p| int_cast(p, BigIntRing::RING, StaticRing::<i64>::RING))
     ).unwrap();
-    rns_factors.sort_unstable_by(|l, r| BigIntRing::RING.cmp(l, r));
     return <CiphertextRing as RingStore>::Type::new(
         number_ring,
         zn_rns::Zn::new(rns_factors.into_iter().map(|p| zn_64::Zn::new(int_cast(p, StaticRing::<i64>::RING, BigIntRing::RING) as u64)). collect(), BigIntRing::RING)
@@ -122,17 +120,15 @@ fn hom_add(
 
 fn create_multiplication_ring(ciphertext_ring: &CiphertextRing) -> CiphertextRing {
     let number_ring = ciphertext_ring.get_ring().number_ring().clone();
-    let mut rns_factors = sample_primes(
-        BigIntRing::RING.abs_log2_ceil(ciphertext_ring.base_ring().modulus()).unwrap() + StaticRing::<i64>::RING.abs_log2_ceil(&(number_ring.rank() as i64)).unwrap() + 10, 
-        BigIntRing::RING.abs_log2_ceil(ciphertext_ring.base_ring().modulus()).unwrap() + StaticRing::<i64>::RING.abs_log2_ceil(&(number_ring.rank() as i64)).unwrap() + 67, 
+    let mut rns_factors = extend_sampled_primes(
+        &ciphertext_ring.base_ring().as_iter().map(|RNS_factor| int_cast(*RNS_factor.modulus(), BigIntRing::RING, StaticRing::<i64>::RING)).collect::<Vec<_>>(),
+        BigIntRing::RING.abs_log2_ceil(ciphertext_ring.base_ring().modulus()).unwrap() * 2 + StaticRing::<i64>::RING.abs_log2_ceil(&(number_ring.rank() as i64)).unwrap() + 10, 
+        BigIntRing::RING.abs_log2_ceil(ciphertext_ring.base_ring().modulus()).unwrap() * 2 + StaticRing::<i64>::RING.abs_log2_ceil(&(number_ring.rank() as i64)).unwrap() + 67, 
         57, 
         |bound| largest_prime_leq_congruent_to_one(int_cast(bound, StaticRing::<i64>::RING, BigIntRing::RING), number_ring.mod_p_required_root_of_unity() as i64).map(|p| int_cast(p, BigIntRing::RING, StaticRing::<i64>::RING))
     ).unwrap().into_iter().map(|p| 
         int_cast(p, StaticRing::<i64>::RING, BigIntRing::RING)
-    ).chain(
-        ciphertext_ring.base_ring().as_iter().map(|Zp| *Zp.modulus())
     ).collect::<Vec<_>>();
-
     rns_factors.sort_unstable();
     return <CiphertextRing as RingStore>::Type::new(
         number_ring,
@@ -175,7 +171,7 @@ fn hom_mul_three_component(
     let scale_down_rnsconv = AlmostExactRescalingConvert::new_with(
         multiplication_ring.base_ring().as_iter().map(|Zp| zn_64::Zn::new(*Zp.modulus() as u64)).collect::<Vec<_>>(), 
         vec![ zn_64::Zn::new(*plaintext_ring.base_ring().modulus() as u64) ], 
-        ciphertext_ring.base_ring().len(),
+        ciphertext_ring.base_ring().as_iter().map(|Zp| multiplication_ring.base_ring().as_iter().position(|Zp2| Zp2.modulus() == Zp.modulus()).unwrap()).collect::<Vec<_>>(),
         Global
     );
     debug_assert!(scale_down_rnsconv.input_rings().iter().zip(multiplication_ring.base_ring().as_iter()).all(|(lhs, rhs)| lhs.get_ring() == rhs.get_ring()));

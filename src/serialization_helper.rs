@@ -342,6 +342,10 @@ macro_rules! impl_deserialize_seed_for_dependent_struct {
     };
 }
 
+///
+/// Helper to deserialize a tuple `(a, b)`, where deserializing `b` requires a
+/// [`DeserializeSeed`] depending on the already deserialized `a`.
+/// 
 pub struct DeserializeSeedDependentTuple<'de, T0, F, T1>
     where T0: DeserializeSeed<'de>,
         T1: DeserializeSeed<'de>,
@@ -423,75 +427,3 @@ impl<'de, T0, F, T1> DeserializeSeed<'de> for DeserializeSeedDependentTuple<'de,
         });
     }
 }
-
-const fn get_const_len<const N: usize>(data: [&'static str; N]) -> usize {
-    N
-}
-
-macro_rules! deserialize_seed_tuple {
-    ($name:ident, $(( $gen_arg:ident, $field:ident)),*) => {
-        pub struct $name<'de, $($gen_arg),*>
-            where $($gen_arg: DeserializeSeed<'de>),*
-        {
-            deserializer: PhantomData<&'de ()>,
-            $($field: $gen_arg),*
-        }
-
-        impl<'de, $($gen_arg),*> DeserializeSeed<'de> for $name<'de, $($gen_arg),*>
-            where $($gen_arg: DeserializeSeed<'de>),*
-        {
-            type Value = ($(<$gen_arg as DeserializeSeed<'de>>::Value),*,);
-
-            fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-                where D: serde::Deserializer<'de>
-            {
-                struct ResultVisitor<'de, $($gen_arg),*>
-                    where $($gen_arg: DeserializeSeed<'de>),*
-                {
-                    deserializer: PhantomData<&'de ()>,
-                    $($field: $gen_arg),*
-                }
-
-                impl<'de, $($gen_arg),*> Visitor<'de> for ResultVisitor<'de, $($gen_arg),*>
-                    where $($gen_arg: DeserializeSeed<'de>),*
-                {
-                    type Value = ($(<$gen_arg as DeserializeSeed<'de>>::Value),*,);
-
-                    fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                        write!(f, "a tuple with {} elements", get_const_len([$(stringify!($gen_arg)),*]))
-                    }
-
-                    #[allow(unused_assignments)]
-                    fn visit_seq<Seq>(self, mut seq: Seq) -> Result<Self::Value, Seq::Error>
-                        where Seq: SeqAccess<'de>
-                    {
-                        const TUPLE_LEN: usize = get_const_len([$(stringify!($gen_arg)),*]);
-                        let mut current = 0;
-                        Ok(($(
-                            {
-                                let result = if let Some(result) = seq.next_element_seed(self.$field)? {
-                                    result
-                                } else {
-                                    return Err(<Seq::Error as serde::de::Error>::invalid_length(current, &format!("a tuple with {} elements", TUPLE_LEN).as_str()));
-                                };
-                                current += 1;
-                                result
-                            }
-                        ),*,))
-                    }
-                }
-
-                return deserializer.deserialize_tuple(get_const_len([$(stringify!($gen_arg)),*]), ResultVisitor {
-                    deserializer: PhantomData,
-                    $($field: self.$field),*
-                });
-            }
-        }
-    };
-}
-
-deserialize_seed_tuple!{ DeserializeSeedTuple1, (T0, t0) }
-deserialize_seed_tuple!{ DeserializeSeedTuple2, (T0, t0), (T1, t1) }
-deserialize_seed_tuple!{ DeserializeSeedTuple3, (T0, t0), (T1, t1), (T2, t2) }
-deserialize_seed_tuple!{ DeserializeSeedTuple4, (T0, t0), (T1, t1), (T2, t2), (T3, t3) }
-deserialize_seed_tuple!{ DeserializeSeedTuple5, (T0, t0), (T1, t1), (T2, t2), (T3, t3), (T4, t4) }

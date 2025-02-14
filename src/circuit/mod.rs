@@ -188,6 +188,16 @@ impl<R: ?Sized + RingBase> LinearCombination<R> {
             factors: result_factors
         };
     }
+    
+    fn change_ring<S, F>(self, f: &mut F) -> LinearCombination<S>
+        where F: FnMut(Coefficient<R>) -> Coefficient<S>,
+            S: ?Sized + RingBase
+    {
+        LinearCombination {
+            constant: f(self.constant),
+            factors: self.factors.into_iter().map(|c| f(c)).collect()
+        }
+    }
 }
 
 impl<R: RingBase + Default> PartialEq for LinearCombination<R> {
@@ -357,6 +367,24 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
         };
         result.check_invariants();
         return result;
+    }
+
+    ///
+    /// Computes a new circuit, which has the same graph structure as this circuit,
+    /// and its constants are derived from this circuit's constants by the given function.
+    /// 
+    pub fn change_ring<S, F>(self, mut f: F) -> PlaintextCircuit<S>
+        where F: FnMut(Coefficient<R>) -> Coefficient<S>,
+            S: ?Sized + RingBase
+    {
+        PlaintextCircuit {
+            input_count: self.input_count,
+            gates: self.gates.into_iter().map(|gate| match gate {
+                PlainCircuitGate::Gal(gs, t) => PlainCircuitGate::Gal(gs, t.change_ring(&mut f)),
+                PlainCircuitGate::Mul(l, r) => PlainCircuitGate::Mul(l.change_ring(&mut f), r.change_ring(&mut f))
+            }).collect(),
+            output_transforms: self.output_transforms.into_iter().map(|t| t.change_ring(&mut f)).collect()
+        }
     }
 
     /// 

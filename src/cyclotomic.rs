@@ -222,12 +222,26 @@ pub trait CyclotomicRing: FreeAlgebra {
     ///
     fn n(&self) -> usize;
 
+    ///
+    /// Returns the Galois group of this ring, which we define as the Galois group of the number field
+    /// `Q[X]/(Phi_n)`. The ring itself may or may not have more automorphisms (depending on `R`), but ever
+    /// Galois group element does induce an automorphism of this ring, which can be accessed via
+    /// [`CyclotomicRing::apply_galois_action()`].
+    /// 
     fn galois_group(&self) -> CyclotomicGaloisGroup {
         CyclotomicGaloisGroup::new(self.n() as u64)
     }
 
+    ///
+    /// Computes `g(x)` for the given Galois automorphism `g`.
+    /// 
     fn apply_galois_action(&self, x: &Self::Element, g: CyclotomicGaloisGroupEl) -> Self::Element;
 
+    ///
+    /// Computes `g(x)` for each Galois automorphism `g` in the given list.
+    /// 
+    /// This may be faster than using [`CyclotomicRing::apply_galois_action()`] multiple times.
+    /// 
     fn apply_galois_action_many(&self, x: &Self::Element, gs: &[CyclotomicGaloisGroupEl]) -> Vec<Self::Element> {
         gs.iter().map(move |g| self.apply_galois_action(&x, *g)).collect()
     }

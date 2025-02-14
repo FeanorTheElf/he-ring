@@ -75,7 +75,7 @@ pub trait RNSOperation {
 /// Returns `(data_sorted, perm)` such that `data_sorted` is an (ascending)
 /// unstable sorting of `data`, and `data[i] = data_sorted[perm[i]]`.
 /// 
-pub(self) fn sort_unstable_permutation<T, F>(data: Vec<T>, mut sort_by: F) -> (Vec<T>, Vec<usize>)
+fn sort_unstable_permutation<T, F>(data: Vec<T>, mut sort_by: F) -> (Vec<T>, Vec<usize>)
     where F: FnMut(&T, &T) -> std::cmp::Ordering
 {
     let len = data.len();
