@@ -116,25 +116,9 @@ impl<A> RNSOperation for AlmostExactRescalingConvert<A>
             }
         }
 
-        println!("{} mod {}, {} mod {}, {} mod {}, {} mod {}, {} mod {}",
-        self.rescaling.input_rings().at(0).format(input.at(0, 0)), self.rescaling.input_rings().at(0).modulus(),
-        self.rescaling.input_rings().at(1).format(input.at(1, 0)), self.rescaling.input_rings().at(1).modulus(),
-        self.rescaling.input_rings().at(2).format(input.at(2, 0)), self.rescaling.input_rings().at(2).modulus(),
-        self.rescaling.input_rings().at(3).format(input.at(3, 0)), self.rescaling.input_rings().at(3).modulus(),
-        self.rescaling.input_rings().at(4).format(input.at(4, 0)), self.rescaling.input_rings().at(4).modulus(),
-        );
-
         let mut tmp = (0..(self.rescaling.output_rings().len() * input.col_count())).map(|idx| self.rescaling.output_rings().at(idx  / input.col_count()).zero()).collect::<Vec<_>>();
         let mut tmp = SubmatrixMut::from_1d(&mut tmp, self.rescaling.output_rings().len(), input.col_count());
         self.rescaling.apply(input, tmp.reborrow());
-
-        println!("{} mod {}, {} mod {}, {} mod {}, {} mod {}",
-        self.rescaling.output_rings().at(0).format(tmp.at(0, 0)), self.rescaling.output_rings().at(0).modulus(),
-        self.rescaling.output_rings().at(1).format(tmp.at(1, 0)), self.rescaling.output_rings().at(1).modulus(),
-        self.rescaling.output_rings().at(2).format(tmp.at(2, 0)), self.rescaling.output_rings().at(2).modulus(),
-        self.rescaling.output_rings().at(3).format(tmp.at(3, 0)), self.rescaling.output_rings().at(3).modulus(),
-        );
-
         self.convert.apply(tmp.as_const(), output);
     }
 }
@@ -374,6 +358,38 @@ fn test_rescale_partial() {
         let mut actual = to.iter().map(|Zn| Zn.zero()).collect::<Vec<_>>();
 
         rescaling.apply(Submatrix::from_1d(&input, 3, 1), SubmatrixMut::from_1d(&mut actual, 2, 1));
+
+        for j in 0..expected.len() {
+            assert!(
+                to.at(j).smallest_lift(to.at(j).sub_ref(expected.at(j), actual.at(j))).abs() <= 1,
+                "Expected {} to be {} +/- 1",
+                to.at(j).format(actual.at(j)),
+                to.at(j).format(expected.at(j))
+            );
+        }
+    }
+}
+
+#[test]
+fn test_rescale_larger() {
+    let from = vec![Zn::new(17), Zn::new(31), Zn::new(23), Zn::new(29), Zn::new(19)];
+    let num = vec![Zn::new(5)];
+    let to = vec![Zn::new(5), Zn::new(17), Zn::new(23), Zn::new(19)];
+    let q = 17 * 31 * 23 * 29 * 19;
+
+    let rescaling = AlmostExactRescaling::new_with(
+        from.clone(), 
+        num.clone(), 
+        vec![1, 3],
+        Global
+    );
+
+    for i in -(q/2)..=(q/2) {
+        let input = from.iter().map(|Zn| Zn.int_hom().map(i)).collect::<Vec<_>>();
+        let expected = to.iter().map(|Zn| Zn.int_hom().map((i as f64 * 5. / 31. / 29.).round() as i32)).collect::<Vec<_>>();
+        let mut actual = to.iter().map(|Zn| Zn.zero()).collect::<Vec<_>>();
+
+        rescaling.apply(Submatrix::from_1d(&input, 5, 1), SubmatrixMut::from_1d(&mut actual, 4, 1));
 
         for j in 0..expected.len() {
             assert!(
