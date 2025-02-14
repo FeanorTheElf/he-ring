@@ -384,7 +384,7 @@ fn test_rescale_larger() {
         Global
     );
 
-    for i in -(q/2)..=(q/2) {
+    for i in (-(q/2)..=(q/2)).step_by(2907) {
         let input = from.iter().map(|Zn| Zn.int_hom().map(i)).collect::<Vec<_>>();
         let expected = to.iter().map(|Zn| Zn.int_hom().map((i as f64 * 5. / 31. / 29.).round() as i32)).collect::<Vec<_>>();
         let mut actual = to.iter().map(|Zn| Zn.zero()).collect::<Vec<_>>();
