@@ -1,23 +1,17 @@
 use std::alloc::Global;
-use std::sync::Arc;
 use std::cmp::min;
 
 use dense_poly::DensePolyRing;
-use feanor_math::algorithms::convolution::{ConvolutionAlgorithm, PreparedConvolutionAlgorithm, STANDARD_CONVOLUTION};
+use feanor_math::algorithms::convolution::*;
 use feanor_math::algorithms::cyclotomic::cyclotomic_polynomial;
 use feanor_math::algorithms::int_factor::factor;
 use feanor_math::homomorphism::Homomorphism;
 use feanor_math::integer::IntegerRingStore;
 use feanor_math::primitive_int::StaticRing;
-use feanor_math::{assert_el_eq, ring::*};
+use feanor_math::ring::*;
 use feanor_math::rings::poly::*;
-use feanor_math::rings::zn::zn_64::Zn;
-use feanor_math::rings::zn::ZnRingStore;
 use sparse_poly::SparsePolyRing;
 use tracing::instrument;
-
-use crate::ntt::ntt_convolution::NTTConv;
-use crate::ntt::HERingConvolution;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum SmallCoeff {
@@ -222,6 +216,17 @@ impl<R, C> CyclotomicPolyReducer<R, C>
         }
     }
 }
+
+#[cfg(test)]
+use feanor_math::assert_el_eq;
+#[cfg(test)]
+use feanor_math::rings::zn::zn_64::*;
+#[cfg(test)]
+use feanor_math::rings::zn::*;
+#[cfg(test)]
+use crate::ntt::ntt_convolution::NTTConv;
+#[cfg(test)]
+use crate::ntt::HERingConvolution;
 
 #[test]
 fn test_sparse_poly_remainder() {

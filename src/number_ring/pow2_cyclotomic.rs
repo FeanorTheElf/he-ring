@@ -6,33 +6,22 @@ use cooley_tuckey::bitreverse;
 use cooley_tuckey::CooleyTuckeyFFT;
 use tracing::instrument;
 
-use feanor_math::algorithms;
 use feanor_math::algorithms::fft::*;
-use feanor_math::algorithms::miller_rabin::is_prime;
 use feanor_math::algorithms::unity_root::get_prim_root_of_unity_pow2;
-use feanor_math::divisibility::DivisibilityRing;
-use feanor_math::field::Field;
 use feanor_math::primitive_int::StaticRing;
 use feanor_math::ring::*;
-use feanor_math::assert_el_eq;
 use feanor_math::homomorphism::*;
 use feanor_math::integer::*;
-use feanor_math::rings::extension::FreeAlgebra;
-use feanor_math::rings::extension::FreeAlgebraStore;
 use feanor_math::rings::poly::*;
 use feanor_math::rings::zn::zn_64;
-use feanor_math::rings::zn::zn_64::ZnEl;
-use feanor_math::rings::zn::FromModulusCreateableZnRing;
 use feanor_math::seq::*;
-use feanor_math::rings::zn::{ZnRing, ZnRingStore, zn_rns};
+use feanor_math::rings::zn::{ZnRing, ZnRingStore};
 use feanor_math::rings::zn::zn_64::Zn;
 
-use crate::cyclotomic::CyclotomicGaloisGroupEl;
+use crate::cyclotomic::*;
 use crate::ntt::HERingNegacyclicNTT;
-use crate::cyclotomic::CyclotomicRing;
 
-use super::quotient;
-use super::{sample_primes, HECyclotomicNumberRing, HECyclotomicNumberRingMod, HENumberRing, HENumberRingMod};
+use super::{HECyclotomicNumberRing, HECyclotomicNumberRingMod, HENumberRing, HENumberRingMod};
 
 pub struct Pow2CyclotomicNumberRing<N = RustNegacyclicNTT<Zn>> {
     log2_n: usize,
@@ -317,8 +306,18 @@ impl<N, A> HENumberRingMod for Pow2CyclotomicDecomposedNumberRing<N, A>
     }
 }
 
+#[cfg(test)]
 use crate::ciphertext_ring::double_rns_ring;
+#[cfg(test)]
 use crate::ciphertext_ring::single_rns_ring;
+#[cfg(test)]
+use feanor_math::assert_el_eq;
+#[cfg(test)]
+use crate::number_ring::quotient;
+#[cfg(test)]
+use feanor_math::rings::zn::zn_rns;
+#[cfg(test)]
+use feanor_math::rings::extension::FreeAlgebraStore;
 
 #[test]
 fn test_pow2_cyclotomic_double_rns_ring() {

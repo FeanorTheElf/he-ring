@@ -2,17 +2,13 @@ use feanor_math::algorithms::miller_rabin::is_prime;
 use feanor_math::divisibility::DivisibilityRing;
 use feanor_math::integer::{BigIntRing, IntegerRing, IntegerRingStore};
 use feanor_math::ordered::OrderedRingStore;
-use feanor_math::pid::EuclideanRingStore;
 use feanor_math::primitive_int::StaticRing;
 use feanor_math::ring::*;
-use feanor_math::rings::extension::FreeAlgebra;
-use feanor_math::rings::float_complex::Complex64;
 use feanor_math::rings::poly::PolyRing;
-use feanor_math::rings::zn::zn_64::{self, Zn, ZnEl};
-use feanor_math::rings::zn::ZnRing;
-use feanor_math::seq::{SwappableVectorViewMut, VectorView, VectorViewMut};
+use feanor_math::rings::zn::zn_64;
+use feanor_math::seq::*;
 
-use crate::cyclotomic::{CyclotomicGaloisGroup, CyclotomicGaloisGroupEl, CyclotomicRing};
+use crate::cyclotomic::*;
 
 pub mod quotient;
 pub mod pow2_cyclotomic;
@@ -252,6 +248,8 @@ pub fn extend_sampled_primes<F>(begin_with: &[El<BigIntRing>], min_bits: usize, 
 
 #[cfg(test)]
 use feanor_math::integer::int_cast;
+#[cfg(test)]
+use feanor_math::pid::EuclideanRingStore;
 
 #[test]
 fn test_sample_primes() {

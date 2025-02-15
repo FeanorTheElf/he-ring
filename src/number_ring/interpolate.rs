@@ -1,22 +1,15 @@
-use std::time::Instant;
 
-use dense_poly::DensePolyRing;
 use feanor_math::algorithms::extension_invert::invert_over_local_zn;
 use feanor_math::algorithms::linsolve::LinSolveRing;
-use feanor_math::assert_el_eq;
-use feanor_math::divisibility::DivisibilityRingStore;
 use feanor_math::homomorphism::CanIsoFromTo;
 use feanor_math::homomorphism::Homomorphism;
 use feanor_math::homomorphism::SelfIso;
 use feanor_math::local::PrincipalLocalRing;
-use feanor_math::primitive_int::StaticRing;
 use feanor_math::ring::*;
 use feanor_math::rings::extension::extension_impl::FreeAlgebraImpl;
 use feanor_math::rings::extension::*;
 use feanor_math::rings::field::AsFieldBase;
-use feanor_math::rings::local::AsLocalPIR;
 use feanor_math::rings::poly::*;
-use feanor_math::rings::zn::zn_64::Zn;
 use feanor_math::rings::zn::FromModulusCreateableZnRing;
 use feanor_math::rings::zn::ZnReductionMap;
 use feanor_math::rings::zn::ZnRing;
@@ -173,6 +166,15 @@ impl<P> FastPolyInterpolation<P>
         return result;
     }
 }
+
+#[cfg(test)]
+use feanor_math::assert_el_eq;
+#[cfg(test)]
+use feanor_math::rings::local::AsLocalPIR;
+#[cfg(test)]
+use feanor_math::rings::poly::dense_poly::DensePolyRing;
+#[cfg(test)]
+use feanor_math::rings::zn::zn_64::Zn;
 
 #[test]
 fn test_interpolate() {

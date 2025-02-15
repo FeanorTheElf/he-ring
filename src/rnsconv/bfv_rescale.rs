@@ -1,6 +1,4 @@
 use feanor_math::matrix::*;
-use feanor_math::pid::EuclideanRingStore;
-use feanor_math::rings::rust_bigint::RustBigintRing;
 use feanor_math::rings::zn::*;
 use feanor_math::rings::zn::zn_64::*;
 use feanor_math::integer::*;
@@ -15,7 +13,6 @@ use std::alloc::Allocator;
 use std::alloc::Global;
 use std::cmp::min;
 
-use super::sort_unstable_permutation;
 use super::RNSOperation;
 
 #[cfg(feature = "fastest_rnsconv")]

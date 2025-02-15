@@ -1,29 +1,20 @@
 use std::alloc::{Allocator, Global};
 use std::marker::PhantomData;
-use std::ops::Range;
-use std::rc::Rc;
 use std::sync::Arc;
 
-use feanor_math::algorithms::convolution::{ConvolutionAlgorithm, KaratsubaAlgorithm, PreparedConvolutionAlgorithm, STANDARD_CONVOLUTION};
-use feanor_math::algorithms::cyclotomic::cyclotomic_polynomial;
-use feanor_math::algorithms::int_factor::factor;
-use feanor_math::algorithms::matmul::ComputeInnerProduct;
-use feanor_math::algorithms::poly_gcd::factor;
+use feanor_math::algorithms::convolution::*;
 use feanor_math::iters::{multi_cartesian_product, MultiProduct};
-use feanor_math::primitive_int::{StaticRing, StaticRingBase};
-use feanor_math::serialization::{DeserializeSeedNewtype, DeserializeSeedSeq, DeserializeWithRing, SerializableElementRing, SerializableNewtype, SerializableSeq, SerializeOwnedWithRing};
+use feanor_math::primitive_int::*;
+use feanor_math::serialization::*;
 use feanor_math::specialization::{FiniteRingOperation, FiniteRingSpecializable};
-use feanor_math::{assert_el_eq, ring::*};
+use feanor_math::ring::*;
 use feanor_math::homomorphism::*;
 use feanor_math::integer::*;
 use feanor_math::rings::extension::*;
 use feanor_math::rings::finite::{FiniteRing, FiniteRingStore};
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
-use feanor_math::rings::poly::sparse_poly::SparsePolyRing;
-use feanor_math::rings::poly::*;
 use feanor_math::rings::zn::*;
 use feanor_math::rings::zn::zn_64::*;
-use feanor_math::seq::sparse::SparseMapVector;
 use feanor_math::seq::*;
 use feanor_math::matrix::*;
 
@@ -31,12 +22,10 @@ use serde::Serialize;
 use serde::de::DeserializeSeed;
 use tracing::instrument;
 
-use crate::number_ring::odd_cyclotomic::OddCyclotomicNumberRing;
 use crate::number_ring::HECyclotomicNumberRing;
 use crate::ciphertext_ring::poly_remainder::CyclotomicPolyReducer;
-use crate::{cyclotomic::*, euler_phi};
+use crate::cyclotomic::*;
 use crate::ciphertext_ring::double_rns_ring::{DoubleRNSRing, DoubleRNSRingBase};
-use crate::rnsconv::RNSOperation;
 use crate::ntt::HERingConvolution;
 use crate::ntt::ntt_convolution::NTTConv;
 
@@ -938,10 +927,15 @@ impl<NumberRing, A1, A2, C1, C2> CanIsoFromTo<SingleRNSRingBase<NumberRing, A2, 
     }
 }
 
+#[cfg(test)]
+use crate::number_ring::odd_cyclotomic::OddCyclotomicNumberRing;
+#[cfg(test)]
+use feanor_math::assert_el_eq;
+
 #[cfg(any(test, feature = "generic_tests"))]
 pub fn test_with_number_ring<NumberRing: Clone + HECyclotomicNumberRing>(number_ring: NumberRing) {
     use feanor_math::algorithms::eea::signed_lcm;
-
+    use feanor_math::assert_el_eq;
     use crate::number_ring::largest_prime_leq_congruent_to_one;
 
     let required_root_of_unity = signed_lcm(

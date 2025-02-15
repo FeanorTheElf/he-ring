@@ -8,7 +8,7 @@ use feanor_math::primitive_int::StaticRing;
 use feanor_math::rings::extension::{FreeAlgebra, FreeAlgebraStore};
 use feanor_math::rings::finite::FiniteRing;
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
-use feanor_math::rings::zn::{zn_64, zn_big, zn_rns, FromModulusCreateableZnRing, ZnRing, ZnRingStore};
+use feanor_math::rings::zn::*;
 use feanor_math::ring::*;
 use feanor_math::seq::*;
 use feanor_math::serialization::{DeserializeSeedNewtype, DeserializeSeedSeq, DeserializeWithRing, SerializableElementRing, SerializableNewtype, SerializableSeq, SerializeWithRing};
@@ -20,7 +20,6 @@ use serde::{Deserializer, Serialize, Serializer};
 use crate::serde::de::DeserializeSeed;
 
 use crate::cyclotomic::{CyclotomicGaloisGroupEl, CyclotomicRing};
-use super::pow2_cyclotomic::Pow2CyclotomicNumberRing;
 use super::{sample_primes, largest_prime_leq_congruent_to_one, HECyclotomicNumberRing, HENumberRing, HENumberRingMod, HECyclotomicNumberRingMod};
 
 ///
@@ -673,6 +672,9 @@ impl<NumberRing, ZnTy1, ZnTy2, A1, A2> CanIsoFromTo<NumberRingQuotientBase<Numbe
         };
     }
 }
+
+#[cfg(test)]
+use super::pow2_cyclotomic::Pow2CyclotomicNumberRing;
 
 #[cfg(test)]
 pub fn test_with_number_ring<NumberRing: HENumberRing>(number_ring: NumberRing) {

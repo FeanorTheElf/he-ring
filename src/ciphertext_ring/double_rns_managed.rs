@@ -1,13 +1,7 @@
 use std::alloc::{Allocator, Global};
-use std::cell::*;
-use std::rc::Rc;
-use std::sync::atomic::AtomicU64;
 use std::sync::*;
-use std::thread::spawn;
 
-use feanor_math::algorithms::convolution::{ConvolutionAlgorithm, PreparedConvolutionAlgorithm};
-use feanor_math::assert_el_eq;
-use feanor_math::delegate::DelegateRing;
+use feanor_math::algorithms::convolution::*;
 use feanor_math::homomorphism::*;
 use feanor_math::integer::*;
 use feanor_math::matrix::*;
@@ -23,12 +17,9 @@ use serde::de::DeserializeSeed;
 
 use crate::cyclotomic::CyclotomicGaloisGroupEl;
 use crate::cyclotomic::CyclotomicRing;
-use crate::number_ring::pow2_cyclotomic::Pow2CyclotomicNumberRing;
 use crate::number_ring::HECyclotomicNumberRing;
 use crate::number_ring::HENumberRing;
-use crate::DefaultConvolution;
 
-use super::double_rns_ring;
 use super::double_rns_ring::*;
 use super::single_rns_ring::*;
 use super::BGFVCiphertextRing;
@@ -1156,6 +1147,13 @@ impl<NumberRing, A1, A2> CanIsoFromTo<ManagedDoubleRNSRingBase<NumberRing, A1>> 
 }
 
 #[cfg(test)]
+use feanor_math::assert_el_eq;
+#[cfg(test)]
+use crate::number_ring::pow2_cyclotomic::*;
+#[cfg(test)]
+use crate::DefaultConvolution;
+
+#[cfg(test)]
 fn ring_and_elements() -> (ManagedDoubleRNSRing<Pow2CyclotomicNumberRing>, Vec<El<ManagedDoubleRNSRing<Pow2CyclotomicNumberRing>>>) {
     let rns_base = zn_rns::Zn::new(vec![zn_64::Zn::new(17), zn_64::Zn::new(97)], BigIntRing::RING);
     let ring = ManagedDoubleRNSRingBase::new(Pow2CyclotomicNumberRing::new(16), rns_base);
@@ -1198,7 +1196,7 @@ fn test_thread_safe() {
         let barrier = barrier.clone();
         let test_element = test_element.clone();
         let ring = ring.clone();
-        threads.push(spawn(move || {
+        threads.push(std::thread::spawn(move || {
             barrier.wait();
             assert_el_eq!(ring, ring.int_hom().map(121), ring.pow(ring.clone_el(&*test_element), 2));
         }))

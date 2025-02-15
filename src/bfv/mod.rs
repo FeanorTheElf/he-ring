@@ -4,39 +4,24 @@
 use std::alloc::Allocator;
 use std::alloc::Global;
 use std::marker::PhantomData;
-use std::process::Output;
-use std::ptr::Alignment;
-use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Instant;
 use std::ops::Range;
-use std::cmp::max;
 use std::fmt::Display;
 
-use feanor_math::algorithms::convolution::PreparedConvolutionAlgorithm;
 use feanor_math::algorithms::eea::signed_lcm;
-use feanor_math::algorithms::int_factor::{factor, is_prime_power};
-use feanor_math::algorithms::miller_rabin::is_prime;
-use feanor_math::algorithms::unity_root::{get_prim_root_of_unity, get_prim_root_of_unity_pow2};
-use feanor_math::homomorphism::*;
+use feanor_math::algorithms::int_factor::is_prime_power;
 use feanor_math::primitive_int::StaticRingBase;
 use feanor_math::ring::*;
-use feanor_math::assert_el_eq;
 use feanor_math::rings::finite::FiniteRing;
 use feanor_math::rings::zn::*;
 use feanor_math::rings::zn::zn_64::*;
 use feanor_math::primitive_int::StaticRing;
 use feanor_math::integer::*;
-use feanor_math::algorithms::fft::*;
 use feanor_math::homomorphism::Homomorphism;
 use feanor_math::rings::extension::FreeAlgebraStore;
 use feanor_math::seq::*;
 use feanor_math::ordered::OrderedRingStore;
-use feanor_math::pid::EuclideanRingStore;
 use feanor_math::rings::finite::FiniteRingStore;
-use feanor_mempool::dynsize::DynLayoutMempool;
-use feanor_mempool::AllocArc;
-use feanor_mempool::AllocRc;
 use tracing::instrument;
 
 use crate::ciphertext_ring::perform_rns_op;
@@ -45,10 +30,8 @@ use crate::ciphertext_ring::BGFVCiphertextRing;
 use crate::circuit::Coefficient;
 use crate::circuit::PlaintextCircuit;
 use crate::cyclotomic::*;
-use crate::euler_phi;
 use crate::gadget_product::GadgetProductLhsOperand;
 use crate::gadget_product::GadgetProductRhsOperand;
-use crate::lintransform::composite::powcoeffs_to_slots_fat;
 use crate::ntt::{HERingNegacyclicNTT, HERingConvolution};
 use crate::ciphertext_ring::double_rns_managed::*;
 use crate::number_ring::hypercube::{HypercubeStructure, HypercubeIsomorphism};
@@ -62,7 +45,6 @@ use crate::rnsconv::shared_lift::AlmostExactSharedBaseConversion;
 use crate::DefaultCiphertextAllocator;
 use crate::*;
 
-use rand::thread_rng;
 use rand::{Rng, CryptoRng};
 use rand_distr::StandardNormal;
 
@@ -866,6 +848,22 @@ pub fn small_basis_repr<Params, NumberRing, A>(C: &CiphertextRing<Params>, ct: C
 
 #[cfg(test)]
 use tracing_subscriber::prelude::*;
+#[cfg(test)]
+use feanor_mempool::dynsize::DynLayoutMempool;
+#[cfg(test)]
+use feanor_mempool::AllocArc;
+#[cfg(test)]
+use feanor_math::assert_el_eq;
+#[cfg(test)]
+use std::time::Instant;
+#[cfg(test)]
+use std::ptr::Alignment;
+#[cfg(test)]
+use std::fmt::Debug;
+#[cfg(test)]
+use crate::log_time;
+#[cfg(test)]
+use rand::thread_rng;
 
 #[test]
 fn test_pow2_bfv_enc_dec() {
@@ -1212,8 +1210,6 @@ fn measure_time_single_rns_composite_bfv() {
 pub fn tree_mul_benchmark<Params>(params: Params, digits: usize)
     where Params: BFVParams + Display
 {
-    use crate::gadget_product::recommended_rns_factors_to_drop;
-
     let mut rng = thread_rng();
     let t = 5;
 
@@ -1249,8 +1245,6 @@ pub fn tree_mul_benchmark<Params>(params: Params, digits: usize)
 pub fn chain_mul_benchmark<Params>(params: Params, digits: usize)
     where Params: BFVParams + Display
 {
-    use crate::gadget_product::recommended_rns_factors_to_drop;
-
     let mut rng = thread_rng();
     let t = 5;
 

@@ -1,11 +1,7 @@
 
 use std::alloc::Allocator;
 use std::alloc::Global;
-use std::fs::File;
-use std::io::BufReader;
-use std::io::BufWriter;
 use std::ops::Range;
-use std::cmp::min;
 
 use feanor_math::algorithms::eea::signed_gcd;
 use feanor_math::algorithms::matmul::ComputeInnerProduct;
@@ -23,7 +19,6 @@ use feanor_math::seq::*;
 use feanor_math::algorithms::linsolve::LinSolveRing;
 use feanor_math::homomorphism::*;
 
-use serde::de::DeserializeSeed;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use tracing::instrument;
 
@@ -31,16 +26,10 @@ use crate::circuit::Coefficient;
 use crate::circuit::PlaintextCircuit;
 use crate::cyclotomic::*;
 use crate::lintransform::PowerTable;
-use crate::number_ring::hypercube::DefaultHypercube;
-use crate::number_ring::hypercube::HypercubeStructure;
-use crate::number_ring::hypercube::SlotRingOver;
-use crate::number_ring::odd_cyclotomic::CompositeCyclotomicNumberRing;
-use crate::number_ring::odd_cyclotomic::OddCyclotomicNumberRing;
-use crate::number_ring::quotient::NumberRingQuotientBase;
-use crate::number_ring::{HECyclotomicNumberRing, HENumberRing};
-use crate::number_ring::quotient::NumberRingQuotient;
-use crate::number_ring::hypercube::HypercubeIsomorphism;
-use crate::lintransform::trace::*;
+use crate::number_ring::quotient::*;
+use crate::number_ring::hypercube::*;
+use crate::number_ring::*;
+use super::trace::extract_linear_map;
 
 ///
 /// A linear transform of the ring `R_t = Z[X]/(Phi_n(X), t)`, written in the form
@@ -663,21 +652,11 @@ pub struct BabyStepGiantStepParams {
 }
 
 #[cfg(test)]
-use feanor_math::algorithms::matmul::MatmulAlgorithm;
-#[cfg(test)]
-use feanor_math::algorithms::matmul::STANDARD_MATMUL;
-#[cfg(test)]
-use feanor_math::matrix::Submatrix;
-#[cfg(test)]
-use feanor_math::matrix::TransposableSubmatrix;
-#[cfg(test)]
-use feanor_math::matrix::TransposableSubmatrixMut;
-#[cfg(test)]
 use super::pow2::slots_to_coeffs_thin;
 #[cfg(test)]
-use super::composite::slots_to_powcoeffs_thin;
-#[cfg(test)]
 use crate::number_ring::pow2_cyclotomic::*;
+#[cfg(test)]
+use crate::number_ring::odd_cyclotomic::*;
 #[cfg(test)]
 use feanor_math::assert_el_eq;
 

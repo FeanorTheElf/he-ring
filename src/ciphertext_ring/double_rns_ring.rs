@@ -3,15 +3,12 @@ use std::alloc::Global;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use feanor_math::algorithms::convolution::ConvolutionAlgorithm;
 use feanor_math::algorithms::convolution::PreparedConvolutionAlgorithm;
 use feanor_math::divisibility::*;
 use feanor_math::integer::*;
 use feanor_math::iters::multi_cartesian_product;
 use feanor_math::iters::MultiProduct;
 use feanor_math::matrix::*;
-use feanor_math::primitive_int::StaticRing;
-use feanor_math::primitive_int::StaticRingBase;
 use feanor_math::rings::extension::*;
 use feanor_math::rings::finite::*;
 use feanor_math::ring::*;
@@ -26,12 +23,10 @@ use feanor_math::specialization::{FiniteRingOperation, FiniteRingSpecializable};
 use serde::Deserializer;
 use serde::Serialize;
 use serde::de::DeserializeSeed;
-use tracing::field::Visit;
 use tracing::instrument;
 
 use crate::cyclotomic::{CyclotomicGaloisGroupEl, CyclotomicRing};
 use crate::number_ring::*;
-use crate::rnsconv::*;
 use super::serialization::deserialize_rns_data;
 use super::serialization::serialize_rns_data;
 use super::single_rns_ring::*;
@@ -1109,6 +1104,7 @@ impl<NumberRing, A1, A2> CanIsoFromTo<DoubleRNSRingBase<NumberRing, A2>> for Dou
 pub fn test_with_number_ring<NumberRing: Clone + HECyclotomicNumberRing>(number_ring: NumberRing) {
     use feanor_math::algorithms::eea::signed_lcm;
     use feanor_math::assert_el_eq;
+    use feanor_math::primitive_int::*;
 
     use crate::ntt::ntt_convolution::NTTConv;
 

@@ -1,42 +1,17 @@
-use std::alloc::*;
 use std::cell::RefCell;
-use std::collections::BTreeMap;
-use std::marker::PhantomData;
-use std::rc::Rc;
-use std::sync::Arc;
 
-use feanor_math::algorithms::convolution::ConvolutionAlgorithm;
-use feanor_math::algorithms::convolution::STANDARD_CONVOLUTION;
 use feanor_math::algorithms::sqr_mul::generic_pow_shortest_chain_table;
 use feanor_math::computation::no_error;
-use feanor_math::homomorphism::*;
-use feanor_math::integer::*;
 use feanor_math::matrix::OwnedMatrix;
 use feanor_math::rings::extension::FreeAlgebraStore;
-use feanor_math::rings::field::AsFieldBase;
-use feanor_math::rings::finite::FiniteRingStore;
-use feanor_math::rings::local::AsLocalPIR;
-use feanor_math::rings::local::AsLocalPIRBase;
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
-use feanor_math::rings::poly::PolyRingStore;
-use feanor_math::algorithms::sqr_mul;
-use feanor_math::rings::zn::zn_64::ZnEl;
 use feanor_math::primitive_int::StaticRing;
 use feanor_math::ring::*;
 use feanor_math::rings::zn::zn_64::*;
-use feanor_math::rings::zn::*;
-use feanor_math::seq::*;
 use feanor_math::algorithms::linsolve::LinSolveRingStore;
 
 use crate::circuit::PlaintextCircuit;
-use crate::number_ring::hypercube::DefaultHypercube;
 use crate::number_ring::hypercube::SlotRingOver;
-use crate::number_ring::odd_cyclotomic::OddCyclotomicNumberRing;
-use crate::number_ring::pow2_cyclotomic::Pow2CyclotomicNumberRing;
-use crate::number_ring::quotient::NumberRingQuotientBase;
-use crate::number_ring::{HECyclotomicNumberRing, HENumberRing};
-use crate::number_ring::quotient::NumberRingQuotient;
-use crate::number_ring::hypercube::HypercubeIsomorphism;
 use crate::cyclotomic::*;
 
 ///
@@ -140,19 +115,29 @@ pub fn extract_linear_map<G>(slot_ring: &SlotRingOver<Zn>, mut function: G) -> E
 #[cfg(test)]
 use feanor_math::assert_el_eq;
 #[cfg(test)]
-use feanor_math::rings::extension::galois_field::GaloisField;
+use feanor_math::rings::local::*;
 #[cfg(test)]
-use feanor_math::seq::sparse::*;
-#[cfg(test)]
-use feanor_math::algorithms::convolution::fft::{FFTRNSBasedConvolution, FFTRNSBasedConvolutionZn};
+use feanor_math::algorithms::convolution::*;
 #[cfg(test)]
 use feanor_math::algorithms::unity_root::is_prim_root_of_unity;
 #[cfg(test)]
-use feanor_math::integer::BigIntRing;
-#[cfg(test)]
 use feanor_math::rings::extension::extension_impl::FreeAlgebraImpl;
 #[cfg(test)]
+use feanor_math::homomorphism::Homomorphism;
+#[cfg(test)]
+use feanor_math::rings::finite::FiniteRingStore;
+#[cfg(test)]
+use feanor_math::seq::VectorFn;
+#[cfg(test)]
 use crate::ntt::dyn_convolution::*;
+#[cfg(test)]
+use crate::number_ring::odd_cyclotomic::OddCyclotomicNumberRing;
+#[cfg(test)]
+use crate::number_ring::quotient::NumberRingQuotientBase;
+#[cfg(test)]
+use std::sync::Arc;
+#[cfg(test)]
+use std::alloc::Global;
 
 #[test]
 fn test_extract_coefficient_map() {

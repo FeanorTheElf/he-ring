@@ -1,7 +1,5 @@
-use std::alloc::Allocator;
 use std::alloc::Global;
 
-use feanor_math::algorithms::fft::cooley_tuckey::bitreverse;
 use feanor_math::algorithms::unity_root::is_prim_root_of_unity;
 use feanor_math::divisibility::DivisibilityRingStore;
 use feanor_math::homomorphism::Homomorphism;
@@ -20,14 +18,9 @@ use crate::cyclotomic::*;
 use crate::lintransform::matmul::*;
 use crate::lintransform::trace::trace_circuit;
 use crate::lintransform::PowerTable;
-use crate::number_ring::hypercube::DefaultHypercube;
-use crate::number_ring::hypercube::HypercubeStructure;
-use crate::number_ring::hypercube::SlotRingOver;
-use crate::number_ring::pow2_cyclotomic::Pow2CyclotomicNumberRing;
+use crate::number_ring::hypercube::*;
 use crate::number_ring::quotient::NumberRingQuotientBase;
-use crate::number_ring::{HECyclotomicNumberRing, HENumberRing};
-use crate::number_ring::quotient::NumberRingQuotient;
-use crate::number_ring::hypercube::HypercubeIsomorphism;
+use crate::number_ring::*;
 
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
 
@@ -442,6 +435,12 @@ pub fn coeffs_to_slots_thin<NumberRing>(H: &DefaultHypercube<NumberRing>) -> Pla
 
 #[cfg(test)]
 use crate::ring_literal;
+#[cfg(test)]
+use crate::number_ring::pow2_cyclotomic::Pow2CyclotomicNumberRing;
+#[cfg(test)]
+use crate::number_ring::hypercube::HypercubeIsomorphism;
+#[cfg(test)]
+use feanor_math::algorithms::fft::cooley_tuckey::bitreverse;
 
 #[test]
 fn test_slots_to_coeffs_thin() {

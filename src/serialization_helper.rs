@@ -1,8 +1,7 @@
-use std::{alloc::Allocator, marker::PhantomData};
+use std::marker::PhantomData;
 
-use feanor_math::seq::VectorView;
 use serde::de::{DeserializeSeed, IgnoredAny, SeqAccess, Visitor};
-use serde::{Deserializer, Serialize};
+use serde::Deserializer;
 
 ///
 /// Macro to implement [`serde::de::DeserializeSeed`] for a custom type.

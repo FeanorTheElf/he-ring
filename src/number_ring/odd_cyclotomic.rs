@@ -1,13 +1,10 @@
 use std::alloc::{Allocator, Global};
-use std::collections::{BTreeMap, HashMap};
 use std::cmp::max;
 
 use bluestein::BluesteinFFT;
 use dense_poly::DensePolyRing;
-use factor_fft::CoprimeCooleyTuckeyFFT;
 use feanor_math::algorithms::eea::{signed_eea, signed_gcd};
 use feanor_math::algorithms::int_factor::factor;
-use feanor_math::algorithms::miller_rabin::is_prime;
 use feanor_math::algorithms::cyclotomic::cyclotomic_polynomial;
 use feanor_math::algorithms::unity_root::{get_prim_root_of_unity, get_prim_root_of_unity_pow2};
 use feanor_math::algorithms::fft::*;
@@ -22,13 +19,11 @@ use feanor_math::rings::poly::sparse_poly::SparsePolyRing;
 use feanor_math::rings::zn::*;
 use subvector::SubvectorView;
 use tracing::instrument;
-use zn_static::Fp;
-use crate::feanor_math::rings::extension::*;
 use feanor_math::seq::*;
 
-use crate::{euler_phi, euler_phi_squarefree};
-use crate::cyclotomic::{CyclotomicGaloisGroupEl, CyclotomicRing, CyclotomicRingStore};
-use super::{quotient, HECyclotomicNumberRing, HECyclotomicNumberRingMod, HENumberRing, HENumberRingMod};
+use crate::euler_phi_squarefree;
+use crate::cyclotomic::*;
+use super::{HECyclotomicNumberRing, HECyclotomicNumberRingMod, HENumberRing, HENumberRingMod};
 
 ///
 /// Represents `Z[𝝵_n]` for an odd `n`.
@@ -651,6 +646,8 @@ use feanor_math::assert_el_eq;
 use crate::ciphertext_ring::double_rns_ring;
 #[cfg(test)]
 use crate::ciphertext_ring::single_rns_ring;
+#[cfg(test)]
+use crate::number_ring::quotient;
 #[cfg(test)]
 use crate::ring_literal;
 

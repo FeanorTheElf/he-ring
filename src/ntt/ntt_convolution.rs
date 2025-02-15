@@ -1,22 +1,16 @@
 use std::alloc::{Allocator, Global};
-use std::cell::{Ref, RefCell};
-use std::cmp::{min, max};
 
 use tracing::instrument;
 
-use feanor_math::algorithms::convolution::{ConvolutionAlgorithm, STANDARD_CONVOLUTION};
-use feanor_math::algorithms::convolution::PreparedConvolutionAlgorithm;
+use feanor_math::algorithms::convolution::*;
 use feanor_math::algorithms::fft::cooley_tuckey::CooleyTuckeyFFT;
 use feanor_math::homomorphism::Identity;
 use feanor_math::primitive_int::StaticRing;
-use feanor_math::assert_el_eq;
 use feanor_math::ring::*;
 use feanor_math::integer::*;
 use feanor_math::rings::zn::*;
 use feanor_math::seq::*;
 use feanor_math::algorithms::fft::FFTAlgorithm;
-use feanor_math::homomorphism::Homomorphism;
-use feanor_math::rings::zn::zn_64::{Zn, ZnEl};
 
 use super::HERingConvolution;
 
@@ -184,6 +178,13 @@ impl<R, A> PreparedConvolutionAlgorithm<R::Type> for NTTConv<R, A>
         }
     }
 }
+
+#[cfg(test)]
+use feanor_math::assert_el_eq;
+#[cfg(test)]
+use feanor_math::rings::zn::zn_64::*;
+#[cfg(test)]
+use feanor_math::homomorphism::Homomorphism;
 
 #[test]
 fn test_convolution() {

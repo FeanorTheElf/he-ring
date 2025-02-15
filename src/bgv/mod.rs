@@ -1,18 +1,15 @@
 use std::alloc::{Allocator, Global};
 use std::fmt::Display;
 use std::marker::PhantomData;
-use std::ops::Range;
-use std::ptr::Alignment;
 use std::sync::Arc;
-use std::time::Instant;
 
 use feanor_math::homomorphism::Homomorphism;
 use feanor_math::integer::{int_cast, BigIntRing, IntegerRingStore};
 use feanor_math::matrix::OwnedMatrix;
 use feanor_math::ordered::OrderedRingStore;
 use feanor_math::primitive_int::StaticRing;
-use feanor_math::{assert_el_eq, ring::*};
-use feanor_math::rings::extension::{FreeAlgebra, FreeAlgebraStore};
+use feanor_math::ring::*;
+use feanor_math::rings::extension::*;
 use feanor_math::rings::finite::{FiniteRing, FiniteRingStore};
 use feanor_math::rings::zn::zn_64::Zn;
 use feanor_math::rings::zn::zn_rns;
@@ -22,8 +19,8 @@ use feanor_math::seq::*;
 use tracing::instrument;
 
 use crate::ciphertext_ring::double_rns_managed::ManagedDoubleRNSRingBase;
-use crate::ciphertext_ring::single_rns_ring::{SingleRNSRing, SingleRNSRingBase};
-use crate::ciphertext_ring::{perform_rns_op, BGFVCiphertextRing};
+use crate::ciphertext_ring::single_rns_ring::*;
+use crate::ciphertext_ring::BGFVCiphertextRing;
 use crate::cyclotomic::CyclotomicRing;
 use crate::gadget_product::{GadgetProductLhsOperand, GadgetProductRhsOperand};
 use crate::ntt::{HERingConvolution, HERingNegacyclicNTT};
@@ -31,12 +28,12 @@ use crate::number_ring::odd_cyclotomic::CompositeCyclotomicNumberRing;
 use crate::number_ring::{sample_primes, largest_prime_leq_congruent_to_one, HECyclotomicNumberRing, HENumberRing};
 use crate::number_ring::pow2_cyclotomic::Pow2CyclotomicNumberRing;
 use crate::number_ring::quotient::{NumberRingQuotient, NumberRingQuotientBase};
-use crate::rnsconv::bgv_rescale::{CongruenceAwareAlmostExactBaseConversion, CongruencePreservingRescaling};
+use crate::rnsconv::bgv_rescale::CongruenceAwareAlmostExactBaseConversion;
 use crate::rnsconv::RNSOperation;
-use crate::{log_time, DefaultCiphertextAllocator, DefaultConvolution, DefaultNegacyclicNTT};
+use crate::{DefaultCiphertextAllocator, DefaultConvolution, DefaultNegacyclicNTT};
 
 use rand_distr::StandardNormal;
-use rand::{thread_rng, CryptoRng, Rng};
+use rand::*;
 
 pub type NumberRing<Params: BGVParams> = <Params::CiphertextRing as BGFVCiphertextRing>::NumberRing;
 pub type CiphertextRing<Params: BGVParams> = RingValue<Params::CiphertextRing>;
@@ -560,7 +557,15 @@ use feanor_mempool::dynsize::DynLayoutMempool;
 #[cfg(test)]
 use feanor_mempool::AllocArc;
 #[cfg(test)]
+use feanor_math::assert_el_eq;
+#[cfg(test)]
+use std::time::Instant;
+#[cfg(test)]
+use std::ptr::Alignment;
+#[cfg(test)]
 use std::fmt::Debug;
+#[cfg(test)]
+use crate::log_time;
 
 #[test]
 fn test_pow2_bgv_enc_dec() {

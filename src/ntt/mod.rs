@@ -1,6 +1,5 @@
 use feanor_math::algorithms::convolution::PreparedConvolutionAlgorithm;
 use feanor_math::ring::*;
-use feanor_math::rings::zn::ZnRing;
 
 ///
 /// A convolution as in [`PreparedConvolutionAlgorithm`], that can additionally be created for

@@ -1,57 +1,47 @@
 use std::alloc::Global;
-use std::fmt::Debug;
 use std::marker::PhantomData;
-use std::ptr::Alignment;
-use std::rc::Rc;
 use std::cmp::max;
 use std::sync::Arc;
-use std::time::Instant;
 
 use feanor_math::algorithms::convolution::fft::{FFTRNSBasedConvolution, FFTRNSBasedConvolutionZn};
 use feanor_math::algorithms::convolution::STANDARD_CONVOLUTION;
-use feanor_math::algorithms::discrete_log::{discrete_log, order};
+use feanor_math::algorithms::discrete_log::discrete_log;
 use feanor_math::algorithms::eea::{signed_gcd, signed_lcm};
 use feanor_math::algorithms::int_factor::{factor, is_prime_power};
 use feanor_math::algorithms::linsolve::LinSolveRing;
-use feanor_math::algorithms::poly_gcd::factor;
 use feanor_math::divisibility::{DivisibilityRing, DivisibilityRingStore};
 use feanor_math::rings::field::AsFieldBase;
-use feanor_math::rings::poly::generic_impls::Isomorphism;
 use feanor_math::homomorphism::*;
-use feanor_math::assert_el_eq;
-use feanor_math::integer::{int_cast, BigIntRing, BigIntRingBase, IntegerRingStore};
+use feanor_math::integer::*;
 use feanor_math::iters::{clone_slice, multi_cartesian_product};
 use feanor_math::local::PrincipalLocalRing;
 use feanor_math::primitive_int::{StaticRing, StaticRingBase};
-use feanor_math::rings::extension::extension_impl::{FreeAlgebraImpl, FreeAlgebraImplBase};
+use feanor_math::rings::extension::extension_impl::*;
 use feanor_math::rings::extension::galois_field::GaloisField;
 use feanor_math::rings::extension::{FreeAlgebra, FreeAlgebraStore};
 use feanor_math::rings::finite::{FiniteRing, FiniteRingStore};
 use feanor_math::rings::local::{AsLocalPIR, AsLocalPIRBase};
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
 use feanor_math::rings::poly::PolyRingStore;
-use feanor_math::rings::zn::zn_64::{Zn, ZnBase, ZnEl};
+use feanor_math::rings::zn::zn_64::*;
 use feanor_math::delegate::DelegateRing;
 use feanor_math::ring::*;
 use feanor_math::rings::zn::{zn_big, zn_rns, FromModulusCreateableZnRing, ZnReductionMap, ZnRing, ZnRingStore};
-use feanor_math::seq::sparse::SparseMapVector;
 use feanor_math::seq::*;
-use feanor_math::serialization::{DeserializeSeedNewtype, SerializableNewtype, SerializableSeq};
+use feanor_math::serialization::{DeserializeSeedNewtype, SerializableNewtype};
 use feanor_math::wrapper::RingElementWrapper;
 
 use serde::{Deserialize, Serialize};
 use serde::de::DeserializeSeed;
 use tracing::instrument;
 
-use crate::cyclotomic::{CyclotomicGaloisGroup, CyclotomicGaloisGroupEl, CyclotomicRing, CyclotomicRingStore, SerializableCyclotomicGaloisGroupEl};
+use crate::cyclotomic::*;
 use crate::serialization_helper::DeserializeSeedDependentTuple;
 use crate::{euler_phi, log_time};
 use crate::ntt::dyn_convolution::*;
 use serialization::{HypercubeStructureDataDeserializer, SerializableHypercubeStructureData};
 
 use super::interpolate::FastPolyInterpolation;
-use super::odd_cyclotomic::CompositeCyclotomicNumberRing;
-use super::pow2_cyclotomic::Pow2CyclotomicNumberRing;
 use super::quotient::*;
 
 mod serialization;
@@ -740,6 +730,17 @@ impl<R> HypercubeIsomorphism<R>
         }));
     }
 }
+
+#[cfg(test)]
+use super::odd_cyclotomic::CompositeCyclotomicNumberRing;
+#[cfg(test)]
+use super::pow2_cyclotomic::Pow2CyclotomicNumberRing;
+#[cfg(test)]
+use feanor_math::assert_el_eq;
+#[cfg(test)]
+use std::rc::Rc;
+#[cfg(test)]
+use std::ptr::Alignment;
 
 #[cfg(test)]
 fn test_ring1() -> (NumberRingQuotient<Pow2CyclotomicNumberRing, Zn>, HypercubeStructure) {

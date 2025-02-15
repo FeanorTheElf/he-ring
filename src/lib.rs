@@ -13,7 +13,6 @@
 
 #![allow(non_snake_case)]
 #![allow(type_alias_bounds)]
-#![allow(unused_imports)]
 #![allow(non_camel_case_types)]
 #![allow(non_upper_case_globals)]
 #![allow(unused_variables)]
@@ -23,21 +22,9 @@
 use std::alloc::Global;
 use std::time::Instant;
 
-use feanor_math::algorithms::miller_rabin::is_prime;
-use feanor_math::integer::*;
-use feanor_math::ordered::OrderedRingStore;
-use feanor_math::pid::EuclideanRingStore;
 use feanor_math::primitive_int::*;
 use feanor_math::ring::*;
-use feanor_math::homomorphism::*;
-use feanor_math::rings::extension::galois_field::GaloisField;
-use feanor_math::rings::extension::{FreeAlgebra, FreeAlgebraStore};
-use feanor_math::rings::field::AsFieldBase;
-use feanor_math::rings::local::AsLocalPIRBase;
-use feanor_math::rings::zn::zn_64;
 use feanor_math::rings::zn::zn_64::Zn;
-use feanor_math::rings::zn::{FromModulusCreateableZnRing, ZnRing};
-use feanor_math::serialization::SerializableElementRing;
 
 extern crate feanor_math;
 #[cfg(feature = "use_hexl")]
@@ -54,8 +41,11 @@ extern crate rand_distr;
 #[cfg(test)]
 fn ring_literal<R>(ring: R, data: &[i32]) -> El<R>
     where R: RingStore,
-        R::Type: FreeAlgebra
+        R::Type: feanor_math::rings::extension::FreeAlgebra
 {
+    use feanor_math::homomorphism::*;
+    use feanor_math::rings::extension::*;
+
     ring.from_canonical_basis(data.iter().map(|x| ring.base_ring().int_hom().map(*x)))
 }
 

@@ -1,10 +1,5 @@
-use std::alloc::Allocator;
-use std::alloc::Global;
-use std::ptr::Alignment;
-use std::rc::Rc;
 
 use feanor_math::algorithms::linsolve::LinSolveRingStore;
-use feanor_math::assert_el_eq;
 use feanor_math::homomorphism::*;
 use feanor_math::matrix::OwnedMatrix;
 use feanor_math::ring::*;
@@ -15,15 +10,8 @@ use feanor_math::seq::VectorFn;
 use matmul::MatmulTransform;
 use tracing::instrument;
 
-use crate::number_ring::hypercube::DefaultHypercube;
-use crate::number_ring::hypercube::HypercubeStructure;
-use crate::number_ring::hypercube::SlotRingOver;
-use crate::number_ring::odd_cyclotomic::CompositeCyclotomicNumberRing;
-use crate::number_ring::quotient::NumberRingQuotientBase;
-use crate::log_time;
-use crate::number_ring::{HECyclotomicNumberRing, HENumberRing};
-use crate::number_ring::quotient::NumberRingQuotient;
-use crate::number_ring::hypercube::HypercubeIsomorphism;
+use crate::number_ring::hypercube::*;
+use crate::number_ring::*;
 use crate::cyclotomic::*;
 use crate::lintransform::*;
 
@@ -235,6 +223,12 @@ pub fn powcoeffs_to_slots_thin<NumberRing>(H: &DefaultHypercube<NumberRing>) -> 
 
 #[cfg(test)]
 use crate::ring_literal;
+#[cfg(test)]
+use feanor_math::assert_el_eq;
+#[cfg(test)]
+use crate::number_ring::quotient::*;
+#[cfg(test)]
+use crate::number_ring::odd_cyclotomic::CompositeCyclotomicNumberRing;
 
 #[test]
 fn test_slots_to_powcoeffs_thin() {

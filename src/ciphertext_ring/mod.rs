@@ -1,7 +1,7 @@
 use std::alloc::Allocator;
 
 use feanor_math::integer::BigIntRing;
-use feanor_math::matrix::{AsFirstElement, AsPointerToSlice, OwnedMatrix, Submatrix, SubmatrixMut};
+use feanor_math::matrix::*;
 use feanor_math::ring::*;
 use feanor_math::rings::extension::{FreeAlgebra, FreeAlgebraStore};
 use feanor_math::rings::zn::zn_64::{ZnEl, Zn, ZnBase};

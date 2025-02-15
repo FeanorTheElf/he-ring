@@ -1,26 +1,20 @@
 use std::alloc::{Allocator, Global};
 use std::ops::Range;
-use std::cmp::min;
 
 use feanor_math::integer::BigIntRing;
-use feanor_math::matrix::{OwnedMatrix, Submatrix, SubmatrixMut};
+use feanor_math::matrix::*;
 use feanor_math::primitive_int::StaticRing;
-use feanor_math::rings::zn::{zn_64, ZnRingStore};
-use feanor_math::{assert_el_eq, ring::*};
+use feanor_math::rings::zn::zn_64;
+use feanor_math::ring::*;
 use feanor_math::rings::zn::{zn_64::Zn, zn_rns};
-use feanor_math::seq::subvector::SubvectorView;
 use feanor_math::seq::{VectorFn, VectorView};
 use feanor_math::homomorphism::Homomorphism;
 
 use crate::ciphertext_ring::double_rns_ring::{DoubleRNSRing, DoubleRNSRingBase, SmallBasisEl};
-use crate::ciphertext_ring::single_rns_ring::SingleRNSRingBase;
 use crate::ciphertext_ring::{BGFVCiphertextRing, PreparedMultiplicationRing};
-use crate::cyclotomic::{CyclotomicGaloisGroupEl, CyclotomicRing};
-use crate::number_ring::pow2_cyclotomic::Pow2CyclotomicNumberRing;
+use crate::cyclotomic::*;
 use crate::number_ring::HENumberRing;
-use crate::rnsconv::bfv_rescale::AlmostExactRescaling;
 use crate::rnsconv::{lift, RNSOperation};
-use crate::DefaultConvolution;
 
 type UsedBaseConversion<A> = lift::AlmostExactBaseConversion<A>;
 
@@ -543,6 +537,15 @@ impl<R: BGFVCiphertextRing> GadgetProductRhsOperand<R> {
         };
     }
 }
+
+#[cfg(test)]
+use feanor_math::assert_el_eq;
+#[cfg(test)]
+use crate::ciphertext_ring::single_rns_ring::SingleRNSRingBase;
+#[cfg(test)]
+use crate::number_ring::pow2_cyclotomic::Pow2CyclotomicNumberRing;
+#[cfg(test)]
+use crate::DefaultConvolution;
 
 #[test]
 fn test_gadget_decomposition() {

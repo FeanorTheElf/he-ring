@@ -1,16 +1,9 @@
 use std::cmp::max;
 
-use feanor_math::rings::extension::FreeAlgebraStore;
-use feanor_math::{algorithms::matmul::ComputeInnerProduct, rings::zn::zn_64::Zn};
 use feanor_math::homomorphism::Homomorphism;
-use feanor_math::primitive_int::StaticRing;
-use feanor_math::{assert_el_eq, ring::*};
+use feanor_math::ring::*;
 
 use crate::cyclotomic::*;
-use crate::number_ring::pow2_cyclotomic::Pow2CyclotomicNumberRing;
-use crate::number_ring::{HECyclotomicNumberRing, HENumberRing};
-use crate::number_ring::quotient::{NumberRingQuotient, NumberRingQuotientBase};
-use crate::number_ring::hypercube::HypercubeIsomorphism;
 
 mod serialization;
 
@@ -22,7 +15,7 @@ mod serialization;
 /// special cases are stored separately for a more efficient evaluation.
 /// 
 pub enum Coefficient<R: ?Sized + RingBase> {
-    Zero, One, Integer(i32), Other(R::Element)
+    Zero, One, NegOne, Integer(i32), Other(R::Element)
 }
 
 impl<R> Clone for Coefficient<R>
@@ -33,6 +26,7 @@ impl<R> Clone for Coefficient<R>
         match self {
             Coefficient::Zero => Coefficient::Zero,
             Coefficient::One => Coefficient::One,
+            Coefficient::NegOne => Coefficient::NegOne,
             Coefficient::Integer(x) => Coefficient::Integer(*x),
             Coefficient::Other(x) => Coefficient::Other(x.clone())
         }
@@ -50,6 +44,7 @@ impl<R: ?Sized + RingBase> Coefficient<R> {
         match self {
             Coefficient::Zero => Coefficient::Zero,
             Coefficient::One => Coefficient::One,
+            Coefficient::NegOne => Coefficient::NegOne,
             Coefficient::Integer(x) => Coefficient::Integer(*x),
             Coefficient::Other(x) => Coefficient::Other(ring.clone_el(x))
         }
@@ -66,6 +61,7 @@ impl<R: ?Sized + RingBase> Coefficient<R> {
         match self {
             Coefficient::Zero => x,
             Coefficient::One => ring.add(x, ring.one()),
+            Coefficient::NegOne => ring.add(x, ring.neg_one()),
             Coefficient::Integer(y) => ring.add(x, ring.int_hom().map(*y)),
             Coefficient::Other(y) => ring.add_ref_snd(x, y)
         }
@@ -79,6 +75,7 @@ impl<R: ?Sized + RingBase> Coefficient<R> {
         match self {
             Coefficient::Zero => ring.zero(),
             Coefficient::One => x,
+            Coefficient::NegOne => ring.negate(x),
             Coefficient::Integer(y) => ring.int_hom().mul_map(x, *y),
             Coefficient::Other(y) => ring.mul_ref_snd(x, y)
         }
@@ -105,20 +102,30 @@ impl<R: ?Sized + RingBase> Coefficient<R> {
         match self {
             Coefficient::Zero => ring.zero(),
             Coefficient::One => ring.one(),
+            Coefficient::NegOne => ring.neg_one(),
             Coefficient::Integer(x) => ring.int_hom().map(x),
             Coefficient::Other(x) => x
         }
     }
 
+    pub fn negate<S: RingStore<Type = R>>(self, ring: S) -> Self {
+        match self {
+            Coefficient::Zero => Coefficient::Zero,
+            Coefficient::One => Coefficient::NegOne,
+            Coefficient::NegOne => Coefficient::One,
+            Coefficient::Integer(x) => Coefficient::Integer(-x),
+            Coefficient::Other(x) => Coefficient::Other(ring.negate(x))
+        }
+    }
+
     fn add<S: RingStore<Type = R> + Copy>(self, other: Self, ring: S) -> Self {
         match (self, other) {
-            (Coefficient::Zero, Coefficient::Zero) => Coefficient::Zero,
-            (Coefficient::Zero, Coefficient::One) => Coefficient::One,
-            (Coefficient::One, Coefficient::Zero) => Coefficient::One,
-            (Coefficient::Zero, Coefficient::Integer(x)) => Coefficient::Integer(x),
-            (Coefficient::Integer(x), Coefficient::Zero) => Coefficient::Integer(x),
+            (Coefficient::Zero, rhs) => rhs,
+            (lhs, Coefficient::Zero) => lhs,
             (Coefficient::One, Coefficient::Integer(x)) => Coefficient::Integer(x + 1),
+            (Coefficient::NegOne, Coefficient::Integer(x)) => Coefficient::Integer(x - 1),
             (Coefficient::Integer(x), Coefficient::One) => Coefficient::Integer(x + 1),
+            (Coefficient::Integer(x), Coefficient::NegOne) => Coefficient::Integer(x - 1),
             (lhs, rhs) => Coefficient::Other(ring.add(lhs.to_ring_el(ring), rhs.to_ring_el(ring)))
         }
     }
@@ -127,9 +134,10 @@ impl<R: ?Sized + RingBase> Coefficient<R> {
         match (self, other) {
             (Coefficient::Zero, _) => Coefficient::Zero,
             (_, Coefficient::Zero) => Coefficient::Zero,
-            (Coefficient::One, Coefficient::One) => Coefficient::One,
-            (Coefficient::One, Coefficient::Integer(x)) => Coefficient::Integer(x),
-            (Coefficient::Integer(x), Coefficient::One) => Coefficient::Integer(x),
+            (Coefficient::One, rhs) => rhs,
+            (lhs, Coefficient::One) => lhs,
+            (lhs, Coefficient::NegOne) => lhs.negate(ring),
+            (Coefficient::NegOne, rhs) => rhs.negate(ring),
             (lhs, rhs) => Coefficient::Other(ring.mul(lhs.to_ring_el(ring), rhs.to_ring_el(ring)))
         }
     }
@@ -456,6 +464,30 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
             output_transforms: vec![LinearCombination {
                 constant: Coefficient::Zero,
                 factors: vec![Coefficient::One, Coefficient::One]
+            }]
+        };
+        return result;
+    }
+
+    /// 
+    /// Creates the circuit consisting of a single subtraction gate
+    /// ```text
+    ///   | |
+    ///  |‾‾‾|
+    ///  | - |
+    ///  |___|
+    ///    |
+    /// ```
+    /// This is a special case of [`PlaintextCircuit::linear_transform()`], in many cases
+    /// the latter is more convenient to use.
+    /// 
+    pub fn sub<S: RingStore<Type = R>>(ring: S) -> Self {
+        let result = Self {
+            input_count: 2,
+            gates: Vec::new(),
+            output_transforms: vec![LinearCombination {
+                constant: Coefficient::Zero,
+                factors: vec![Coefficient::One, Coefficient::NegOne]
             }]
         };
         return result;
@@ -955,6 +987,19 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
         (0..self.output_count()).map(|i| self.mul_depth(i)).max().unwrap_or(0)
     }
 }
+
+#[cfg(test)]
+use feanor_math::assert_el_eq;
+#[cfg(test)]
+use feanor_math::primitive_int::*;
+#[cfg(test)]
+use feanor_math::rings::zn::zn_64::Zn;
+#[cfg(test)]
+use feanor_math::rings::extension::FreeAlgebraStore;
+#[cfg(test)]
+use crate::number_ring::quotient::NumberRingQuotientBase;
+#[cfg(test)]
+use crate::number_ring::pow2_cyclotomic::Pow2CyclotomicNumberRing;
 
 #[test]
 fn test_circuit_tensor_compose() {
