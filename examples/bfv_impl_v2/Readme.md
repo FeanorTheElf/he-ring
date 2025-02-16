@@ -749,7 +749,7 @@ assert_el_eq!(&P, P.pow(message, 2), result);
 
 ## Performance
 
-Plugging in larger values in the above example, we see that homomorphic multiplication for `N = 16384` and `q ~ 2^100` takes only 50 ms!
+Plugging in larger values in the above example, I find that on my desktop PC, homomorphic multiplication for `N = 16384` and `q ~ 2^100` takes only 50 ms!
 This is clearly an impressive speedup compared to the 7.7 seconds we got in the first example [`crate::examples::bfv_impl_v1`].
 In fact, a little more benchmarking shows that our implementation almost matches state-of-the-art HE libraries!
 For example, for `N = 32768` and `q ~ 800`, I get 0.88 seconds, which is close to the 0.5 seconds that SEAL version 4.1.2 takes on my system.

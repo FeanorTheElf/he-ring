@@ -3,6 +3,7 @@ use std::fmt::Display;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use feanor_math::algorithms::rational_reconstruction::rational_reconstruction;
 use feanor_math::homomorphism::Homomorphism;
 use feanor_math::integer::{int_cast, BigIntRing, IntegerRingStore};
 use feanor_math::matrix::OwnedMatrix;
@@ -21,7 +22,7 @@ use tracing::instrument;
 use crate::ciphertext_ring::double_rns_managed::ManagedDoubleRNSRingBase;
 use crate::ciphertext_ring::single_rns_ring::*;
 use crate::ciphertext_ring::BGFVCiphertextRing;
-use crate::cyclotomic::CyclotomicRing;
+use crate::cyclotomic::*;
 use crate::gadget_product::{GadgetProductLhsOperand, GadgetProductRhsOperand};
 use crate::ntt::{HERingConvolution, HERingNegacyclicNTT};
 use crate::number_ring::odd_cyclotomic::CompositeCyclotomicNumberRing;
@@ -41,6 +42,9 @@ pub type PlaintextRing<Params: BGVParams> = NumberRingQuotient<NumberRing<Params
 pub type SecretKey<Params: BGVParams> = El<CiphertextRing<Params>>;
 pub type KeySwitchKey<'a, Params: BGVParams> = (GadgetProductRhsOperand<Params::CiphertextRing>, GadgetProductRhsOperand<Params::CiphertextRing>);
 pub type RelinKey<'a, Params: BGVParams> = KeySwitchKey<'a, Params>;
+
+pub mod strategy;
+pub mod bootstrap;
 
 const ZZbig: BigIntRing = BigIntRing::RING;
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
@@ -266,6 +270,28 @@ pub trait BGVParams {
             implicit_scale: P.base_ring().mul(lhs.implicit_scale, rhs.implicit_scale)
         };
     }
+    
+    #[instrument(skip_all)]
+    fn hom_add(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, mut lhs: Ciphertext<Self>, mut rhs: Ciphertext<Self>) -> Ciphertext<Self> {
+        let Zt = P.base_ring();
+        let ZZ_to_Zt = Zt.can_hom(Zt.integer_ring()).unwrap();
+        let (a, b) = rational_reconstruction(Zt, Zt.checked_div(&lhs.implicit_scale, &rhs.implicit_scale).unwrap());
+
+        C.int_hom().mul_assign_map(&mut rhs.c0, a as i32);
+        C.int_hom().mul_assign_map(&mut rhs.c1, a as i32);
+        P.base_ring().int_hom().mul_assign_map(&mut rhs.implicit_scale, a as i32);
+
+        C.int_hom().mul_assign_map(&mut lhs.c0, b as i32);
+        C.int_hom().mul_assign_map(&mut lhs.c1, b as i32);
+        P.base_ring().int_hom().mul_assign_map(&mut lhs.implicit_scale, b as i32);
+
+        debug_assert!(Zt.eq_el(&lhs.implicit_scale, &rhs.implicit_scale));
+        return Ciphertext {
+            c0: C.add(lhs.c0, rhs.c0),
+            c1: C.add(lhs.c1, rhs.c1),
+            implicit_scale: lhs.implicit_scale
+        };
+    }
 
     #[instrument(skip_all)]
     fn mod_switch_sk(P: &PlaintextRing<Self>, Cnew: &CiphertextRing<Self>, Cold: &CiphertextRing<Self>, dropped_rns_factor_indices: &[usize], sk: &SecretKey<Self>) -> SecretKey<Self> {
@@ -343,6 +369,35 @@ pub trait BGVParams {
             implicit_scale: P.base_ring().mul(ct.implicit_scale, implicit_scale)
         };
     }
+    
+    #[instrument(skip_all)]
+    fn hom_galois_many<'a, 'b, V>(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: Ciphertext<Self>, gs: &[CyclotomicGaloisGroupEl], gks: V) -> Vec<Ciphertext<Self>>
+        where V: VectorFn<&'b KeySwitchKey<'a, Self>>,
+            KeySwitchKey<'a, Self>: 'b,
+            'a: 'b,
+            Self: 'a
+    {
+        let digits = gks.at(0).0.gadget_vector_moduli_indices();
+        let has_same_digits = |gk: &GadgetProductRhsOperand<_>| gk.gadget_vector_moduli_indices().len() == digits.len() && gk.gadget_vector_moduli_indices().iter().zip(digits.iter()).all(|(l, r)| l == r);
+        assert!(gks.iter().all(|gk| has_same_digits(&gk.0) && has_same_digits(&gk.1)));
+        let c1_op = GadgetProductLhsOperand::from_element_with(C.get_ring(), &ct.c1, digits);
+        let c1_op_gs = c1_op.apply_galois_action_many(C.get_ring(), gs);
+        let c0_gs = C.get_ring().apply_galois_action_many(&ct.c0, gs).into_iter();
+        assert_eq!(gks.len(), c1_op_gs.len());
+        assert_eq!(gks.len(), c0_gs.len());
+        return c0_gs.zip(c1_op_gs.iter()).enumerate().map(|(i, (c0_g, c1_g))| {
+            let (s0, s1) = gks.at(i);
+            let r0 = c1_g.gadget_product(s0, C.get_ring());
+            let r1 = c1_g.gadget_product(s1, C.get_ring());
+            let c0_g = C.apply_galois_action(&ct.c0, gs[i]);
+            return Ciphertext {
+                c0: C.add_ref(&r0, &c0_g),
+                c1: r1,
+                implicit_scale: P.base_ring().clone_el(&ct.implicit_scale)
+            };
+        }).collect();
+    }
+
 }
 
 #[derive(Debug)]
@@ -656,6 +711,42 @@ fn test_pow2_bgv_modulus_switch() {
     let result_ctxt = Pow2BGV::mod_switch(&P, &C1, &C0, &[8], Pow2BGV::clone_ct(&P, &C0, &ctxt));
     let result = Pow2BGV::dec(&P, &C1, result_ctxt, &Pow2BGV::mod_switch_sk(&P, &C1, &C0, &[8], &sk));
     assert_el_eq!(&P, P.int_hom().map(2), result);
+}
+
+#[test]
+fn test_pow2_modulus_switch_hom_add() {
+    let mut rng = thread_rng();
+    
+    let params = Pow2BGV {
+        log2_q_min: 500,
+        log2_q_max: 520,
+        log2_N: 7,
+        ciphertext_allocator: DefaultCiphertextAllocator::default(),
+        negacyclic_ntt: PhantomData::<DefaultNegacyclicNTT>
+    };
+    let t = 257;
+    let digits = 3;
+    
+    let P = params.create_plaintext_ring(t);
+    let C0 = params.create_initial_ciphertext_ring();
+    assert_eq!(9, C0.base_ring().len());
+
+    let sk = Pow2BGV::gen_sk(&C0, &mut rng);
+
+    let input = P.int_hom().map(2);
+    let ctxt = Pow2BGV::enc_sym(&P, &C0, &mut rng, &input, &sk);
+
+    for i in [0, 1, 8] {
+        let C1 = params.drop_rns_factor(&C0, &[i]);
+        let ctxt_modswitch = Pow2BGV::mod_switch(&P, &C1, &C0, &[i], Pow2BGV::clone_ct(&P, &C0, &ctxt));
+        let sk_modswitch = Pow2BGV::mod_switch_sk(&P, &C1, &C0, &[i], &sk);
+        let ctxt_other = Pow2BGV::enc_sym(&P, &C1, &mut rng, &P.int_hom().map(30), &sk_modswitch);
+
+        let ctxt_result = Pow2BGV::hom_add(&P, &C1, ctxt_modswitch, ctxt_other);
+
+        let result = Pow2BGV::dec(&P, &C1, ctxt_result, &sk_modswitch);
+        assert_el_eq!(&P, P.int_hom().map(32), result);
+    }
 }
 
 #[test]
