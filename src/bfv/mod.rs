@@ -392,7 +392,7 @@ pub trait BFVParams {
         let res1 = scale_down(lifted1);
         let res2 = scale_down(lifted2);
 
-        let op = GadgetProductLhsOperand::from_element_with(C.get_ring(), &res2, rk.0.gadget_vector_moduli_indices());
+        let op = GadgetProductLhsOperand::from_element_with(C.get_ring(), &res2, rk.0.gadget_vector_digits());
         let (s0, s1) = rk;
         return (C.add_ref(&res0, &op.gadget_product(s0, C.get_ring())), C.add_ref(&res1, &op.gadget_product(s1, C.get_ring())));
         
@@ -418,7 +418,7 @@ pub trait BFVParams {
         let mut res1 = GadgetProductRhsOperand::new(C.get_ring(), digits);
         for digit_i in 0..digits {
             let (c0, c1) = Self::enc_sym_zero(C, &mut rng, new_sk);
-            let digit_range = res0.gadget_vector_moduli_indices().at(digit_i).clone();
+            let digit_range = res0.gadget_vector_digits().at(digit_i).clone();
             let factor = C.base_ring().get_ring().from_congruence((0..C.base_ring().len()).map(|i2| {
                 let Fp = C.base_ring().at(i2);
                 if digit_range.contains(&i2) { Fp.one() } else { Fp.zero() } 
@@ -442,7 +442,7 @@ pub trait BFVParams {
     {
         let (c0, c1) = ct;
         let (s0, s1) = switch_key;
-        let op = GadgetProductLhsOperand::from_element_with(C.get_ring(), &c1, switch_key.0.gadget_vector_moduli_indices());
+        let op = GadgetProductLhsOperand::from_element_with(C.get_ring(), &c1, switch_key.0.gadget_vector_digits());
         return (
             C.add_ref_snd(c0, &op.gadget_product(s0, C.get_ring())),
             op.gadget_product(s1, C.get_ring())
@@ -510,8 +510,8 @@ pub trait BFVParams {
             'a: 'b,
             Self: 'a
     {
-        let digits = gks.at(0).0.gadget_vector_moduli_indices();
-        let has_same_digits = |gk: &GadgetProductRhsOperand<_>| gk.gadget_vector_moduli_indices().len() == digits.len() && gk.gadget_vector_moduli_indices().iter().zip(digits.iter()).all(|(l, r)| l == r);
+        let digits = gks.at(0).0.gadget_vector_digits();
+        let has_same_digits = |gk: &GadgetProductRhsOperand<_>| gk.gadget_vector_digits().len() == digits.len() && gk.gadget_vector_digits().iter().zip(digits.iter()).all(|(l, r)| l == r);
         assert!(gks.iter().all(|gk| has_same_digits(&gk.0) && has_same_digits(&gk.1)));
         let (c0, c1) = ct;
         let c1_op = GadgetProductLhsOperand::from_element_with(C.get_ring(), &c1, digits);

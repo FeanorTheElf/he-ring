@@ -1,7 +1,7 @@
 use std::alloc::{Allocator, Global};
 use std::ops::Range;
 
-use digits::{DropModuliIndices, RNSGadgetVectorDigitList};
+use digits::{DropModuliIndices, RNSGadgetVectorDigitIndices};
 use feanor_math::integer::BigIntRing;
 use feanor_math::matrix::*;
 use feanor_math::primitive_int::StaticRing;
@@ -22,57 +22,12 @@ pub mod digits;
 type UsedBaseConversion<A> = lift::AlmostExactBaseConversion<A>;
 
 ///
-/// Chooses `drop_prime_count` indices from `0..rns_base_len`, in a way such that removing these indices from
-/// each range in the given list of "digits", the result is as balanced as possible.
-///  
-/// # The standard use case 
-/// 
-/// This hopefully becomes clearer once we consider the main use case:
-/// When we do modulus-switching (e.g. during BGV), we remove RNS factors from the ciphertext modulus.
-/// For the ciphertexts itself, it is (almost) irrelevant which of these RNS factors are removed, but it makes
-/// a huge difference when mod-switching key-switching keys (e.g. relinearization keys). This is because
-/// the used gadget vector relies is based on a decomposition of RNS factors into groups, and removing a single
-/// RNS factor from every group will give a very different behavior from removing a single, whole group and
-/// leaving the other groups unchanged.
-/// 
-/// This function will choose the indices of the RNS factors to achieve the former, i.e. remove RNS factors
-/// from every group, with the goal that the resulting groups all have (close to) equal size. This means that
-/// the number of digits of the key-switching keys remains constant. 
-/// 
-/// This is probably the desired behavior in most cases, but other behaviors might as well be reasonable in 
-/// certain scenarios. 
-/// 
-/// # Example
-/// ```
-/// # use feanor_math::seq::*;
-/// # use he_ring::gadget_product::*;
-/// # use he_ring::gadget_product::digits::RNSGadgetVectorDigitList;
-/// // remove the first two indices from 0..3, and the first index from 3..5 - the resulting ranges both have length 1
-/// assert_eq!(&[0usize, 1, 3][..], &recommended_rns_factors_to_drop(5, &RNSGadgetVectorDigitList::from([0..3, 3..5].clone_els()), 3) as &[usize]);
-/// ```
-/// 
-pub fn recommended_rns_factors_to_drop(rns_base_len: usize, old_digits: &RNSGadgetVectorDigitList, drop_prime_count: usize) -> Box<DropModuliIndices> {
-    assert!(drop_prime_count <= rns_base_len);
-
-    let mut digits = old_digits.iter().collect::<Vec<_>>();
-    digits.sort_unstable_by_key(|digit| digit.start);
-    let mut drop_from_digit = (0..digits.len()).map(|_| 0).collect::<Vec<_>>();
-
-    for _ in 0..drop_prime_count {
-        let largest_digit_idx = (0..digits.len()).max_by_key(|i| digits[*i].end - digits[*i].start - drop_from_digit[*i]).unwrap();
-        drop_from_digit[largest_digit_idx] += 1;
-    }
-
-    return DropModuliIndices::from((0..digits.len()).flat_map(|i| digits[i].start..(digits[i].start + drop_from_digit[i])).collect(), rns_base_len);
-}
-
-///
 /// Represents the left-hand side operand of a gadget product.
 /// 
 /// In other words, this stores a "gadget-decomposition" of a single ring element `x`,
 /// i.e. small ring elements `x[i]` such that `x = sum_i g[i] x[i]` for a gadget vector
 /// `g`. The only supported gadget vectors are RNS-based gadget vectors, see 
-/// [`GadgetProductRhsOperand::gadget_vector_moduli_indices()`].
+/// [`GadgetProductRhsOperand::gadget_vector_digits()`].
 /// 
 /// For more details, see [`GadgetProductLhsOperand::gadget_product()`].
 /// 
@@ -90,7 +45,7 @@ impl<R: BGFVCiphertextRing> GadgetProductLhsOperand<R> {
     /// Creates a [`GadgetProductLhsOperand`] w.r.t. the gadget vector given by `digits`.
     /// For an explanation of gadget products, see [`GadgetProductLhsOperand::gadget_product()`].
     /// 
-    pub fn from_element_with(ring: &R, el: &R::Element, digits: &RNSGadgetVectorDigitList) -> Self {
+    pub fn from_element_with(ring: &R, el: &R::Element, digits: &RNSGadgetVectorDigitIndices) -> Self {
         let decomposition = gadget_decompose(ring, el, digits);
         return Self {
             element_decomposition: decomposition
@@ -102,7 +57,7 @@ impl<R: BGFVCiphertextRing> GadgetProductLhsOperand<R> {
     /// For an explanation of gadget products, see [`GadgetProductLhsOperand::gadget_product()`].
     /// 
     pub fn from_element(ring: &R, el: &R::Element, digits: usize) -> Self {
-        Self::from_element_with(ring, el, &RNSGadgetVectorDigitList::select_digits(digits, ring.base_ring().len()))
+        Self::from_element_with(ring, el, &RNSGadgetVectorDigitIndices::select_digits(digits, ring.base_ring().len()))
     }
 }
 
@@ -114,7 +69,7 @@ impl<NumberRing, A> GadgetProductLhsOperand<DoubleRNSRingBase<NumberRing, A>>
     /// Creates a [`GadgetProductLhsOperand`] w.r.t. the gadget vector given by `digits`.
     /// For an explanation of gadget products, see [`GadgetProductLhsOperand::gadget_product()`].
     /// 
-    pub fn from_double_rns_ring_with(ring: &DoubleRNSRingBase<NumberRing, A>, el: &SmallBasisEl<NumberRing, A>, digits: &RNSGadgetVectorDigitList) -> Self {
+    pub fn from_double_rns_ring_with(ring: &DoubleRNSRingBase<NumberRing, A>, el: &SmallBasisEl<NumberRing, A>, digits: &RNSGadgetVectorDigitIndices) -> Self {
         let decomposition = gadget_decompose_doublerns(ring, el, digits);
         return Self {
             element_decomposition: decomposition
@@ -126,7 +81,7 @@ impl<NumberRing, A> GadgetProductLhsOperand<DoubleRNSRingBase<NumberRing, A>>
     /// For an explanation of gadget products, see [`GadgetProductLhsOperand::gadget_product()`].
     /// 
     pub fn from_double_rns_ring(ring: &DoubleRNSRingBase<NumberRing, A>, el: &SmallBasisEl<NumberRing, A>, digits: usize) -> Self {
-        Self::from_double_rns_ring_with(ring, el, &RNSGadgetVectorDigitList::select_digits(digits, ring.base_ring().len()))
+        Self::from_double_rns_ring_with(ring, el, &RNSGadgetVectorDigitIndices::select_digits(digits, ring.base_ring().len()))
     }
 }
 
@@ -358,7 +313,7 @@ fn gadget_decompose_doublerns<NumberRing, A, V>(ring: &DoubleRNSRingBase<NumberR
 /// 
 /// In other words, this stores a multiple "noisy" approximations to a `g[i] * x`, for
 /// a ring element `x` and a gadget vector `g`. The only supported gadget vectors
-/// are RNS-based gadget vectors, see [`GadgetProductRhsOperand::gadget_vector_moduli_indices()`].
+/// are RNS-based gadget vectors, see [`GadgetProductRhsOperand::gadget_vector_digits()`].
 /// 
 /// For more details, see [`GadgetProductLhsOperand::gadget_product()`].
 /// 
@@ -372,7 +327,7 @@ pub struct GadgetProductRhsOperand<R: PreparedMultiplicationRing> {
     /// representation of the used gadget vector, the `i`-th entry of the gadget vector is the
     /// RNS unit vector that is 1 modulo exactly the RNS factors contained in the digit at index
     /// `i` of this list
-    digits: Box<RNSGadgetVectorDigitList>
+    digits: Box<RNSGadgetVectorDigitIndices>
 }
 
 impl<R: PreparedMultiplicationRing> GadgetProductRhsOperand<R> {
@@ -396,7 +351,7 @@ impl<R: PreparedMultiplicationRing> GadgetProductRhsOperand<R> {
         where R: RingExtension,
             R::BaseRing: RingStore<Type = zn_rns::ZnBase<zn_64::Zn, BigIntRing>>
     {
-        self.gadget_vector_moduli_indices().map_fn(|digit| ring.base_ring().get_ring().from_congruence((0..ring.base_ring().get_ring().len()).map(|i| if digit.contains(&i) {
+        self.gadget_vector_digits().map_fn(|digit| ring.base_ring().get_ring().from_congruence((0..ring.base_ring().get_ring().len()).map(|i| if digit.contains(&i) {
             ring.base_ring().get_ring().at(i).one()
         } else {
             ring.base_ring().get_ring().at(i).zero()
@@ -411,12 +366,14 @@ impl<R: PreparedMultiplicationRing> GadgetProductRhsOperand<R> {
     /// gadget vectors that are based on the RNS representation of `q = p1 ... pr`. In other
     /// words, the gadget vector `g` is defined as
     /// ```text
-    ///   g[i] = 1 mod pj    if j in g_indices[i]
+    ///   g[i] = 1 mod pj    if j in digits[i]
     ///   g[i] = 0 mod pj    otherwise
     /// ```
-    /// where `g_indices` is the vector of ranges that is returned by this function.
+    /// where `digits` is the vector of ranges that is returned by this function.
     /// 
-    pub fn gadget_vector_moduli_indices<'b>(&'b self) -> &'b RNSGadgetVectorDigitList {
+    /// For some more details, see [`RNSGadgetVectorDigitIndices`].
+    /// 
+    pub fn gadget_vector_digits<'b>(&'b self) -> &'b RNSGadgetVectorDigitIndices {
         &self.digits
     }
 
@@ -438,17 +395,17 @@ impl<R: PreparedMultiplicationRing> GadgetProductRhsOperand<R> {
         where R: RingExtension,
             R::BaseRing: RingStore<Type = zn_rns::ZnBase<zn_64::Zn, BigIntRing>>
     {
-        Self::new_with(ring, RNSGadgetVectorDigitList::select_digits(digits, ring.base_ring().get_ring().len()))
+        Self::new_with(ring, RNSGadgetVectorDigitIndices::select_digits(digits, ring.base_ring().get_ring().len()))
     }
 
     /// 
     /// Creates a [`GadgetProductRhsOperand`] representing `0` w.r.t. the RNS-based gadget vector given by `digits`.
     /// For the exact description how the gadget vector is constructed based on `digits`, see 
-    /// [`GadgetProductRhsOperand::gadget_vector_moduli_indices()`].
+    /// [`GadgetProductRhsOperand::gadget_vector_digits()`].
     /// 
     /// For an explanation of gadget products, see [`GadgetProductLhsOperand::gadget_product()`].
     /// 
-    pub fn new_with(ring: &R, digits: Box<RNSGadgetVectorDigitList>) -> Self 
+    pub fn new_with(ring: &R, digits: Box<RNSGadgetVectorDigitIndices>) -> Self 
         where R: RingExtension,
             R::BaseRing: RingStore<Type = zn_rns::ZnBase<zn_64::Zn, BigIntRing>>
     {

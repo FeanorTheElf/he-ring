@@ -7,8 +7,8 @@
 
 use he_ring::bgv::{BGVParams, CiphertextRing, PlaintextRing, Pow2BGV};
 use he_ring::cyclotomic::CyclotomicRingStore;
+use he_ring::gadget_product::digits::recommended_rns_factors_to_drop;
 use he_ring::DefaultNegacyclicNTT;
-use he_ring::gadget_product::recommended_rns_factors_to_drop;
 use rand::{SeedableRng, rngs::StdRng};
 use std::alloc::Global;
 use std::marker::PhantomData;
@@ -20,7 +20,6 @@ use feanor_math::ring::RingStore;
 use feanor_math::algorithms::eea::signed_gcd;
 use feanor_math::homomorphism::Homomorphism;
 use feanor_math::rings::extension::FreeAlgebraStore;
-use feanor_math::seq::VectorView;
 use feanor_math::assert_el_eq;
 
 fn main() {
@@ -58,7 +57,7 @@ fn main() {
     let enc_x_sqr = ChosenBGVParamType::hom_mul(&P, &C_initial, ChosenBGVParamType::clone_ct(&P, &C_initial, &enc_x), enc_x, &rk);
     
     let num_digits_to_drop = 1;
-    let to_drop = recommended_rns_factors_to_drop(C_initial.base_ring().len(), rk.0.gadget_vector_moduli_indices(), num_digits_to_drop);
+    let to_drop = recommended_rns_factors_to_drop(rk.0.gadget_vector_digits(), num_digits_to_drop);
     let C_new = ChosenBGVParamType::mod_switch_down_ciphertext_ring(&C_initial, &to_drop);
     
     println!("log2(q') = {}", BigIntRing::RING.abs_log2_ceil(C_new.base_ring().modulus()).unwrap());

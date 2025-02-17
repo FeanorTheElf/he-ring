@@ -513,7 +513,7 @@ fn relinearize(
     three_component_ciphertext: (SmallBasisEl<Pow2CyclotomicNumberRing>, SmallBasisEl<Pow2CyclotomicNumberRing>, SmallBasisEl<Pow2CyclotomicNumberRing>), 
     relin_key: &RelinKey
 ) -> (SmallBasisEl<Pow2CyclotomicNumberRing>, SmallBasisEl<Pow2CyclotomicNumberRing>) {
-    let c2_decomposition = GadgetProductLhsOperand::from_double_rns_ring_with(ciphertext_ring.get_ring(), &three_component_ciphertext.2, relin_key.0.gadget_vector_moduli_indices());
+    let c2_decomposition = GadgetProductLhsOperand::from_double_rns_ring_with(ciphertext_ring.get_ring(), &three_component_ciphertext.2, relin_key.0.gadget_vector_digits());
     let mut result0 = three_component_ciphertext.0;
     ciphertext_ring.get_ring().add_assign_non_fft(&mut result0, &ciphertext_ring.get_ring().undo_fft(c2_decomposition.gadget_product(&relin_key.0, ciphertext_ring.get_ring())));
     let mut result1 = three_component_ciphertext.1;
@@ -719,7 +719,7 @@ Finally, let's test this implementation again!
 #     three_component_ciphertext: (SmallBasisEl<Pow2CyclotomicNumberRing>, SmallBasisEl<Pow2CyclotomicNumberRing>, SmallBasisEl<Pow2CyclotomicNumberRing>), 
 #     relin_key: &RelinKey
 # ) -> (SmallBasisEl<Pow2CyclotomicNumberRing>, SmallBasisEl<Pow2CyclotomicNumberRing>) {
-#     let c2_decomposition = GadgetProductLhsOperand::from_double_rns_ring_with(ciphertext_ring.get_ring(), &three_component_ciphertext.2, relin_key.0.gadget_vector_moduli_indices());
+#     let c2_decomposition = GadgetProductLhsOperand::from_double_rns_ring_with(ciphertext_ring.get_ring(), &three_component_ciphertext.2, relin_key.0.gadget_vector_digits());
 #     let mut result0 = three_component_ciphertext.0;
 #     ciphertext_ring.get_ring().add_assign_non_fft(&mut result0, &ciphertext_ring.get_ring().undo_fft(c2_decomposition.gadget_product(&relin_key.0, ciphertext_ring.get_ring())));
 #     let mut result1 = three_component_ciphertext.1;

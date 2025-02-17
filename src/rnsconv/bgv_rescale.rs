@@ -27,11 +27,13 @@ type UsedBaseConversion<A> = super::lift::AlmostExactBaseConversion<A>;
 /// Concretely, the image `y` of `x` is the closest integer to `ax/b` with `by = ax mod t`.
 /// In particular, we compute the map
 /// ```text
-/// Z/qZ -> Z/(aq/b)Z,  x -> round*(ax / b) + lift(a b^-1 x - round*(ax / b) mod t)
+///   Z/qZ -> Z/(aq/b)Z,  x -> round*(ax / b) + lift(a b^-1 x - round*(ax / b) mod t)
 /// ```
 /// To allow an efficient RNS implementation, we allow `round*` to make an error of `+/- 1`.
 /// This means that the "closest integer" above might only be the second-closest when there is
 /// almost a tie.
+/// 
+/// We also assume that `b^2 <= q / 8`.
 /// 
 /// In some cases, BGV modulus-switching can be implemented more efficiently by using
 /// [`CongruenceAwareAlmostExactBaseConversion`].
@@ -93,9 +95,9 @@ impl<A> CongruencePreservingRescaling<A>
         let a = ZZbig.prod(num_moduli.iter().map(|Zn| int_cast(Zn.integer_ring().clone_el(Zn.modulus()), &ZZbig, Zn.integer_ring())));
         let b = ZZbig.prod(den_moduli_indices.iter().map(|i| &in_moduli[*i]).map(|Zn| int_cast(Zn.integer_ring().clone_el(Zn.modulus()), &ZZbig, Zn.integer_ring())));
         
-        // after the lifting to `q/b`, we have a value `<= 2b` in absolute value; this must be `<= (q/b)/4` for
+        // after the lifting to `aq/b`, we have a value `<= 2b` in absolute value; this must be `<= (aq/b)/4` for
         // the mod-`t` base conversion to not cause any error
-        assert!(ZZbig.is_geq(&ZZbig.mul_ref(&a, &q), &ZZbig.int_hom().mul_ref_map(&b, &4)));
+        assert!(ZZbig.is_geq(&ZZbig.rounded_div(ZZbig.mul_ref(&q, &a), &b), &ZZbig.int_hom().mul_ref_map(&b, &8)));
         
         let aq_moduli_unsorted = in_moduli.iter().copied().chain(num_moduli.iter().copied()).collect::<Vec<_>>();
         let (aq_moduli, aq_permutation) = sort_unstable_permutation(aq_moduli_unsorted.clone(), |ring_l, ring_r| ZZ.cmp(ring_l.modulus(), ring_r.modulus()));
@@ -263,6 +265,8 @@ impl<A> RNSOperation for CongruencePreservingRescaling<A>
 /// Hence, "almost-smallest" could be the smallest, or second-smallest integer if there is
 /// almost a tie.
 /// 
+/// We also assume that `b^2 <= q/8`.
+/// 
 /// # Difference to [`CongruencePreservingRescaling`]
 /// 
 /// [`CongruencePreservingRescaling`] computes the whole BGV modulus-switch. On the other hand, after
@@ -315,7 +319,7 @@ impl<A> CongruenceAwareAlmostExactBaseConversion<A>
         let q_over_b = ZZbig.prod(out_moduli.iter().map(|Zn| int_cast(Zn.integer_ring().clone_el(Zn.modulus()), &ZZbig, Zn.integer_ring())));
         // after the lifting to `q/b`, we have a value `<= 2b` in absolute value; this must be `<= (q/b)/4` for
         // the mod-`t` base conversion to not cause any error
-        assert!(ZZbig.is_geq(&q_over_b, &ZZbig.int_hom().mul_ref_map(&b, &4)));
+        assert!(ZZbig.is_geq(&q_over_b, &ZZbig.int_hom().mul_ref_map(&b, &8)));
 
         let b_moduli = in_moduli.clone();
         let q_over_b_moduli_unsorted = out_moduli;

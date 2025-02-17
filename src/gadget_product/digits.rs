@@ -24,7 +24,7 @@ use feanor_math::seq::VectorFn;
 /// ```
 /// # use feanor_math::seq::*;
 /// # use he_ring::gadget_product::digits::*;
-/// let digits = RNSGadgetVectorDigitList::from([3..7, 0..3, 7..10].clone_els());
+/// let digits = RNSGadgetVectorDigitIndices::from([3..7, 0..3, 7..10].clone_els());
 /// assert_eq!(3, digits.len());
 /// 
 /// // the digits will be stored in an ordered way
@@ -35,13 +35,25 @@ use feanor_math::seq::VectorFn;
 /// assert_eq!(10, digits.rns_base_len());
 /// ```
 /// 
+/// # Why do we call it "digits"?
+/// 
+/// This comes from the beginnings of modulus-switching. Instead of the much more efficient
+/// RNS gadget vector, the first idea was to use a `B`-adic decomposition of `x` as
+/// ```text
+///   x = x[0] + B x[1] + B^2 x[2] + ...
+/// ```
+/// In this case, the entries of the gadget vector where powers of `B`, hence each associated to 
+/// a digit in the `B`-adic decomposition of some unspecified `x`. With an RNS gadget vector, the 
+/// "digits" are now the groups of RNS factors `pi, ..., p(i + d)` according to which we decompose
+/// the input. While this is not a standard naming convention, it makes sense (to me at least).
+/// 
 #[repr(transparent)]
-#[derive(Debug)]
-pub struct RNSGadgetVectorDigitList {
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub struct RNSGadgetVectorDigitIndices {
     digit_boundaries: [usize]
 }
 
-impl RNSGadgetVectorDigitList {
+impl RNSGadgetVectorDigitIndices {
 
     fn from_unchecked(digit_boundaries: Box<[usize]>) -> Box<Self> {
         unsafe { std::mem::transmute(digit_boundaries) }
@@ -74,11 +86,10 @@ impl RNSGadgetVectorDigitList {
     /// is often the best choice for an RNS gadget vector.
     /// 
     /// # Example
-    /// 
     /// ```
     /// # use feanor_math::seq::*;
     /// # use he_ring::gadget_product::digits::*;
-    /// let digits = RNSGadgetVectorDigitList::select_digits(3, 10);
+    /// let digits = RNSGadgetVectorDigitIndices::select_digits(3, 10);
     /// assert_eq!(3, digits.len());
     /// assert_eq!(0..4, digits.at(0));
     /// assert_eq!(4..7, digits.at(1));
@@ -108,11 +119,10 @@ impl RNSGadgetVectorDigitList {
     /// list of shorter digits.
     /// 
     /// # Example
-    /// 
     /// ```
     /// # use feanor_math::seq::*;
     /// # use he_ring::gadget_product::digits::*;
-    /// let original_digits = RNSGadgetVectorDigitList::from([0..3, 3..5, 5..7].clone_els());
+    /// let original_digits = RNSGadgetVectorDigitIndices::from([0..3, 3..5, 5..7].clone_els());
     /// let digits = original_digits.remove_indices(DropModuliIndices::from_ref(&[1, 2, 5], 7));
     /// assert_eq!(3, digits.len());
     /// assert_eq!(0..1, digits.at(0));
@@ -123,7 +133,7 @@ impl RNSGadgetVectorDigitList {
     /// ```
     /// # use feanor_math::seq::*;
     /// # use he_ring::gadget_product::digits::*;
-    /// let original_digits = RNSGadgetVectorDigitList::from([0..3, 3..5, 5..7].clone_els());
+    /// let original_digits = RNSGadgetVectorDigitIndices::from([0..3, 3..5, 5..7].clone_els());
     /// let digits = original_digits.remove_indices(DropModuliIndices::from_ref(&[0, 1, 2, 5], 7));
     /// assert_eq!(2, digits.len());
     /// assert_eq!(0..2, digits.at(0));
@@ -145,7 +155,7 @@ impl RNSGadgetVectorDigitList {
     }
 }
 
-impl VectorFn<Range<usize>> for RNSGadgetVectorDigitList {
+impl VectorFn<Range<usize>> for RNSGadgetVectorDigitIndices {
 
     fn len(&self) -> usize {
         self.digit_boundaries.len()
@@ -160,10 +170,10 @@ impl VectorFn<Range<usize>> for RNSGadgetVectorDigitList {
     }
 }
 
-impl Clone for Box<RNSGadgetVectorDigitList> {
+impl Clone for Box<RNSGadgetVectorDigitIndices> {
 
     fn clone(&self) -> Self {
-        RNSGadgetVectorDigitList::from_unchecked(self.digit_boundaries.to_owned().into_boxed_slice())
+        RNSGadgetVectorDigitIndices::from_unchecked(self.digit_boundaries.to_owned().into_boxed_slice())
     }
 }
 
@@ -173,7 +183,7 @@ impl Clone for Box<RNSGadgetVectorDigitList> {
 /// dropped from a "master RNS base" to get to the current state.
 /// 
 #[repr(transparent)]
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct DropModuliIndices {
     drop_rns_moduli_indices: [usize]
 }
@@ -229,6 +239,15 @@ impl DropModuliIndices {
         self.drop_rns_moduli_indices.binary_search(&i).is_ok()
     }
 
+    ///
+    /// Returns the number of indices in this set within the given range.
+    /// 
+    /// # Example
+    /// ```
+    /// # use he_ring::gadget_product::digits::*;
+    /// assert_eq!(1, DropModuliIndices::from_ref(&[2, 5], 8).num_within(&(0..5)));
+    /// ```
+    /// 
     pub fn num_within(&self, range: &Range<usize>) -> usize {
         match (self.drop_rns_moduli_indices.binary_search(&range.start), self.drop_rns_moduli_indices.binary_search(&range.end)) {
             (Ok(i), Ok(j)) |
@@ -247,10 +266,24 @@ impl DropModuliIndices {
     }
 
     ///
-    /// Returns the indices contained in `self` but not in `context`, however relative to the
-    /// RNS base that has `context` already removed.
+    /// Returns the indices contained in `self` but not in `context`, however - as opposed to
+    /// [`DropModuliIndices::subtract()`] - relative to the RNS base that has `context` already removed.
+    /// This assumes that `context` is a subset of `self`.
     /// 
-    pub fn within(&self, context: &Self) -> Box<Self> {
+    /// More concretely, this returns
+    /// ```text
+    ///   { i - #{ j in context | j < i } | i in self \ context }
+    /// ```
+    /// 
+    /// **Note for mathematicians**: This has nothing to do with the category-theoretical pushforward
+    /// 
+    /// # Example
+    /// ```
+    /// # use he_ring::gadget_product::digits::*;
+    /// assert_eq!(&[1usize, 3, 5][..], &DropModuliIndices::from_ref(&[1, 2, 4, 5, 7], 8).pushforward(DropModuliIndices::from_ref(&[2, 5], 8)) as &[usize])
+    /// ```
+    /// 
+    pub fn pushforward(&self, context: &Self) -> Box<Self> {
         if self.len() == 0 {
             assert!(context.len() == 0);
             return Self::empty();
@@ -274,6 +307,40 @@ impl DropModuliIndices {
         return Self::from_unchecked(result.into_boxed_slice());
     }
 
+    ///
+    /// Returns the indices of the elements that will removed when first removing `context`,
+    /// and then removing `self` w.r.t. the new RNS base that already has `context` removed.
+    /// In this sense, it is the counterpart to [`DropModuliIndices::pushforward()`].
+    /// 
+    /// More concretely, this returns
+    /// ```text
+    ///   { i | i - #{ j in context | j < i } in self } + context
+    /// ```
+    /// 
+    /// **Note for mathematicians**: This has nothing to do with the category-theoretical pullback
+    /// 
+    /// # Example
+    /// ```
+    /// # use he_ring::gadget_product::digits::*;
+    /// assert_eq!(&[1, 2, 3, 5, 6][..], &DropModuliIndices::from_ref(&[1, 2, 4], 6).pullback(DropModuliIndices::from_ref(&[2, 5], 8)) as &[usize])
+    /// ```
+    /// 
+    pub fn pullback(&self, context: &Self) -> Box<Self> {
+        let mut result = Vec::new();
+        for mut i in self.iter().copied() {
+            let mut added = 0..(i + 1);
+            while added.start != added.end {
+                let new_els = context.num_within(&added);
+                added = (i + 1)..(i + new_els + 1);
+                i += new_els;
+            }
+            result.push(i);
+        }
+        result.extend(context.iter().copied());
+        result.sort_unstable();
+        return Self::from_unchecked(result.into_boxed_slice());
+    }
+
     pub fn union(&self, other: &Self) -> Box<Self> {
         let mut result = self.drop_rns_moduli_indices.iter().copied().chain(
             other.drop_rns_moduli_indices.iter().copied().filter(|i| !self.contains(*i)
@@ -285,4 +352,53 @@ impl DropModuliIndices {
     pub fn empty() -> Box<Self> {
         Self::from_unchecked(Box::new([]))
     }
+}
+
+impl Clone for Box<DropModuliIndices> {
+    fn clone(&self) -> Self {
+        DropModuliIndices::from_unchecked(self.drop_rns_moduli_indices.to_owned().into_boxed_slice())
+    }
+}
+
+///
+/// Chooses `drop_prime_count` indices from `0..rns_base_len`, in a way such that removing these indices from
+/// each range in the given list of "digits", the result is as balanced as possible.
+///  
+/// # The standard use case 
+/// 
+/// This hopefully becomes clearer once we consider the main use case:
+/// When we do modulus-switching (e.g. during BGV), we remove RNS factors from the ciphertext modulus.
+/// For the ciphertexts itself, it is (almost) irrelevant which of these RNS factors are removed, but it makes
+/// a huge difference when mod-switching key-switching keys (e.g. relinearization keys). This is because
+/// the used gadget vector relies is based on a decomposition of RNS factors into groups, and removing a single
+/// RNS factor from every group will give a very different behavior from removing a single, whole group and
+/// leaving the other groups unchanged.
+/// 
+/// This function will choose the indices of the RNS factors to achieve the former, i.e. remove RNS factors
+/// from every group, with the goal that the resulting groups all have (close to) equal size. This means that
+/// the number of digits of the key-switching keys remains constant. 
+/// 
+/// This is probably the desired behavior in most cases, but other behaviors might as well be reasonable in 
+/// certain scenarios. 
+/// 
+/// # Example
+/// ```
+/// # use feanor_math::seq::*;
+/// # use he_ring::gadget_product::*;
+/// # use he_ring::gadget_product::digits::*;
+/// // remove the first two indices from 0..3, and the first index from 3..5 - the resulting ranges both have length 1
+/// assert_eq!(&[0usize, 1, 3][..], &recommended_rns_factors_to_drop(&RNSGadgetVectorDigitIndices::from([0..3, 3..5].clone_els()), 3) as &[usize]);
+/// ```
+/// 
+pub fn recommended_rns_factors_to_drop(digits: &RNSGadgetVectorDigitIndices, drop_prime_count: usize) -> Box<DropModuliIndices> {
+    assert!(drop_prime_count <= digits.rns_base_len());
+
+    let mut drop_from_digit = (0..digits.len()).map(|_| 0).collect::<Vec<_>>();
+
+    for _ in 0..drop_prime_count {
+        let largest_digit_idx = (0..digits.len()).max_by_key(|i| digits.at(*i).end - digits.at(*i).start - drop_from_digit[*i]).unwrap();
+        drop_from_digit[largest_digit_idx] += 1;
+    }
+
+    return DropModuliIndices::from((0..digits.len()).flat_map(|i| digits.at(i).start..(digits.at(i).start + drop_from_digit[i])).collect(), digits.rns_base_len());
 }

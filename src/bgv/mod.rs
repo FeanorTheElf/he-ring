@@ -50,7 +50,6 @@ pub mod bootstrap;
 const ZZbig: BigIntRing = BigIntRing::RING;
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
 
-
 ///
 /// A BGV ciphertext w.r.t. some [`BGVParams`]. Note that this implementation
 /// does not include an automatic management of the ciphertext modulus chain,
@@ -59,7 +58,9 @@ const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
 /// 
 pub struct Ciphertext<Params: ?Sized + BGVParams> {
     /// the ciphertext represents the value `implicit_scale^-1 lift(c0 + c1 s) mod t`, 
-    /// i.e. implicit scale stores the factor in `Z/tZ` that is introduced by modulus-switching
+    /// i.e. `implicit_scale` stores the factor in `Z/tZ` that is introduced by modulus-switching;
+    /// Hence, `implicit_scale` is set to `1` when encrypting a value, and only changes when
+    /// doing modulus-switching.
     pub implicit_scale: El<Zn>,
     pub c0: El<CiphertextRing<Params>>,
     pub c1: El<CiphertextRing<Params>>
@@ -197,6 +198,13 @@ pub trait BGVParams {
         }
     }
 
+    ///
+    /// Returns the value
+    /// ```
+    ///   log2( q / | c0 + c1 s |_inf )
+    /// ```
+    /// which roughly corresponds to the "noise budget" of the ciphertext, in bits.
+    /// 
     #[instrument(skip_all)]
     fn noise_budget(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: &Ciphertext<Self>, sk: &SecretKey<Self>) -> usize {
         let ct = Self::clone_ct(P, C, ct);
@@ -218,7 +226,7 @@ pub trait BGVParams {
         let mut res1 = GadgetProductRhsOperand::new(C.get_ring(), digits);
         for digit_i in 0..digits {
             let ct = Self::enc_sym_zero(P, C, &mut rng, new_sk);
-            let digit_range = res0.gadget_vector_moduli_indices().at(digit_i).clone();
+            let digit_range = res0.gadget_vector_digits().at(digit_i).clone();
             let factor = C.base_ring().get_ring().from_congruence((0..C.base_ring().len()).map(|i2| {
                 let Fp = C.base_ring().at(i2);
                 if digit_range.contains(&i2) { Fp.one() } else { Fp.zero() } 
@@ -237,7 +245,7 @@ pub trait BGVParams {
         where Self: 'a
     {
         let (s0, s1) = switch_key;
-        let op = GadgetProductLhsOperand::from_element_with(C.get_ring(), &ct.c1, switch_key.0.gadget_vector_moduli_indices());
+        let op = GadgetProductLhsOperand::from_element_with(C.get_ring(), &ct.c1, switch_key.0.gadget_vector_digits());
         return Ciphertext {
             c0: C.add_ref_snd(ct.c0, &op.gadget_product(s0, C.get_ring())),
             c1: op.gadget_product(s1, C.get_ring()),
@@ -258,7 +266,7 @@ pub trait BGVParams {
     {
         let [res0, res1, res2] = C.get_ring().two_by_two_convolution([&lhs.c0, &lhs.c1], [&rhs.c0, &rhs.c1]);
         
-        let op = GadgetProductLhsOperand::from_element_with(C.get_ring(), &res2, rk.0.gadget_vector_moduli_indices());
+        let op = GadgetProductLhsOperand::from_element_with(C.get_ring(), &res2, rk.0.gadget_vector_digits());
         let (s0, s1) = &rk;
         
         return Ciphertext {
@@ -301,8 +309,8 @@ pub trait BGVParams {
             'a: 'b,
             Self: 'a
     {
-        let digits = gks.at(0).0.gadget_vector_moduli_indices();
-        let has_same_digits = |gk: &GadgetProductRhsOperand<_>| gk.gadget_vector_moduli_indices().len() == digits.len() && gk.gadget_vector_moduli_indices().iter().zip(digits.iter()).all(|(l, r)| l == r);
+        let digits = gks.at(0).0.gadget_vector_digits();
+        let has_same_digits = |gk: &GadgetProductRhsOperand<_>| gk.gadget_vector_digits().len() == digits.len() && gk.gadget_vector_digits().iter().zip(digits.iter()).all(|(l, r)| l == r);
         assert!(gks.iter().all(|gk| has_same_digits(&gk.0) && has_same_digits(&gk.1)));
         let c1_op = GadgetProductLhsOperand::from_element_with(C.get_ring(), &ct.c1, digits);
         let c1_op_gs = c1_op.apply_galois_action_many(C.get_ring(), gs);
@@ -363,6 +371,14 @@ pub trait BGVParams {
         }
     }
 
+    fn mod_switch_down_compute_implicit_scale_factor(P: &PlaintextRing<Self>, Cnew: &CiphertextRing<Self>, Cold: &CiphertextRing<Self>, drop_moduli: &DropModuliIndices) -> El<Zn> {
+        let ZZbig_to_Zt = P.base_ring().can_hom(&ZZbig).unwrap();
+        return P.base_ring().checked_div(
+            &ZZbig_to_Zt.map_ref(Cnew.base_ring().modulus()),
+            &ZZbig_to_Zt.map_ref(&Cold.base_ring().modulus())
+        ).unwrap();
+    }
+
     #[instrument(skip_all)]
     fn mod_switch_down(P: &PlaintextRing<Self>, Cnew: &CiphertextRing<Self>, Cold: &CiphertextRing<Self>, drop_moduli: &DropModuliIndices, ct: Ciphertext<Self>) -> Ciphertext<Self> {
         assert_rns_factor_drop_correct::<Self>(Cnew, Cold, drop_moduli);
@@ -397,15 +413,10 @@ pub trait BGVParams {
                 )
             };
             
-            let ZZbig_to_Zt = P.base_ring().can_hom(&ZZbig).unwrap();
-            let implicit_scale = P.base_ring().checked_div(
-                &ZZbig_to_Zt.map_ref(Cnew.base_ring().modulus()),
-                &ZZbig_to_Zt.map_ref(&Cold.base_ring().modulus())
-            ).unwrap();
             return Ciphertext {
                 c0: mod_switch_ring_element(ct.c0),
                 c1: mod_switch_ring_element(ct.c1),
-                implicit_scale: P.base_ring().mul(ct.implicit_scale, implicit_scale)
+                implicit_scale: P.base_ring().mul(ct.implicit_scale, Self::mod_switch_down_compute_implicit_scale_factor(P, Cnew, Cold, drop_moduli))
             };
         }
     }
@@ -989,7 +1000,7 @@ fn measure_time_single_rns_composite_bgv() {
 pub fn tree_mul_benchmark<Params>(params: Params, digits: usize)
     where Params: Display + BGVParams
 {
-    use crate::gadget_product::recommended_rns_factors_to_drop;
+    use crate::gadget_product::digits::recommended_rns_factors_to_drop;
 
     let mut rng = thread_rng();
     let t = 7;
@@ -1013,8 +1024,8 @@ pub fn tree_mul_benchmark<Params>(params: Params, digits: usize)
         }
         current.truncate(mid);
 
-        let drop_prime_count = C_current.base_ring().len() / rk.0.gadget_vector_moduli_indices().len();
-        let to_drop = recommended_rns_factors_to_drop(C_current.base_ring().len(), rk.0.gadget_vector_moduli_indices(), drop_prime_count);
+        let drop_prime_count = C_current.base_ring().len() / rk.0.gadget_vector_digits().len();
+        let to_drop = recommended_rns_factors_to_drop(rk.0.gadget_vector_digits(), drop_prime_count);
         let C_new = Params::mod_switch_down_ciphertext_ring(&C_current, &to_drop);
         for ct in &mut current {
             *ct = Some(Params::mod_switch_down(&P, &C_new, &C_current, &to_drop, ct.take().unwrap()));
@@ -1036,7 +1047,7 @@ pub fn tree_mul_benchmark<Params>(params: Params, digits: usize)
 pub fn chain_mul_benchmark<Params>(params: Params, digits: usize)
     where Params: Display + BGVParams
 {
-    use crate::gadget_product::recommended_rns_factors_to_drop;
+    use crate::gadget_product::digits::recommended_rns_factors_to_drop;
 
     let mut rng = thread_rng();
     let t = 7;
@@ -1056,8 +1067,8 @@ pub fn chain_mul_benchmark<Params>(params: Params, digits: usize)
         let right = current;
         current = Params::hom_mul(&P, &C_current, left, right, &rk);
 
-        let drop_prime_count = C_current.base_ring().len() / rk.0.gadget_vector_moduli_indices().len();
-        let to_drop = recommended_rns_factors_to_drop(C_current.base_ring().len(), rk.0.gadget_vector_moduli_indices(), drop_prime_count);
+        let drop_prime_count = C_current.base_ring().len() / rk.0.gadget_vector_digits().len();
+        let to_drop = recommended_rns_factors_to_drop(rk.0.gadget_vector_digits(), drop_prime_count);
         let C_new = Params::mod_switch_down_ciphertext_ring(&C_current, &to_drop);
         current = Params::mod_switch_down(&P, &C_new, &C_current, &to_drop, current);
         sk = Params::mod_switch_down_sk(&P, &C_new, &C_current, &to_drop, &sk);
