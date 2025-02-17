@@ -8,7 +8,6 @@
 use he_ring::bgv::{BGVParams, CiphertextRing, PlaintextRing, Pow2BGV};
 use he_ring::cyclotomic::CyclotomicRingStore;
 use he_ring::DefaultNegacyclicNTT;
-use he_ring::ciphertext_ring::BGFVCiphertextRing;
 use he_ring::gadget_product::recommended_rns_factors_to_drop;
 use rand::{SeedableRng, rngs::StdRng};
 use std::alloc::Global;
@@ -59,14 +58,14 @@ fn main() {
     let enc_x_sqr = ChosenBGVParamType::hom_mul(&P, &C_initial, ChosenBGVParamType::clone_ct(&P, &C_initial, &enc_x), enc_x, &rk);
     
     let num_digits_to_drop = 1;
-    let digits_to_drop_indices = recommended_rns_factors_to_drop(C_initial.base_ring().len(), rk.0.gadget_vector_moduli_indices(), num_digits_to_drop);
-    let C_new = RingValue::from(C_initial.get_ring().drop_rns_factor(&digits_to_drop_indices));
+    let to_drop = recommended_rns_factors_to_drop(C_initial.base_ring().len(), rk.0.gadget_vector_moduli_indices(), num_digits_to_drop);
+    let C_new = ChosenBGVParamType::mod_switch_down_ciphertext_ring(&C_initial, &to_drop);
     
     println!("log2(q') = {}", BigIntRing::RING.abs_log2_ceil(C_new.base_ring().modulus()).unwrap());
     
-    let enc_x_modswitch = ChosenBGVParamType::mod_switch(&P, &C_new, &C_initial, &digits_to_drop_indices, enc_x_sqr);
-    let sk_modswitch = ChosenBGVParamType::mod_switch_sk(&P, &C_new, &C_initial, &digits_to_drop_indices, &sk);
-    let rk_modswitch = ChosenBGVParamType::mod_switch_rk(&P, &C_new, &C_initial, &digits_to_drop_indices, &rk);
+    let enc_x_modswitch = ChosenBGVParamType::mod_switch_down(&P, &C_new, &C_initial, &to_drop, enc_x_sqr);
+    let sk_modswitch = ChosenBGVParamType::mod_switch_down_sk(&P, &C_new, &C_initial, &to_drop, &sk);
+    let rk_modswitch = ChosenBGVParamType::mod_switch_down_rk(&P, &C_new, &C_initial, &to_drop, &rk);
     
     let enc_x_pow4 = ChosenBGVParamType::hom_mul(&P, &C_new, ChosenBGVParamType::clone_ct(&P, &C_initial, &enc_x_modswitch), enc_x_modswitch, &rk_modswitch);
     assert_eq!(22, ChosenBGVParamType::noise_budget(&P, &C_new, &enc_x_pow4, &sk_modswitch));

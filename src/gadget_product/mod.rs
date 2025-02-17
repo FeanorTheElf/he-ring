@@ -1,6 +1,7 @@
 use std::alloc::{Allocator, Global};
 use std::ops::Range;
 
+use digits::{DropModuliIndices, RNSGadgetVectorDigitList};
 use feanor_math::integer::BigIntRing;
 use feanor_math::matrix::*;
 use feanor_math::primitive_int::StaticRing;
@@ -16,50 +17,9 @@ use crate::cyclotomic::*;
 use crate::number_ring::HENumberRing;
 use crate::rnsconv::{lift, RNSOperation};
 
+pub mod digits;
+
 type UsedBaseConversion<A> = lift::AlmostExactBaseConversion<A>;
-
-fn is_cover<V>(len: usize, ranges: V) -> bool
-    where V: VectorFn<Range<usize>>
-{
-    let mut considered_ranges = Vec::new();
-    if let Some(mut current_i) = (0..ranges.len()).filter(|i| ranges.at(*i).start == 0).next() {
-        considered_ranges.push(current_i);
-        while ranges.at(current_i).end != len {
-            if let Some(next_i) = (0..ranges.len()).filter(|i| ranges.at(*i).start == ranges.at(current_i).end).next() {
-                considered_ranges.push(next_i);
-                current_i = next_i;
-            } else {
-                return false;
-            }
-        }
-        considered_ranges.sort_unstable();
-        if considered_ranges.len() != ranges.len() {
-            return false;
-        }
-        if considered_ranges.iter().enumerate().any(|(l, r)| l != *r) {
-            return false;
-        }
-        return true;
-    } else {
-        return false;
-    }
-}
-
-fn select_digits(digits: usize, rns_base_len: usize) -> Vec<Range<usize>> {
-    assert!(digits <= rns_base_len, "the number of gadget product digits may not exceed the number of RNS factors");
-    let moduli_per_small_digit = rns_base_len / digits;
-    let large_digits = rns_base_len % digits;
-    let small_digits = digits - large_digits;
-    let result = (0..large_digits).map(|_| moduli_per_small_digit + 1)
-        .chain((0..small_digits).map(|_| moduli_per_small_digit))
-        .scan(0, |current, next| {
-            let result = *current..(*current + next);
-            *current += next;
-            return Some(result);
-        }).collect::<Vec<_>>();
-    debug_assert!(is_cover(rns_base_len, result.clone_els()));
-    return result;
-}
 
 ///
 /// Chooses `drop_prime_count` indices from `0..rns_base_len`, in a way such that removing these indices from
@@ -86,15 +46,13 @@ fn select_digits(digits: usize, rns_base_len: usize) -> Vec<Range<usize>> {
 /// ```
 /// # use feanor_math::seq::*;
 /// # use he_ring::gadget_product::*;
+/// # use he_ring::gadget_product::digits::RNSGadgetVectorDigitList;
 /// // remove the first two indices from 0..3, and the first index from 3..5 - the resulting ranges both have length 1
-/// assert_eq!(vec![0, 1, 3], recommended_rns_factors_to_drop(5, vec![0..3, 3..5].clone_els(), 3));
+/// assert_eq!(&[0usize, 1, 3][..], &recommended_rns_factors_to_drop(5, &RNSGadgetVectorDigitList::from([0..3, 3..5].clone_els()), 3) as &[usize]);
 /// ```
 /// 
-pub fn recommended_rns_factors_to_drop<V>(rns_base_len: usize, old_digits: V, drop_prime_count: usize) -> Vec<usize>
-    where V: VectorFn<Range<usize>>
-{
+pub fn recommended_rns_factors_to_drop(rns_base_len: usize, old_digits: &RNSGadgetVectorDigitList, drop_prime_count: usize) -> Box<DropModuliIndices> {
     assert!(drop_prime_count <= rns_base_len);
-    assert!(is_cover(rns_base_len, &old_digits));
 
     let mut digits = old_digits.iter().collect::<Vec<_>>();
     digits.sort_unstable_by_key(|digit| digit.start);
@@ -105,7 +63,7 @@ pub fn recommended_rns_factors_to_drop<V>(rns_base_len: usize, old_digits: V, dr
         drop_from_digit[largest_digit_idx] += 1;
     }
 
-    return (0..digits.len()).flat_map(|i| digits[i].start..(digits[i].start + drop_from_digit[i])).collect();
+    return DropModuliIndices::from((0..digits.len()).flat_map(|i| digits[i].start..(digits[i].start + drop_from_digit[i])).collect(), rns_base_len);
 }
 
 ///
@@ -132,9 +90,7 @@ impl<R: BGFVCiphertextRing> GadgetProductLhsOperand<R> {
     /// Creates a [`GadgetProductLhsOperand`] w.r.t. the gadget vector given by `digits`.
     /// For an explanation of gadget products, see [`GadgetProductLhsOperand::gadget_product()`].
     /// 
-    pub fn from_element_with<V>(ring: &R, el: &R::Element, digits: V) -> Self
-        where V: VectorFn<Range<usize>>
-    {
+    pub fn from_element_with(ring: &R, el: &R::Element, digits: &RNSGadgetVectorDigitList) -> Self {
         let decomposition = gadget_decompose(ring, el, digits);
         return Self {
             element_decomposition: decomposition
@@ -146,7 +102,7 @@ impl<R: BGFVCiphertextRing> GadgetProductLhsOperand<R> {
     /// For an explanation of gadget products, see [`GadgetProductLhsOperand::gadget_product()`].
     /// 
     pub fn from_element(ring: &R, el: &R::Element, digits: usize) -> Self {
-        Self::from_element_with(ring, el, select_digits(digits, ring.base_ring().len()).clone_els())
+        Self::from_element_with(ring, el, &RNSGadgetVectorDigitList::select_digits(digits, ring.base_ring().len()))
     }
 }
 
@@ -158,9 +114,7 @@ impl<NumberRing, A> GadgetProductLhsOperand<DoubleRNSRingBase<NumberRing, A>>
     /// Creates a [`GadgetProductLhsOperand`] w.r.t. the gadget vector given by `digits`.
     /// For an explanation of gadget products, see [`GadgetProductLhsOperand::gadget_product()`].
     /// 
-    pub fn from_double_rns_ring_with<V>(ring: &DoubleRNSRingBase<NumberRing, A>, el: &SmallBasisEl<NumberRing, A>, digits: V) -> Self
-        where V: VectorFn<Range<usize>>
-    {
+    pub fn from_double_rns_ring_with(ring: &DoubleRNSRingBase<NumberRing, A>, el: &SmallBasisEl<NumberRing, A>, digits: &RNSGadgetVectorDigitList) -> Self {
         let decomposition = gadget_decompose_doublerns(ring, el, digits);
         return Self {
             element_decomposition: decomposition
@@ -172,7 +126,7 @@ impl<NumberRing, A> GadgetProductLhsOperand<DoubleRNSRingBase<NumberRing, A>>
     /// For an explanation of gadget products, see [`GadgetProductLhsOperand::gadget_product()`].
     /// 
     pub fn from_double_rns_ring(ring: &DoubleRNSRingBase<NumberRing, A>, el: &SmallBasisEl<NumberRing, A>, digits: usize) -> Self {
-        Self::from_double_rns_ring_with(ring, el, select_digits(digits, ring.base_ring().len()).clone_els())
+        Self::from_double_rns_ring_with(ring, el, &RNSGadgetVectorDigitList::select_digits(digits, ring.base_ring().len()))
     }
 }
 
@@ -416,9 +370,9 @@ pub struct GadgetProductRhsOperand<R: PreparedMultiplicationRing> {
     /// a `PreparedMultiplicant`
     scaled_element: Vec<Option<(R::PreparedMultiplicant, R::Element)>>,
     /// representation of the used gadget vector, the `i`-th entry of the gadget vector is the
-    /// RNS unit vector that is 1 modulo exactly the RNS factors contained in the range at index
+    /// RNS unit vector that is 1 modulo exactly the RNS factors contained in the digit at index
     /// `i` of this list
-    digits: Vec<Range<usize>>
+    digits: Box<RNSGadgetVectorDigitList>
 }
 
 impl<R: PreparedMultiplicationRing> GadgetProductRhsOperand<R> {
@@ -442,7 +396,7 @@ impl<R: PreparedMultiplicationRing> GadgetProductRhsOperand<R> {
         where R: RingExtension,
             R::BaseRing: RingStore<Type = zn_rns::ZnBase<zn_64::Zn, BigIntRing>>
     {
-        self.digits.as_fn().map_fn(|digit| ring.base_ring().get_ring().from_congruence((0..ring.base_ring().get_ring().len()).map(|i| if digit.contains(&i) {
+        self.gadget_vector_moduli_indices().map_fn(|digit| ring.base_ring().get_ring().from_congruence((0..ring.base_ring().get_ring().len()).map(|i| if digit.contains(&i) {
             ring.base_ring().get_ring().at(i).one()
         } else {
             ring.base_ring().get_ring().at(i).zero()
@@ -462,8 +416,8 @@ impl<R: PreparedMultiplicationRing> GadgetProductRhsOperand<R> {
     /// ```
     /// where `g_indices` is the vector of ranges that is returned by this function.
     /// 
-    pub fn gadget_vector_moduli_indices<'b>(&'b self) -> impl VectorFn<Range<usize>> + use<'b, R> {
-        self.digits.as_fn().map_fn(|digit| digit.clone())
+    pub fn gadget_vector_moduli_indices<'b>(&'b self) -> &'b RNSGadgetVectorDigitList {
+        &self.digits
     }
 
     ///
@@ -484,7 +438,7 @@ impl<R: PreparedMultiplicationRing> GadgetProductRhsOperand<R> {
         where R: RingExtension,
             R::BaseRing: RingStore<Type = zn_rns::ZnBase<zn_64::Zn, BigIntRing>>
     {
-        Self::new_with(ring, select_digits(digits, ring.base_ring().get_ring().len()))
+        Self::new_with(ring, RNSGadgetVectorDigitList::select_digits(digits, ring.base_ring().get_ring().len()))
     }
 
     /// 
@@ -494,7 +448,7 @@ impl<R: PreparedMultiplicationRing> GadgetProductRhsOperand<R> {
     /// 
     /// For an explanation of gadget products, see [`GadgetProductLhsOperand::gadget_product()`].
     /// 
-    pub fn new_with(ring: &R, digits: Vec<Range<usize>>) -> Self 
+    pub fn new_with(ring: &R, digits: Box<RNSGadgetVectorDigitList>) -> Self 
         where R: RingExtension,
             R::BaseRing: RingStore<Type = zn_rns::ZnBase<zn_64::Zn, BigIntRing>>
     {
@@ -509,30 +463,28 @@ impl<R: PreparedMultiplicationRing> GadgetProductRhsOperand<R> {
 
 impl<R: BGFVCiphertextRing> GadgetProductRhsOperand<R> {
 
-    pub fn modulus_switch(self, to: &R, dropped_rns_factors: &[usize], from: &R) -> Self {
-        assert_eq!(to.base_ring().get_ring().len() + dropped_rns_factors.len(), from.base_ring().get_ring().len());
+    pub fn modulus_switch(self, to: &R, drop_rns_factors: &DropModuliIndices, from: &R) -> Self {
+        assert_eq!(to.base_ring().get_ring().len() + drop_rns_factors.len(), from.base_ring().get_ring().len());
         debug_assert_eq!(self.digits.len(), self.scaled_element.len());
         let mut result_scaled_el = Vec::new();
-        let mut result_digits = Vec::new();
         let mut current = 0;
         for (digit, scaled_el) in self.digits.iter().zip(self.scaled_element.into_iter()) {
             let old_digit_len = digit.end - digit.start;
-            let dropped_from_digit = dropped_rns_factors.iter().filter(|i| digit.contains(&i)).count();
+            let dropped_from_digit = drop_rns_factors.num_within(&digit);
             assert!(dropped_from_digit <= old_digit_len);
             if dropped_from_digit == old_digit_len {
                 continue;
             }
-            result_digits.push(current..(current + old_digit_len - dropped_from_digit));
             current += old_digit_len - dropped_from_digit;
             if let Some((scaled_el_prepared, scaled_el)) = scaled_el {
-                let new_scaled_el = to.drop_rns_factor_element(from, dropped_rns_factors, scaled_el);
-                result_scaled_el.push(Some((to.drop_rns_factor_prepared(from, dropped_rns_factors, scaled_el_prepared), new_scaled_el)));
+                let new_scaled_el = to.drop_rns_factor_element(from, drop_rns_factors, scaled_el);
+                result_scaled_el.push(Some((to.drop_rns_factor_prepared(from, drop_rns_factors, scaled_el_prepared), new_scaled_el)));
             } else {
                 result_scaled_el.push(None);
             }
         }
         return Self {
-            digits: result_digits,
+            digits: self.digits.remove_indices(drop_rns_factors),
             scaled_element: result_scaled_el
         };
     }
@@ -575,7 +527,7 @@ fn test_modulus_switch() {
     rhs.set_rns_factor(ring.get_ring(), 1, ring.inclusion().map(from_congruence(&[0, 0, 1])));
 
     let smaller_ring = SingleRNSRingBase::<_, Global, DefaultConvolution>::new(Pow2CyclotomicNumberRing::new(4), zn_rns::Zn::create_from_primes(vec![17, 113], BigIntRing::RING));
-    let rhs = rhs.modulus_switch(smaller_ring.get_ring(), &[1], ring.get_ring());
+    let rhs = rhs.modulus_switch(smaller_ring.get_ring(), DropModuliIndices::from_ref(&[1], rns_base.len()), ring.get_ring());
     let lhs = GadgetProductLhsOperand::from_element(smaller_ring.get_ring(), &smaller_ring.int_hom().map(1000), 2);
 
     assert_el_eq!(&smaller_ring, smaller_ring.int_hom().map(1000), lhs.gadget_product(&rhs, smaller_ring.get_ring()));
@@ -590,7 +542,7 @@ fn test_modulus_switch() {
     rhs.set_rns_factor(ring.get_ring(), 2, ring.inclusion().map(from_congruence(&[0, 0, 0, 0, 1000])));
 
     let smaller_ring = SingleRNSRingBase::<_, Global, DefaultConvolution>::new(Pow2CyclotomicNumberRing::new(4), zn_rns::Zn::create_from_primes(vec![17, 193, 241], BigIntRing::RING));
-    let rhs = rhs.modulus_switch(smaller_ring.get_ring(), &[1, 2], ring.get_ring());
+    let rhs = rhs.modulus_switch(smaller_ring.get_ring(), DropModuliIndices::from_ref(&[1, 2], rns_base.len()), ring.get_ring());
     let lhs = GadgetProductLhsOperand::from_element(smaller_ring.get_ring(), &smaller_ring.int_hom().map(1000), 3);
 
     assert_el_eq!(&smaller_ring, smaller_ring.int_hom().map(1000000), lhs.gadget_product(&rhs, smaller_ring.get_ring()));

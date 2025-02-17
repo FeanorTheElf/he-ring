@@ -23,6 +23,7 @@ use crate::ciphertext_ring::double_rns_managed::ManagedDoubleRNSRingBase;
 use crate::ciphertext_ring::single_rns_ring::*;
 use crate::ciphertext_ring::BGFVCiphertextRing;
 use crate::cyclotomic::*;
+use crate::gadget_product::digits::DropModuliIndices;
 use crate::gadget_product::{GadgetProductLhsOperand, GadgetProductRhsOperand};
 use crate::ntt::{HERingConvolution, HERingNegacyclicNTT};
 use crate::number_ring::odd_cyclotomic::CompositeCyclotomicNumberRing;
@@ -48,6 +49,7 @@ pub mod bootstrap;
 
 const ZZbig: BigIntRing = BigIntRing::RING;
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
+
 
 ///
 /// A BGV ciphertext w.r.t. some [`BGVParams`]. Note that this implementation
@@ -89,11 +91,6 @@ pub trait BGVParams {
 
     fn create_initial_ciphertext_ring(&self) -> CiphertextRing<Self> {
         self.create_ciphertext_ring(self.max_rns_base())
-    }
-
-    #[instrument(skip_all)]
-    fn drop_rns_factor(&self, C: &CiphertextRing<Self>, drop_factor_indices: &[usize]) -> CiphertextRing<Self> {
-        RingValue::from(C.get_ring().drop_rns_factor(drop_factor_indices))
     }
 
     fn number_ring(&self) -> NumberRing<Self>;
@@ -293,81 +290,8 @@ pub trait BGVParams {
         };
     }
 
-    #[instrument(skip_all)]
-    fn mod_switch_sk(P: &PlaintextRing<Self>, Cnew: &CiphertextRing<Self>, Cold: &CiphertextRing<Self>, dropped_rns_factor_indices: &[usize], sk: &SecretKey<Self>) -> SecretKey<Self> {
-        assert_rns_factor_drop_correct::<Self>(Cnew, Cold, dropped_rns_factor_indices);
-        if dropped_rns_factor_indices.len() == 0 {
-            assert!(Cnew.base_ring().get_ring() == Cold.base_ring().get_ring());
-            return Cnew.clone_el(sk);
-        }
-        return Cnew.get_ring().drop_rns_factor_element(Cold.get_ring(), dropped_rns_factor_indices, Cold.clone_el(sk));
-    }
-
-    #[instrument(skip_all)]
-    fn mod_switch_rk<'a, 'b>(P: &PlaintextRing<Self>, Cnew: &'b CiphertextRing<Self>, Cold: &CiphertextRing<Self>, dropped_rns_factor_indices: &[usize], rk: &RelinKey<'a, Self>) -> RelinKey<'b, Self> {
-        assert_rns_factor_drop_correct::<Self>(Cnew, Cold, dropped_rns_factor_indices);
-        if dropped_rns_factor_indices.len() == 0 {
-            assert!(Cnew.base_ring().get_ring() == Cold.base_ring().get_ring());
-            return (rk.0.clone(Cnew.get_ring()), rk.1.clone(Cnew.get_ring()));
-        }
-        return (rk.0.clone(Cold.get_ring()).modulus_switch(Cnew.get_ring(), dropped_rns_factor_indices, Cold.get_ring()), rk.1.clone(Cold.get_ring()).modulus_switch(Cnew.get_ring(), dropped_rns_factor_indices, Cold.get_ring()));
-    }
-
-    #[instrument(skip_all)]
-    fn mod_switch_gk<'a, 'b>(P: &PlaintextRing<Self>, Cnew: &'b CiphertextRing<Self>, Cold: &CiphertextRing<Self>, dropped_rns_factor_indices: &[usize], gk: &KeySwitchKey<'a, Self>) -> KeySwitchKey<'b, Self> {
-        assert_rns_factor_drop_correct::<Self>(Cnew, Cold, dropped_rns_factor_indices);
-        if dropped_rns_factor_indices.len() == 0 {
-            assert!(Cnew.base_ring().get_ring() == Cold.base_ring().get_ring());
-            return (gk.0.clone(Cnew.get_ring()), gk.1.clone(Cnew.get_ring()));
-        }
-        return (gk.0.clone(Cold.get_ring()).modulus_switch(Cnew.get_ring(), dropped_rns_factor_indices, Cold.get_ring()), gk.1.clone(Cold.get_ring()).modulus_switch(Cnew.get_ring(), dropped_rns_factor_indices, Cold.get_ring()));
-    }
-
-    #[instrument(skip_all)]
-    fn mod_switch(P: &PlaintextRing<Self>, Cnew: &CiphertextRing<Self>, Cold: &CiphertextRing<Self>, dropped_rns_factor_indices: &[usize], ct: Ciphertext<Self>) -> Ciphertext<Self> {
-        assert_rns_factor_drop_correct::<Self>(Cnew, Cold, dropped_rns_factor_indices);
-        if dropped_rns_factor_indices.len() == 0 {
-            assert!(Cnew.base_ring().get_ring() == Cold.base_ring().get_ring());
-            return ct;
-        }
-
-        let compute_delta = CongruenceAwareAlmostExactBaseConversion::new_with(
-            dropped_rns_factor_indices.iter().map(|i| *Cold.base_ring().at(*i)).collect(),
-            Cnew.base_ring().as_iter().cloned().collect(),
-            *P.base_ring(),
-            Global
-        );
-        let mod_switch_ring_element = |x: El<CiphertextRing<Self>>| {
-            // this logic is slightly complicated, since we want to avoid using `perform_rns_op()`;
-            // in particular, we only need to convert a part of `x` into coefficient/small-basis representation,
-            // while just using `perform_rns_op()` would convert all of `x`.
-            let mut mod_b_part_of_x = OwnedMatrix::zero(dropped_rns_factor_indices.len(), Cold.get_ring().small_generating_set_len(), Cold.base_ring().at(0));
-            Cold.get_ring().partial_representation_wrt_small_generating_set(&x, dropped_rns_factor_indices, mod_b_part_of_x.data_mut());
-            // this is the "correction", subtracting it will make `x` divisible by the moduli to drop
-            let mut delta = OwnedMatrix::zero(Cnew.base_ring().len(), Cnew.get_ring().small_generating_set_len(), Cnew.base_ring().at(0));
-            compute_delta.apply(mod_b_part_of_x.data(), delta.data_mut());
-            let delta = Cnew.get_ring().from_representation_wrt_small_generating_set(delta.data());
-            // now subtract `delta` and scale by the moduli to drop - since `x - delta` is divisible by those,
-            // this is actually a rescaling and not only a division in `Z/qZ`
-            return Cnew.inclusion().mul_map(
-                Cnew.sub(
-                    Cnew.get_ring().drop_rns_factor_element(Cold.get_ring(), dropped_rns_factor_indices, x),
-                    delta
-                ),
-                Cnew.base_ring().invert(&Cnew.base_ring().coerce(&ZZbig, ZZbig.prod(dropped_rns_factor_indices.iter().map(|i| int_cast(*Cold.base_ring().at(*i).modulus(), ZZbig, ZZ))))).unwrap()
-            )
-        };
-        
-        let ZZbig_to_Zt = P.base_ring().can_hom(&ZZbig).unwrap();
-        let implicit_scale = P.base_ring().checked_div(
-            &ZZbig_to_Zt.map_ref(Cnew.base_ring().modulus()),
-            &ZZbig_to_Zt.map_ref(&Cold.base_ring().modulus())
-        ).unwrap();
-        return Ciphertext {
-            c0: mod_switch_ring_element(ct.c0),
-            c1: mod_switch_ring_element(ct.c1),
-            implicit_scale: P.base_ring().mul(ct.implicit_scale, implicit_scale)
-        };
+    fn hom_sub(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, lhs: Ciphertext<Self>, rhs: Ciphertext<Self>) -> Ciphertext<Self> {
+        Self::hom_add(P, C, lhs, Ciphertext { c0: rhs.c0, c1: rhs.c1, implicit_scale: P.base_ring().negate(rhs.implicit_scale) })
     }
     
     #[instrument(skip_all)]
@@ -398,6 +322,93 @@ pub trait BGVParams {
         }).collect();
     }
 
+    #[instrument(skip_all)]
+    fn mod_switch_down_ciphertext_ring(C: &CiphertextRing<Self>, drop_moduli: &DropModuliIndices) -> CiphertextRing<Self> {
+        RingValue::from(C.get_ring().drop_rns_factor(&drop_moduli))
+    }
+
+    #[instrument(skip_all)]
+    fn mod_switch_down_sk(P: &PlaintextRing<Self>, Cnew: &CiphertextRing<Self>, Cold: &CiphertextRing<Self>, drop_moduli: &DropModuliIndices, sk: &SecretKey<Self>) -> SecretKey<Self> {
+        assert_rns_factor_drop_correct::<Self>(Cnew, Cold, drop_moduli);
+        if drop_moduli.len() == 0 {
+            Cnew.clone_el(sk)
+        } else {
+            Cnew.get_ring().drop_rns_factor_element(Cold.get_ring(), &drop_moduli, Cold.clone_el(sk))
+        }
+    }
+
+    #[instrument(skip_all)]
+    fn mod_switch_down_rk<'a, 'b>(P: &PlaintextRing<Self>, Cnew: &'b CiphertextRing<Self>, Cold: &CiphertextRing<Self>, drop_moduli: &DropModuliIndices, rk: &RelinKey<'a, Self>) -> RelinKey<'b, Self> {
+        assert_rns_factor_drop_correct::<Self>(Cnew, Cold, drop_moduli);
+        if drop_moduli.len() == 0 {
+            (rk.0.clone(Cnew.get_ring()), rk.1.clone(Cnew.get_ring()))
+        } else {
+            (
+                rk.0.clone(Cold.get_ring()).modulus_switch(Cnew.get_ring(), &drop_moduli, Cold.get_ring()), 
+                rk.1.clone(Cold.get_ring()).modulus_switch(Cnew.get_ring(), &drop_moduli, Cold.get_ring())
+            )
+        }
+    }
+
+    #[instrument(skip_all)]
+    fn mod_switch_down_gk<'a, 'b>(P: &PlaintextRing<Self>, Cnew: &'b CiphertextRing<Self>, Cold: &CiphertextRing<Self>, drop_moduli: &DropModuliIndices, gk: &KeySwitchKey<'a, Self>) -> KeySwitchKey<'b, Self> {
+        assert_rns_factor_drop_correct::<Self>(Cnew, Cold, drop_moduli);
+        if drop_moduli.len() == 0 {
+            (gk.0.clone(Cnew.get_ring()), gk.1.clone(Cnew.get_ring()))
+        } else {
+            (
+                gk.0.clone(Cold.get_ring()).modulus_switch(Cnew.get_ring(), &drop_moduli, Cold.get_ring()), 
+                gk.1.clone(Cold.get_ring()).modulus_switch(Cnew.get_ring(), &drop_moduli, Cold.get_ring())
+            )
+        }
+    }
+
+    #[instrument(skip_all)]
+    fn mod_switch_down(P: &PlaintextRing<Self>, Cnew: &CiphertextRing<Self>, Cold: &CiphertextRing<Self>, drop_moduli: &DropModuliIndices, ct: Ciphertext<Self>) -> Ciphertext<Self> {
+        assert_rns_factor_drop_correct::<Self>(Cnew, Cold, drop_moduli);
+        if drop_moduli.len() == 0 {
+            return ct;
+        } else {
+
+            let compute_delta = CongruenceAwareAlmostExactBaseConversion::new_with(
+                drop_moduli.iter().map(|i| *Cold.base_ring().at(*i)).collect(),
+                Cnew.base_ring().as_iter().cloned().collect(),
+                *P.base_ring(),
+                Global
+            );
+            let mod_switch_ring_element = |x: El<CiphertextRing<Self>>| {
+                // this logic is slightly complicated, since we want to avoid using `perform_rns_op()`;
+                // in particular, we only need to convert a part of `x` into coefficient/small-basis representation,
+                // while just using `perform_rns_op()` would convert all of `x`.
+                let mut mod_b_part_of_x = OwnedMatrix::zero(drop_moduli.len(), Cold.get_ring().small_generating_set_len(), Cold.base_ring().at(0));
+                Cold.get_ring().partial_representation_wrt_small_generating_set(&x, &drop_moduli, mod_b_part_of_x.data_mut());
+                // this is the "correction", subtracting it will make `x` divisible by the moduli to drop
+                let mut delta = OwnedMatrix::zero(Cnew.base_ring().len(), Cnew.get_ring().small_generating_set_len(), Cnew.base_ring().at(0));
+                compute_delta.apply(mod_b_part_of_x.data(), delta.data_mut());
+                let delta = Cnew.get_ring().from_representation_wrt_small_generating_set(delta.data());
+                // now subtract `delta` and scale by the moduli to drop - since `x - delta` is divisible by those,
+                // this is actually a rescaling and not only a division in `Z/qZ`
+                return Cnew.inclusion().mul_map(
+                    Cnew.sub(
+                        Cnew.get_ring().drop_rns_factor_element(Cold.get_ring(), &drop_moduli, x),
+                        delta
+                    ),
+                    Cnew.base_ring().invert(&Cnew.base_ring().coerce(&ZZbig, ZZbig.prod(drop_moduli.iter().map(|i| int_cast(*Cold.base_ring().at(*i).modulus(), ZZbig, ZZ))))).unwrap()
+                )
+            };
+            
+            let ZZbig_to_Zt = P.base_ring().can_hom(&ZZbig).unwrap();
+            let implicit_scale = P.base_ring().checked_div(
+                &ZZbig_to_Zt.map_ref(Cnew.base_ring().modulus()),
+                &ZZbig_to_Zt.map_ref(&Cold.base_ring().modulus())
+            ).unwrap();
+            return Ciphertext {
+                c0: mod_switch_ring_element(ct.c0),
+                c1: mod_switch_ring_element(ct.c1),
+                implicit_scale: P.base_ring().mul(ct.implicit_scale, implicit_scale)
+            };
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -526,13 +537,13 @@ impl<A: Allocator + Clone + Send + Sync> BGVParams for CompositeBGV<A> {
     }
 }
 
-fn assert_rns_factor_drop_correct<Params>(Cnew: &CiphertextRing<Params>, Cold: &CiphertextRing<Params>, dropped_rns_factor_indices: &[usize])
+fn assert_rns_factor_drop_correct<Params>(Cnew: &CiphertextRing<Params>, Cold: &CiphertextRing<Params>, drop_moduli: &DropModuliIndices)
     where Params: ?Sized + BGVParams
 {
-    assert_eq!(Cold.base_ring().len(), Cnew.base_ring().len() + dropped_rns_factor_indices.len());
+    assert_eq!(Cold.base_ring().len(), Cnew.base_ring().len() + drop_moduli.len());
     let mut i_new = 0;
     for i_old in 0..Cold.base_ring().len() {
-        if dropped_rns_factor_indices.contains(&i_old) {
+        if drop_moduli.contains(i_old) {
             continue;
         }
         assert!(Cold.base_ring().at(i_old).get_ring() == Cnew.base_ring().at(i_new).get_ring());
@@ -697,20 +708,13 @@ fn test_pow2_bgv_modulus_switch() {
     let input = P.int_hom().map(2);
     let ctxt = Pow2BGV::enc_sym(&P, &C0, &mut rng, &input, &sk);
 
-    let C1 = params.drop_rns_factor(&C0, &[0]);
-    let result_ctxt = Pow2BGV::mod_switch(&P, &C1, &C0, &[0], Pow2BGV::clone_ct(&P, &C0, &ctxt));
-    let result = Pow2BGV::dec(&P, &C1, result_ctxt, &Pow2BGV::mod_switch_sk(&P, &C1, &C0, &[0], &sk));
-    assert_el_eq!(&P, P.int_hom().map(2), result);
-
-    let C1 = params.drop_rns_factor(&C0, &[1]);
-    let result_ctxt = Pow2BGV::mod_switch(&P, &C1, &C0, &[1], Pow2BGV::clone_ct(&P, &C0, &ctxt));
-    let result = Pow2BGV::dec(&P, &C1, result_ctxt, &Pow2BGV::mod_switch_sk(&P, &C1, &C0, &[1], &sk));
-    assert_el_eq!(&P, P.int_hom().map(2), result);
-
-    let C1 = params.drop_rns_factor(&C0, &[8]);
-    let result_ctxt = Pow2BGV::mod_switch(&P, &C1, &C0, &[8], Pow2BGV::clone_ct(&P, &C0, &ctxt));
-    let result = Pow2BGV::dec(&P, &C1, result_ctxt, &Pow2BGV::mod_switch_sk(&P, &C1, &C0, &[8], &sk));
-    assert_el_eq!(&P, P.int_hom().map(2), result);
+    for i in [0, 1, 8] {
+        let to_drop = DropModuliIndices::from(vec![i], C0.base_ring().len());
+        let C1 = Pow2BGV::mod_switch_down_ciphertext_ring(&C0, &to_drop);
+        let result_ctxt = Pow2BGV::mod_switch_down(&P, &C1, &C0, &to_drop, Pow2BGV::clone_ct(&P, &C0, &ctxt));
+        let result = Pow2BGV::dec(&P, &C1, result_ctxt, &Pow2BGV::mod_switch_down_sk(&P, &C1, &C0, &to_drop, &sk));
+        assert_el_eq!(&P, P.int_hom().map(2), result);
+    }
 }
 
 #[test]
@@ -737,9 +741,10 @@ fn test_pow2_modulus_switch_hom_add() {
     let ctxt = Pow2BGV::enc_sym(&P, &C0, &mut rng, &input, &sk);
 
     for i in [0, 1, 8] {
-        let C1 = params.drop_rns_factor(&C0, &[i]);
-        let ctxt_modswitch = Pow2BGV::mod_switch(&P, &C1, &C0, &[i], Pow2BGV::clone_ct(&P, &C0, &ctxt));
-        let sk_modswitch = Pow2BGV::mod_switch_sk(&P, &C1, &C0, &[i], &sk);
+        let to_drop = DropModuliIndices::from(vec![i], C0.base_ring().len());
+        let C1 = Pow2BGV::mod_switch_down_ciphertext_ring(&C0, &to_drop);
+        let ctxt_modswitch = Pow2BGV::mod_switch_down(&P, &C1, &C0, &to_drop, Pow2BGV::clone_ct(&P, &C0, &ctxt));
+        let sk_modswitch = Pow2BGV::mod_switch_down_sk(&P, &C1, &C0, &to_drop, &sk);
         let ctxt_other = Pow2BGV::enc_sym(&P, &C1, &mut rng, &P.int_hom().map(30), &sk_modswitch);
 
         let ctxt_result = Pow2BGV::hom_add(&P, &C1, ctxt_modswitch, ctxt_other);
@@ -774,14 +779,15 @@ fn test_pow2_bgv_modulus_switch_rk() {
     let ctxt = Pow2BGV::enc_sym(&P, &C0, &mut rng, &input, &sk);
 
     for i in [0, 1, 8] {
-        let C1 = params.drop_rns_factor(&C0, &[i]);
-        let new_sk = Pow2BGV::mod_switch_sk(&P, &C1, &C0, &[i], &sk);
-        let new_rk = Pow2BGV::mod_switch_rk(&P, &C1, &C0, &[i], &rk);
+        let to_drop = DropModuliIndices::from(vec![i], C0.base_ring().len());
+        let C1 = Pow2BGV::mod_switch_down_ciphertext_ring(&C0, &to_drop);
+        let new_sk = Pow2BGV::mod_switch_down_sk(&P, &C1, &C0, &to_drop, &sk);
+        let new_rk = Pow2BGV::mod_switch_down_rk(&P, &C1, &C0, &to_drop, &rk);
         let ctxt2 = Pow2BGV::enc_sym(&P, &C1, &mut rng, &P.int_hom().map(3), &new_sk);
         let result_ctxt = Pow2BGV::hom_mul(
             &P,
             &C1,
-            Pow2BGV::mod_switch(&P, &C1, &C0, &[i], Pow2BGV::clone_ct(&P, &C0, &ctxt)),
+            Pow2BGV::mod_switch_down(&P, &C1, &C0, &to_drop, Pow2BGV::clone_ct(&P, &C0, &ctxt)),
             ctxt2,
             &new_rk
         );
@@ -843,10 +849,11 @@ fn measure_time_pow2_bgv() {
     );
     assert_el_eq!(&P, &P.int_hom().map(4), &Pow2BGV::dec(&P, &C, Pow2BGV::clone_ct(&P, &C, &res), &sk));
 
-    let C_new = params.drop_rns_factor(&C, &[0]);
-    let sk_new = Pow2BGV::mod_switch_sk(&P, &C_new, &C, &[0], &sk);
+    let to_drop = DropModuliIndices::from(vec![0], C.base_ring().len());
+    let C_new = Pow2BGV::mod_switch_down_ciphertext_ring(&C, &to_drop);
+    let sk_new = Pow2BGV::mod_switch_down_sk(&P, &C_new, &C, &to_drop, &sk);
     let res_new = log_time::<_, _, true, _>("ModSwitch", |[]| 
-        Pow2BGV::mod_switch(&P, &C_new, &C, &[0], res)
+        Pow2BGV::mod_switch_down(&P, &C_new, &C, &to_drop, res)
     );
     assert_el_eq!(&P, &P.int_hom().map(4), &Pow2BGV::dec(&P, &C_new, res_new, &sk_new));
 }
@@ -905,10 +912,11 @@ fn measure_time_double_rns_composite_bgv() {
     );
     assert_el_eq!(&P, &P.int_hom().map(1), &CompositeBGV::dec(&P, &C, CompositeBGV::clone_ct(&P, &C, &res), &sk));
 
-    let C_new = params.drop_rns_factor(&C, &[0]);
-    let sk_new = CompositeBGV::mod_switch_sk(&P, &C_new, &C, &[0], &sk);
+    let to_drop = DropModuliIndices::from(vec![0], C.base_ring().len());
+    let C_new = CompositeBGV::mod_switch_down_ciphertext_ring(&C, &to_drop);
+    let sk_new = CompositeBGV::mod_switch_down_sk(&P, &C_new, &C, &to_drop, &sk);
     let res_new = log_time::<_, _, true, _>("ModSwitch", |[]| 
-        CompositeBGV::mod_switch(&P, &C_new, &C, &[0], res)
+        CompositeBGV::mod_switch_down(&P, &C_new, &C, &to_drop, res)
     );
     assert_el_eq!(&P, &P.int_hom().map(1), &CompositeBGV::dec(&P, &C_new, res_new, &sk_new));
 }
@@ -968,10 +976,11 @@ fn measure_time_single_rns_composite_bgv() {
     );
     assert_el_eq!(&P, &P.int_hom().map(1), &SingleRNSCompositeBGV::dec(&P, &C, SingleRNSCompositeBGV::clone_ct(&P, &C, &res), &sk));
 
-    let C_new = params.drop_rns_factor(&C, &[0]);
-    let sk_new = SingleRNSCompositeBGV::mod_switch_sk(&P, &C_new, &C, &[0], &sk);
+    let to_drop = DropModuliIndices::from(vec![0], C.base_ring().len());
+    let C_new = SingleRNSCompositeBGV::mod_switch_down_ciphertext_ring(&C, &to_drop);
+    let sk_new = SingleRNSCompositeBGV::mod_switch_down_sk(&P, &C_new, &C, &to_drop, &sk);
     let res_new = log_time::<_, _, true, _>("ModSwitch", |[]| 
-        SingleRNSCompositeBGV::mod_switch(&P, &C_new, &C, &[0], res)
+        SingleRNSCompositeBGV::mod_switch_down(&P, &C_new, &C, &to_drop, res)
     );
     assert_el_eq!(&P, &P.int_hom().map(1), &SingleRNSCompositeBGV::dec(&P, &C_new, res_new, &sk_new));
 }
@@ -1005,13 +1014,13 @@ pub fn tree_mul_benchmark<Params>(params: Params, digits: usize)
         current.truncate(mid);
 
         let drop_prime_count = C_current.base_ring().len() / rk.0.gadget_vector_moduli_indices().len();
-        let drop_rns_base_factors = recommended_rns_factors_to_drop(C_current.base_ring().len(), rk.0.gadget_vector_moduli_indices(), drop_prime_count);
-        let C_new = RingValue::from(C_current.get_ring().drop_rns_factor(&drop_rns_base_factors));
+        let to_drop = recommended_rns_factors_to_drop(C_current.base_ring().len(), rk.0.gadget_vector_moduli_indices(), drop_prime_count);
+        let C_new = Params::mod_switch_down_ciphertext_ring(&C_current, &to_drop);
         for ct in &mut current {
-            *ct = Some(Params::mod_switch(&P, &C_new, &C_current, &drop_rns_base_factors, ct.take().unwrap()));
+            *ct = Some(Params::mod_switch_down(&P, &C_new, &C_current, &to_drop, ct.take().unwrap()));
         }
-        sk = Params::mod_switch_sk(&P, &C_new, &C_current, &drop_rns_base_factors, &sk);
-        rk = Params::mod_switch_rk(&P, &C_new, &C_current, &drop_rns_base_factors, &rk);
+        sk = Params::mod_switch_down_sk(&P, &C_new, &C_current, &to_drop, &sk);
+        rk = Params::mod_switch_down_rk(&P, &C_new, &C_current, &to_drop, &rk);
         C_current = C_new;
     }
     let end = Instant::now();
@@ -1048,11 +1057,11 @@ pub fn chain_mul_benchmark<Params>(params: Params, digits: usize)
         current = Params::hom_mul(&P, &C_current, left, right, &rk);
 
         let drop_prime_count = C_current.base_ring().len() / rk.0.gadget_vector_moduli_indices().len();
-        let drop_rns_base_factors = recommended_rns_factors_to_drop(C_current.base_ring().len(), rk.0.gadget_vector_moduli_indices(), drop_prime_count);
-        let C_new = RingValue::from(C_current.get_ring().drop_rns_factor(&drop_rns_base_factors));
-        current = Params::mod_switch(&P, &C_new, &C_current, &drop_rns_base_factors, current);
-        sk = Params::mod_switch_sk(&P, &C_new, &C_current, &drop_rns_base_factors, &sk);
-        rk = Params::mod_switch_rk(&P, &C_new, &C_current, &drop_rns_base_factors, &rk);
+        let to_drop = recommended_rns_factors_to_drop(C_current.base_ring().len(), rk.0.gadget_vector_moduli_indices(), drop_prime_count);
+        let C_new = Params::mod_switch_down_ciphertext_ring(&C_current, &to_drop);
+        current = Params::mod_switch_down(&P, &C_new, &C_current, &to_drop, current);
+        sk = Params::mod_switch_down_sk(&P, &C_new, &C_current, &to_drop, &sk);
+        rk = Params::mod_switch_down_rk(&P, &C_new, &C_current, &to_drop, &rk);
         C_current = C_new;
     }
     let end = Instant::now();
