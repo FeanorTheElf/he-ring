@@ -97,7 +97,7 @@ impl<A> CongruencePreservingRescaling<A>
         
         // after the lifting to `aq/b`, we have a value `<= 2b` in absolute value; this must be `<= (aq/b)/4` for
         // the mod-`t` base conversion to not cause any error
-        assert!(ZZbig.is_geq(&ZZbig.rounded_div(ZZbig.mul_ref(&q, &a), &b), &ZZbig.int_hom().mul_ref_map(&b, &8)));
+        assert!(ZZbig.is_geq(&ZZbig.rounded_div(ZZbig.mul_ref(&q, &a), &b), &ZZbig.int_hom().mul_ref_map(&b, &4)));
         
         let aq_moduli_unsorted = in_moduli.iter().copied().chain(num_moduli.iter().copied()).collect::<Vec<_>>();
         let (aq_moduli, aq_permutation) = sort_unstable_permutation(aq_moduli_unsorted.clone(), |ring_l, ring_r| ZZ.cmp(ring_l.modulus(), ring_r.modulus()));
@@ -319,7 +319,7 @@ impl<A> CongruenceAwareAlmostExactBaseConversion<A>
         let q_over_b = ZZbig.prod(out_moduli.iter().map(|Zn| int_cast(Zn.integer_ring().clone_el(Zn.modulus()), &ZZbig, Zn.integer_ring())));
         // after the lifting to `q/b`, we have a value `<= 2b` in absolute value; this must be `<= (q/b)/4` for
         // the mod-`t` base conversion to not cause any error
-        assert!(ZZbig.is_geq(&q_over_b, &ZZbig.int_hom().mul_ref_map(&b, &8)));
+        assert!(ZZbig.is_geq(&q_over_b, &ZZbig.int_hom().mul_ref_map(&b, &4)));
 
         let b_moduli = in_moduli.clone();
         let q_over_b_moduli_unsorted = out_moduli;
@@ -408,14 +408,16 @@ impl<A> RNSOperation for CongruenceAwareAlmostExactBaseConversion<A>
 
 #[cfg(test)]
 use feanor_math::assert_el_eq;
+#[cfg(test)]
+use feanor_math::primitive_int::StaticRing;
 
 #[test]
 fn test_rescale_complete() {
     let from = vec![Zn::new(17), Zn::new(23), Zn::new(29)];
-    let to = vec![Zn::new(19), Zn::new(31)];
+    let to = vec![Zn::new(19), Zn::new(31), Zn::new(37), Zn::new(39)];
     let Zt = Zn::new(5);
     let q = 17 * 23 * 29;
-    let qprime = 19 * 31;
+    let qprime = 19 * 31 * 37 * 39;
 
     let rescaling = CongruencePreservingRescaling::new_with(
         from.clone(), 
@@ -425,23 +427,23 @@ fn test_rescale_complete() {
         Global
     );
 
-    let ZZ_to_Zt = Zt.int_hom();
+    let ZZ_to_Zt = Zt.can_hom(&StaticRing::<i64>::RING).unwrap();
     
     for i in -(q/2)..=(q/2) {
         let input = i;
-        let rescaled = (input as f64 * qprime as f64 / q as f64).round() as i32;
+        let rescaled = (input as f64 * qprime as f64 / q as f64).round() as i64;
         let expected = rescaled + Zt.smallest_lift(Zt.sub(
             Zt.checked_div(&ZZ_to_Zt.map(input * qprime), &ZZ_to_Zt.map(q)).unwrap(),
             ZZ_to_Zt.map(rescaled)
-        )) as i32;
+        ));
 
         assert!(Zt.is_zero(&ZZ_to_Zt.map(input * qprime - expected * q)));
 
-        let input = from.iter().map(|Zn| Zn.int_hom().map(input)).collect::<Vec<_>>();
-        let expected = to.iter().map(|Zn| Zn.int_hom().map(expected)).collect::<Vec<_>>();
+        let input = from.iter().map(|Zn| Zn.int_hom().map(input as i32)).collect::<Vec<_>>();
+        let expected = to.iter().map(|Zn| Zn.int_hom().map(expected as i32)).collect::<Vec<_>>();
         let mut actual = to.iter().map(|Zn| Zn.zero()).collect::<Vec<_>>();
 
-        rescaling.apply(Submatrix::from_1d(&input, 3, 1), SubmatrixMut::from_1d(&mut actual, 2, 1));
+        rescaling.apply(Submatrix::from_1d(&input, 3, 1), SubmatrixMut::from_1d(&mut actual, 4, 1));
 
         for j in 0..expected.len() {
             assert!(

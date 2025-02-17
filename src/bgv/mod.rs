@@ -200,7 +200,7 @@ pub trait BGVParams {
 
     ///
     /// Returns the value
-    /// ```
+    /// ```text
     ///   log2( q / | c0 + c1 s |_inf )
     /// ```
     /// which roughly corresponds to the "noise budget" of the ciphertext, in bits.

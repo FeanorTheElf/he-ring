@@ -56,8 +56,8 @@ fn log2_can_norm_sk_estimate<Params: BGVParams>(C: &CiphertextRing<Params>) -> f
 
 ///
 /// A [`BGVNoiseEstimator`] that uses some very simple formulas to estimate the noise
-/// growth of BGV operations. It is likely to be far off the real value, and should only
-/// be used until we get a proper noise estimator.
+/// growth of BGV operations. This is WIP and very likely to be replaced later by
+/// a better and more rigorous estimator.
 /// 
 pub struct NaiveBGVNoiseEstimator;
 
@@ -123,6 +123,35 @@ impl<Params: BGVParams> BGVNoiseEstimator<Params> for NaiveBGVNoiseEstimator {
 }
 
 ///
+/// Noise estimator that always returns 0 as estimated noise budget.
+/// 
+/// Its only use is probably to have a default value in places where a
+/// noise estimator is required but never used, as well as to implement
+/// [`DefaultModswitchStrategy::never_modswitch()`].
+/// 
+pub struct AlwaysZeroNoiseEstimator;
+
+impl<Params: BGVParams> BGVNoiseEstimator<Params> for AlwaysZeroNoiseEstimator {
+
+    type CriticalQuantityLevel = ();
+
+    fn get_ln_relative_noise_level(&self, P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, noise: &Self::CriticalQuantityLevel) -> f64 {
+        0.
+    }
+
+    fn enc_sym_zero(&self, P: &PlaintextRing<Params>, C: &CiphertextRing<Params>) -> Self::CriticalQuantityLevel {}
+    fn hom_add(&self, P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, lhs: &Self::CriticalQuantityLevel, lhs_implicit_scale: Option<El<Zn>>, rhs: &Self::CriticalQuantityLevel, rhs_implicit_scale: Option<El<Zn>>) -> Self::CriticalQuantityLevel {}
+    fn hom_add_plain(&self, P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, m: &El<PlaintextRing<Params>>, ct: &Self::CriticalQuantityLevel, implicit_scale: El<Zn>) -> Self::CriticalQuantityLevel {}
+    fn hom_galois(&self, P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, ct: &Self::CriticalQuantityLevel, g: CyclotomicGaloisGroupEl, gk: &RNSGadgetVectorDigitIndices) -> Self::CriticalQuantityLevel {}
+    fn hom_mul(&self, P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, lhs: &Self::CriticalQuantityLevel, rhs: &Self::CriticalQuantityLevel, rk_digits: &RNSGadgetVectorDigitIndices) -> Self::CriticalQuantityLevel {}
+    fn hom_mul_plain(&self, P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, m: &El<PlaintextRing<Params>>, ct: &Self::CriticalQuantityLevel, implicit_scale: El<Zn>) -> Self::CriticalQuantityLevel {}
+    fn hom_mul_plain_i64(&self, P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, m: i64, ct: &Self::CriticalQuantityLevel, implicit_scale: El<Zn>) -> Self::CriticalQuantityLevel {}
+    fn key_switch(&self, P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, ct: &Self::CriticalQuantityLevel, switch_key: &RNSGadgetVectorDigitIndices) -> Self::CriticalQuantityLevel {}
+    fn mod_switch_down(&self, P: &PlaintextRing<Params>, Cnew: &CiphertextRing<Params>, Cold: &CiphertextRing<Params>, drop_moduli: &DropModuliIndices, ct: &Self::CriticalQuantityLevel) -> Self::CriticalQuantityLevel {}
+    fn transparent_zero(&self) -> Self::CriticalQuantityLevel {}
+}
+
+///
 /// Trait for different modulus-switching strategies in BGV, currently WIP
 /// 
 pub trait BGVModswitchStrategy<Params: BGVParams> {
@@ -158,6 +187,23 @@ pub trait BGVModswitchStrategy<Params: BGVParams> {
 pub struct DefaultModswitchStrategy<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> {
     params: PhantomData<Params>,
     noise_estimator: N
+}
+
+impl<Params: BGVParams> DefaultModswitchStrategy<Params, AlwaysZeroNoiseEstimator, false> {
+
+    ///
+    /// Create a [`DefaultModswitchStrategy`] that never performs modulus switching,
+    /// except when necessary because operands are defined modulo different RNS bases.
+    /// 
+    /// Using this is not recommended, except for linear circuits, or circuits with
+    /// very low multiplicative depth.
+    /// 
+    pub fn never_modswitch() -> Self {
+        Self {
+            params: PhantomData,
+            noise_estimator: AlwaysZeroNoiseEstimator
+        }
+    }
 }
 
 impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> DefaultModswitchStrategy<Params, N, LOG> {
@@ -352,7 +398,6 @@ impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> BGVModswi
     }
 }
 
-
 #[test]
 fn test_default_modswitch_strategy() {
     let mut rng = thread_rng();
@@ -397,5 +442,73 @@ fn test_default_modswitch_strategy() {
     let res_noise = Pow2BGV::noise_budget(&P, &res_C, &res_ctxt, &res_sk);
     println!("Actual output noise budget is {}", res_noise);
     assert_el_eq!(&P, &P.neg_one(), Pow2BGV::dec(&P, &res_C, res_ctxt, &res_sk));
+}
 
+#[test]
+fn test_never_modswitch_strategy() {
+    let mut rng = thread_rng();
+
+    let params = Pow2BGV {
+        log2_q_min: 500,
+        log2_q_max: 520,
+        log2_N: 7,
+        ciphertext_allocator: DefaultCiphertextAllocator::default(),
+        negacyclic_ntt: PhantomData::<DefaultNegacyclicNTT>
+    };
+    let t = 257;
+    let digits = 3;
+    
+    let P = params.create_plaintext_ring(t);
+    let C = params.create_initial_ciphertext_ring();
+
+    let sk = Pow2BGV::gen_sk(&C, &mut rng);
+    let rk = Pow2BGV::gen_rk(&P, &C, &mut rng, &sk, digits);
+
+    let input = P.int_hom().map(2);
+    let ctxt = Pow2BGV::enc_sym(&P, &C, &mut rng, &input, &sk);
+
+    {
+        let modswitch_strategy = DefaultModswitchStrategy::never_modswitch();
+        let pow4_circuit = PlaintextCircuit::mul(ZZ)
+            .compose(PlaintextCircuit::mul(ZZ).output_twice(ZZ), ZZ)
+            .compose(PlaintextCircuit::identity(1, ZZ).output_twice(ZZ), ZZ);
+
+        let (res_dropped_indices, res_noise_estimate, res_ctxt) = modswitch_strategy.evaluate_circuit(
+            &pow4_circuit,
+            &P, 
+            &C,
+            &[(DropModuliIndices::empty(), modswitch_strategy.fresh_encryption(&P, &C), Pow2BGV::clone_ct(&P, &C, &ctxt))],
+            Some(&rk),
+            &[]
+        ).into_iter().next().unwrap();
+
+        let res_C = Pow2BGV::mod_switch_down_ciphertext_ring(&C, &res_dropped_indices);
+        let res_sk = Pow2BGV::mod_switch_down_sk(&P, &res_C, &C, &res_dropped_indices, &sk);
+
+        let res_noise = Pow2BGV::noise_budget(&P, &res_C, &res_ctxt, &res_sk);
+        println!("Actual output noise budget is {}", res_noise);
+        assert_el_eq!(&P, &P.int_hom().map(16), Pow2BGV::dec(&P, &res_C, res_ctxt, &res_sk));
+    }
+    {
+        let modswitch_strategy = DefaultModswitchStrategy::never_modswitch();
+        let pow8_circuit = PlaintextCircuit::mul(ZZ)
+            .compose(PlaintextCircuit::mul(ZZ).output_twice(ZZ), ZZ)
+            .compose(PlaintextCircuit::mul(ZZ).output_twice(ZZ), ZZ)
+            .compose(PlaintextCircuit::identity(1, ZZ).output_twice(ZZ), ZZ);
+
+        let (res_dropped_indices, res_noise_estimate, res_ctxt) = modswitch_strategy.evaluate_circuit(
+            &pow8_circuit,
+            &P, 
+            &C,
+            &[(DropModuliIndices::empty(), modswitch_strategy.fresh_encryption(&P, &C), Pow2BGV::clone_ct(&P, &C, &ctxt))],
+            Some(&rk),
+            &[]
+        ).into_iter().next().unwrap();
+
+        let res_C = Pow2BGV::mod_switch_down_ciphertext_ring(&C, &res_dropped_indices);
+        let res_sk = Pow2BGV::mod_switch_down_sk(&P, &res_C, &C, &res_dropped_indices, &sk);
+
+        let res_noise = Pow2BGV::noise_budget(&P, &res_C, &res_ctxt, &res_sk);
+        assert_eq!(0, res_noise);
+    }
 }
