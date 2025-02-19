@@ -44,7 +44,7 @@ pub type SecretKey<Params: BGVParams> = El<CiphertextRing<Params>>;
 pub type KeySwitchKey<'a, Params: BGVParams> = (GadgetProductRhsOperand<Params::CiphertextRing>, GadgetProductRhsOperand<Params::CiphertextRing>);
 pub type RelinKey<'a, Params: BGVParams> = KeySwitchKey<'a, Params>;
 
-pub mod strategy;
+pub mod modwitch;
 pub mod bootstrap;
 
 const ZZbig: BigIntRing = BigIntRing::RING;
@@ -419,6 +419,23 @@ pub trait BGVParams {
                 implicit_scale: P.base_ring().mul(ct.implicit_scale, Self::mod_switch_down_compute_implicit_scale_factor(P, Cnew, Cold, drop_moduli))
             };
         }
+    }
+
+    ///
+    /// Converts an encrypted value `m` w.r.t. a plaintext modulus `t` to an encryption of `t' m / t` w.r.t.
+    /// a plaintext modulus `t'`. This requires that `t' m / t` is an integral ring element (i.e. `t` divides
+    /// `t' m`), otherwise this function will cause immediate noise overflow.
+    /// 
+    fn change_plaintext_modulus(Pnew: &PlaintextRing<Self>, Pold: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
+        let x = C.base_ring().checked_div(
+            &C.base_ring().coerce(&StaticRing::<i64>::RING, *Pnew.base_ring().modulus()),
+            &C.base_ring().coerce(&StaticRing::<i64>::RING, *Pold.base_ring().modulus()),
+        ).unwrap();
+        return Ciphertext {
+            c0: C.inclusion().mul_ref_snd_map(ct.c0, &x),
+            c1: C.inclusion().mul_ref_snd_map(ct.c1, &x),
+            implicit_scale: Pnew.base_ring().coerce(&StaticRing::<i64>::RING, Pold.base_ring().smallest_positive_lift(ct.implicit_scale))
+        };
     }
 }
 

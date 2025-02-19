@@ -13,6 +13,14 @@ use super::*;
 
 pub trait BGVNoiseEstimator<Params: BGVParams> {
 
+    ///
+    /// An estimate of the size and distribution of the critical quantity
+    /// `c0 + c1 s = m + t e`. The only requirement is that the noise estimator
+    /// can derive an estimate about its infinity norm via
+    /// [`BGVNoiseEstimator::get_ln_relative_noise_level`], but estimators are free
+    /// to store additional data to get more precise estimates on the noise growth
+    /// of operations. 
+    /// 
     type CriticalQuantityLevel;
 
     ///
@@ -21,7 +29,7 @@ pub trait BGVNoiseEstimator<Params: BGVParams> {
     ///   ln( | c0 + c1 * s |_inf / q )
     /// ```
     /// 
-    fn get_ln_relative_noise_level(&self, P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, noise: &Self::CriticalQuantityLevel) -> f64;
+    fn estimate_ln_relative_noise_level(&self, P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, noise: &Self::CriticalQuantityLevel) -> f64;
 
     fn enc_sym_zero(&self, P: &PlaintextRing<Params>, C: &CiphertextRing<Params>) -> Self::CriticalQuantityLevel;
 
@@ -48,6 +56,8 @@ pub trait BGVNoiseEstimator<Params: BGVParams> {
     }
 
     fn mod_switch_down(&self, P: &PlaintextRing<Params>, Cnew: &CiphertextRing<Params>, Cold: &CiphertextRing<Params>, drop_moduli: &DropModuliIndices, ct: &Self::CriticalQuantityLevel) -> Self::CriticalQuantityLevel;
+    
+    fn change_plaintext_modulus(Pnew: &PlaintextRing<Params>, Pold: &PlaintextRing<Params>, C: &CiphertextRing<Params>, ct: &Self::CriticalQuantityLevel) -> Self::CriticalQuantityLevel;
 }
 
 fn log2_can_norm_sk_estimate<Params: BGVParams>(C: &CiphertextRing<Params>) -> f64 {
@@ -66,7 +76,7 @@ impl<Params: BGVParams> BGVNoiseEstimator<Params> for NaiveBGVNoiseEstimator {
     /// We store `log2(| c0 + c1 s |_can / q)`; this is hopefully `< 0`
     type CriticalQuantityLevel = f64;
 
-    fn get_ln_relative_noise_level(&self, P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, noise: &Self::CriticalQuantityLevel) -> f64 {
+    fn estimate_ln_relative_noise_level(&self, P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, noise: &Self::CriticalQuantityLevel) -> f64 {
         // we subtract `(C.rank() as f64).log2()`, since that should be about the difference between `l_inf` and canonical norm
         *noise * 2f64.ln() - (C.rank() as f64).log2()
     }
@@ -120,6 +130,10 @@ impl<Params: BGVParams> BGVNoiseEstimator<Params> for NaiveBGVNoiseEstimator {
             log2_largest_digit + (C.rank() as f64).log2() * 2. - BigIntRing::RING.abs_log2_ceil(C.base_ring().modulus()).unwrap() as f64
         )
     }
+
+    fn change_plaintext_modulus(Pnew: &PlaintextRing<Params>, Pold: &PlaintextRing<Params>, C: &CiphertextRing<Params>, ct: &Self::CriticalQuantityLevel) -> Self::CriticalQuantityLevel {
+        *ct
+    }
 }
 
 ///
@@ -135,7 +149,7 @@ impl<Params: BGVParams> BGVNoiseEstimator<Params> for AlwaysZeroNoiseEstimator {
 
     type CriticalQuantityLevel = ();
 
-    fn get_ln_relative_noise_level(&self, P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, noise: &Self::CriticalQuantityLevel) -> f64 {
+    fn estimate_ln_relative_noise_level(&self, P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, noise: &Self::CriticalQuantityLevel) -> f64 {
         0.
     }
 
@@ -149,6 +163,7 @@ impl<Params: BGVParams> BGVNoiseEstimator<Params> for AlwaysZeroNoiseEstimator {
     fn key_switch(&self, P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, ct: &Self::CriticalQuantityLevel, switch_key: &RNSGadgetVectorDigitIndices) -> Self::CriticalQuantityLevel {}
     fn mod_switch_down(&self, P: &PlaintextRing<Params>, Cnew: &CiphertextRing<Params>, Cold: &CiphertextRing<Params>, drop_moduli: &DropModuliIndices, ct: &Self::CriticalQuantityLevel) -> Self::CriticalQuantityLevel {}
     fn transparent_zero(&self) -> Self::CriticalQuantityLevel {}
+    fn change_plaintext_modulus(Pnew: &PlaintextRing<Params>, Pold: &PlaintextRing<Params>, C: &CiphertextRing<Params>, ct: &Self::CriticalQuantityLevel) -> Self::CriticalQuantityLevel {}
 }
 
 ///
@@ -156,17 +171,42 @@ impl<Params: BGVParams> BGVNoiseEstimator<Params> for AlwaysZeroNoiseEstimator {
 /// 
 pub trait BGVModswitchStrategy<Params: BGVParams> {
 
-    type CiphertextDescriptor;
+    type CiphertextInfo;
 
+    ///
+    /// Evaluates the given circuit homomorphically on the given encrypted inputs.
+    /// This includes performing modulus-switches at suitable times.
+    /// 
+    /// The parameters are as follows:
+    ///  - `circuit` is the circuit to evaluate, with integer constants
+    ///  - `P` is the plaintext ring w.r.t. which the inputs are encrypted; this function does not
+    ///    support mixing different plaintext moduli
+    ///  - `C_master` is the ciphertext ring with the largest relevant RNS base, i.e. its RNS
+    ///    base should contain all RNS factors that are referenced by any ciphertext, and may
+    ///    have additional unused RNS factors
+    ///  - `inputs` contains all inputs to the circuit, i.e. must be of the same length as the
+    ///    circuit has input wires. Each entry should be of the form `(drop_rns_factors, info, ctxt)`
+    ///    where `ctxt` is the ciphertext w.r.t. the RNS base that contains all RNS factors of `C_master`
+    ///    except those mentioned in `drop_rns_fctors`, and `info` should store the additional information
+    ///    associated to the ciphertext that is required to determine modulus-switching times.
+    ///  - `rk` should be the relinearization key w.r.t. `C_master`, can be `None` if the circuit
+    ///    contains no multiplication gates.
+    ///  - `gks` should contain all Galois keys used by the circuit (may also contain unused ones);
+    ///    if the circuit has no Galois gates, this may be an empty slice
+    /// 
+    /// Note that the [`BGVModswitchStrategy::CiphertextInfo`]s currently cannot be created using
+    /// functions of the trait, but only via functions on the concrete implementation of
+    /// [`BGVModswitchStrategy`].
+    /// 
     fn evaluate_circuit(
         &self,
         circuit: &PlaintextCircuit<StaticRingBase<i64>>,
         P: &PlaintextRing<Params>,
         C_master: &CiphertextRing<Params>,
-        inputs: &[(Box<DropModuliIndices>, Self::CiphertextDescriptor, Ciphertext<Params>)],
+        inputs: &[(Box<DropModuliIndices>, Self::CiphertextInfo, Ciphertext<Params>)],
         rk: Option<&RelinKey<Params>>,
         gks: &[(CyclotomicGaloisGroupEl, KeySwitchKey<Params>)]
-    ) -> Vec<(Box<DropModuliIndices>, Self::CiphertextDescriptor, Ciphertext<Params>)>;
+    ) -> Vec<(Box<DropModuliIndices>, Self::CiphertextInfo, Ciphertext<Params>)>;
 }
 
 ///
@@ -215,14 +255,15 @@ impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> DefaultMo
         }
     }
 
-    pub fn fresh_encryption(&self, P: &PlaintextRing<Params>, C: &CiphertextRing<Params>) -> <Self as BGVModswitchStrategy<Params>>::CiphertextDescriptor {
+    pub fn fresh_encryption(&self, P: &PlaintextRing<Params>, C: &CiphertextRing<Params>) -> <Self as BGVModswitchStrategy<Params>>::CiphertextInfo {
         self.from_noise_level(self.noise_estimator.enc_sym_zero(P, C))
     }
 
-    pub fn from_noise_level(&self, noise_level: N::CriticalQuantityLevel) -> <Self as BGVModswitchStrategy<Params>>::CiphertextDescriptor {
+    pub fn from_noise_level(&self, noise_level: N::CriticalQuantityLevel) -> <Self as BGVModswitchStrategy<Params>>::CiphertextInfo {
         noise_level
     }
 
+    #[instrument(skip_all)]
     fn compute_optimal_mul_modswitch(
         &self,
         P: &PlaintextRing<Params>,
@@ -243,7 +284,7 @@ impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> DefaultMo
             let C_target = Params::mod_switch_down_ciphertext_ring(C_master, &total_drop);
             let rk_after_total_drop = rk_digits.remove_indices(&total_drop);
             
-            let expected_noise = self.noise_estimator.get_ln_relative_noise_level(
+            let expected_noise = self.noise_estimator.estimate_ln_relative_noise_level(
                 P,
                 &C_target,
                 &self.noise_estimator.hom_mul(
@@ -258,30 +299,28 @@ impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> DefaultMo
         };
         return (0..(C_master.base_ring().len() - outer_drop.len())).map(compute_result_noise).min_by(|(_, l), (_, r)| f64::total_cmp(l, r)).unwrap().0;
     }
-}
-
-impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> BGVModswitchStrategy<Params> for DefaultModswitchStrategy<Params, N, LOG> {
-
-    type CiphertextDescriptor = N::CriticalQuantityLevel;
-
-    fn evaluate_circuit(
+    
+    fn evaluate_circuit_over_any_ring<R, F1, F2>(
         &self,
-        circuit: &PlaintextCircuit<StaticRingBase<i64>>,
+        circuit: &PlaintextCircuit<R>,
         P: &PlaintextRing<Params>,
         C_master: &CiphertextRing<Params>,
-        inputs: &[(Box<DropModuliIndices>, Self::CiphertextDescriptor, Ciphertext<Params>)],
+        inputs: &[(Box<DropModuliIndices>, <Self as BGVModswitchStrategy<Params>>::CiphertextInfo, Ciphertext<Params>)],
         rk: Option<&RelinKey<Params>>,
-        gks: &[(CyclotomicGaloisGroupEl, KeySwitchKey<Params>)]
-    ) -> Vec<(Box<DropModuliIndices>, Self::CiphertextDescriptor, Ciphertext<Params>)> {
+        gks: &[(CyclotomicGaloisGroupEl, KeySwitchKey<Params>)],
+        ring: &R,
+        mut hom_add_plain: F1,
+        mut hom_mul_plain: F2
+    ) -> Vec<(Box<DropModuliIndices>, <Self as BGVModswitchStrategy<Params>>::CiphertextInfo, Ciphertext<Params>)>
+        where R: ?Sized + RingBase,
+            F1: FnMut(&PlaintextRing<Params>, &CiphertextRing<Params>, &R::Element, Ciphertext<Params>, &<Self as BGVModswitchStrategy<Params>>::CiphertextInfo) -> (<Self as BGVModswitchStrategy<Params>>::CiphertextInfo, Ciphertext<Params>),
+            F2: FnMut(&PlaintextRing<Params>, &CiphertextRing<Params>, &R::Element, Ciphertext<Params>, &<Self as BGVModswitchStrategy<Params>>::CiphertextInfo) -> (<Self as BGVModswitchStrategy<Params>>::CiphertextInfo, Ciphertext<Params>),
+    {
         circuit.evaluate_generic(
             inputs,
-            |x| {
-                let m = P.int_hom().map(x.to_ring_el(StaticRing::<i64>::RING) as i32);
-                return (
-                    DropModuliIndices::empty(),
-                    self.noise_estimator.hom_add_plain(P, C_master, &m, &self.noise_estimator.transparent_zero(), P.base_ring().one()),
-                    Params::hom_add_plain(P, C_master, &m, Params::transparent_zero(P, C_master))
-                );
+            |m| {
+                let (result_noise, result) = hom_add_plain(P, C_master, &m.clone(RingRef::new(ring)).to_ring_el(RingRef::new(ring)), Params::transparent_zero(P, C_master), &self.noise_estimator.transparent_zero());
+                return (DropModuliIndices::empty(), result_noise, result);
             },
             |x, c, y| {
 
@@ -310,7 +349,7 @@ impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> BGVModswi
                 let y_noise = self.noise_estimator.mod_switch_down(&P, &Cres, &Cy, &drop_y, &y.1);
                 let y_modswitch = Params::mod_switch_down(P, &Cres, &Cy, &drop_y, Params::clone_ct(P, &Cy, &y.2));
                 
-                let (y_noise, y_mult) = match c {
+                let (y_noise, y_scaled) = match c {
                     Coefficient::Zero => unreachable!(),
                     Coefficient::One => (y_noise, y_modswitch),
                     Coefficient::NegOne => (y_noise, Params::hom_mul_plain_i64(P, &Cy, -1, y_modswitch)),
@@ -318,16 +357,13 @@ impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> BGVModswi
                         self.noise_estimator.hom_mul_plain_i64(P, &Cy, *c as i64, &y_noise, y_modswitch.implicit_scale),
                         Params::hom_mul_plain_i64(P, &Cy, *c as i64, y_modswitch)
                     ),
-                    Coefficient::Other(c) => (
-                        self.noise_estimator.hom_mul_plain_i64(P, &Cy, *c as i64, &y_noise, y_modswitch.implicit_scale),
-                        Params::hom_mul_plain_i64(P, &Cy, *c as i64, y_modswitch)
-                    )
+                    Coefficient::Other(m) => hom_mul_plain(P, &Cy, m, y_modswitch, &y_noise)
                 };
 
                 return (
                     res, 
-                    self.noise_estimator.hom_add(P, C_master, &x_noise, Some(x_modswitch.implicit_scale), &y_noise, Some(y_mult.implicit_scale)), 
-                    Params::hom_add(P, &Cres, x_modswitch, y_mult)
+                    self.noise_estimator.hom_add(P, C_master, &x_noise, Some(x_modswitch.implicit_scale), &y_noise, Some(y_scaled.implicit_scale)), 
+                    Params::hom_add(P, &Cres, x_modswitch, y_scaled)
                 );
             },
             |x, y| {
@@ -354,7 +390,7 @@ impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> BGVModswi
                 let Cx = Params::mod_switch_down_ciphertext_ring(C_master, &x.0);
                 let drop_x = total_drop.pushforward(&x.0);
                 if LOG {
-                    println!("Dropping {:?} from homomorphic product operand with estimated noise {}", drop_x, self.noise_estimator.get_ln_relative_noise_level(P, &Cx, &x.1));
+                    println!("Dropping {:?} from homomorphic product operand with estimated noise {}", drop_x, self.noise_estimator.estimate_ln_relative_noise_level(P, &Cx, &x.1));
                 }
 
                 let x_noise = self.noise_estimator.mod_switch_down(P, &Ctarget, &Cx, &drop_x, &x.1);
@@ -363,7 +399,7 @@ impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> BGVModswi
                 let Cy = Params::mod_switch_down_ciphertext_ring(C_master, &y.0);
                 let drop_y = total_drop.pushforward(&y.0);
                 if LOG {
-                    println!("Dropping {:?} from homomorphic product operand with estimated noise {}", drop_y, self.noise_estimator.get_ln_relative_noise_level(P, &Cy, &y.1));
+                    println!("Dropping {:?} from homomorphic product operand with estimated noise {}", drop_y, self.noise_estimator.estimate_ln_relative_noise_level(P, &Cy, &y.1));
                 }
 
                 let y_noise = self.noise_estimator.mod_switch_down(P, &Ctarget, &Cy, &drop_y, &y.1);
@@ -372,7 +408,7 @@ impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> BGVModswi
                 let result = Params::hom_mul(P, &Ctarget, x_modswitch, y_modswitch, &rk_modswitch);
                 let result_noise = self.noise_estimator.hom_mul(P, &Ctarget, &x_noise, &y_noise, rk_modswitch.0.gadget_vector_digits());
                 if LOG {
-                    println!("Estimated output noise is {}", self.noise_estimator.get_ln_relative_noise_level(P, &Ctarget, &result_noise));
+                    println!("Estimated output noise is {}", self.noise_estimator.estimate_ln_relative_noise_level(P, &Ctarget, &result_noise));
                 }
 
                 return (total_drop, result_noise, result);
@@ -394,6 +430,40 @@ impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> BGVModswi
                     res
                 )).collect();
             }
+        )
+    }
+}
+
+impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> BGVModswitchStrategy<Params> for DefaultModswitchStrategy<Params, N, LOG> {
+
+    type CiphertextInfo = N::CriticalQuantityLevel;
+
+    #[instrument(skip_all)]
+    fn evaluate_circuit(
+        &self,
+        circuit: &PlaintextCircuit<StaticRingBase<i64>>,
+        P: &PlaintextRing<Params>,
+        C_master: &CiphertextRing<Params>,
+        inputs: &[(Box<DropModuliIndices>, Self::CiphertextInfo, Ciphertext<Params>)],
+        rk: Option<&RelinKey<Params>>,
+        gks: &[(CyclotomicGaloisGroupEl, KeySwitchKey<Params>)]
+    ) -> Vec<(Box<DropModuliIndices>, Self::CiphertextInfo, Ciphertext<Params>)> {
+        self.evaluate_circuit_over_any_ring(
+            circuit,
+            P, 
+            C_master,
+            inputs,
+            rk,
+            gks,
+            StaticRing::<i64>::RING.get_ring(),
+            |P, C, m, ct, noise| (
+                self.noise_estimator.hom_add_plain(P, C, &P.int_hom().map(*m as i32), noise, ct.implicit_scale),
+                Params::hom_add_plain(P, C, &P.int_hom().map(*m as i32), ct)
+            ),
+            |P, C, m, ct, noise| (
+                self.noise_estimator.hom_mul_plain_i64(P, C, *m, noise, ct.implicit_scale),
+                Params::hom_mul_plain_i64(P, C, *m, ct)
+            )
         )
     }
 }

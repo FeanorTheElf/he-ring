@@ -826,6 +826,10 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
     /// Naturally, if the circuit does not contain multiplication gates (can be checked e.g. via [`PlaintextCircuit::has_multiplication_gates()`]),
     /// `add_prod` will never be called, and similarly for galois gates.
     /// 
+    /// Note also that `constant` and `add_prod` are called even if the underlying element is `0` resp. `1`.
+    /// Hence, it is recommended that the given functions for `constant` and `add_prod` perform a match on
+    /// the given [`Coefficient`] and treat the `0` resp. `1` case differently.
+    /// 
     /// # Example
     /// 
     /// ```
