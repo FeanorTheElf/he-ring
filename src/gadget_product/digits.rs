@@ -140,7 +140,7 @@ impl RNSGadgetVectorDigitIndices {
     /// assert_eq!(2..3, digits.at(1));
     /// ```
     /// 
-    pub fn remove_indices(&self, drop_rns_factors: &DropModuliIndices) -> Box<Self> {
+    pub fn remove_indices(&self, drop_rns_factors: &RNSFactorIndexList) -> Box<Self> {
         let mut result = Vec::new();
         let mut current_len = 0;
         for range in self.iter() {
@@ -184,19 +184,19 @@ impl Clone for Box<RNSGadgetVectorDigitIndices> {
 /// 
 #[repr(transparent)]
 #[derive(Debug, PartialEq, Eq, Hash)]
-pub struct DropModuliIndices {
-    drop_rns_moduli_indices: [usize]
+pub struct RNSFactorIndexList {
+    rns_factor_indices: [usize]
 }
 
-impl Deref for DropModuliIndices {
+impl Deref for RNSFactorIndexList {
     type Target = [usize];
 
     fn deref(&self) -> &Self::Target {
-        &self.drop_rns_moduli_indices
+        &self.rns_factor_indices
     }
 }
 
-impl DropModuliIndices {
+impl RNSFactorIndexList {
 
     fn from_unchecked(indices: Box<[usize]>) -> Box<Self> {
         unsafe { std::mem::transmute(indices) }
@@ -236,7 +236,7 @@ impl DropModuliIndices {
     }
 
     pub fn contains(&self, i: usize) -> bool {
-        self.drop_rns_moduli_indices.binary_search(&i).is_ok()
+        self.rns_factor_indices.binary_search(&i).is_ok()
     }
 
     ///
@@ -249,7 +249,7 @@ impl DropModuliIndices {
     /// ```
     /// 
     pub fn num_within(&self, range: &Range<usize>) -> usize {
-        match (self.drop_rns_moduli_indices.binary_search(&range.start), self.drop_rns_moduli_indices.binary_search(&range.end)) {
+        match (self.rns_factor_indices.binary_search(&range.start), self.rns_factor_indices.binary_search(&range.end)) {
             (Ok(i), Ok(j)) |
             (Ok(i), Err(j)) |
             (Err(i), Ok(j)) |
@@ -258,11 +258,11 @@ impl DropModuliIndices {
     }
 
     pub fn subtract(&self, other: &Self) -> Box<Self> {
-        Self::from_unchecked(self.drop_rns_moduli_indices.iter().copied().filter(|i| !other.contains(*i)).collect())
+        Self::from_unchecked(self.rns_factor_indices.iter().copied().filter(|i| !other.contains(*i)).collect())
     }
 
     pub fn intersect(&self, other: &Self) -> Box<Self> {
-        Self::from_unchecked(self.drop_rns_moduli_indices.iter().copied().filter(|i| other.contains(*i)).collect())
+        Self::from_unchecked(self.rns_factor_indices.iter().copied().filter(|i| other.contains(*i)).collect())
     }
 
     ///
@@ -342,8 +342,8 @@ impl DropModuliIndices {
     }
 
     pub fn union(&self, other: &Self) -> Box<Self> {
-        let mut result = self.drop_rns_moduli_indices.iter().copied().chain(
-            other.drop_rns_moduli_indices.iter().copied().filter(|i| !self.contains(*i)
+        let mut result = self.rns_factor_indices.iter().copied().chain(
+            other.rns_factor_indices.iter().copied().filter(|i| !self.contains(*i)
         )).collect::<Box<[usize]>>();
         result.sort_unstable();
         return Self::from_unchecked(result);
@@ -354,9 +354,17 @@ impl DropModuliIndices {
     }
 }
 
-impl Clone for Box<DropModuliIndices> {
+impl Clone for Box<RNSFactorIndexList> {
     fn clone(&self) -> Self {
-        DropModuliIndices::from_unchecked(self.drop_rns_moduli_indices.to_owned().into_boxed_slice())
+        (*&*self).to_owned()
+    }
+}
+
+impl ToOwned for RNSFactorIndexList {
+    type Owned = Box<Self>;
+
+    fn to_owned(&self) -> Self::Owned {
+        RNSFactorIndexList::from_unchecked(self.rns_factor_indices.to_owned().into_boxed_slice())
     }
 }
 
@@ -390,7 +398,7 @@ impl Clone for Box<DropModuliIndices> {
 /// assert_eq!(&[0usize, 1, 3][..], &recommended_rns_factors_to_drop(&RNSGadgetVectorDigitIndices::from([0..3, 3..5].clone_els()), 3) as &[usize]);
 /// ```
 /// 
-pub fn recommended_rns_factors_to_drop(digits: &RNSGadgetVectorDigitIndices, drop_prime_count: usize) -> Box<DropModuliIndices> {
+pub fn recommended_rns_factors_to_drop(digits: &RNSGadgetVectorDigitIndices, drop_prime_count: usize) -> Box<RNSFactorIndexList> {
     assert!(drop_prime_count <= digits.rns_base_len());
 
     let mut drop_from_digit = (0..digits.len()).map(|_| 0).collect::<Vec<_>>();
@@ -400,5 +408,5 @@ pub fn recommended_rns_factors_to_drop(digits: &RNSGadgetVectorDigitIndices, dro
         drop_from_digit[largest_digit_idx] += 1;
     }
 
-    return DropModuliIndices::from((0..digits.len()).flat_map(|i| digits.at(i).start..(digits.at(i).start + drop_from_digit[i])).collect(), digits.rns_base_len());
+    return RNSFactorIndexList::from((0..digits.len()).flat_map(|i| digits.at(i).start..(digits.at(i).start + drop_from_digit[i])).collect(), digits.rns_base_len());
 }

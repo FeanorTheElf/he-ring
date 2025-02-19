@@ -1,7 +1,7 @@
 use std::alloc::{Allocator, Global};
 use std::ops::Range;
 
-use digits::{DropModuliIndices, RNSGadgetVectorDigitIndices};
+use digits::{RNSFactorIndexList, RNSGadgetVectorDigitIndices};
 use feanor_math::integer::BigIntRing;
 use feanor_math::matrix::*;
 use feanor_math::primitive_int::StaticRing;
@@ -420,7 +420,7 @@ impl<R: PreparedMultiplicationRing> GadgetProductRhsOperand<R> {
 
 impl<R: BGFVCiphertextRing> GadgetProductRhsOperand<R> {
 
-    pub fn modulus_switch(self, to: &R, drop_rns_factors: &DropModuliIndices, from: &R) -> Self {
+    pub fn modulus_switch(self, to: &R, drop_rns_factors: &RNSFactorIndexList, from: &R) -> Self {
         assert_eq!(to.base_ring().get_ring().len() + drop_rns_factors.len(), from.base_ring().get_ring().len());
         debug_assert_eq!(self.digits.len(), self.scaled_element.len());
         let mut result_scaled_el = Vec::new();
@@ -484,7 +484,7 @@ fn test_modulus_switch() {
     rhs.set_rns_factor(ring.get_ring(), 1, ring.inclusion().map(from_congruence(&[0, 0, 1])));
 
     let smaller_ring = SingleRNSRingBase::<_, Global, DefaultConvolution>::new(Pow2CyclotomicNumberRing::new(4), zn_rns::Zn::create_from_primes(vec![17, 113], BigIntRing::RING));
-    let rhs = rhs.modulus_switch(smaller_ring.get_ring(), DropModuliIndices::from_ref(&[1], rns_base.len()), ring.get_ring());
+    let rhs = rhs.modulus_switch(smaller_ring.get_ring(), RNSFactorIndexList::from_ref(&[1], rns_base.len()), ring.get_ring());
     let lhs = GadgetProductLhsOperand::from_element(smaller_ring.get_ring(), &smaller_ring.int_hom().map(1000), 2);
 
     assert_el_eq!(&smaller_ring, smaller_ring.int_hom().map(1000), lhs.gadget_product(&rhs, smaller_ring.get_ring()));
@@ -499,7 +499,7 @@ fn test_modulus_switch() {
     rhs.set_rns_factor(ring.get_ring(), 2, ring.inclusion().map(from_congruence(&[0, 0, 0, 0, 1000])));
 
     let smaller_ring = SingleRNSRingBase::<_, Global, DefaultConvolution>::new(Pow2CyclotomicNumberRing::new(4), zn_rns::Zn::create_from_primes(vec![17, 193, 241], BigIntRing::RING));
-    let rhs = rhs.modulus_switch(smaller_ring.get_ring(), DropModuliIndices::from_ref(&[1, 2], rns_base.len()), ring.get_ring());
+    let rhs = rhs.modulus_switch(smaller_ring.get_ring(), RNSFactorIndexList::from_ref(&[1, 2], rns_base.len()), ring.get_ring());
     let lhs = GadgetProductLhsOperand::from_element(smaller_ring.get_ring(), &smaller_ring.int_hom().map(1000), 3);
 
     assert_el_eq!(&smaller_ring, smaller_ring.int_hom().map(1000000), lhs.gadget_product(&rhs, smaller_ring.get_ring()));

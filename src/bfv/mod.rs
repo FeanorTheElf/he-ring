@@ -130,6 +130,7 @@ pub trait BFVParams {
     ///
     /// Creates the plaintext ring `R/tR` for the given plaintext modulus `t`.
     /// 
+    #[instrument(skip_all)]
     fn create_plaintext_ring(&self, modulus: i64) -> PlaintextRing<Self> {
         NumberRingQuotientBase::new(self.number_ring(), Zn::new(modulus as u64))
     }
@@ -162,6 +163,7 @@ pub trait BFVParams {
     /// 
     /// Often used to initialize an accumulator (or similar) during algorithms. 
     /// 
+    #[instrument(skip_all)]
     fn transparent_zero(C: &CiphertextRing<Self>) -> Ciphertext<Self> {
         (C.zero(), C.zero())
     }
@@ -177,6 +179,7 @@ pub trait BFVParams {
     ///
     /// Creates an encryption of the secret key - this is always easily possible in BFV.
     /// 
+    #[instrument(skip_all)]
     fn enc_sk(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>) -> Ciphertext<Self> {
         let Delta = ZZbig.rounded_div(
             ZZbig.clone_el(C.base_ring().modulus()), 
@@ -189,6 +192,7 @@ pub trait BFVParams {
     /// Given `q/t m + e`, removes the noise term `e`, thus returns `q/t m`.
     /// Used during [`BFVParams::dec()`] and [`BFVParams::noise_budget()`].
     /// 
+    #[instrument(skip_all)]
     fn remove_noise(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, c: &El<CiphertextRing<Self>>) -> El<PlaintextRing<Self>> {
         let coefficients = C.wrt_canonical_basis(c);
         let Delta = ZZbig.rounded_div(
@@ -273,6 +277,7 @@ pub trait BFVParams {
     ///
     /// Copies a ciphertext.
     /// 
+    #[instrument(skip_all)]
     fn clone_ct(C: &CiphertextRing<Self>, ct: &Ciphertext<Self>) -> Ciphertext<Self> {
         (C.clone_el(&ct.0), C.clone_el(&ct.1))
     }
