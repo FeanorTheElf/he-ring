@@ -22,7 +22,8 @@ pub struct ThinBootstrapData<Params: BGVParams, M: BGVModswitchStrategy<Params>>
     digit_extract: DigitExtract,
     slots_to_coeffs_thin: PlaintextCircuit<<PlaintextRing<Params> as RingStore>::Type>,
     coeffs_to_slots_thin: PlaintextCircuit<<PlaintextRing<Params> as RingStore>::Type>,
-    plaintext_ring_hierarchy: Vec<PlaintextRing<Params>>
+    plaintext_ring_hierarchy: Vec<PlaintextRing<Params>>,
+    tmp_coprime_modulus_plaintext: PlaintextRing<Params>
 }
 
 
@@ -70,6 +71,12 @@ impl<Params: BGVParams, Strategy: BGVModswitchStrategy<Params>> ThinBootstrapDat
         if LOG {
             println!("Starting Bootstrapping")
         }
+        
+        let C_input = Params::mod_switch_down_ciphertext_ring(C_master, ct_dropped_moduli);
+        let sk_input = debug_sk.map(|sk| Params::mod_switch_down_sk(&C_input, &C_master, ct_dropped_moduli, sk));
+        if let Some(sk) = &sk_input {
+            Params::dec_println_slots(P_base, &C_input, &ct, sk);
+        }
 
         let P_main = self.plaintext_ring_hierarchy.last().unwrap();
         debug_assert_eq!(ZZ.pow(self.p(), self.e()), *P_main.base_ring().modulus());
@@ -78,33 +85,53 @@ impl<Params: BGVParams, Strategy: BGVModswitchStrategy<Params>> ThinBootstrapDat
             let result = DefaultModswitchStrategy::never_modswitch().evaluate_circuit_plaintext(
                 &self.slots_to_coeffs_thin, 
                 P_base, 
-                C_master, 
+                &C_input, 
                 &[ModulusAwareCiphertext {
                     data: ct, 
                     info: (), 
-                    dropped_rns_factor_indices: ct_dropped_moduli.to_owned()
+                    dropped_rns_factor_indices: RNSFactorIndexList::empty()
                 }], 
                 None, 
-                gks
+                gks,
+                key_switches
             );
             assert_eq!(1, result.len());
             let result = result.into_iter().next().unwrap();
             debug_assert_eq!(*result.dropped_rns_factor_indices, *ct_dropped_moduli);
             return result.data;
         });
+        if let Some(sk) = &sk_input {
+            Params::dec_println(P_base, &C_input, &values_in_coefficients, sk);
+        }
 
         let noisy_decryption = log_time::<_, _, LOG, _>("2. Computing noisy decryption c0 + c1 * s", |[key_switches]| {
-            let C_current = Params::mod_switch_down_ciphertext_ring(C_master, ct_dropped_moduli);
-            // let (c0, c1) = Params::mod_switch_to_plaintext(P_main, C_current, values_in_coefficients);
-            let (c0, c1) = unimplemented!();
+            // this is slightly more complicated than in BFV, since we cannot mod-switch to a ciphertext modulus that is not coprime to `t`.
+            // Instead, we first mod-switch to `p^e + 1`, and then reduce the shortest lift of the result modulo `p^e`. This will introduce the
+            // overflow modulo `p^e + 1` as error in the lower bits, which we will later remove during digit extraction
+            let (c0, c1) = Params::mod_switch_to_plaintext(P_main, &self.tmp_coprime_modulus_plaintext, &C_input, values_in_coefficients);
+            // multiply by `p^v`, to move the coefficients into the higher digits; this will cause noise overflow in a sense, but in this concrete
+            // situation, it only moves the error into the lower digits
+            let (c0, c1) = (
+                self.tmp_coprime_modulus_plaintext.inclusion().mul_map(c0, self.tmp_coprime_modulus_plaintext.base_ring().coerce(&ZZ, ZZ.pow(self.p(), self.v()))),
+                self.tmp_coprime_modulus_plaintext.inclusion().mul_map(c1, self.tmp_coprime_modulus_plaintext.base_ring().coerce(&ZZ, ZZ.pow(self.p(), self.v()))),
+            );
+            // reduce modulo `p^e`, which will introduce additional error in the lower digits
+            let mod_pe = P_main.base_ring().can_hom(&ZZ).unwrap();
+            let (c0, c1) = (
+                P_main.from_canonical_basis(self.tmp_coprime_modulus_plaintext.wrt_canonical_basis(&c0).iter().map(|x| mod_pe.map(self.tmp_coprime_modulus_plaintext.base_ring().smallest_lift(x)))),
+                P_main.from_canonical_basis(self.tmp_coprime_modulus_plaintext.wrt_canonical_basis(&c1).iter().map(|x| mod_pe.map(self.tmp_coprime_modulus_plaintext.base_ring().smallest_lift(x))))
+            );
+
             let enc_sk = Params::enc_sk(P_main, C_master);
-            *key_switches += 1;
             return ModulusAwareCiphertext {
                 data: Params::hom_add_plain(P_main, C_master, &c0, Params::hom_mul_plain(P_main, C_master, &c1, enc_sk)),
                 info: self.modswitch_strategy.info_for_fresh_encryption(P_main, C_master),
                 dropped_rns_factor_indices: RNSFactorIndexList::empty()
             };
         });
+        if let Some(sk) = debug_sk {
+            Params::dec_println(P_main, &C_master, &noisy_decryption.data, sk);
+        }
 
         let noisy_decryption_in_slots = log_time::<_, _, LOG, _>("3. Computing Coeffs-to-Slots transform", |[key_switches]| {
             let result = self.modswitch_strategy.evaluate_circuit_plaintext(
@@ -113,11 +140,15 @@ impl<Params: BGVParams, Strategy: BGVModswitchStrategy<Params>> ThinBootstrapDat
                 C_master, 
                 &[noisy_decryption], 
                 None, 
-                gks
+                gks,
+                key_switches
             );
             assert_eq!(1, result.len());
             return result.into_iter().next().unwrap();
         });
+        if let Some(sk) = debug_sk {
+            Params::dec_println_slots(P_main, C_master, &noisy_decryption_in_slots.data, sk);
+        }
 
         if LOG {
             println!("4. Performing digit extraction");
@@ -165,7 +196,7 @@ impl DigitExtract {
         return self.evaluate_generic(
             input,
             |exp, inputs, circuit|
-                modswitch_strategy.evaluate_circuit_int(circuit, get_P(exp), C_master, inputs, Some(rk), &[]),
+                modswitch_strategy.evaluate_circuit_int(circuit, get_P(exp), C_master, inputs, Some(rk), &[], &mut 0),
             |exp_old, exp_new, input| ModulusAwareCiphertext {
                 data: Params::change_plaintext_modulus(get_P(exp_new), get_P(exp_old), C_master, input.data),
                 dropped_rns_factor_indices: input.dropped_rns_factor_indices,

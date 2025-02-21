@@ -32,7 +32,7 @@ pub trait BGVNoiseEstimator<Params: BGVParams> {
     /// An estimate of the size and distribution of the critical quantity
     /// `c0 + c1 s = m + t e`. The only requirement is that the noise estimator
     /// can derive an estimate about its infinity norm via
-    /// [`BGVNoiseEstimator::get_ln_relative_noise_level`], but estimators are free
+    /// [`BGVNoiseEstimator::estimate_ln_relative_noise_level`], but estimators are free
     /// to store additional data to get more precise estimates on the noise growth
     /// of operations. 
     /// 
@@ -220,7 +220,8 @@ pub trait BGVModswitchStrategy<Params: BGVParams> {
         C_master: &CiphertextRing<Params>,
         inputs: &[ModulusAwareCiphertext<Params, Self>],
         rk: Option<&RelinKey<Params>>,
-        gks: &[(CyclotomicGaloisGroupEl, KeySwitchKey<Params>)]
+        gks: &[(CyclotomicGaloisGroupEl, KeySwitchKey<Params>)],
+        key_switches: &mut usize
     ) -> Vec<ModulusAwareCiphertext<Params, Self>>;
 
     ///
@@ -238,7 +239,8 @@ pub trait BGVModswitchStrategy<Params: BGVParams> {
         C_master: &CiphertextRing<Params>,
         inputs: &[ModulusAwareCiphertext<Params, Self>],
         rk: Option<&RelinKey<Params>>,
-        gks: &[(CyclotomicGaloisGroupEl, KeySwitchKey<Params>)]
+        gks: &[(CyclotomicGaloisGroupEl, KeySwitchKey<Params>)],
+        key_switches: &mut usize
     ) -> Vec<ModulusAwareCiphertext<Params, Self>>;
 
     fn info_for_fresh_encryption(&self, P: &PlaintextRing<Params>, C: &CiphertextRing<Params>) -> Self::CiphertextInfo;
@@ -341,12 +343,14 @@ impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> DefaultMo
         gks: &[(CyclotomicGaloisGroupEl, KeySwitchKey<Params>)],
         ring: &R,
         mut hom_add_plain: F1,
-        mut hom_mul_plain: F2
+        mut hom_mul_plain: F2,
+        key_switches: &mut usize
     ) -> Vec<ModulusAwareCiphertext<Params, Self>>
         where R: ?Sized + RingBase,
             F1: FnMut(&PlaintextRing<Params>, &CiphertextRing<Params>, &R::Element, Ciphertext<Params>, &<Self as BGVModswitchStrategy<Params>>::CiphertextInfo) -> (<Self as BGVModswitchStrategy<Params>>::CiphertextInfo, Ciphertext<Params>),
             F2: FnMut(&PlaintextRing<Params>, &CiphertextRing<Params>, &R::Element, Ciphertext<Params>, &<Self as BGVModswitchStrategy<Params>>::CiphertextInfo) -> (<Self as BGVModswitchStrategy<Params>>::CiphertextInfo, Ciphertext<Params>),
     {
+        let key_switches_refcell = std::cell::RefCell::new(key_switches);
         circuit.evaluate_generic(
             inputs,
             |m| {
@@ -397,15 +401,16 @@ impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> DefaultMo
 
                 return ModulusAwareCiphertext {
                     dropped_rns_factor_indices: res, 
-              info: self.noise_estimator.hom_add(P, C_master, &x_noise, Some(x_modswitch.implicit_scale), &y_noise, Some(y_scaled.implicit_scale)), 
+                    info: self.noise_estimator.hom_add(P, C_master, &x_noise, Some(x_modswitch.implicit_scale), &y_noise, Some(y_scaled.implicit_scale)), 
                     data: Params::hom_add(P, &Cres, x_modswitch, y_scaled)
                 };
             },
             |x, y| {
+                **key_switches_refcell.borrow_mut() += 1;
 
                 let total_drop = self.compute_optimal_mul_modswitch(P, C_master, &x.info, &x.dropped_rns_factor_indices, &y.info, &y.dropped_rns_factor_indices, rk.unwrap().0.gadget_vector_digits());
                 let Ctarget = Params::mod_switch_down_ciphertext_ring(C_master, &total_drop);
-                let rk_modswitch = Params::mod_switch_down_rk(P, &Ctarget, C_master, &total_drop, rk.unwrap());
+                let rk_modswitch = Params::mod_switch_down_rk(&Ctarget, C_master, &total_drop, rk.unwrap());
 
                 if total_drop.len() == x.dropped_rns_factor_indices.len() {
                     debug_assert_eq!(total_drop.len(), y.dropped_rns_factor_indices.len());
@@ -453,10 +458,12 @@ impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> DefaultMo
                 };
             },
             |gs, x| {
+                **key_switches_refcell.borrow_mut() += gs.len();
+
                 let Cx = Params::mod_switch_down_ciphertext_ring(C_master, &x.dropped_rns_factor_indices);
                 let gks_mod_switched = (0..gs.len()).map(|i| {
                     if let Some((_, gk)) = gks.iter().filter(|(provided_g, _)| C_master.galois_group().eq_el(gs[i], *provided_g)).next() {
-                        Params::mod_switch_down_gk(P, &Cx, C_master, &x.dropped_rns_factor_indices, gk)
+                        Params::mod_switch_down_gk(&Cx, C_master, &x.dropped_rns_factor_indices, gk)
                     } else {
                         panic!("Galois key for {} not found", C_master.galois_group().representative(gs[i]))
                     }
@@ -485,7 +492,8 @@ impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> BGVModswi
         C_master: &CiphertextRing<Params>,
         inputs: &[ModulusAwareCiphertext<Params, Self>],
         rk: Option<&RelinKey<Params>>,
-        gks: &[(CyclotomicGaloisGroupEl, KeySwitchKey<Params>)]
+        gks: &[(CyclotomicGaloisGroupEl, KeySwitchKey<Params>)],
+        key_switches: &mut usize
     ) -> Vec<ModulusAwareCiphertext<Params, Self>> {
         self.evaluate_circuit_over_any_ring(
             circuit,
@@ -502,7 +510,8 @@ impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> BGVModswi
             |P, C, m, ct, noise| (
                 self.noise_estimator.hom_mul_plain_i64(P, C, *m, noise, ct.implicit_scale),
                 Params::hom_mul_plain_i64(P, C, *m, ct)
-            )
+            ),
+            key_switches
         )
     }
 
@@ -514,7 +523,8 @@ impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> BGVModswi
         C_master: &CiphertextRing<Params>,
         inputs: &[ModulusAwareCiphertext<Params, Self>],
         rk: Option<&RelinKey<Params>>,
-        gks: &[(CyclotomicGaloisGroupEl, KeySwitchKey<Params>)]
+        gks: &[(CyclotomicGaloisGroupEl, KeySwitchKey<Params>)],
+        key_switches: &mut usize
     ) -> Vec<ModulusAwareCiphertext<Params, Self>> {
         self.evaluate_circuit_over_any_ring(
             circuit,
@@ -531,7 +541,8 @@ impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> BGVModswi
             |P, C, m, ct, noise| (
                 self.noise_estimator.hom_mul_plain(P, C, m, noise, ct.implicit_scale),
                 Params::hom_mul_plain(P, C, m, ct)
-            )
+            ),
+            key_switches
         )
     }
 
@@ -579,11 +590,12 @@ fn test_default_modswitch_strategy() {
             data: ctxt
         }],
         Some(&rk),
-        &[]
+        &[],
+        &mut 0
     ).into_iter().next().unwrap();
 
     let res_C = Pow2BGV::mod_switch_down_ciphertext_ring(&C, &res.dropped_rns_factor_indices);
-    let res_sk = Pow2BGV::mod_switch_down_sk(&P, &res_C, &C, &res.dropped_rns_factor_indices, &sk);
+    let res_sk = Pow2BGV::mod_switch_down_sk(&res_C, &C, &res.dropped_rns_factor_indices, &sk);
 
     let res_noise = Pow2BGV::noise_budget(&P, &res_C, &res.data, &res_sk);
     println!("Actual output noise budget is {}", res_noise);
@@ -629,11 +641,12 @@ fn test_never_modswitch_strategy() {
                 data: Pow2BGV::clone_ct(&P, &C, &ctxt)
             }],
             Some(&rk),
-            &[]
+            &[],
+            &mut 0
         ).into_iter().next().unwrap();
 
         let res_C = Pow2BGV::mod_switch_down_ciphertext_ring(&C, &res.dropped_rns_factor_indices);
-        let res_sk = Pow2BGV::mod_switch_down_sk(&P, &res_C, &C, &res.dropped_rns_factor_indices, &sk);
+        let res_sk = Pow2BGV::mod_switch_down_sk(&res_C, &C, &res.dropped_rns_factor_indices, &sk);
 
         let res_noise = Pow2BGV::noise_budget(&P, &res_C, &res.data, &res_sk);
         println!("Actual output noise budget is {}", res_noise);
@@ -656,11 +669,12 @@ fn test_never_modswitch_strategy() {
                 data: Pow2BGV::clone_ct(&P, &C, &ctxt)
             }],
             Some(&rk),
-            &[]
+            &[],
+            &mut 0
         ).into_iter().next().unwrap();
 
         let res_C = Pow2BGV::mod_switch_down_ciphertext_ring(&C, &res.dropped_rns_factor_indices);
-        let res_sk = Pow2BGV::mod_switch_down_sk(&P, &res_C, &C, &res.dropped_rns_factor_indices, &sk);
+        let res_sk = Pow2BGV::mod_switch_down_sk(&res_C, &C, &res.dropped_rns_factor_indices, &sk);
 
         let res_noise = Pow2BGV::noise_budget(&P, &res_C, &res.data, &res_sk);
         assert_eq!(0, res_noise);

@@ -35,7 +35,7 @@ type UsedBaseConversion<A> = super::lift::AlmostExactBaseConversion<A>;
 /// almost a tie.
 /// 
 /// In some cases, BGV modulus-switching can be implemented more efficiently by using
-/// [`CongruenceAwareAlmostExactBaseConversion`].
+/// [`CongruencePreservingAlmostExactBaseConversion`].
 /// 
 pub struct CongruencePreservingRescaling<A = Global>
     where A: Allocator + Clone
@@ -216,7 +216,7 @@ impl<A> CongruencePreservingAlmostExactBaseConversion<A>
     where A: Allocator + Clone
 {
     ///
-    /// Creates a new [`CongruenceAwareAlmostExactBaseConversion`], where
+    /// Creates a new [`CongruencePreservingAlmostExactBaseConversion`], where
     ///  - `b` is the product of the moduli in `in_moduli`
     ///  - `q` is the product of the moduli in `out_moduli`
     ///  - `t` is the modulus of `plaintext_modulus`

@@ -3,6 +3,8 @@ use std::fmt::Display;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use feanor_math::algorithms::eea::signed_gcd;
+use feanor_math::algorithms::int_factor::is_prime_power;
 use feanor_math::algorithms::rational_reconstruction::rational_reconstruction;
 use feanor_math::homomorphism::Homomorphism;
 use feanor_math::integer::{int_cast, BigIntRing, IntegerRingStore};
@@ -20,17 +22,18 @@ use feanor_math::seq::*;
 use tracing::instrument;
 
 use crate::ciphertext_ring::double_rns_managed::ManagedDoubleRNSRingBase;
-use crate::ciphertext_ring::single_rns_ring::*;
+use crate::ciphertext_ring::{perform_rns_op_to_plaintext_ring, single_rns_ring::*};
 use crate::ciphertext_ring::BGFVCiphertextRing;
 use crate::cyclotomic::*;
 use crate::gadget_product::digits::RNSFactorIndexList;
 use crate::gadget_product::{GadgetProductLhsOperand, GadgetProductRhsOperand};
 use crate::ntt::{HERingConvolution, HERingNegacyclicNTT};
+use crate::number_ring::hypercube::{HypercubeIsomorphism, HypercubeStructure};
 use crate::number_ring::odd_cyclotomic::CompositeCyclotomicNumberRing;
 use crate::number_ring::{sample_primes, largest_prime_leq_congruent_to_one, HECyclotomicNumberRing, HENumberRing};
 use crate::number_ring::pow2_cyclotomic::Pow2CyclotomicNumberRing;
 use crate::number_ring::quotient::{NumberRingQuotient, NumberRingQuotientBase};
-use crate::rnsconv::bgv_rescale::CongruencePreservingAlmostExactBaseConversion;
+use crate::rnsconv::bgv_rescale::{CongruencePreservingAlmostExactBaseConversion, CongruencePreservingRescaling};
 use crate::rnsconv::RNSOperation;
 use crate::{DefaultCiphertextAllocator, DefaultConvolution, DefaultNegacyclicNTT};
 
@@ -142,6 +145,19 @@ pub trait BGVParams {
         let m = Self::dec(P, C, Self::clone_ct(P, C, ct), sk);
         println!("ciphertext (noise budget: {} / {}):", Self::noise_budget(P, C, ct, sk), ZZbig.abs_log2_ceil(C.base_ring().modulus()).unwrap());
         P.println(&m);
+        println!();
+    }
+    
+    #[instrument(skip_all)]
+    fn dec_println_slots(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: &Ciphertext<Self>, sk: &SecretKey<Self>) {
+        let (p, _e) = is_prime_power(ZZ, P.base_ring().modulus()).unwrap();
+        let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(P.n() as u64), p);
+        let H = HypercubeIsomorphism::new::<false>(P, hypercube);
+        let m = Self::dec(P, C, Self::clone_ct(P, C, ct), sk);
+        println!("ciphertext (noise budget: {}):", Self::noise_budget(P, C, ct, sk));
+        for a in H.get_slot_values(&m) {
+            H.slot_ring().println(&a);
+        }
         println!();
     }
 
@@ -338,7 +354,7 @@ pub trait BGVParams {
     }
 
     #[instrument(skip_all)]
-    fn mod_switch_down_sk(P: &PlaintextRing<Self>, Cnew: &CiphertextRing<Self>, Cold: &CiphertextRing<Self>, drop_moduli: &RNSFactorIndexList, sk: &SecretKey<Self>) -> SecretKey<Self> {
+    fn mod_switch_down_sk(Cnew: &CiphertextRing<Self>, Cold: &CiphertextRing<Self>, drop_moduli: &RNSFactorIndexList, sk: &SecretKey<Self>) -> SecretKey<Self> {
         assert_rns_factor_drop_correct::<Self>(Cnew, Cold, drop_moduli);
         if drop_moduli.len() == 0 {
             Cnew.clone_el(sk)
@@ -348,7 +364,7 @@ pub trait BGVParams {
     }
 
     #[instrument(skip_all)]
-    fn mod_switch_down_rk<'a, 'b>(P: &PlaintextRing<Self>, Cnew: &'b CiphertextRing<Self>, Cold: &CiphertextRing<Self>, drop_moduli: &RNSFactorIndexList, rk: &RelinKey<'a, Self>) -> RelinKey<'b, Self> {
+    fn mod_switch_down_rk<'a, 'b>(Cnew: &'b CiphertextRing<Self>, Cold: &CiphertextRing<Self>, drop_moduli: &RNSFactorIndexList, rk: &RelinKey<'a, Self>) -> RelinKey<'b, Self> {
         assert_rns_factor_drop_correct::<Self>(Cnew, Cold, drop_moduli);
         if drop_moduli.len() == 0 {
             (rk.0.clone(Cnew.get_ring()), rk.1.clone(Cnew.get_ring()))
@@ -361,7 +377,7 @@ pub trait BGVParams {
     }
 
     #[instrument(skip_all)]
-    fn mod_switch_down_gk<'a, 'b>(P: &PlaintextRing<Self>, Cnew: &'b CiphertextRing<Self>, Cold: &CiphertextRing<Self>, drop_moduli: &RNSFactorIndexList, gk: &KeySwitchKey<'a, Self>) -> KeySwitchKey<'b, Self> {
+    fn mod_switch_down_gk<'a, 'b>(Cnew: &'b CiphertextRing<Self>, Cold: &CiphertextRing<Self>, drop_moduli: &RNSFactorIndexList, gk: &KeySwitchKey<'a, Self>) -> KeySwitchKey<'b, Self> {
         assert_rns_factor_drop_correct::<Self>(Cnew, Cold, drop_moduli);
         if drop_moduli.len() == 0 {
             (gk.0.clone(Cnew.get_ring()), gk.1.clone(Cnew.get_ring()))
@@ -373,12 +389,14 @@ pub trait BGVParams {
         }
     }
 
-    fn mod_switch_down_compute_implicit_scale_factor(P: &PlaintextRing<Self>, Cnew: &CiphertextRing<Self>, Cold: &CiphertextRing<Self>, drop_moduli: &RNSFactorIndexList) -> El<Zn> {
+    fn mod_switch_down_compute_implicit_scale_factor(P: &PlaintextRing<Self>, q_new: &El<BigIntRing>, q_old: &El<BigIntRing>) -> El<Zn> {
         let ZZbig_to_Zt = P.base_ring().can_hom(&ZZbig).unwrap();
-        return P.base_ring().checked_div(
-            &ZZbig_to_Zt.map_ref(Cnew.base_ring().modulus()),
-            &ZZbig_to_Zt.map_ref(&Cold.base_ring().modulus())
+        let result = P.base_ring().checked_div(
+            &ZZbig_to_Zt.map_ref(q_new),
+            &ZZbig_to_Zt.map_ref(q_old)
         ).unwrap();
+        assert!(P.base_ring().is_unit(&result));
+        return result;
     }
 
     #[instrument(skip_all)]
@@ -418,7 +436,7 @@ pub trait BGVParams {
             return Ciphertext {
                 c0: mod_switch_ring_element(ct.c0),
                 c1: mod_switch_ring_element(ct.c1),
-                implicit_scale: P.base_ring().mul(ct.implicit_scale, Self::mod_switch_down_compute_implicit_scale_factor(P, Cnew, Cold, drop_moduli))
+                implicit_scale: P.base_ring().mul(ct.implicit_scale, Self::mod_switch_down_compute_implicit_scale_factor(P, Cnew.base_ring().modulus(), Cold.base_ring().modulus()))
             };
         }
     }
@@ -448,6 +466,30 @@ pub trait BGVParams {
             c1: C.one(),
             implicit_scale: P.base_ring().one()
         }
+    }
+
+    #[instrument(skip_all)]
+    fn mod_switch_to_plaintext(P: &PlaintextRing<Self>, target: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: Ciphertext<Self>) -> (El<PlaintextRing<Self>>, El<PlaintextRing<Self>>) {
+        assert!(signed_gcd(*P.base_ring().modulus(), *target.base_ring().modulus(), ZZ) == 1, "can only mod-switch to ciphertext moduli that are coprime to t");
+        let mod_switch = CongruencePreservingRescaling::new_with(
+            C.base_ring().as_iter().map(|Zp| *Zp).collect(),
+            vec![*target.base_ring()],
+            (0..C.base_ring().len()).collect(),
+            *P.base_ring(),
+            Global
+        );
+        let c0 = C.inclusion().mul_map(ct.c0, C.base_ring().coerce(&ZZ, P.base_ring().smallest_lift(P.base_ring().invert(&P.base_ring().mul(
+            ct.implicit_scale,
+            Self::mod_switch_down_compute_implicit_scale_factor(P, &int_cast(*target.base_ring().modulus(), ZZbig, ZZ), C.base_ring().modulus())
+        )).unwrap())));
+        let c1 = C.inclusion().mul_map(ct.c1, C.base_ring().coerce(&ZZ, P.base_ring().smallest_lift(P.base_ring().invert(&P.base_ring().mul(
+            ct.implicit_scale,
+            Self::mod_switch_down_compute_implicit_scale_factor(P, &int_cast(*target.base_ring().modulus(), ZZbig, ZZ), C.base_ring().modulus())
+        )).unwrap())));
+        return (
+            perform_rns_op_to_plaintext_ring(target, C.get_ring(), &c0, &mod_switch),
+            perform_rns_op_to_plaintext_ring(target, C.get_ring(), &c1, &mod_switch)
+        );
     }
 }
 
@@ -752,7 +794,7 @@ fn test_pow2_bgv_modulus_switch() {
         let to_drop = RNSFactorIndexList::from(vec![i], C0.base_ring().len());
         let C1 = Pow2BGV::mod_switch_down_ciphertext_ring(&C0, &to_drop);
         let result_ctxt = Pow2BGV::mod_switch_down(&P, &C1, &C0, &to_drop, Pow2BGV::clone_ct(&P, &C0, &ctxt));
-        let result = Pow2BGV::dec(&P, &C1, result_ctxt, &Pow2BGV::mod_switch_down_sk(&P, &C1, &C0, &to_drop, &sk));
+        let result = Pow2BGV::dec(&P, &C1, result_ctxt, &Pow2BGV::mod_switch_down_sk(&C1, &C0, &to_drop, &sk));
         assert_el_eq!(&P, P.int_hom().map(2), result);
     }
 }
@@ -784,7 +826,7 @@ fn test_pow2_modulus_switch_hom_add() {
         let to_drop = RNSFactorIndexList::from(vec![i], C0.base_ring().len());
         let C1 = Pow2BGV::mod_switch_down_ciphertext_ring(&C0, &to_drop);
         let ctxt_modswitch = Pow2BGV::mod_switch_down(&P, &C1, &C0, &to_drop, Pow2BGV::clone_ct(&P, &C0, &ctxt));
-        let sk_modswitch = Pow2BGV::mod_switch_down_sk(&P, &C1, &C0, &to_drop, &sk);
+        let sk_modswitch = Pow2BGV::mod_switch_down_sk(&C1, &C0, &to_drop, &sk);
         let ctxt_other = Pow2BGV::enc_sym(&P, &C1, &mut rng, &P.int_hom().map(30), &sk_modswitch);
 
         let ctxt_result = Pow2BGV::hom_add(&P, &C1, ctxt_modswitch, ctxt_other);
@@ -821,8 +863,8 @@ fn test_pow2_bgv_modulus_switch_rk() {
     for i in [0, 1, 8] {
         let to_drop = RNSFactorIndexList::from(vec![i], C0.base_ring().len());
         let C1 = Pow2BGV::mod_switch_down_ciphertext_ring(&C0, &to_drop);
-        let new_sk = Pow2BGV::mod_switch_down_sk(&P, &C1, &C0, &to_drop, &sk);
-        let new_rk = Pow2BGV::mod_switch_down_rk(&P, &C1, &C0, &to_drop, &rk);
+        let new_sk = Pow2BGV::mod_switch_down_sk(&C1, &C0, &to_drop, &sk);
+        let new_rk = Pow2BGV::mod_switch_down_rk(&C1, &C0, &to_drop, &rk);
         let ctxt2 = Pow2BGV::enc_sym(&P, &C1, &mut rng, &P.int_hom().map(3), &new_sk);
         let result_ctxt = Pow2BGV::hom_mul(
             &P,
@@ -891,7 +933,7 @@ fn measure_time_pow2_bgv() {
 
     let to_drop = RNSFactorIndexList::from(vec![0], C.base_ring().len());
     let C_new = Pow2BGV::mod_switch_down_ciphertext_ring(&C, &to_drop);
-    let sk_new = Pow2BGV::mod_switch_down_sk(&P, &C_new, &C, &to_drop, &sk);
+    let sk_new = Pow2BGV::mod_switch_down_sk(&C_new, &C, &to_drop, &sk);
     let res_new = log_time::<_, _, true, _>("ModSwitch", |[]| 
         Pow2BGV::mod_switch_down(&P, &C_new, &C, &to_drop, res)
     );
@@ -954,7 +996,7 @@ fn measure_time_double_rns_composite_bgv() {
 
     let to_drop = RNSFactorIndexList::from(vec![0], C.base_ring().len());
     let C_new = CompositeBGV::mod_switch_down_ciphertext_ring(&C, &to_drop);
-    let sk_new = CompositeBGV::mod_switch_down_sk(&P, &C_new, &C, &to_drop, &sk);
+    let sk_new = CompositeBGV::mod_switch_down_sk(&C_new, &C, &to_drop, &sk);
     let res_new = log_time::<_, _, true, _>("ModSwitch", |[]| 
         CompositeBGV::mod_switch_down(&P, &C_new, &C, &to_drop, res)
     );
@@ -1018,7 +1060,7 @@ fn measure_time_single_rns_composite_bgv() {
 
     let to_drop = RNSFactorIndexList::from(vec![0], C.base_ring().len());
     let C_new = SingleRNSCompositeBGV::mod_switch_down_ciphertext_ring(&C, &to_drop);
-    let sk_new = SingleRNSCompositeBGV::mod_switch_down_sk(&P, &C_new, &C, &to_drop, &sk);
+    let sk_new = SingleRNSCompositeBGV::mod_switch_down_sk(&C_new, &C, &to_drop, &sk);
     let res_new = log_time::<_, _, true, _>("ModSwitch", |[]| 
         SingleRNSCompositeBGV::mod_switch_down(&P, &C_new, &C, &to_drop, res)
     );
@@ -1059,8 +1101,8 @@ pub fn tree_mul_benchmark<Params>(params: Params, digits: usize)
         for ct in &mut current {
             *ct = Some(Params::mod_switch_down(&P, &C_new, &C_current, &to_drop, ct.take().unwrap()));
         }
-        sk = Params::mod_switch_down_sk(&P, &C_new, &C_current, &to_drop, &sk);
-        rk = Params::mod_switch_down_rk(&P, &C_new, &C_current, &to_drop, &rk);
+        sk = Params::mod_switch_down_sk(&C_new, &C_current, &to_drop, &sk);
+        rk = Params::mod_switch_down_rk(&C_new, &C_current, &to_drop, &rk);
         C_current = C_new;
     }
     let end = Instant::now();
@@ -1100,8 +1142,8 @@ pub fn chain_mul_benchmark<Params>(params: Params, digits: usize)
         let to_drop = recommended_rns_factors_to_drop(rk.0.gadget_vector_digits(), drop_prime_count);
         let C_new = Params::mod_switch_down_ciphertext_ring(&C_current, &to_drop);
         current = Params::mod_switch_down(&P, &C_new, &C_current, &to_drop, current);
-        sk = Params::mod_switch_down_sk(&P, &C_new, &C_current, &to_drop, &sk);
-        rk = Params::mod_switch_down_rk(&P, &C_new, &C_current, &to_drop, &rk);
+        sk = Params::mod_switch_down_sk(&C_new, &C_current, &to_drop, &sk);
+        rk = Params::mod_switch_down_rk(&C_new, &C_current, &to_drop, &rk);
         C_current = C_new;
     }
     let end = Instant::now();

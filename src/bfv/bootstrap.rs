@@ -169,7 +169,6 @@ impl<Params: BFVParams> ThinBootstrapData<Params> {
         let noisy_decryption = log_time::<_, _, LOG, _>("2. Computing noisy decryption c0 + c1 * s", |[key_switches]| {
             let (c0, c1) = Params::mod_switch_to_plaintext(P_main, C, values_in_coefficients);
             let enc_sk = Params::enc_sk(P_main, C);
-            *key_switches += 1;
             return Params::hom_add_plain(P_main, C, &c0, Params::hom_mul_plain(P_main, C, &c1, enc_sk));
         });
         if let Some(sk) = debug_sk {
@@ -223,7 +222,6 @@ impl DigitExtract {
         } else {
             &P[exp - self.r() - 1]
         };
-        let mut key_switches = 0;
         let result = self.evaluate_generic(
             input,
             |exp, params, circuit| circuit.evaluate_bfv::<Params>(
@@ -233,7 +231,7 @@ impl DigitExtract {
                 params,
                 Some(rk),
                 &[],
-                &mut key_switches
+                &mut 0
             ),
             |_, _, x| x
         );

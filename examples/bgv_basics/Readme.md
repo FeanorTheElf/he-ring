@@ -281,7 +281,7 @@ However, we can decrease the noise growth that happens during the second multipl
 Note that finding the right size of `q'` is, in general, not so easy, since it requires an estimate of the current size of the noise in `enc_x_sqr`. 
 In particular, this depends on the size of the ring we work in, and also on the number of digits chosen for relinearization.
 
-Once we decided on the number of factors to drop, we can use the convenience function [`crate::gadget_product::recommended_rns_factors_to_drop()`] to choose the exact factors to drop in such a way as to preserve the quality of the relinearization key.
+Once we decided on the number of factors to drop, we can use the convenience function [`crate::gadget_product::digits::recommended_rns_factors_to_drop()`] to choose the exact factors to drop in such a way as to preserve the quality of the relinearization key.
 Alternatively, these can also determined manually: [`crate::bgv::BGVParams::mod_switch_down()`] takes a list of indices, which refer to the indices of the factors of `q` that will be dropped.
 ```rust
 #![feature(allocator_api)]
@@ -324,20 +324,16 @@ Alternatively, these can also determined manually: [`crate::bgv::BGVParams::mod_
 # let enc_x = ChosenBGVParamType::enc_sym(&P, &C_initial, &mut rng, &x, &sk);
 let enc_x_sqr = ChosenBGVParamType::hom_mul(&P, &C_initial, ChosenBGVParamType::clone_ct(&P, &C_initial, &enc_x), enc_x, &rk);
 
-let num_digits_to_drop = 1;
+let num_digits_to_drop = 2;
 let to_drop = recommended_rns_factors_to_drop(rk.0.gadget_vector_digits(), num_digits_to_drop);
 let C_new = ChosenBGVParamType::mod_switch_down_ciphertext_ring(&C_initial, &to_drop);
 
 let enc_x_modswitch = ChosenBGVParamType::mod_switch_down(&P, &C_new, &C_initial, &to_drop, enc_x_sqr);
-let sk_modswitch = ChosenBGVParamType::mod_switch_down_sk(&P, &C_new, &C_initial, &to_drop, &sk);
-let rk_modswitch = ChosenBGVParamType::mod_switch_down_rk(&P, &C_new, &C_initial, &to_drop, &rk);
+let sk_modswitch = ChosenBGVParamType::mod_switch_down_sk(&C_new, &C_initial, &to_drop, &sk);
+let rk_modswitch = ChosenBGVParamType::mod_switch_down_rk(&C_new, &C_initial, &to_drop, &rk);
 
 let enc_x_pow4 = ChosenBGVParamType::hom_mul(&P, &C_new, ChosenBGVParamType::clone_ct(&P, &C_initial, &enc_x_modswitch), enc_x_modswitch, &rk_modswitch);
-assert_eq!(22, ChosenBGVParamType::noise_budget(&P, &C_new, &enc_x_pow4, &sk_modswitch));
+assert_eq!(41, ChosenBGVParamType::noise_budget(&P, &C_new, &enc_x_pow4, &sk_modswitch));
 let dec_x_pow4 = ChosenBGVParamType::dec(&P, &C_new, enc_x_pow4, &sk_modswitch);
 assert_el_eq!(&P, P.pow(P.clone_el(&x), 4), &dec_x_pow4);
 ```
-Unfortunately, the current implementation currently cannot handle cases where we drop half of more of the prime factors of `q`.
-This is in particular a problem in cases where `digits` is very small (like the `2` in our case), since this means the first multiplication causes a large noise growth, and we have to greatly reduce the ciphertext modulus before the next multiplication.
-Improvements for these cases are planned for future versions of HE-Ring.
-For now, if you really have to work with such small HE parameters, consider using BFV instead.

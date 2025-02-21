@@ -63,8 +63,8 @@ fn main() {
     println!("log2(q') = {}", BigIntRing::RING.abs_log2_ceil(C_new.base_ring().modulus()).unwrap());
     
     let enc_x_modswitch = ChosenBGVParamType::mod_switch_down(&P, &C_new, &C_initial, &to_drop, enc_x_sqr);
-    let sk_modswitch = ChosenBGVParamType::mod_switch_down_sk(&P, &C_new, &C_initial, &to_drop, &sk);
-    let rk_modswitch = ChosenBGVParamType::mod_switch_down_rk(&P, &C_new, &C_initial, &to_drop, &rk);
+    let sk_modswitch = ChosenBGVParamType::mod_switch_down_sk(&C_new, &C_initial, &to_drop, &sk);
+    let rk_modswitch = ChosenBGVParamType::mod_switch_down_rk(&C_new, &C_initial, &to_drop, &rk);
     
     let enc_x_pow4 = ChosenBGVParamType::hom_mul(&P, &C_new, ChosenBGVParamType::clone_ct(&P, &C_initial, &enc_x_modswitch), enc_x_modswitch, &rk_modswitch);
     assert_eq!(22, ChosenBGVParamType::noise_budget(&P, &C_new, &enc_x_pow4, &sk_modswitch));

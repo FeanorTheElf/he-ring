@@ -49,7 +49,7 @@ use serde::Deserializer;
 /// 
 /// It becomes more interesting if fields of the result struct should be deserialized
 /// using a [`DeserializeSeed`], since in this case, it cannot be achieved using `#[derive(Deserialize)]`
-/// anymore. Note however that [`impl_deserialize_seed_for_dependent_struct!`] can only implement
+/// anymore. Note however that [`crate::impl_deserialize_seed_for_dependent_struct!`] can only implement
 /// [`DeserializeSeed`] for a type in terms of more basic [`DeserializeSeed`]s. Hence, the leaves of the
 /// "deserialization-tree" must still be implemented manually (this is also the case for `#[derive(Deserialize)]`
 /// of course, but the leaves here are usually std type `i64`, `&[u8]` or `String`, for which the implementation
