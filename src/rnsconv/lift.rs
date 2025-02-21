@@ -22,7 +22,7 @@ use super::RNSOperation;
 /// Stores values for an almost exact conversion between RNS bases.
 /// A complete conversion refers to the function
 /// ```text
-/// Z/QZ -> Z/Q'Z, x -> [lift(x)]
+///   Z/QZ -> Z/Q'Z, x -> [lift(x)]
 /// ```
 /// In our case, the output of the function is allowed to have an error of `{ -Q, 0, Q }`,
 /// unless the shortest lift of the input is bounded by `Q/4`, in which case the result
@@ -33,7 +33,7 @@ use super::RNSOperation;
 /// Implementation is changed to approximating the lifted value using lower precision integers,
 /// which can be used to determine the overflow when computing
 /// ```text
-/// lift(x) = sum_q lift(x * q/Q mod q) * Q/q
+///   lift(x) = sum_q lift(x * q/Q mod q) * Q/q
 /// ```
 /// modulo some `q'`.
 /// 
@@ -146,7 +146,7 @@ impl<A> RNSOperation for AlmostExactBaseConversion<A>
     ///
     /// Performs the (almost) exact RNS base conversion
     /// ```text
-    ///     Z/QZ -> Z/Q'Z, x -> smallest_lift(x) + kQ mod Q''
+    ///   Z/QZ -> Z/Q'Z, x -> smallest_lift(x) + kQ mod Q''
     /// ```
     /// where `k in { -1, 0, 1 }`.
     /// 

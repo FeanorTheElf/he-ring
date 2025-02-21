@@ -20,7 +20,7 @@ const ZZ: StaticRing<i64> = StaticRing::RING;
 ///
 /// Returns the best arithmetic circuit that computes a function
 /// ```text
-/// digitex: Z/2^eZ -> (Z/2^eZ)^log(e)
+///   digitex: Z/2^eZ -> (Z/2^eZ)^log(e)
 /// ```
 /// that satisfies `digitex(x)[i] = (x mod 2) mod 2^(2^i)`.
 /// `e` must be a power of two.

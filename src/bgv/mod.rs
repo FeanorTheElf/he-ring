@@ -30,7 +30,7 @@ use crate::number_ring::odd_cyclotomic::CompositeCyclotomicNumberRing;
 use crate::number_ring::{sample_primes, largest_prime_leq_congruent_to_one, HECyclotomicNumberRing, HENumberRing};
 use crate::number_ring::pow2_cyclotomic::Pow2CyclotomicNumberRing;
 use crate::number_ring::quotient::{NumberRingQuotient, NumberRingQuotientBase};
-use crate::rnsconv::bgv_rescale::CongruenceAwareAlmostExactBaseConversion;
+use crate::rnsconv::bgv_rescale::CongruencePreservingAlmostExactBaseConversion;
 use crate::rnsconv::RNSOperation;
 use crate::{DefaultCiphertextAllocator, DefaultConvolution, DefaultNegacyclicNTT};
 
@@ -388,7 +388,7 @@ pub trait BGVParams {
             return ct;
         } else {
 
-            let compute_delta = CongruenceAwareAlmostExactBaseConversion::new_with(
+            let compute_delta = CongruencePreservingAlmostExactBaseConversion::new_with(
                 drop_moduli.iter().map(|i| *Cold.base_ring().at(*i)).collect(),
                 Cnew.base_ring().as_iter().cloned().collect(),
                 *P.base_ring(),

@@ -28,7 +28,7 @@ const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
 /// Works separately on each block `(b0, ..., b(l - 1))` of size `l = blocksize` along the given given hypercube dimension.
 /// This function computes the length-`l` DWT
 /// ```text
-/// sum_(0 <= i < l) ai * 𝝵_(4l)^(i * g^j)
+///   sum_(0 <= i < l) ai * 𝝵_(4l)^(i * g^j)
 /// ``` 
 /// from the length-`l/2` DWTs of the even-index resp. odd-index entries of `ai`. These two sub-DWTs are expected to be written
 /// in the first resp. second half of the input block (i.e. not interleaved, this is where the "bitreversed" comes from).
@@ -36,13 +36,13 @@ const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
 /// 
 /// More concretely, it is expected that the input to the linear transform is
 /// ```text
-/// bj = sum_(0 <= i < l/2) a(2i) * 𝝵_(4l)^(2 * i * g^j)              if j < l/2
-/// bj = sum_(0 <= i < l/2) a(2i + 1) * 𝝵_(4l)^(2 * i * g^j)
-///    = sum_(0 <= i < l/2) a(2i + 1) * 𝝵_(4l)^(2 * i * g^(j - l/2))  otherwise
+///   bj = sum_(0 <= i < l/2) a(2i) * 𝝵_(4l)^(2 * i * g^j)              if j < l/2
+///   bj = sum_(0 <= i < l/2) a(2i + 1) * 𝝵_(4l)^(2 * i * g^j)
+///      = sum_(0 <= i < l/2) a(2i + 1) * 𝝵_(4l)^(2 * i * g^(j - l/2))  otherwise
 /// ```
 /// In this case, the output is
 /// ```text
-/// bj = sum_(0 <= i < l) ai * 𝝵_(4l)^(i * g^j)
+///   bj = sum_(0 <= i < l) ai * 𝝵_(4l)^(i * g^j)
 /// ```
 /// 
 /// # Notes
@@ -220,7 +220,7 @@ fn pow2_bitreversed_inv_dwt_butterfly<G, NumberRing>(H: &DefaultHypercube<Number
 /// 
 /// More concretely, this computes
 /// ```text
-/// sum_(0 <= i < m) a(bitrev(i)) * 𝝵^(n / (4m) * row_autos(idxs) * g^j)
+///   sum_(0 <= i < m) a(bitrev(i)) * 𝝵^(n / (4m) * row_autos(idxs) * g^j)
 /// ```
 /// for `j` from `0` to `m`.
 /// Here `𝝵` is the canonical generator of the slot ring, which is a primitive `n`-th root of unity.

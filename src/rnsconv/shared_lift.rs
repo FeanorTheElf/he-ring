@@ -14,7 +14,7 @@ type UsedBaseConversion<A> = super::lift::AlmostExactBaseConversion<A>;
 /// Computes almost exact base conversion with a shared factor.
 /// The exact map would be
 /// ```text
-/// Z/aqZ -> Z/aq'Z, x -> lift(x) mod aq'
+///   Z/aqZ -> Z/aq'Z, x -> lift(x) mod aq'
 /// ```
 /// but as usual, we allow an error of `+/- aq`, unless the shortest 
 /// lift of the input is bounded by `aq/4`, in which case the result

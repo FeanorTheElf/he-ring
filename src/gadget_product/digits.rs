@@ -123,7 +123,7 @@ impl RNSGadgetVectorDigitIndices {
     /// # use feanor_math::seq::*;
     /// # use he_ring::gadget_product::digits::*;
     /// let original_digits = RNSGadgetVectorDigitIndices::from([0..3, 3..5, 5..7].clone_els());
-    /// let digits = original_digits.remove_indices(DropModuliIndices::from_ref(&[1, 2, 5], 7));
+    /// let digits = original_digits.remove_indices(RNSFactorIndexList::from_ref(&[1, 2, 5], 7));
     /// assert_eq!(3, digits.len());
     /// assert_eq!(0..1, digits.at(0));
     /// assert_eq!(1..3, digits.at(1));
@@ -134,7 +134,7 @@ impl RNSGadgetVectorDigitIndices {
     /// # use feanor_math::seq::*;
     /// # use he_ring::gadget_product::digits::*;
     /// let original_digits = RNSGadgetVectorDigitIndices::from([0..3, 3..5, 5..7].clone_els());
-    /// let digits = original_digits.remove_indices(DropModuliIndices::from_ref(&[0, 1, 2, 5], 7));
+    /// let digits = original_digits.remove_indices(RNSFactorIndexList::from_ref(&[0, 1, 2, 5], 7));
     /// assert_eq!(2, digits.len());
     /// assert_eq!(0..2, digits.at(0));
     /// assert_eq!(2..3, digits.at(1));
@@ -245,7 +245,7 @@ impl RNSFactorIndexList {
     /// # Example
     /// ```
     /// # use he_ring::gadget_product::digits::*;
-    /// assert_eq!(1, DropModuliIndices::from_ref(&[2, 5], 8).num_within(&(0..5)));
+    /// assert_eq!(1, RNSFactorIndexList::from_ref(&[2, 5], 8).num_within(&(0..5)));
     /// ```
     /// 
     pub fn num_within(&self, range: &Range<usize>) -> usize {
@@ -267,7 +267,7 @@ impl RNSFactorIndexList {
 
     ///
     /// Returns the indices contained in `self` but not in `context`, however - as opposed to
-    /// [`DropModuliIndices::subtract()`] - relative to the RNS base that has `context` already removed.
+    /// [`RNSFactorIndexList::subtract()`] - relative to the RNS base that has `context` already removed.
     /// This assumes that `context` is a subset of `self`.
     /// 
     /// More concretely, this returns
@@ -280,7 +280,7 @@ impl RNSFactorIndexList {
     /// # Example
     /// ```
     /// # use he_ring::gadget_product::digits::*;
-    /// assert_eq!(&[1usize, 3, 5][..], &DropModuliIndices::from_ref(&[1, 2, 4, 5, 7], 8).pushforward(DropModuliIndices::from_ref(&[2, 5], 8)) as &[usize])
+    /// assert_eq!(&[1usize, 3, 5][..], &RNSFactorIndexList::from_ref(&[1, 2, 4, 5, 7], 8).pushforward(RNSFactorIndexList::from_ref(&[2, 5], 8)) as &[usize])
     /// ```
     /// 
     pub fn pushforward(&self, context: &Self) -> Box<Self> {
@@ -310,7 +310,7 @@ impl RNSFactorIndexList {
     ///
     /// Returns the indices of the elements that will removed when first removing `context`,
     /// and then removing `self` w.r.t. the new RNS base that already has `context` removed.
-    /// In this sense, it is the counterpart to [`DropModuliIndices::pushforward()`].
+    /// In this sense, it is the counterpart to [`RNSFactorIndexList::pushforward()`].
     /// 
     /// More concretely, this returns
     /// ```text
@@ -322,7 +322,7 @@ impl RNSFactorIndexList {
     /// # Example
     /// ```
     /// # use he_ring::gadget_product::digits::*;
-    /// assert_eq!(&[1, 2, 3, 5, 6][..], &DropModuliIndices::from_ref(&[1, 2, 4], 6).pullback(DropModuliIndices::from_ref(&[2, 5], 8)) as &[usize])
+    /// assert_eq!(&[1, 2, 3, 5, 6][..], &RNSFactorIndexList::from_ref(&[1, 2, 4], 6).pullback(RNSFactorIndexList::from_ref(&[2, 5], 8)) as &[usize])
     /// ```
     /// 
     pub fn pullback(&self, context: &Self) -> Box<Self> {

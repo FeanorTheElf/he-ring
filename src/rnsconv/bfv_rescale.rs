@@ -26,7 +26,7 @@ const ZZbig: BigIntRing = BigIntRing::RING;
 /// Computes almost exact rescaling with final conversion.
 /// The exact rescaling with conversion refers to the map
 /// ```text
-/// Z/qZ -> Z/bZ, x -> round(lift(x) * a/b) mod b
+///   Z/qZ -> Z/bZ, x -> round(lift(x) * a/b) mod b
 /// ```
 /// where `b | q` and `gcd(a, q) = 1`. We allow this implementation to
 /// make an error of `+/- 1` in the result.
@@ -37,7 +37,7 @@ const ZZbig: BigIntRing = BigIntRing::RING;
 /// Primarily, this is relevant as it is used during multiplication for BFV.
 /// This is also the reason why we restrict to the map as above, instead of
 /// ```text
-/// Z/qZ -> Z/cZ, x -> round(lift(x) * a/b) mod c
+///   Z/qZ -> Z/cZ, x -> round(lift(x) * a/b) mod c
 /// ```
 /// for an arbitrary `c`, which can be implemented just as easily.
 /// 
@@ -124,7 +124,7 @@ impl<A> RNSOperation for AlmostExactRescalingConvert<A>
 /// Computes almost exact rescaling.
 /// The exact rescaling refers to the map
 /// ```text
-/// Z/qZ -> Z/(aq/b)Z, x -> round(lift(x) * a/b) mod aq/b
+///   Z/qZ -> Z/(aq/b)Z, x -> round(lift(x) * a/b) mod aq/b
 /// ```
 /// where `b | q` and `gcd(a, q) = 1`. We allow allow an error of `+/- 1`, 
 /// as this enables a fast RNS implementation

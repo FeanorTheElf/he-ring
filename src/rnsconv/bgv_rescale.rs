@@ -1,11 +1,13 @@
 use std::alloc::Allocator;
 use std::alloc::Global;
 
+use feanor_math::algorithms::miller_rabin::prev_prime;
 use feanor_math::divisibility::DivisibilityRingStore;
 use feanor_math::homomorphism::*;
 use feanor_math::matrix::*;
 use feanor_math::rings::zn::*;
 use feanor_math::rings::zn::zn_64::*;
+use feanor_math::primitive_int::*;
 use feanor_math::integer::int_cast;
 use feanor_math::integer::*;
 use feanor_math::ring::*;
@@ -13,7 +15,6 @@ use feanor_math::ordered::OrderedRingStore;
 use feanor_math::seq::*;
 use tracing::instrument;
 
-use super::sort_unstable_permutation;
 use super::RNSOperation;
 
 const ZZbig: BigIntRing = BigIntRing::RING;
@@ -33,39 +34,21 @@ type UsedBaseConversion<A> = super::lift::AlmostExactBaseConversion<A>;
 /// This means that the "closest integer" above might only be the second-closest when there is
 /// almost a tie.
 /// 
-/// We also assume that `b^2 <= q / 8`.
-/// 
 /// In some cases, BGV modulus-switching can be implemented more efficiently by using
 /// [`CongruenceAwareAlmostExactBaseConversion`].
 /// 
 pub struct CongruencePreservingRescaling<A = Global>
     where A: Allocator + Clone
 {
-    /// ordered as supplied when instantiating the object
-    input_moduli_unordered: Vec<Zn>,
-    /// ordered as supplied when instantiating the object
-    output_moduli_unordered: Vec<Zn>,
-    /// ordered in ascending order
-    aq_moduli: Vec<Zn>,
-    /// indices of moduli belonging to `b` as part of `aq_moduli`
-    b_moduli_indices: Vec<usize>,
-    /// the `i`-th entry points to the position of `aq_moduli[i]` in `input_moduli_unordered`, or `None` if `aq_moduli[i]`
-    /// belongs to `a`
-    input_permutation: Vec<Option<usize>>,
-    /// the `i`-th entry points to the position of `aq_moduli[i]` in `output_moduli_unordered`, or `None` if `aq_moduli[i]`
-    /// belongs to `b`
-    output_permutation: Vec<Option<usize>>,
-    /// moduli of `aq` are sorted as in `aq_moduli`
-    b_to_aq_lift: UsedBaseConversion<A>,
-    /// moduli of `aq` are sorted as in `aq_moduli`
-    aq_to_t_conv: UsedBaseConversion<A>,
     allocator: A,
-    /// `a` as an element of each modulus of `q`
-    a: Vec<Option<El<Zn>>>,
-    /// `b^-1` as an element of each modulus of `aq/b`
-    b_inv: Vec<Option<El<Zn>>>,
-    /// `b^-1` as an element of `Z/tZ`
-    b_inv_mod_t: El<Zn>
+    q_moduli: Vec<Zn>,
+    b_moduli_indices: Vec<usize>,
+    /// the `i`-th entry contains the index of `output_rings()[i]` in `input_rings()`, or
+    /// `None` if `output_rings()[i]` belongs to `a`
+    output_input_permutation: Vec<Option<usize>>,
+    compute_delta: CongruencePreservingAlmostExactBaseConversion<A>,
+    a_mod_q: Vec<El<Zn>>,
+    b_inv_mod_aq_over_b: Vec<El<Zn>>
 }
 
 impl<A> CongruencePreservingRescaling<A>
@@ -90,71 +73,32 @@ impl<A> CongruencePreservingRescaling<A>
         for ring in &num_moduli {
             assert!(ring.integer_ring().get_ring() == ZZ.get_ring());
         }
+        let a_moduli_len = num_moduli.len();
+
+        let q = ZZbig.prod(in_moduli.iter().map(|rns_factor| int_cast(ZZ.clone_el(rns_factor.modulus()), &ZZbig, ZZ)));
+        let b = ZZbig.prod(den_moduli_indices.iter().map(|i| int_cast(ZZ.clone_el(in_moduli[*i].modulus()), &ZZbig, ZZ)));
+        let a = ZZbig.prod(num_moduli.iter().map(|rns_factor| int_cast(ZZ.clone_el(rns_factor.modulus()), &ZZbig, ZZ)));
+
+        let output_rings = (0..in_moduli.len()).filter(|i| !den_moduli_indices.contains(i)).map(|i| in_moduli[i]).chain(num_moduli.into_iter()).collect::<Vec<_>>();
+        let output_input_permutation = (0..in_moduli.len()).filter(|i| !den_moduli_indices.contains(i)).map(|i| Some(i)).chain((0..a_moduli_len).map(|_| None)).collect::<Vec<_>>();
+
+        let compute_delta = CongruencePreservingAlmostExactBaseConversion::new_with(
+            den_moduli_indices.iter().map(|i| in_moduli[*i]).collect(), 
+            output_rings, 
+            plaintext_modulus, 
+            allocator.clone()
+        );
+        let output_rings = compute_delta.output_rings();
         
-        let q = ZZbig.prod(in_moduli.iter().map(|Zn| int_cast(Zn.integer_ring().clone_el(Zn.modulus()), &ZZbig, Zn.integer_ring())));
-        let a = ZZbig.prod(num_moduli.iter().map(|Zn| int_cast(Zn.integer_ring().clone_el(Zn.modulus()), &ZZbig, Zn.integer_ring())));
-        let b = ZZbig.prod(den_moduli_indices.iter().map(|i| &in_moduli[*i]).map(|Zn| int_cast(Zn.integer_ring().clone_el(Zn.modulus()), &ZZbig, Zn.integer_ring())));
-        
-        // after the lifting to `aq/b`, we have a value `<= 2b` in absolute value; this must be `<= (aq/b)/4` for
-        // the mod-`t` base conversion to not cause any error
-        assert!(ZZbig.is_geq(&ZZbig.rounded_div(ZZbig.mul_ref(&q, &a), &b), &ZZbig.int_hom().mul_ref_map(&b, &4)));
-        
-        let aq_moduli_unsorted = in_moduli.iter().copied().chain(num_moduli.iter().copied()).collect::<Vec<_>>();
-        let (aq_moduli, aq_permutation) = sort_unstable_permutation(aq_moduli_unsorted.clone(), |ring_l, ring_r| ZZ.cmp(ring_l.modulus(), ring_r.modulus()));
-
-        let input_moduli_unordered = in_moduli;
-        let mut input_permutation = Vec::new();
-        input_permutation.resize(aq_moduli.len(), None);
-        for i in 0..input_moduli_unordered.len() {
-            input_permutation[aq_permutation[i]] = Some(i);
-        }
-
-        let mut output_moduli_unordered = Vec::new();
-        let mut output_permutation = Vec::new();
-        output_permutation.resize(aq_moduli.len(), None);
-        let mut b_moduli_indices = Vec::new();
-        let mut b_inv_mod_aq_over_b = Vec::new();
-        b_inv_mod_aq_over_b.resize(aq_moduli.len(), None);
-        let mut a_mod_q = Vec::new();
-        a_mod_q.resize(aq_moduli.len(), None);
-
-        for i in 0..input_moduli_unordered.len() {
-            let index_in_ordered = aq_permutation[i];
-            if den_moduli_indices.contains(&i) {
-                b_moduli_indices.push(index_in_ordered);
-            } else {
-                output_permutation[index_in_ordered] = Some(output_moduli_unordered.len());
-                output_moduli_unordered.push(aq_moduli[index_in_ordered]);
-                b_inv_mod_aq_over_b[index_in_ordered] = Some(aq_moduli[index_in_ordered].invert(&aq_moduli[index_in_ordered].coerce(&ZZbig, ZZbig.clone_el(&b))).unwrap());
-            }
-            a_mod_q[index_in_ordered] = Some(aq_moduli[index_in_ordered].coerce(&ZZbig, ZZbig.clone_el(&a)));
-        }
-
-        for i in 0..num_moduli.len() {
-            let index_in_ordered = aq_permutation[i + input_moduli_unordered.len()];
-            output_permutation[index_in_ordered] = Some(output_moduli_unordered.len());
-            output_moduli_unordered.push(aq_moduli[index_in_ordered]);
-            b_inv_mod_aq_over_b[index_in_ordered] = Some(aq_moduli[index_in_ordered].invert(&aq_moduli[index_in_ordered].coerce(&ZZbig, ZZbig.clone_el(&b))).unwrap());
-        }
-
-        Self {
-            a: a_mod_q,
-            aq_moduli: aq_moduli.clone(),
-            b_inv: b_inv_mod_aq_over_b,
-            input_moduli_unordered,
-            input_permutation: input_permutation,
-            output_moduli_unordered,
-            output_permutation: output_permutation,
-            b_inv_mod_t: plaintext_modulus.invert(&plaintext_modulus.coerce(&ZZbig, b)).unwrap(),
-            b_to_aq_lift: UsedBaseConversion::new_with(b_moduli_indices.iter().map(|i| aq_moduli[*i]).collect(), aq_moduli.clone(), allocator.clone()),
-            aq_to_t_conv: UsedBaseConversion::new_with(aq_moduli, vec![plaintext_modulus], allocator.clone()),
-            b_moduli_indices: b_moduli_indices,
-            allocator: allocator
-        }
-    }
-
-    fn t_modulus(&self) -> &Zn {
-        &self.aq_to_t_conv.output_rings()[0]
+        return Self {
+            a_mod_q: in_moduli.iter().map(|rns_factor| rns_factor.coerce(&ZZbig, ZZbig.clone_el(&a))).collect(),
+            b_inv_mod_aq_over_b: output_rings.iter().map(|rns_factor| rns_factor.invert(&rns_factor.coerce(&ZZbig, ZZbig.clone_el(&b))).unwrap()).collect(),
+            b_moduli_indices: den_moduli_indices,
+            allocator: allocator,
+            compute_delta: compute_delta,
+            output_input_permutation: output_input_permutation,
+            q_moduli: in_moduli
+        };
     }
 }
 
@@ -166,11 +110,11 @@ impl<A> RNSOperation for CongruencePreservingRescaling<A>
     type RingType = ZnBase;
 
     fn input_rings<'a>(&'a self) -> &'a [Zn] {
-        &self.input_moduli_unordered
+        &self.q_moduli
     }
 
     fn output_rings<'a>(&'a self) -> &'a [Zn] {
-        &self.output_moduli_unordered
+        self.compute_delta.output_rings()
     }
 
     ///
@@ -188,122 +132,94 @@ impl<A> RNSOperation for CongruencePreservingRescaling<A>
         where V1: AsPointerToSlice<El<Self::Ring>>,
             V2: AsPointerToSlice<El<Self::Ring>>
     {
-        // `input` is ordered as in `input_moduli_unordered`
         assert_eq!(input.row_count(), self.input_rings().len());
         assert_eq!(output.row_count(), self.output_rings().len());
         assert_eq!(input.col_count(), output.col_count());
 
-        // Compute `x := el * a`, ordered as in `aq_moduli`
-        let mut x = Vec::with_capacity_in(self.aq_moduli.len() * input.col_count(), self.allocator.clone());
-        x.extend((0..self.aq_moduli.len()).flat_map(|i| (0..input.col_count()).map(move |j| {
-            if let Some(input_i) = self.input_permutation[i] {
-                debug_assert!(self.aq_moduli[i].get_ring() == self.input_rings()[input_i].get_ring());
-                self.aq_moduli[i].mul_ref(input.at(input_i, j), self.a.at(i).as_ref().unwrap())
-            } else {
-                self.aq_moduli[i].zero()
-            }
-        })));
-        let mut x = SubmatrixMut::from_1d(&mut x, self.aq_moduli.len(), input.col_count());
+        let col_count = input.col_count();
 
-        let mut x_mod_b = Vec::with_capacity_in(self.b_moduli_indices.len() * input.col_count(), self.allocator.clone());
-        x_mod_b.extend(self.b_moduli_indices.iter().flat_map(|i| (0..input.col_count()).map(|j| self.aq_moduli[*i].clone_el(x.at(*i, j)))));
-        let x_mod_b = Submatrix::from_1d(&x_mod_b, self.b_moduli_indices.len(), input.col_count());
-
-        // Compute `lift(x mod b)`; Here we introduce an error of `+/- b`; ordered as in `aq_moduli`
-        let mut x_mod_b_lift = Vec::with_capacity_in(self.aq_moduli.len() * input.col_count(), self.allocator.clone());
-        x_mod_b_lift.extend((0..(self.aq_moduli.len() * input.col_count())).map(|idx| self.aq_moduli.at(idx / input.col_count()).zero()));
-        let mut x_mod_b_lift = SubmatrixMut::from_1d(&mut x_mod_b_lift, self.aq_moduli.len(), input.col_count());
-        self.b_to_aq_lift.apply(x_mod_b, x_mod_b_lift.reborrow());
-
-        // Make `x` divisible by `b` by subtracting `lift(x mod b)`
-        for (i, Zk) in self.aq_moduli.iter().enumerate() {
-            for j in 0..input.col_count() {
-                Zk.sub_assign_ref(x.at_mut(i, j), x_mod_b_lift.at(i, j));
+        let mut ax_mod_b = Vec::with_capacity_in(self.b_moduli_indices.len() * col_count, self.allocator.clone());
+        for i in &self.b_moduli_indices {
+            for j in 0..col_count {
+                ax_mod_b.push(self.q_moduli[*i].mul_ref(input.at(*i, j), &self.a_mod_q[*i]));
             }
         }
+        let ax_mod_b = Submatrix::from_1d(&ax_mod_b, self.b_moduli_indices.len(), col_count);
 
-        // now we have to ensure congruence; the difference between `x = el * a` and `b * exactdiv(x, b)` is exactly `x_mod_b_lift`;
-        // this is small, so no error here
-        let mut diff_mod_t = Vec::with_capacity_in(input.col_count(), self.allocator.clone());
-        diff_mod_t.extend((0..input.col_count()).map(|_j| self.t_modulus().zero()));
-        let mut diff_mod_t = SubmatrixMut::from_1d(&mut diff_mod_t, 1, input.col_count());
-        self.aq_to_t_conv.apply(x_mod_b_lift.as_const(), diff_mod_t.reborrow());
-        for j in 0..input.col_count() {
-            self.t_modulus().mul_assign_ref(diff_mod_t.at_mut(0, j), &self.b_inv_mod_t);
-        }
+        self.compute_delta.apply(ax_mod_b, output.reborrow());
 
-        // this is now `round((aq/b) * el / q)`, possibly `+/- 1`
-        for i in 0..self.aq_moduli.len() {
-            if let Some(output_i) = self.output_permutation[i] {
-                debug_assert!(self.aq_moduli[i].get_ring() == self.output_rings()[output_i].get_ring());
-                let Zk = &self.aq_moduli[i];
-                let modulo = Zk.can_hom(self.t_modulus().integer_ring()).unwrap();
-                debug_assert!(Zk.integer_ring().get_ring() == self.t_modulus().integer_ring().get_ring());
-                let b_inv = self.b_inv.at(i).as_ref().unwrap();
-                for j in 0..input.col_count() {
-                    *output.at_mut(output_i, j) = Zk.mul_ref(x.at(i, j), b_inv);
-    
-                    // fix the congruence
-                    Zk.add_assign(output.at_mut(output_i, j), modulo.map(self.t_modulus().smallest_lift(self.t_modulus().clone_el(diff_mod_t.at(0, j)))));
+        for i in 0..self.output_rings().len() {
+            for j in 0..col_count {
+                if let Some(input_i) = self.output_input_permutation[i] {
+                    debug_assert!(self.output_rings()[i].get_ring() == self.input_rings()[input_i].get_ring());
+                    *output.at_mut(i, j) = self.output_rings()[i].mul(
+                        self.output_rings()[i].sub(
+                            self.output_rings()[i].mul(*input.at(input_i, j), self.a_mod_q[input_i]),
+                            *output.at(i, j)
+                        ),
+                        self.b_inv_mod_aq_over_b[i]
+                    );
+                } else {
+                    *output.at_mut(i, j) = self.output_rings()[i].mul(
+                        self.output_rings()[i].negate(*output.at(i, j)),
+                        self.b_inv_mod_aq_over_b[i]
+                    );
                 }
             }
         }
-        // output should be ordered according to `output_moduli_unordered`
     }
 }
 
 ///
-/// Computes the difference of the input to a multiple of `b`, in a way that can be used for BGV
-/// modulus-switching. Hence, this can be used as alternative to [`CongruencePreservingRescaling`].
+/// Computes the base conversion that preserves the congruence modulo some `t` in a certain sense. 
+/// In particular, this can be used as alternative to [`CongruencePreservingRescaling`] during BGV
+/// modulus switching.
 /// 
 /// Concretely, the image `y` of `x` is the almost-smallest integer that is `= x mod b` and `= 0 mod t`.
 /// In particular, assuming that `b | q`, we compute the map
 /// ```text
-/// Z/bZ -> Z/(q/b)Z,  x -> lift*(x) - b lift(lift*(x) b^-1 mod t)
+///   Z/bZ -> Z/qZ,  x -> lift*(x) - b lift(lift*(x) b^-1 mod t)
 /// ```
 /// To allow an efficient RNS implementation, we allow `lift*` to make an error of `+/- b`.
 /// Hence, "almost-smallest" could be the smallest, or second-smallest integer if there is
 /// almost a tie.
 /// 
-/// We also assume that `b^2 <= q/8`.
-/// 
 /// # Difference to [`CongruencePreservingRescaling`]
 /// 
 /// [`CongruencePreservingRescaling`] computes the whole BGV modulus-switch. On the other hand, after
-/// performing [`CongruenceAwareAlmostExactBaseConversion`], it is still necessary to subtract the result and
+/// performing [`CongruencePreservingAlmostExactBaseConversion`], it is still necessary to subtract the result and
 /// scale by `b^-1` to achieve the same effect. However, the advantage is that these steps can already
 /// be performed in double-RNS representation, which means that we only need to convert the part `x mod b`
 /// to coefficient/small-basis representation.
 /// 
-pub struct CongruenceAwareAlmostExactBaseConversion<A = Global>
+pub struct CongruencePreservingAlmostExactBaseConversion<A = Global>
     where A: Allocator + Clone
 {
     /// ordered as supplied when instantiating the object
-    output_moduli_unordered: Vec<Zn>,
-    /// ordered as supplied when instantiating the object
     b_moduli: Vec<Zn>,
-    /// ordered in ascending order
-    q_over_b_moduli: Vec<Zn>,
-    /// the `i`-th entry points to the position of `q_over_b_moduli[i]` in `output_moduli_unordered`
-    output_permutation: Vec<usize>,
-    /// moduli of `q/b` are sorted as in `q_over_b_moduli`
-    b_to_q_over_b_lift: UsedBaseConversion<A>,
+    /// moduli corresponding to `q`, possibly with a additional helper moduli
+    intermediate_moduli: Vec<Zn>,
+    /// the first this many moduli of `intermediate_moduli` are the output moduli
+    q_moduli_count: usize,
+    /// moduli of `q` are sorted as in `intermediate_moduli`
+    b_to_intermediate_lift: UsedBaseConversion<A>,
     /// moduli of `q` are sorted as in `q_over_b_moduli`
-    q_over_b_to_t_conv: UsedBaseConversion<A>,
+    intermediate_to_t_conv: UsedBaseConversion<A>,
     allocator: A,
     /// `b^-1` as an element of `Z/tZ`
     b_inv_mod_t: El<Zn>,
-    /// `b` as an element of `Z/(q/b)Z`
-    b_mod_q_over_b: Vec<El<Zn>>
+    /// `b` as an element of `Z/qZ`
+    b_mod_q: Vec<El<Zn>>
 }
 
-impl<A> CongruenceAwareAlmostExactBaseConversion<A>
+impl<A> CongruencePreservingAlmostExactBaseConversion<A>
     where A: Allocator + Clone
 {
     ///
     /// Creates a new [`CongruenceAwareAlmostExactBaseConversion`], where
-    ///  - `q` is the product of `in_moduli` and `out_moduli`
-    ///  - `b` is the product of the moduli of `in_moduli`
+    ///  - `b` is the product of the moduli in `in_moduli`
+    ///  - `q` is the product of the moduli in `out_moduli`
+    ///  - `t` is the modulus of `plaintext_modulus`
     /// 
     #[instrument(skip_all)]
     pub fn new_with(in_moduli: Vec<Zn>, out_moduli: Vec<Zn>, plaintext_modulus: Zn, allocator: A) -> Self {
@@ -315,41 +231,44 @@ impl<A> CongruenceAwareAlmostExactBaseConversion<A>
             assert!(ring.integer_ring().get_ring() == ZZ.get_ring());
         }
         
-        let b = ZZbig.prod(in_moduli.iter().map(|Zn| int_cast(Zn.integer_ring().clone_el(Zn.modulus()), &ZZbig, Zn.integer_ring())));
-        let q_over_b = ZZbig.prod(out_moduli.iter().map(|Zn| int_cast(Zn.integer_ring().clone_el(Zn.modulus()), &ZZbig, Zn.integer_ring())));
-        // after the lifting to `q/b`, we have a value `<= 2b` in absolute value; this must be `<= (q/b)/4` for
-        // the mod-`t` base conversion to not cause any error
-        assert!(ZZbig.is_geq(&q_over_b, &ZZbig.int_hom().mul_ref_map(&b, &4)));
+        let b = ZZbig.prod(in_moduli.iter().map(|rns_factor| int_cast(ZZ.clone_el(rns_factor.modulus()), &ZZbig, ZZ)));
 
         let b_moduli = in_moduli.clone();
-        let q_over_b_moduli_unsorted = out_moduli;
-        let (q_over_b_moduli, q_over_b_permutation) = sort_unstable_permutation(q_over_b_moduli_unsorted.clone(), |ring_l, ring_r| ZZ.cmp(ring_l.modulus(), ring_r.modulus()));
-        let output_moduli_unordered = q_over_b_moduli_unsorted;
-        let mut output_permutation = Vec::new();
-        output_permutation.resize(q_over_b_moduli.len(), usize::MAX);
-        for i in 0..output_moduli_unordered.len() {
-            output_permutation[q_over_b_permutation[i]] = i;
+        let q_moduli_count = out_moduli.len();
+        let mut intermediate_moduli = out_moduli;
+
+        // after the lifting to `intermediate`, we have a value `<= 2b` in absolute value; this must be `<= intermediate/4` for
+        // the mod-`t` base conversion to not cause any error
+        let mut current = (1 << 62) / 9;
+        while ZZbig.is_lt(
+            &ZZbig.prod(intermediate_moduli.iter().map(|rns_factor| int_cast(*rns_factor.modulus(), &ZZbig, ZZ))), 
+            &ZZbig.int_hom().mul_ref_map(&b, &8))
+        {
+            current = prev_prime(StaticRing::<i64>::RING, current).unwrap();
+            while intermediate_moduli.iter().any(|rns_factor| ZZ.divides(rns_factor.modulus(), &current)) {
+                current = prev_prime(StaticRing::<i64>::RING, current).unwrap();
+            }
+            intermediate_moduli.push(Zn::new(current as u64));
         }
 
         Self {
-            q_over_b_moduli: q_over_b_moduli.clone(),
-            output_moduli_unordered,
-            output_permutation: output_permutation,
-            b_mod_q_over_b: q_over_b_moduli.iter().map(|Zp| Zp.coerce(&ZZbig, ZZbig.clone_el(&b))).collect(),
+            intermediate_moduli: intermediate_moduli.clone(),
+            q_moduli_count: q_moduli_count,
+            b_mod_q: intermediate_moduli[..q_moduli_count].iter().map(|rns_factor| rns_factor.coerce(&ZZbig, ZZbig.clone_el(&b))).collect(),
             b_inv_mod_t: plaintext_modulus.invert(&plaintext_modulus.coerce(&ZZbig, b)).unwrap(),
-            b_to_q_over_b_lift: UsedBaseConversion::new_with(b_moduli.clone(), q_over_b_moduli.clone(), allocator.clone()),
-            q_over_b_to_t_conv: UsedBaseConversion::new_with(q_over_b_moduli, vec![plaintext_modulus], allocator.clone()),
+            b_to_intermediate_lift: UsedBaseConversion::new_with(b_moduli.clone(), intermediate_moduli.clone(), allocator.clone()),
+            intermediate_to_t_conv: UsedBaseConversion::new_with(intermediate_moduli, vec![plaintext_modulus], allocator.clone()),
             b_moduli: b_moduli,
             allocator: allocator
         }
     }
 
     fn t_modulus(&self) -> &Zn {
-        &self.q_over_b_to_t_conv.output_rings()[0]
+        &self.intermediate_to_t_conv.output_rings()[0]
     }
 }
 
-impl<A> RNSOperation for CongruenceAwareAlmostExactBaseConversion<A>
+impl<A> RNSOperation for CongruencePreservingAlmostExactBaseConversion<A>
     where A: Allocator + Clone
 {
     type Ring = Zn;
@@ -361,7 +280,7 @@ impl<A> RNSOperation for CongruenceAwareAlmostExactBaseConversion<A>
     }
 
     fn output_rings<'a>(&'a self) -> &'a [Zn] {
-        &self.output_moduli_unordered
+        &self.intermediate_moduli[..self.q_moduli_count]
     }
 
     #[instrument(skip_all)]
@@ -374,42 +293,38 @@ impl<A> RNSOperation for CongruenceAwareAlmostExactBaseConversion<A>
         assert_eq!(output.row_count(), self.output_rings().len());
         assert_eq!(input.col_count(), output.col_count());
 
-        // Compute `lift(x) mod q/b`
-        let mut x_lift: Vec<ZnEl, A> = Vec::with_capacity_in(self.q_over_b_moduli.len() * input.col_count(), self.allocator.clone());
-        x_lift.extend((0..(self.q_over_b_moduli.len() * input.col_count())).map(|idx| self.q_over_b_moduli.at(idx / input.col_count()).zero()));
-        let mut x_lift = SubmatrixMut::from_1d(&mut x_lift, self.q_over_b_moduli.len(), input.col_count());
-        self.b_to_q_over_b_lift.apply(input, x_lift.reborrow());
+        // Compute `lift(x) mod intermediate`
+        let mut x_lift: Vec<ZnEl, A> = Vec::with_capacity_in(self.intermediate_moduli.len() * input.col_count(), self.allocator.clone());
+        x_lift.extend((0..(self.intermediate_moduli.len() * input.col_count())).map(|idx| self.intermediate_moduli.at(idx / input.col_count()).zero()));
+        let mut x_lift = SubmatrixMut::from_1d(&mut x_lift, self.intermediate_moduli.len(), input.col_count());
+        self.b_to_intermediate_lift.apply(input, x_lift.reborrow());
 
-        // now compute `lift(x_mod_b_lift b^-1 mod t)`, which we use to take care of the congruence modulo `t` later
-        // this is small, so no error here
+        // now compute `lift(x_lift b^-1 mod t)`, which we use to take care of the congruence modulo `t` later;
+        // because of the helper moduli, this is small enough not to cause any error
         let mut diff_mod_t = Vec::with_capacity_in(input.col_count(), self.allocator.clone());
         diff_mod_t.extend((0..input.col_count()).map(|_j| self.t_modulus().zero()));
         let mut diff_mod_t = SubmatrixMut::from_1d(&mut diff_mod_t, 1, input.col_count());
-        self.q_over_b_to_t_conv.apply(x_lift.as_const(), diff_mod_t.reborrow());
+        self.intermediate_to_t_conv.apply(x_lift.as_const(), diff_mod_t.reborrow());
         for j in 0..input.col_count() {
             self.t_modulus().mul_assign_ref(diff_mod_t.at_mut(0, j), &self.b_inv_mod_t);
         }
 
         // compute the result as `x_mod_b_lift - b * diff_mod_t`
-        for i in 0..self.q_over_b_moduli.len() {
-            let output_i = self.output_permutation[i];
-            debug_assert!(self.q_over_b_moduli[i].get_ring() == self.output_rings()[output_i].get_ring());
-            let Zp = &self.q_over_b_moduli[i];
+        for i in 0..self.q_moduli_count {
+            debug_assert!(self.intermediate_moduli[i].get_ring() == self.output_rings()[i].get_ring());
+            let Zp = &self.intermediate_moduli[i];
             let modulo = Zp.can_hom(self.t_modulus().integer_ring()).unwrap();
             debug_assert!(Zp.integer_ring().get_ring() == self.t_modulus().integer_ring().get_ring());
-            let b = self.b_mod_q_over_b.at(i);
+            let b = self.b_mod_q.at(i);
             for j in 0..input.col_count() {
-                *output.at_mut(output_i, j) = Zp.sub_ref_fst(x_lift.at(i, j), Zp.mul_ref_fst(b, modulo.map(self.t_modulus().smallest_lift(*diff_mod_t.at(0, j)))));
+                *output.at_mut(i, j) = Zp.sub_ref_fst(x_lift.at(i, j), Zp.mul_ref_fst(b, modulo.map(self.t_modulus().smallest_lift(*diff_mod_t.at(0, j)))));
             }
         }
-        // output should be ordered according to `output_moduli_unordered`
     }
 }
 
 #[cfg(test)]
 use feanor_math::assert_el_eq;
-#[cfg(test)]
-use feanor_math::primitive_int::StaticRing;
 
 #[test]
 fn test_rescale_complete() {
@@ -552,7 +467,7 @@ fn test_rescale_down() {
 }
 
 #[test]
-fn test_divisible_remainder() {
+fn test_congruence_preserving_baseconv_small() {
     let from = vec![Zn::new(23)];
     let to = vec![Zn::new(17), Zn::new(29)];
     let Zt = Zn::new(5);
@@ -560,7 +475,7 @@ fn test_divisible_remainder() {
     let b = *Zb.modulus() as i32;
     let t = *Zt.modulus() as i32;
     
-    let remainder = CongruenceAwareAlmostExactBaseConversion::new_with(
+    let baseconv = CongruencePreservingAlmostExactBaseConversion::new_with(
         from.clone(),
         to.clone(),
         Zt.clone(), 
@@ -570,7 +485,7 @@ fn test_divisible_remainder() {
     let ZZ_to_Zt = Zt.int_hom();
     let ZZ_to_Zb = Zb.int_hom();
 
-    for i in -(23/2)..=(23/2) {
+    for i in -(b/2)..=(b/2) {
         let input = i;
         let input_mod_b = Zb.smallest_lift(ZZ_to_Zb.map(input)) as i32;
         let expected = input_mod_b - b * Zt.smallest_lift(Zt.checked_div(&ZZ_to_Zt.map(input_mod_b), &ZZ_to_Zt.map(b)).unwrap()) as i32;
@@ -582,7 +497,7 @@ fn test_divisible_remainder() {
         let expected = to.iter().map(|Zn| Zn.int_hom().map(expected)).collect::<Vec<_>>();
         let mut actual = to.iter().map(|Zn| Zn.zero()).collect::<Vec<_>>();
 
-        remainder.apply(Submatrix::from_1d(&input, 1, 1), SubmatrixMut::from_1d(&mut actual, 2, 1));
+        baseconv.apply(Submatrix::from_1d(&input, 1, 1), SubmatrixMut::from_1d(&mut actual, 2, 1));
         
         for j in 0..expected.len() {
             // we currently assume no error happens
@@ -592,7 +507,7 @@ fn test_divisible_remainder() {
 }
 
 #[test]
-fn test_divisible_remainder_two_denominators() {
+fn test_congruence_preserving_baseconv_two_denominators() {
     let from = vec![Zn::new(23), Zn::new(7)];
     let to = vec![Zn::new(17), Zn::new(5), Zn::new(11)];
     let Zt = Zn::new(3);
@@ -600,7 +515,7 @@ fn test_divisible_remainder_two_denominators() {
     let b = *Zb.modulus() as i32;
     let t = *Zt.modulus() as i32;
     
-    let remainder = CongruenceAwareAlmostExactBaseConversion::new_with(
+    let baseconv = CongruencePreservingAlmostExactBaseConversion::new_with(
         from.clone(),
         to.clone(),
         Zt.clone(), 
@@ -610,7 +525,7 @@ fn test_divisible_remainder_two_denominators() {
     let ZZ_to_Zt = Zt.int_hom();
     let ZZ_to_Zb = Zb.int_hom();
 
-    for i in -((23 * 7)/2)..=((23 * 7)/2) {
+    for i in -(b/2)..=(b/2) {
         let input = i;
         let input_mod_b = Zb.smallest_lift(ZZ_to_Zb.map(input)) as i32;
         let expected = input_mod_b - b * Zt.smallest_lift(Zt.checked_div(&ZZ_to_Zt.map(input_mod_b), &ZZ_to_Zt.map(b)).unwrap()) as i32;
@@ -622,7 +537,47 @@ fn test_divisible_remainder_two_denominators() {
         let expected = to.iter().map(|Zn| Zn.int_hom().map(expected)).collect::<Vec<_>>();
         let mut actual = to.iter().map(|Zn| Zn.zero()).collect::<Vec<_>>();
 
-        remainder.apply(Submatrix::from_1d(&input, 2, 1), SubmatrixMut::from_1d(&mut actual, 3, 1));
+        baseconv.apply(Submatrix::from_1d(&input, 2, 1), SubmatrixMut::from_1d(&mut actual, 3, 1));
+        
+        for j in 0..expected.len() {
+            // we currently assume no error happens
+            assert_el_eq!(to.at(j), expected.at(j), actual.at(j));
+        }
+    }
+}
+
+#[test]
+fn test_congruence_preserving_baseconv_unordered() {
+    let from = vec![Zn::new(19), Zn::new(7), Zn::new(13)];
+    let to = vec![Zn::new(17), Zn::new(5), Zn::new(3)];
+    let Zt = Zn::new(11);
+    let Zb = Zn::new(19 * 7 * 13);
+    let b = *Zb.modulus() as i32;
+    let t = *Zt.modulus() as i32;
+    
+    let baseconv = CongruencePreservingAlmostExactBaseConversion::new_with(
+        from.clone(),
+        to.clone(),
+        Zt.clone(), 
+        Global
+    );
+
+    let ZZ_to_Zt = Zt.int_hom();
+    let ZZ_to_Zb = Zb.int_hom();
+
+    for i in -(b/2)..=(b/2) {
+        let input = i;
+        let input_mod_b = Zb.smallest_lift(ZZ_to_Zb.map(input)) as i32;
+        let expected = input_mod_b - b * Zt.smallest_lift(Zt.checked_div(&ZZ_to_Zt.map(input_mod_b), &ZZ_to_Zt.map(b)).unwrap()) as i32;
+        assert_el_eq!(&Zb, ZZ_to_Zb.map(input), ZZ_to_Zb.map(expected));
+        assert_eq!(0, expected % t);
+        assert!(expected.abs() <= b * t / 2);
+
+        let input = from.iter().map(|Zn| Zn.int_hom().map(input)).collect::<Vec<_>>();
+        let expected = to.iter().map(|Zn| Zn.int_hom().map(expected)).collect::<Vec<_>>();
+        let mut actual = to.iter().map(|Zn| Zn.zero()).collect::<Vec<_>>();
+
+        baseconv.apply(Submatrix::from_1d(&input, 3, 1), SubmatrixMut::from_1d(&mut actual, 3, 1));
         
         for j in 0..expected.len() {
             // we currently assume no error happens

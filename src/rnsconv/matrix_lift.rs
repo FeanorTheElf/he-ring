@@ -20,7 +20,7 @@ use super::RNSOperation;
 /// Stores values for an almost exact conversion between RNS bases.
 /// A complete conversion refers to the function
 /// ```text
-/// Z/QZ -> Z/Q'Z, x -> [lift(x)]
+///   Z/QZ -> Z/Q'Z, x -> [lift(x)]
 /// ```
 /// In our case, the output of the function is allowed to have an error of `{ -Q, 0, Q }`,
 /// unless the shortest lift of the input is bounded by `Q/4`, in which case the result
@@ -135,7 +135,7 @@ impl<A> RNSOperation for AlmostExactMatrixBaseConversion<A>
     ///
     /// Performs the (almost) exact RNS base conversion
     /// ```text
-    ///     Z/QZ -> Z/Q'Z, x -> smallest_lift(x) + kQ mod Q''
+    ///   Z/QZ -> Z/Q'Z, x -> smallest_lift(x) + kQ mod Q''
     /// ```
     /// where `k in { -1, 0, 1 }`.
     /// 
@@ -211,7 +211,7 @@ impl<A> RNSOperation for AlmostExactMatrixBaseConversion<A>
                         }
                     }
                 }
-            };
+            }
 
             for j in 0..col_count {
                 let mut correction = *output_unreduced.at(out_len, j);
