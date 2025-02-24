@@ -75,7 +75,6 @@ impl<A> CongruencePreservingRescaling<A>
         }
         let a_moduli_len = num_moduli.len();
 
-        let q = ZZbig.prod(in_moduli.iter().map(|rns_factor| int_cast(ZZ.clone_el(rns_factor.modulus()), &ZZbig, ZZ)));
         let b = ZZbig.prod(den_moduli_indices.iter().map(|i| int_cast(ZZ.clone_el(in_moduli[*i].modulus()), &ZZbig, ZZ)));
         let a = ZZbig.prod(num_moduli.iter().map(|rns_factor| int_cast(ZZ.clone_el(rns_factor.modulus()), &ZZbig, ZZ)));
 

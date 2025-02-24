@@ -4,7 +4,6 @@ use feanor_math::algorithms::sqr_mul::generic_pow_shortest_chain_table;
 use feanor_math::computation::no_error;
 use feanor_math::matrix::OwnedMatrix;
 use feanor_math::rings::extension::FreeAlgebraStore;
-use feanor_math::rings::poly::dense_poly::DensePolyRing;
 use feanor_math::primitive_int::StaticRing;
 use feanor_math::ring::*;
 use feanor_math::rings::zn::zn_64::*;
@@ -97,7 +96,6 @@ pub fn extract_linear_map<G>(slot_ring: &SlotRingOver<Zn>, mut function: G) -> E
     let mut rhs = OwnedMatrix::zero(slot_ring.rank(), 1, slot_ring.base_ring());
     let mut sol = OwnedMatrix::zero(slot_ring.rank(), 1, slot_ring.base_ring());
 
-    let poly_ring = DensePolyRing::new(slot_ring.base_ring(), "X");
     for i in 0..slot_ring.rank() {
         for j in 0..slot_ring.rank() {
             *lhs.at_mut(i, j) = slot_ring.trace(slot_ring.pow(slot_ring.canonical_gen(), i + j));
@@ -148,10 +146,8 @@ fn test_extract_coefficient_map() {
     let max_ideal_gen = slot_ring.int_hom().map(17);
     let slot_ring = AsLocalPIR::from(AsLocalPIRBase::promise_is_local_pir(slot_ring, max_ideal_gen, Some(2)));
     assert!(is_prim_root_of_unity(&slot_ring, &slot_ring.canonical_gen(), 5));
-    let Gal = CyclotomicGaloisGroup::new(5);
 
     let extract_constant_coeff = extract_linear_map(&slot_ring, |c| slot_ring.wrt_canonical_basis(&c).at(0));
-    let poly_ring = DensePolyRing::new(slot_ring.base_ring(), "X");
     for i in 0..4 {
         let b = slot_ring.pow(slot_ring.canonical_gen(), i);
         let actual = slot_ring.trace(slot_ring.mul_ref(&b, &extract_constant_coeff));

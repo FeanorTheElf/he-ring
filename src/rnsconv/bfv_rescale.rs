@@ -221,7 +221,6 @@ impl<A> AlmostExactRescaling<A>
     #[instrument(skip_all)]
     pub fn new_with(in_moduli: Vec<Zn>, num_moduli: Vec<Zn>, den_moduli_indices: Vec<usize>, allocator: A) -> Self {
         let a_moduli_count = num_moduli.len();
-        let ZZ = in_moduli[0].integer_ring();
         
         let a = ZZbig.prod(num_moduli.iter().map(|Zn| int_cast(Zn.integer_ring().clone_el(Zn.modulus()), &ZZbig, Zn.integer_ring())));
         let b = ZZbig.prod(den_moduli_indices.iter().map(|i| &in_moduli[*i]).map(|Zn| int_cast(Zn.integer_ring().clone_el(Zn.modulus()), &ZZbig, Zn.integer_ring())));
@@ -286,7 +285,6 @@ impl<A> RNSOperation for AlmostExactRescaling<A>
         assert_eq!(input.row_count(), self.input_rings().len());
         assert_eq!(output.row_count(), self.output_rings().len());
         assert_eq!(input.col_count(), output.col_count());
-        let in_len = input.row_count();
         let col_count = input.col_count();
 
         // Compute `x := el * a mod aq`, store it in `x_mod_b` and `x_mod_aq_over_b`
@@ -416,7 +414,7 @@ fn test_rescale_convert() {
         // `q/4` is quite large, so group stuff into matrices here
         let input = OwnedMatrix::from_fn(from.len(), 512, |k, j| from.at(k).int_hom().map(i + j as i32));
         let expected = OwnedMatrix::from_fn(to.len(), 512, |k, j| to.at(k).int_hom().map(((i + j as i32) as f64 * 5. / 31. / 29.).round() as i32));
-        let mut actual = OwnedMatrix::from_fn(to.len(), 512, |k, j| to.at(k).zero());
+        let mut actual = OwnedMatrix::from_fn(to.len(), 512, |k, _j| to.at(k).zero());
 
         rescaling.apply(input.data(), actual.data_mut());
 

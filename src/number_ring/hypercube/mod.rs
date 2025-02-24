@@ -636,8 +636,8 @@ impl<R> HypercubeIsomorphism<R>
         };
     }
 
-    fn create_slot_ring_convolution(d: usize) -> DynConvolutionAlgorithmConvolution<<<R::Type as RingExtension>::BaseRing as RingStore>::Type, Arc<dyn Send + Sync + DynConvolutionAlgorithm<<<R::Type as RingExtension>::BaseRing as RingStore>::Type>>> {
-        let max_log2_len = ZZi64.abs_log2_ceil(&(d as i64)).unwrap() + 1;
+    fn create_slot_ring_convolution(_d: usize) -> DynConvolutionAlgorithmConvolution<<<R::Type as RingExtension>::BaseRing as RingStore>::Type, Arc<dyn Send + Sync + DynConvolutionAlgorithm<<<R::Type as RingExtension>::BaseRing as RingStore>::Type>>> {
+        // let max_log2_len = ZZi64.abs_log2_ceil(&(d as i64)).unwrap() + 1;
         DynConvolutionAlgorithmConvolution::new(Arc::new(STANDARD_CONVOLUTION))
     }
 

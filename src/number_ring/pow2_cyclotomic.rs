@@ -293,9 +293,9 @@ impl<N, A> HENumberRingMod for Pow2CyclotomicDecomposedNumberRing<N, A>
         }
     }
 
-    fn coeff_basis_to_small_basis<V>(&self, data: V) {}
+    fn coeff_basis_to_small_basis<V>(&self, _data: V) {}
 
-    fn small_basis_to_coeff_basis<V>(&self, data: V) {}
+    fn small_basis_to_coeff_basis<V>(&self, _data: V) {}
 
     fn rank(&self) -> usize {
         self.ntt.len()

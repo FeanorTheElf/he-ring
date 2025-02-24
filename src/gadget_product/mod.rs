@@ -239,7 +239,6 @@ fn gadget_decompose<R, V>(ring: &R, el: &R::Element, digits: V) -> Vec<(R::Prepa
     where R: BGFVCiphertextRing,
         V: VectorFn<Range<usize>>
 {
-    let ZZbig = BigIntRing::RING;
     let ZZi64 = StaticRing::<i64>::RING;
     let mut result = Vec::new();
     let mut el_as_matrix = OwnedMatrix::zero(ring.base_ring().len(), ring.small_generating_set_len(), ring.base_ring().at(0));
@@ -278,7 +277,6 @@ fn gadget_decompose_doublerns<NumberRing, A, V>(ring: &DoubleRNSRingBase<NumberR
         A: Allocator + Clone,
         V: VectorFn<Range<usize>>
 {
-    let ZZbig = BigIntRing::RING;
     let ZZi64 = StaticRing::<i64>::RING;
     let mut result = Vec::new();
     let el_as_matrix = ring.as_matrix_wrt_small_basis(el);
@@ -405,7 +403,7 @@ impl<R: PreparedMultiplicationRing> GadgetProductRhsOperand<R> {
     /// 
     /// For an explanation of gadget products, see [`GadgetProductLhsOperand::gadget_product()`].
     /// 
-    pub fn new_with(ring: &R, digits: Box<RNSGadgetVectorDigitIndices>) -> Self 
+    pub fn new_with(_ring: &R, digits: Box<RNSGadgetVectorDigitIndices>) -> Self 
         where R: RingExtension,
             R::BaseRing: RingStore<Type = zn_rns::ZnBase<zn_64::Zn, BigIntRing>>
     {
@@ -424,7 +422,6 @@ impl<R: BGFVCiphertextRing> GadgetProductRhsOperand<R> {
         assert_eq!(to.base_ring().get_ring().len() + drop_rns_factors.len(), from.base_ring().get_ring().len());
         debug_assert_eq!(self.digits.len(), self.scaled_element.len());
         let mut result_scaled_el = Vec::new();
-        let mut current = 0;
         for (digit, scaled_el) in self.digits.iter().zip(self.scaled_element.into_iter()) {
             let old_digit_len = digit.end - digit.start;
             let dropped_from_digit = drop_rns_factors.num_within(&digit);
@@ -432,7 +429,6 @@ impl<R: BGFVCiphertextRing> GadgetProductRhsOperand<R> {
             if dropped_from_digit == old_digit_len {
                 continue;
             }
-            current += old_digit_len - dropped_from_digit;
             if let Some((scaled_el_prepared, scaled_el)) = scaled_el {
                 let new_scaled_el = to.drop_rns_factor_element(from, drop_rns_factors, scaled_el);
                 result_scaled_el.push(Some((to.drop_rns_factor_prepared(from, drop_rns_factors, scaled_el_prepared), new_scaled_el)));
@@ -461,7 +457,6 @@ fn test_gadget_decomposition() {
     let ring = SingleRNSRingBase::<_, Global, DefaultConvolution>::new(Pow2CyclotomicNumberRing::new(4), zn_rns::Zn::create_from_primes(vec![17, 97, 113], BigIntRing::RING));
     let rns_base = ring.base_ring();
     let from_congruence = |data: &[i32]| rns_base.from_congruence(data.iter().enumerate().map(|(i, c)| rns_base.at(i).int_hom().map(*c)));
-    let hom_big = ring.base_ring().can_hom(&BigIntRing::RING).unwrap();
     let hom_i32 = ring.base_ring().can_hom(&StaticRing::<i32>::RING).unwrap();
 
     let mut rhs = GadgetProductRhsOperand::new(ring.get_ring(), 2);

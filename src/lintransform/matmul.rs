@@ -192,7 +192,6 @@ impl<NumberRing, A> MatmulTransform<NumberRing, A>
             extract_linear_map(H.slot_ring(), |x| H.slot_ring().wrt_canonical_basis(&x).at(j))
         ).collect::<Vec<_>>();
         
-        let poly_ring = DensePolyRing::new(H.slot_ring().base_ring(), "X");
         let canonical_gen_powertable = PowerTable::new(H.slot_ring(), H.slot_ring().canonical_gen(), H.ring().n() as usize);
         // this is the map `X -> X^p`, which is the frobenius in our case, since we choose the canonical generator of the slot ring as root of unity
         let apply_frobenius = |x: &El<SlotRingOver<Zn>>, count: i64| H.slot_ring().sum(
@@ -713,7 +712,7 @@ fn test_compute_automorphisms_per_dimension() {
     assert_eq!(6, H.hypercube().m(0));
     assert_eq!(2, H.hypercube().m(1));
 
-    let transform = MatmulTransform::blockmatmul1d(&H, 0, |i, j, _| H.slot_ring().base_ring().one());
+    let transform = MatmulTransform::blockmatmul1d(&H, 0, |_, _, _| H.slot_ring().base_ring().one());
     let (max, min, gcd, sizes) = transform.compute_automorphisms_per_dimension(&H);
     assert_eq!(vec![2, 5, 0], max);
     assert_eq!(vec![0, 0, 0], min);

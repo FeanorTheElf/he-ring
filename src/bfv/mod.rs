@@ -528,7 +528,6 @@ pub trait BFVParams {
             let (s0, s1) = gks.at(i);
             let r0 = c1_g.gadget_product(s0, C.get_ring());
             let r1 = c1_g.gadget_product(s1, C.get_ring());
-            let c0_g = C.apply_galois_action(&c0, gs[i]);
             return (C.add_ref(&r0, &c0_g), r1);
         }).collect();
     }
@@ -563,7 +562,7 @@ impl<NumberRing> PlaintextCircuit<NumberRingQuotientBase<NumberRing, Zn>>
         inputs: &[Ciphertext<Params>], 
         rk: Option<&RelinKey<Params>>, 
         gks: &[(CyclotomicGaloisGroupEl, KeySwitchKey<Params>)], 
-        key_switches: &mut usize
+        _key_switches: &mut usize
     ) -> Vec<Ciphertext<Params>> 
         where Params: BFVParams,
             Params::CiphertextRing: BGFVCiphertextRing<NumberRing = NumberRing>
@@ -594,7 +593,7 @@ impl PlaintextCircuit<StaticRingBase<i64>> {
         inputs: &[Ciphertext<Params>], 
         rk: Option<&RelinKey<Params>>, 
         gks: &[(CyclotomicGaloisGroupEl, KeySwitchKey<Params>)], 
-        key_switches: &mut usize
+        _key_switches: &mut usize
     ) -> Vec<Ciphertext<Params>> 
         where Params: BFVParams
     {
@@ -803,7 +802,7 @@ impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingConvolution<Zn>>
         let number_ring = self.number_ring();
         let required_root_of_unity = signed_lcm(
             number_ring.mod_p_required_root_of_unity() as i64,
-            ZZ.abs_log2_ceil(&(number_ring.n() as i64 * 2)).unwrap() as i64,
+            1 << ZZ.abs_log2_ceil(&(number_ring.n() as i64 * 2)).unwrap(),
             ZZ
         );
 
@@ -884,7 +883,7 @@ fn test_pow2_bfv_enc_dec() {
     let t = 257;
     
     let P = params.create_plaintext_ring(t);
-    let (C, Cmul) = params.create_ciphertext_rings();
+    let (C, _Cmul) = params.create_ciphertext_rings();
 
     let sk = Pow2BFV::gen_sk(&C, &mut rng);
 
@@ -1228,7 +1227,7 @@ pub fn tree_mul_benchmark<Params>(params: Params, digits: usize)
     let mut current = (0..(1 << log2_count)).map(|i| Params::enc_sym(&P, &C, &mut rng, &P.int_hom().map(2 * i + 1), &sk)).map(Some).collect::<Vec<_>>();
 
     let start = Instant::now();
-    for i in 0..log2_count {
+    for _ in 0..log2_count {
         let mid = current.len() / 2;
         let (left, right) = current.split_at_mut(mid);
         assert_eq!(left.len(), right.len());
@@ -1262,7 +1261,7 @@ pub fn chain_mul_benchmark<Params>(params: Params, digits: usize)
     let mut current = Params::enc_sym(&P, &C, &mut rng, &P.int_hom().map(1), &sk);
 
     let start = Instant::now();
-    for i in 0..count {
+    for _ in 0..count {
         let left = Params::clone_ct(&C, &current);
         let right = current;
         current = Params::hom_mul(&P, &C, &Cmul, left, right, &rk);

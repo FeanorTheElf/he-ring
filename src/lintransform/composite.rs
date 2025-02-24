@@ -300,6 +300,7 @@ fn test_powcoeffs_to_slots_thin() {
         current = ring.get_ring().compute_linear_transform(&H, &current, &transform);
     }
     let expected = H.from_slot_values([H.slot_ring().one()].into_iter().chain((2..9).map(|_| H.slot_ring().zero())));
+    assert_el_eq!(ring, expected, current);
     
     let ring_ref = &ring;
     let mut current = ring.sum((0..6).flat_map(|i| (0..4).map(move |j| ring_ref.mul(ring_ref.pow(ring_ref.canonical_gen(), i * 5 + j * 7), ring_ref.int_hom().map((1 + j + i * 4) as i32)))));

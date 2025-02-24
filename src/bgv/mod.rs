@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use feanor_math::algorithms::eea::signed_gcd;
 use feanor_math::algorithms::int_factor::is_prime_power;
-use feanor_math::algorithms::rational_reconstruction::rational_reconstruction;
+use feanor_math::algorithms::rational_reconstruction::reduce_2d_modular_relation_basis;
 use feanor_math::homomorphism::Homomorphism;
 use feanor_math::integer::{int_cast, BigIntRing, IntegerRingStore};
 use feanor_math::matrix::OwnedMatrix;
@@ -67,6 +67,20 @@ pub struct Ciphertext<Params: ?Sized + BGVParams> {
     pub implicit_scale: El<Zn>,
     pub c0: El<CiphertextRing<Params>>,
     pub c1: El<CiphertextRing<Params>>
+}
+
+///
+/// Computes small `a, b` such that `a/b = implicit_scale_bound` modulo `t`.
+/// 
+pub fn equalize_implicit_scale(Zt: &Zn, implicit_scale_quotient: El<Zn>) -> (i64, i64) {
+    let (u, v) = reduce_2d_modular_relation_basis(Zt, implicit_scale_quotient);
+    let ZZ_to_Zt = Zt.can_hom(&StaticRing::<i64>::RING).unwrap();
+    if Zt.is_unit(&ZZ_to_Zt.map(u[0])) {
+        return (u[1], u[0]);
+    } else {
+        assert!(Zt.is_unit(&ZZ_to_Zt.map(v[0])), "handling this situation in the case of plaintext moduli with multiple different prime factors is not implemented");
+        return (v[1], v[0]);
+    }
 }
 
 ///
@@ -154,7 +168,7 @@ pub trait BGVParams {
         let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(P.n() as u64), p);
         let H = HypercubeIsomorphism::new::<false>(P, hypercube);
         let m = Self::dec(P, C, Self::clone_ct(P, C, ct), sk);
-        println!("ciphertext (noise budget: {}):", Self::noise_budget(P, C, ct, sk));
+        println!("ciphertext (noise budget: {} / {}):", Self::noise_budget(P, C, ct, sk), ZZbig.abs_log2_ceil(C.base_ring().modulus()).unwrap());
         for a in H.get_slot_values(&m) {
             H.slot_ring().println(&a);
         }
@@ -163,13 +177,16 @@ pub trait BGVParams {
 
     #[instrument(skip_all)]
     fn hom_add_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
+        assert!(P.base_ring().is_unit(&ct.implicit_scale));
         let ZZ_to_Zq = C.base_ring().can_hom(P.base_ring().integer_ring()).unwrap();
-        let m = C.from_canonical_basis(P.wrt_canonical_basis(m).iter().map(|c| ZZ_to_Zq.map(P.base_ring().smallest_lift(c))));
-        return Ciphertext {
+        let m = C.from_canonical_basis(P.wrt_canonical_basis(&P.inclusion().mul_ref_map(m, &ct.implicit_scale)).iter().map(|c| ZZ_to_Zq.map(P.base_ring().smallest_lift(c))));
+        let result = Ciphertext {
             c0: C.add(ct.c0, m),
             c1: ct.c1,
             implicit_scale: ct.implicit_scale
         };
+        assert!(P.base_ring().is_unit(&result.implicit_scale));
+        return result;
     }
 
     #[instrument(skip_all)]
@@ -189,26 +206,33 @@ pub trait BGVParams {
 
     #[instrument(skip_all)]
     fn hom_mul_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
+        assert!(P.base_ring().is_unit(&ct.implicit_scale));
         let ZZ_to_Zq = C.base_ring().can_hom(P.base_ring().integer_ring()).unwrap();
         let m = C.from_canonical_basis(P.wrt_canonical_basis(m).iter().map(|c| ZZ_to_Zq.map(P.base_ring().smallest_lift(c))));
-        return Ciphertext {
+        let result = Ciphertext {
             c0: C.mul_ref_snd(ct.c0, &m), 
             c1: C.mul(ct.c1, m),
             implicit_scale: ct.implicit_scale
         };
+        assert!(P.base_ring().is_unit(&result.implicit_scale));
+        return result;
     }
 
     #[instrument(skip_all)]
-    fn hom_mul_plain_i64(_P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: i64, ct: Ciphertext<Self>) -> Ciphertext<Self> {
-        Ciphertext {
+    fn hom_mul_plain_i64(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: i64, ct: Ciphertext<Self>) -> Ciphertext<Self> {
+        assert!(P.base_ring().is_unit(&ct.implicit_scale));
+        let result = Ciphertext {
             c0: C.int_hom().mul_map(ct.c0, m as i32), 
             c1: C.int_hom().mul_map(ct.c1, m as i32),
             implicit_scale: ct.implicit_scale
-        }
+        };
+        assert!(P.base_ring().is_unit(&result.implicit_scale));
+        return result;
     }
 
     #[instrument(skip_all)]
     fn clone_ct(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: &Ciphertext<Self>) -> Ciphertext<Self> {
+        assert!(P.base_ring().is_unit(&ct.implicit_scale));
         Ciphertext {
             c0: C.clone_el(&ct.c0),
             c1: C.clone_el(&ct.c1),
@@ -243,7 +267,7 @@ pub trait BGVParams {
         let mut res0 = GadgetProductRhsOperand::new(C.get_ring(), digits);
         let mut res1 = GadgetProductRhsOperand::new(C.get_ring(), digits);
         for digit_i in 0..digits {
-            let ct = Self::enc_sym_zero(P, C, &mut rng, new_sk);
+            let base = Self::enc_sym_zero(P, C, &mut rng, new_sk);
             let digit_range = res0.gadget_vector_digits().at(digit_i).clone();
             let factor = C.base_ring().get_ring().from_congruence((0..C.base_ring().len()).map(|i2| {
                 let Fp = C.base_ring().at(i2);
@@ -251,9 +275,9 @@ pub trait BGVParams {
             }));
             let mut payload = C.clone_el(&old_sk);
             C.inclusion().mul_assign_ref_map(&mut payload, &factor);
-            C.add_assign(&mut payload, ct.c0);
+            C.add_assign(&mut payload, base.c0);
             res0.set_rns_factor(C.get_ring(), digit_i, payload);
-            res1.set_rns_factor(C.get_ring(), digit_i, ct.c1);
+            res1.set_rns_factor(C.get_ring(), digit_i, base.c1);
         }
         return (res0, res1);
     }
@@ -282,23 +306,30 @@ pub trait BGVParams {
     fn hom_mul<'a>(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, lhs: Ciphertext<Self>, rhs: Ciphertext<Self>, rk: &RelinKey<'a, Self>) -> Ciphertext<Self>
         where Self: 'a
     {
+        assert!(P.base_ring().is_unit(&lhs.implicit_scale));
+        assert!(P.base_ring().is_unit(&rhs.implicit_scale));
+
         let [res0, res1, res2] = C.get_ring().two_by_two_convolution([&lhs.c0, &lhs.c1], [&rhs.c0, &rhs.c1]);
         
         let op = GadgetProductLhsOperand::from_element_with(C.get_ring(), &res2, rk.0.gadget_vector_digits());
         let (s0, s1) = &rk;
         
-        return Ciphertext {
+        let result = Ciphertext {
             c0: C.add(res0, op.gadget_product(s0, C.get_ring())), 
             c1: C.add(res1, op.gadget_product(s1, C.get_ring())),
             implicit_scale: P.base_ring().mul(lhs.implicit_scale, rhs.implicit_scale)
         };
+        assert!(P.base_ring().is_unit(&result.implicit_scale));
+        return result;
     }
     
     #[instrument(skip_all)]
     fn hom_add(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, mut lhs: Ciphertext<Self>, mut rhs: Ciphertext<Self>) -> Ciphertext<Self> {
+        assert!(P.base_ring().is_unit(&lhs.implicit_scale));
+        assert!(P.base_ring().is_unit(&rhs.implicit_scale));
+
         let Zt = P.base_ring();
-        let ZZ_to_Zt = Zt.can_hom(Zt.integer_ring()).unwrap();
-        let (a, b) = rational_reconstruction(Zt, Zt.checked_div(&lhs.implicit_scale, &rhs.implicit_scale).unwrap());
+        let (a, b) = equalize_implicit_scale(Zt, Zt.checked_div(&lhs.implicit_scale, &rhs.implicit_scale).unwrap());
 
         C.int_hom().mul_assign_map(&mut rhs.c0, a as i32);
         C.int_hom().mul_assign_map(&mut rhs.c1, a as i32);
@@ -308,12 +339,14 @@ pub trait BGVParams {
         C.int_hom().mul_assign_map(&mut lhs.c1, b as i32);
         P.base_ring().int_hom().mul_assign_map(&mut lhs.implicit_scale, b as i32);
 
-        debug_assert!(Zt.eq_el(&lhs.implicit_scale, &rhs.implicit_scale));
-        return Ciphertext {
+        assert!(Zt.eq_el(&lhs.implicit_scale, &rhs.implicit_scale));
+        let result = Ciphertext {
             c0: C.add(lhs.c0, rhs.c0),
             c1: C.add(lhs.c1, rhs.c1),
             implicit_scale: lhs.implicit_scale
         };
+        assert!(P.base_ring().is_unit(&result.implicit_scale));
+        return result;
     }
 
     fn hom_sub(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, lhs: Ciphertext<Self>, rhs: Ciphertext<Self>) -> Ciphertext<Self> {
@@ -327,6 +360,8 @@ pub trait BGVParams {
             'a: 'b,
             Self: 'a
     {
+        assert!(P.base_ring().is_unit(&ct.implicit_scale));
+
         let digits = gks.at(0).0.gadget_vector_digits();
         let has_same_digits = |gk: &GadgetProductRhsOperand<_>| gk.gadget_vector_digits().len() == digits.len() && gk.gadget_vector_digits().iter().zip(digits.iter()).all(|(l, r)| l == r);
         assert!(gks.iter().all(|gk| has_same_digits(&gk.0) && has_same_digits(&gk.1)));
@@ -339,12 +374,13 @@ pub trait BGVParams {
             let (s0, s1) = gks.at(i);
             let r0 = c1_g.gadget_product(s0, C.get_ring());
             let r1 = c1_g.gadget_product(s1, C.get_ring());
-            let c0_g = C.apply_galois_action(&ct.c0, gs[i]);
-            return Ciphertext {
+            let result = Ciphertext {
                 c0: C.add_ref(&r0, &c0_g),
                 c1: r1,
                 implicit_scale: P.base_ring().clone_el(&ct.implicit_scale)
             };
+            assert!(P.base_ring().is_unit(&result.implicit_scale));
+            return result;
         }).collect();
     }
 
@@ -402,6 +438,8 @@ pub trait BGVParams {
     #[instrument(skip_all)]
     fn mod_switch_down(P: &PlaintextRing<Self>, Cnew: &CiphertextRing<Self>, Cold: &CiphertextRing<Self>, drop_moduli: &RNSFactorIndexList, ct: Ciphertext<Self>) -> Ciphertext<Self> {
         assert_rns_factor_drop_correct::<Self>(Cnew, Cold, drop_moduli);
+        assert!(P.base_ring().is_unit(&ct.implicit_scale));
+
         if drop_moduli.len() == 0 {
             return ct;
         } else {
@@ -433,12 +471,21 @@ pub trait BGVParams {
                 )
             };
             
-            return Ciphertext {
+            let result = Ciphertext {
                 c0: mod_switch_ring_element(ct.c0),
                 c1: mod_switch_ring_element(ct.c1),
                 implicit_scale: P.base_ring().mul(ct.implicit_scale, Self::mod_switch_down_compute_implicit_scale_factor(P, Cnew.base_ring().modulus(), Cold.base_ring().modulus()))
             };
+            assert!(P.base_ring().is_unit(&result.implicit_scale));
+            return result;
         }
+    }
+
+    #[instrument(skip_all)]
+    fn gen_gk<'a, R: Rng + CryptoRng>(P: &PlaintextRing<Self>, C: &'a CiphertextRing<Self>, rng: R, sk: &SecretKey<Self>, g: CyclotomicGaloisGroupEl, digits: usize) -> KeySwitchKey<'a, Self>
+        where Self: 'a
+    {
+        Self::gen_switch_key(P, C, rng, &C.get_ring().apply_galois_action(sk, g), sk, digits)
     }
 
     ///
@@ -448,15 +495,20 @@ pub trait BGVParams {
     /// 
     #[instrument(skip_all)]
     fn change_plaintext_modulus(Pnew: &PlaintextRing<Self>, Pold: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
+        assert!(Pold.base_ring().is_unit(&ct.implicit_scale));
+
         let x = C.base_ring().checked_div(
             &C.base_ring().coerce(&StaticRing::<i64>::RING, *Pnew.base_ring().modulus()),
             &C.base_ring().coerce(&StaticRing::<i64>::RING, *Pold.base_ring().modulus()),
         ).unwrap();
-        return Ciphertext {
+        let new_implicit_scale = Pnew.base_ring().coerce(&StaticRing::<i64>::RING, Pold.base_ring().smallest_positive_lift(ct.implicit_scale));
+        let result = Ciphertext {
             c0: C.inclusion().mul_ref_snd_map(ct.c0, &x),
             c1: C.inclusion().mul_ref_snd_map(ct.c1, &x),
-            implicit_scale: Pnew.base_ring().coerce(&StaticRing::<i64>::RING, Pold.base_ring().smallest_positive_lift(ct.implicit_scale))
+            implicit_scale: new_implicit_scale
         };
+        assert!(Pnew.base_ring().is_unit(&result.implicit_scale));
+        return result;
     }
 
     #[instrument(skip_all)]
@@ -471,6 +523,8 @@ pub trait BGVParams {
     #[instrument(skip_all)]
     fn mod_switch_to_plaintext(P: &PlaintextRing<Self>, target: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: Ciphertext<Self>) -> (El<PlaintextRing<Self>>, El<PlaintextRing<Self>>) {
         assert!(signed_gcd(*P.base_ring().modulus(), *target.base_ring().modulus(), ZZ) == 1, "can only mod-switch to ciphertext moduli that are coprime to t");
+        assert!(P.base_ring().is_unit(&ct.implicit_scale));
+
         let mod_switch = CongruencePreservingRescaling::new_with(
             C.base_ring().as_iter().map(|Zp| *Zp).collect(),
             vec![*target.base_ring()],
@@ -633,7 +687,7 @@ fn assert_rns_factor_drop_correct<Params>(Cnew: &CiphertextRing<Params>, Cold: &
     }
 }
 
-pub fn small_basis_repr<Params, NumberRing, A>(P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, ct: Ciphertext<Params>) -> Ciphertext<Params>
+pub fn small_basis_repr<Params, NumberRing, A>(_P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, ct: Ciphertext<Params>) -> Ciphertext<Params>
     where Params: BGVParams<CiphertextRing = ManagedDoubleRNSRingBase<NumberRing, A>>,
         NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone
@@ -645,7 +699,7 @@ pub fn small_basis_repr<Params, NumberRing, A>(P: &PlaintextRing<Params>, C: &Ci
     };
 }
 
-pub fn double_rns_repr<Params, NumberRing, A>(P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, ct: Ciphertext<Params>) -> Ciphertext<Params>
+pub fn double_rns_repr<Params, NumberRing, A>(_P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, ct: Ciphertext<Params>) -> Ciphertext<Params>
     where Params: BGVParams<CiphertextRing = ManagedDoubleRNSRingBase<NumberRing, A>>,
         NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone
@@ -729,7 +783,6 @@ fn test_pow2_bgv_enc_dec() {
     let t = 257;
     
     let P = params.create_plaintext_ring(t);
-    let max_rns_base = params.max_rns_base();
     let C = params.create_initial_ciphertext_ring();
     let sk = Pow2BGV::gen_sk(&C, &mut rng);
 
@@ -754,7 +807,6 @@ fn test_pow2_bgv_mul() {
     let digits = 3;
     
     let P = params.create_plaintext_ring(t);
-    let max_rns_base = params.max_rns_base();
     let C = params.create_initial_ciphertext_ring();
     let sk = Pow2BGV::gen_sk(&C, &mut rng);
     let rk = Pow2BGV::gen_rk(&P, &C, &mut rng, &sk, digits);
@@ -778,14 +830,12 @@ fn test_pow2_bgv_modulus_switch() {
         negacyclic_ntt: PhantomData::<DefaultNegacyclicNTT>
     };
     let t = 257;
-    let digits = 3;
     
     let P = params.create_plaintext_ring(t);
     let C0 = params.create_initial_ciphertext_ring();
     assert_eq!(9, C0.base_ring().len());
 
     let sk = Pow2BGV::gen_sk(&C0, &mut rng);
-    let rk = Pow2BGV::gen_rk(&P, &C0, &mut rng, &sk, digits);
 
     let input = P.int_hom().map(2);
     let ctxt = Pow2BGV::enc_sym(&P, &C0, &mut rng, &input, &sk);
@@ -800,6 +850,31 @@ fn test_pow2_bgv_modulus_switch() {
 }
 
 #[test]
+fn test_pow2_change_plaintext_modulus() {
+    let mut rng = thread_rng();
+    
+    let params = Pow2BGV {
+        log2_q_min: 500,
+        log2_q_max: 520,
+        log2_N: 7,
+        ciphertext_allocator: DefaultCiphertextAllocator::default(),
+        negacyclic_ntt: PhantomData::<DefaultNegacyclicNTT>
+    };
+    
+    let P0 = params.create_plaintext_ring(17 * 17);
+    let P1 = params.create_plaintext_ring(17);
+    let C = params.create_initial_ciphertext_ring();
+
+    let sk = Pow2BGV::gen_sk(&C, &mut rng);
+
+    let input = P0.int_hom().map(2 * 17);
+    let ctxt = Pow2BGV::enc_sym(&P0, &C, &mut rng, &input, &sk);
+    let result_ctxt = Pow2BGV::change_plaintext_modulus(&P1, &P0, &C, ctxt);
+    let result = Pow2BGV::dec(&P1, &C, result_ctxt, &sk);
+    assert_el_eq!(&P1, P1.int_hom().map(2), result);
+}
+
+#[test]
 fn test_pow2_modulus_switch_hom_add() {
     let mut rng = thread_rng();
     
@@ -811,7 +886,6 @@ fn test_pow2_modulus_switch_hom_add() {
         negacyclic_ntt: PhantomData::<DefaultNegacyclicNTT>
     };
     let t = 257;
-    let digits = 3;
     
     let P = params.create_plaintext_ring(t);
     let C0 = params.create_initial_ciphertext_ring();
@@ -1082,11 +1156,11 @@ pub fn tree_mul_benchmark<Params>(params: Params, digits: usize)
     let mut rk = Params::gen_rk(&P, &C, &mut rng, &sk, digits);
 
     let log2_count = 4;
-    let mut current = (0..(1 << log2_count)).map(|i| Params::enc_sym(&P, &C, &mut rng, &P.int_hom().map(2), &sk)).map(Some).collect::<Vec<_>>();
+    let mut current = (0..(1 << log2_count)).map(|_| Params::enc_sym(&P, &C, &mut rng, &P.int_hom().map(2), &sk)).map(Some).collect::<Vec<_>>();
     let mut C_current = C;
 
     let start = Instant::now();
-    for i in 0..log2_count {
+    for _ in 0..log2_count {
         let mid = current.len() / 2;
         let (left, right) = current.split_at_mut(mid);
         assert_eq!(left.len(), right.len());
@@ -1133,7 +1207,7 @@ pub fn chain_mul_benchmark<Params>(params: Params, digits: usize)
     let mut C_current = C;
 
     let start = Instant::now();
-    for i in 0..count {
+    for _ in 0..count {
         let left = Params::clone_ct(&P, &C_current, &current);
         let right = current;
         current = Params::hom_mul(&P, &C_current, left, right, &rk);

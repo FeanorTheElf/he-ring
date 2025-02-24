@@ -3,11 +3,14 @@ use feanor_math::ring::*;
 
 use crate::bgv::modwitch::DefaultModswitchStrategy;
 use crate::circuit::*;
+use crate::lintransform::matmul::MatmulTransform;
 use crate::log_time;
 use crate::digitextract::DigitExtract;
 
-use super::modwitch::BGVModswitchStrategy;
-use super::modwitch::ModulusAwareCiphertext;
+use crate::lintransform::composite;
+use crate::lintransform::pow2;
+
+use super::modwitch::*;
 use super::*;
 
 #[derive(Clone, Debug)]
@@ -15,6 +18,81 @@ pub struct ThinBootstrapParams<Params: BGVParams> {
     pub scheme_params: Params,
     pub v: usize,
     pub t: i64
+}
+
+impl<Params: BGVParams> ThinBootstrapParams<Params>
+    where NumberRing<Params>: Clone
+{
+    pub fn build_pow2<M: BGVModswitchStrategy<Params>, const LOG: bool>(&self, modswitch_strategy: M) -> ThinBootstrapData<Params, M> {
+        let log2_n = ZZ.abs_log2_ceil(&(self.scheme_params.number_ring().n() as i64)).unwrap();
+        assert_eq!(self.scheme_params.number_ring().n(), 1 << log2_n);
+
+        let (p, r) = is_prime_power(&ZZ, &self.t).unwrap();
+        let v = self.v;
+        let e = r + v;
+        if LOG {
+            println!("Setting up bootstrapping for plaintext modulus p^r = {}^{} = {} within the cyclotomic ring Q[X]/(Phi_{})", p, r, self.t, <_ as HECyclotomicNumberRing>::n(&self.scheme_params.number_ring()));
+            println!("Choosing e = r + v = {} + {}", r, v);
+        }
+
+        let plaintext_ring = self.scheme_params.create_plaintext_ring(ZZ.pow(p, e));
+        let original_plaintext_ring = self.scheme_params.create_plaintext_ring(ZZ.pow(p, r));
+
+        let digit_extract = DigitExtract::new_default(p, e, r);
+
+        let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(plaintext_ring.n() as u64), p);
+        let H = HypercubeIsomorphism::new::<LOG>(&plaintext_ring, hypercube);
+        let original_H = H.change_modulus(&original_plaintext_ring);
+        let slots_to_coeffs = log_time::<_, _, LOG, _>("Creating Slots-to-Coeffs transform", |[]| MatmulTransform::to_circuit_many(pow2::slots_to_coeffs_thin(&original_H), &original_H));
+        let coeffs_to_slots = log_time::<_, _, LOG, _>("Creating Coeffs-to-Slots transform", |[]| pow2::coeffs_to_slots_thin(&H));
+        let plaintext_ring_hierarchy = ((r + 1)..=e).map(|k| self.scheme_params.create_plaintext_ring(ZZ.pow(p, k))).collect();
+
+        return ThinBootstrapData {
+            digit_extract,
+            slots_to_coeffs_thin: slots_to_coeffs,
+            coeffs_to_slots_thin: coeffs_to_slots,
+            plaintext_ring_hierarchy: plaintext_ring_hierarchy,
+            modswitch_strategy: modswitch_strategy,
+            tmp_coprime_modulus_plaintext: self.scheme_params.create_plaintext_ring(ZZ.pow(p, e) + 1)
+        };
+    }
+
+    pub fn build_odd<M: BGVModswitchStrategy<Params>, const LOG: bool>(&self, modswitch_strategy: M) -> ThinBootstrapData<Params, M> {
+        assert!(self.scheme_params.number_ring().n() % 2 != 0);
+
+        let (p, r) = is_prime_power(&ZZ, &self.t).unwrap();
+        let v = self.v;
+        let e = r + v;
+        if LOG {
+            println!("Setting up bootstrapping for plaintext modulus p^r = {}^{} = {} within the cyclotomic ring Q[X]/(Phi_{})", p, r, self.t, self.scheme_params.number_ring().n());
+            println!("Choosing e = r + v = {} + {}", r, v);
+        }
+
+        let plaintext_ring = self.scheme_params.create_plaintext_ring(ZZ.pow(p, e));
+        let original_plaintext_ring = self.scheme_params.create_plaintext_ring(ZZ.pow(p, r));
+
+        let digit_extract = if p == 2 && e <= 23 {
+            DigitExtract::new_precomputed_p_is_2(p, e, r)
+        } else {
+            DigitExtract::new_default(p, e, r)
+        };
+
+        let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(plaintext_ring.n() as u64), p);
+        let H = HypercubeIsomorphism::new::<LOG>(&plaintext_ring, hypercube);
+        let original_H = H.change_modulus(&original_plaintext_ring);
+        let slots_to_coeffs = log_time::<_, _, LOG, _>("Creating Slots-to-Coeffs transform", |[]| MatmulTransform::to_circuit_many(composite::slots_to_powcoeffs_thin(&original_H), &original_H));
+        let coeffs_to_slots = log_time::<_, _, LOG, _>("Creating Coeffs-to-Slots transform", |[]| MatmulTransform::to_circuit_many(composite::powcoeffs_to_slots_thin(&H), &H));
+        let plaintext_ring_hierarchy = ((r + 1)..=e).map(|k| self.scheme_params.create_plaintext_ring(ZZ.pow(p, k))).collect();
+
+        return ThinBootstrapData {
+            digit_extract,
+            slots_to_coeffs_thin: slots_to_coeffs,
+            coeffs_to_slots_thin: coeffs_to_slots,
+            plaintext_ring_hierarchy: plaintext_ring_hierarchy,
+            modswitch_strategy: modswitch_strategy,
+            tmp_coprime_modulus_plaintext: self.scheme_params.create_plaintext_ring(ZZ.pow(p, e) + 1)
+        };
+    }
 }
 
 pub struct ThinBootstrapData<Params: BGVParams, M: BGVModswitchStrategy<Params>> {
@@ -43,6 +121,10 @@ impl<Params: BGVParams, Strategy: BGVModswitchStrategy<Params>> ThinBootstrapDat
 
     fn p(&self) -> i64 {
         self.digit_extract.p()
+    }
+
+    pub fn largest_plaintext_ring(&self) -> &PlaintextRing<Params> {
+        self.plaintext_ring_hierarchy.last().unwrap()
     }
 
     pub fn required_galois_keys(&self, P: &PlaintextRing<Params>) -> Vec<CyclotomicGaloisGroupEl> {
@@ -93,7 +175,8 @@ impl<Params: BGVParams, Strategy: BGVModswitchStrategy<Params>> ThinBootstrapDat
                 }], 
                 None, 
                 gks,
-                key_switches
+                key_switches,
+                debug_sk
             );
             assert_eq!(1, result.len());
             let result = result.into_iter().next().unwrap();
@@ -104,17 +187,17 @@ impl<Params: BGVParams, Strategy: BGVModswitchStrategy<Params>> ThinBootstrapDat
             Params::dec_println(P_base, &C_input, &values_in_coefficients, sk);
         }
 
-        let noisy_decryption = log_time::<_, _, LOG, _>("2. Computing noisy decryption c0 + c1 * s", |[key_switches]| {
-            // this is slightly more complicated than in BFV, since we cannot mod-switch to a ciphertext modulus that is not coprime to `t`.
-            // Instead, we first mod-switch to `p^e + 1`, and then reduce the shortest lift of the result modulo `p^e`. This will introduce the
-            // overflow modulo `p^e + 1` as error in the lower bits, which we will later remove during digit extraction
-            let (c0, c1) = Params::mod_switch_to_plaintext(P_main, &self.tmp_coprime_modulus_plaintext, &C_input, values_in_coefficients);
-            // multiply by `p^v`, to move the coefficients into the higher digits; this will cause noise overflow in a sense, but in this concrete
-            // situation, it only moves the error into the lower digits
-            let (c0, c1) = (
-                self.tmp_coprime_modulus_plaintext.inclusion().mul_map(c0, self.tmp_coprime_modulus_plaintext.base_ring().coerce(&ZZ, ZZ.pow(self.p(), self.v()))),
-                self.tmp_coprime_modulus_plaintext.inclusion().mul_map(c1, self.tmp_coprime_modulus_plaintext.base_ring().coerce(&ZZ, ZZ.pow(self.p(), self.v()))),
-            );
+        let noisy_decryption = log_time::<_, _, LOG, _>("2. Computing noisy decryption c0 + c1 * s", |[]| {
+            // this is slightly more complicated than in BFV, since we cannot mod-switch to a ciphertext modulus that is not coprime to `t = p^r`.
+            // Instead, we first multiply by `p^v`, then mod-switch to `p^e + 1`, and then reduce the shortest lift of the result modulo `p^e`.
+            //  This will introduce the overflow modulo `p^e + 1` as error in the lower bits, which we will later remove during digit extraction
+            let values_scaled = Ciphertext {
+                c0: C_input.inclusion().mul_map(values_in_coefficients.c0, C_input.base_ring().coerce(&ZZ, ZZ.pow(self.p(), self.v()))),
+                c1: C_input.inclusion().mul_map(values_in_coefficients.c1, C_input.base_ring().coerce(&ZZ, ZZ.pow(self.p(), self.v()))),
+                implicit_scale: values_in_coefficients.implicit_scale
+            };
+            // change to `p^e + 1`
+            let (c0, c1) = Params::mod_switch_to_plaintext(P_main, &self.tmp_coprime_modulus_plaintext, &C_input, values_scaled);
             // reduce modulo `p^e`, which will introduce additional error in the lower digits
             let mod_pe = P_main.base_ring().can_hom(&ZZ).unwrap();
             let (c0, c1) = (
@@ -135,13 +218,14 @@ impl<Params: BGVParams, Strategy: BGVModswitchStrategy<Params>> ThinBootstrapDat
 
         let noisy_decryption_in_slots = log_time::<_, _, LOG, _>("3. Computing Coeffs-to-Slots transform", |[key_switches]| {
             let result = self.modswitch_strategy.evaluate_circuit_plaintext(
-                &self.slots_to_coeffs_thin, 
-                P_base, 
+                &self.coeffs_to_slots_thin, 
+                P_main, 
                 C_master, 
                 &[noisy_decryption], 
                 None, 
                 gks,
-                key_switches
+                key_switches,
+                debug_sk
             );
             assert_eq!(1, result.len());
             return result.into_iter().next().unwrap();
@@ -166,7 +250,8 @@ impl<Params: BGVParams, Strategy: BGVModswitchStrategy<Params>> ThinBootstrapDat
             &self.plaintext_ring_hierarchy,
             C_master,
             digit_extraction_input,
-            rk
+            rk,
+            debug_sk
         ).0;
     }
 }
@@ -180,7 +265,8 @@ impl DigitExtract {
         P: &[PlaintextRing<Params>], 
         C_master: &CiphertextRing<Params>, 
         input: ModulusAwareCiphertext<Params, Strategy>, 
-        rk: &RelinKey<'a, Params>
+        rk: &RelinKey<'a, Params>,
+        debug_sk: Option<&SecretKey<Params>>
     ) -> (ModulusAwareCiphertext<Params, Strategy>, ModulusAwareCiphertext<Params, Strategy>) {
         let (p, actual_r) = is_prime_power(StaticRing::<i64>::RING, P_base.base_ring().modulus()).unwrap();
         assert_eq!(self.p(), p);
@@ -196,12 +282,61 @@ impl DigitExtract {
         return self.evaluate_generic(
             input,
             |exp, inputs, circuit|
-                modswitch_strategy.evaluate_circuit_int(circuit, get_P(exp), C_master, inputs, Some(rk), &[], &mut 0),
-            |exp_old, exp_new, input| ModulusAwareCiphertext {
-                data: Params::change_plaintext_modulus(get_P(exp_new), get_P(exp_old), C_master, input.data),
-                dropped_rns_factor_indices: input.dropped_rns_factor_indices,
-                info: input.info
+                modswitch_strategy.evaluate_circuit_int(circuit, get_P(exp), C_master, inputs, Some(rk), &[], &mut 0, debug_sk),
+            |exp_old, exp_new, input| {
+                let C_current = Params::mod_switch_down_ciphertext_ring(C_master, &input.dropped_rns_factor_indices);
+                let result = ModulusAwareCiphertext {
+                    data: Params::change_plaintext_modulus(get_P(exp_new), get_P(exp_old), &C_current, input.data),
+                    dropped_rns_factor_indices: input.dropped_rns_factor_indices.clone(),
+                    info: input.info
+                };
+                return result;
             }
         );
     }
+}
+
+#[test]
+fn test_pow2_bgv_thin_bootstrapping_17() {
+    let mut rng = thread_rng();
+    
+    // 8 slots of rank 16
+    let params = Pow2BGV {
+        log2_q_min: 790,
+        log2_q_max: 800,
+        log2_N: 7,
+        ciphertext_allocator: DefaultCiphertextAllocator::default(),
+        negacyclic_ntt: PhantomData::<DefaultNegacyclicNTT>
+    };
+    let t = 17;
+    let digits = 6;
+    let bootstrap_params = ThinBootstrapParams {
+        scheme_params: params.clone(),
+        v: 2,
+        t: t
+    };
+    let bootstrapper = bootstrap_params.build_pow2::<_, true>(DefaultModswitchStrategy::<_, _, true>::new(NaiveBGVNoiseEstimator));
+    
+    let P = params.create_plaintext_ring(t);
+    let C_master = params.create_initial_ciphertext_ring();
+    
+    let sk = Pow2BGV::gen_sk(&C_master, &mut rng);
+    let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, Pow2BGV::gen_gk(bootstrapper.largest_plaintext_ring(), &C_master, &mut rng, &sk, g, digits))).collect::<Vec<_>>();
+    let rk = Pow2BGV::gen_rk(bootstrapper.largest_plaintext_ring(), &C_master, &mut rng, &sk, digits);
+    
+    let m = P.int_hom().map(2);
+    let ct = Pow2BGV::enc_sym(&P, &C_master, &mut rng, &m, &sk);
+    let ct_result = bootstrapper.bootstrap_thin::<true>(
+        &C_master, 
+        &P, 
+        &RNSFactorIndexList::empty(),
+        ct, 
+        &rk, 
+        &gk,
+        Some(&sk)
+    );
+    let C_result = Pow2BGV::mod_switch_down_ciphertext_ring(&C_master, &ct_result.dropped_rns_factor_indices);
+    let sk_result = Pow2BGV::mod_switch_down_sk(&C_result, &C_master, &ct_result.dropped_rns_factor_indices, &sk);
+
+    assert_el_eq!(P, P.int_hom().map(2), Pow2BGV::dec(&P, &C_result, ct_result.data, &sk_result));
 }

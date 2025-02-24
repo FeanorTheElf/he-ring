@@ -1001,7 +1001,7 @@ fn test_multiple_representations() {
     let ring: SingleRNSRing<_> = SingleRNSRingBase::new(OddCyclotomicNumberRing::new(3), rns_base.clone());
 
     let from_raw_representation = |data: [i32; 3]| SingleRNSRingEl {
-        coefficients: ring.get_ring().rns_base().as_iter().flat_map(|Zp| data.iter().enumerate().map(|(i, x)| Zp.int_hom().map(*x))).collect(),
+        coefficients: ring.get_ring().rns_base().as_iter().flat_map(|Zp| data.iter().map(|x| Zp.int_hom().map(*x))).collect(),
         convolutions: PhantomData,
         number_ring: PhantomData
     };

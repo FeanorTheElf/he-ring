@@ -198,7 +198,7 @@ macro_rules! impl_deserialize_seed_for_dependent_struct {
 
                 type Field = Option<u32>;
 
-                const fn get_const_len<const N: usize>(data: [&'static str; N]) -> usize {
+                const fn get_const_len<const N: usize>(_: [&'static str; N]) -> usize {
                     N
                 }
                 const FIELD_COUNT: usize = get_const_len([$(stringify!($field)),*]);

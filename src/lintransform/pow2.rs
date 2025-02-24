@@ -112,7 +112,7 @@ fn pow2_bitreversed_dwt_butterfly<G, NumberRing>(H: &DefaultHypercube<NumberRing
 
     let result = MatmulTransform::linear_combine_shifts(H, [
         (
-            (0..H.hypercube().dim_count()).map(|i| 0).collect::<Vec<_>>(),
+            (0..H.hypercube().dim_count()).map(|_| 0).collect::<Vec<_>>(),
             diagonal_mask
         ),
         (
@@ -193,7 +193,7 @@ fn pow2_bitreversed_inv_dwt_butterfly<G, NumberRing>(H: &DefaultHypercube<Number
 
     let result = MatmulTransform::linear_combine_shifts(H, [
         (
-            (0..H.hypercube().dim_count()).map(|i| 0).collect::<Vec<_>>(),
+            (0..H.hypercube().dim_count()).map(|_| 0).collect::<Vec<_>>(),
             diagonal_mask
         ),
         (
@@ -312,7 +312,7 @@ pub fn slots_to_coeffs_thin<NumberRing>(H: &DefaultHypercube<NumberRing>) -> Vec
         // we first combine `ai0` and `ai1` to `(ai0 + 𝝵^(n/4) ai1, ai0 - 𝝵^(n/4) ai1)`
         result.push(MatmulTransform::linear_combine_shifts(H, [
             (
-                (0..H.hypercube().dim_count()).map(|i| 0).collect::<Vec<_>>(),
+                (0..H.hypercube().dim_count()).map(|_| 0).collect::<Vec<_>>(),
                 H.from_slot_values(H.hypercube().hypercube_iter(|idxs| if idxs[1] == 0 {
                     H.slot_ring().one()
                 } else {
@@ -376,7 +376,7 @@ pub fn slots_to_coeffs_thin_inv<NumberRing>(H: &DefaultHypercube<NumberRing>) ->
 
         result.push(MatmulTransform::linear_combine_shifts(H, [
             (
-                (0..H.hypercube().dim_count()).map(|i| 0).collect::<Vec<_>>(),
+                (0..H.hypercube().dim_count()).map(|_| 0).collect::<Vec<_>>(),
                 H.ring().inclusion().mul_map(H.from_slot_values(H.hypercube().hypercube_iter(|idxs| if idxs[1] == 0 {
                     H.slot_ring().one()
                 } else {

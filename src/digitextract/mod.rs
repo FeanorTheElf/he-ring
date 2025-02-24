@@ -173,32 +173,30 @@ impl<R: ?Sized + RingBase> DigitExtract<R> {
         where EvalCircuit: FnMut(/* exponent of p */ usize, &[T], &PlaintextCircuit<R>) -> Vec<T>,
             ChangeSpace: FnMut(/* input exponent of p */ usize, /* output exponent of p */ usize, T) -> T
     {
-        let p = self.p;
         let e = self.e;
         let r = self.e - self.v;
-        let v = self.v;
 
-        enum SingleOrDoubleValue<T> {
-            Single(T), Double([T; 2])
+        enum OneOrTwoValues<T> {
+            One(T), Two([T; 2])
         }
 
-        impl<T> SingleOrDoubleValue<T> {
+        impl<T> OneOrTwoValues<T> {
 
             fn with_first_el<'a>(&'a mut self, first: T) -> &'a mut [T; 2] {
                 take_mut::take(self, |value| match value {
-                    SingleOrDoubleValue::Single(second) => SingleOrDoubleValue::Double([first, second]),
-                    SingleOrDoubleValue::Double([_, second]) => SingleOrDoubleValue::Double([first, second])
+                    OneOrTwoValues::One(second) => OneOrTwoValues::Two([first, second]),
+                    OneOrTwoValues::Two([_, second]) => OneOrTwoValues::Two([first, second])
                 });
                 return match self {
-                    SingleOrDoubleValue::Single(_) => unreachable!(),
-                    SingleOrDoubleValue::Double(data) => data
+                    OneOrTwoValues::One(_) => unreachable!(),
+                    OneOrTwoValues::Two(data) => data
                 };
             }
 
             fn get_second<'a>(&'a self) -> &'a T {
                 match self {
-                    SingleOrDoubleValue::Single(second) => second,
-                    SingleOrDoubleValue::Double([_, second]) => second
+                    OneOrTwoValues::One(second) => second,
+                    OneOrTwoValues::Two([_, second]) => second
                 }
             }
         }
@@ -218,7 +216,7 @@ impl<R: ?Sized + RingBase> DigitExtract<R> {
 
             let current = change_space(e, remaining_digits, partial_floor_divs[i].take().unwrap());
             let digit_extracted = eval_circuit(remaining_digits, std::slice::from_ref(&current), use_circuit);
-            let mut digit_extracted = digit_extracted.into_iter().map(|value| SingleOrDoubleValue::Single(change_space(remaining_digits, e, value))).collect::<Vec<_>>();
+            let mut digit_extracted = digit_extracted.into_iter().map(|value| OneOrTwoValues::One(change_space(remaining_digits, e, value))).collect::<Vec<_>>();
             
             let last_digit_extracted = digit_extracted.last_mut().unwrap();
             take_mut::take(&mut floor_div_result, |current| sub_values(e, last_digit_extracted.with_first_el(current), &mut eval_circuit));

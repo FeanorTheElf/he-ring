@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::ops::{Deref, Range};
 
 use feanor_math::seq::VectorFn;
@@ -196,6 +197,20 @@ impl Deref for RNSFactorIndexList {
     }
 }
 
+impl Display for RNSFactorIndexList {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.rns_factor_indices.len() == 0 {
+            return write!(f, "[]");
+        } else {
+            write!(f, "[{}", self.rns_factor_indices[0])?;
+            for x in &self.rns_factor_indices[1..] {
+                write!(f, ", {}", x)?;
+            }
+            return write!(f, "]");
+        }
+    }
+}
+
 impl RNSFactorIndexList {
 
     fn from_unchecked(indices: Box<[usize]>) -> Box<Self> {
@@ -355,8 +370,9 @@ impl RNSFactorIndexList {
 }
 
 impl Clone for Box<RNSFactorIndexList> {
+    
     fn clone(&self) -> Self {
-        (*&*self).to_owned()
+        RNSFactorIndexList::to_owned(&self)
     }
 }
 

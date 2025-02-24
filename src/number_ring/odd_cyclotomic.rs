@@ -44,8 +44,6 @@ impl OddCyclotomicNumberRing {
         for (_, e) in &factorization {
             assert!(*e == 1, "n = {} is not squarefree", n);
         }
-        let poly_ring = SparsePolyRing::new(StaticRing::<i64>::RING, "X");
-        let cyclotomic_poly = cyclotomic_polynomial(&poly_ring, n);
         Self {
             n_factorization_squarefree: factorization.iter().map(|(p, _)| *p).collect(),
         }
@@ -320,7 +318,6 @@ impl HENumberRing for CompositeCyclotomicNumberRing {
             StaticRing::<i64>::RING.abs_log2_ceil(&(<_ as HECyclotomicNumberRing>::n(&self.tensor_factor1) as i64)).unwrap() + 2,
             StaticRing::<i64>::RING.abs_log2_ceil(&(<_ as HECyclotomicNumberRing>::n(&self.tensor_factor2) as i64)).unwrap() + 2
         );
-        let log2_m = StaticRing::<i64>::RING.abs_log2_ceil(&(n as i64)).unwrap() + 2;
         return n << log2_m;
     }
 
@@ -459,11 +456,11 @@ impl<F, A> HENumberRingMod for OddCyclotomicDecomposedNumberRing<F, A>
         }
     }
 
-    fn coeff_basis_to_small_basis<V>(&self, data: V)
+    fn coeff_basis_to_small_basis<V>(&self, _data: V)
         where V: VectorViewMut<zn_64::ZnEl>
     {}
 
-    fn small_basis_to_coeff_basis<V>(&self, data: V)
+    fn small_basis_to_coeff_basis<V>(&self, _data: V)
         where V: VectorViewMut<zn_64::ZnEl>
     {}
 

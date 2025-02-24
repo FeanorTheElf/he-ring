@@ -189,7 +189,7 @@ impl<R, C> CyclotomicPolyReducer<R, C>
         for i in 0..factorization.len() {
             let cyclotomic_poly = cyclotomic_polynomial(&poly_ring, current_n as usize);
             sparse_reducers.push(SparsePolyReducer::new(&ring_poly_ring, &hom.map(cyclotomic_poly), ring.clone(), current_stride as usize));
-            let (p, e) = factorization[i];
+            let (p, _e) = factorization[i];
             current_n *= p;
             current_stride /= p;
         }
@@ -285,7 +285,6 @@ fn test_cyclotomic_poly_remainder() {
     let ring = Zn::new(65537).as_field().ok().unwrap();
     let convolution = NTTConv::new(ring.clone(), 10);
     let poly_ring = DensePolyRing::new(ring.clone(), "X");
-    let poly = cyclotomic_polynomial(&poly_ring, 3);
     let reducer = CyclotomicPolyReducer::new(ring.clone(), 3, convolution);
     let expected = [ring.zero(), ring.zero()];
 

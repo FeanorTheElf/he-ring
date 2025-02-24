@@ -421,7 +421,7 @@ impl<NumberRing, A> ManagedDoubleRNSRingBase<NumberRing, A>
                 f2(&mut result_fft, rhs_double_rns_repr);
                 return self.from_double_rns_repr(result_fft);
             },
-            (ManagedDoubleRNSElRepresentation::Both(lhs_small_basis_repr, lhs_double_rns_repr), ManagedDoubleRNSElRepresentation::Sum(rhs_sum_repr)) => {
+            (ManagedDoubleRNSElRepresentation::Both(lhs_small_basis_repr, _), ManagedDoubleRNSElRepresentation::Sum(rhs_sum_repr)) => {
                 let mut result_fft = self.base.clone_el(&rhs_sum_repr.1);
                 let mut result_coeff = self.base.clone_el_non_fft(lhs_small_basis_repr);
                 f1(&mut result_coeff, &rhs_sum_repr.0);
@@ -661,8 +661,8 @@ impl<NumberRing, A> RingBase for ManagedDoubleRNSRingBase<NumberRing, A>
             rhs,
             |a, b| self.base.add_assign_non_fft(a, b),
             |a, b| self.base.add_assign_ref(a, b),
-            |a| {},
-            |a| {}
+            |_| {},
+            |_| {}
         )
     }
 
@@ -1192,7 +1192,7 @@ fn test_thread_safe() {
     let mut threads = Vec::new();
     let n = 5;
     let barrier = Arc::new(Barrier::new(n));
-    for i in 0..n {
+    for _ in 0..n {
         let barrier = barrier.clone();
         let test_element = test_element.clone();
         let ring = ring.clone();

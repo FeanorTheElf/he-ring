@@ -41,7 +41,6 @@ impl<Params: BFVParams> ThinBootstrapParams<Params>
         assert_eq!(self.scheme_params.number_ring().n(), 1 << log2_n);
 
         let (p, r) = is_prime_power(&ZZ, &self.t).unwrap();
-        let s_can_norm = <_ as HENumberRing>::inf_to_can_norm_expansion_factor(&self.scheme_params.number_ring());
         let v = self.v;
         let e = r + v;
         if LOG {
@@ -73,7 +72,6 @@ impl<Params: BFVParams> ThinBootstrapParams<Params>
         assert!(self.scheme_params.number_ring().n() % 2 != 0);
 
         let (p, r) = is_prime_power(&ZZ, &self.t).unwrap();
-        let s_can_norm = self.scheme_params.number_ring().inf_to_can_norm_expansion_factor();
         let v = self.v;
         let e = r + v;
         if LOG {
@@ -166,7 +164,7 @@ impl<Params: BFVParams> ThinBootstrapData<Params> {
             Params::dec_println(P_base, C, &values_in_coefficients, sk);
         }
 
-        let noisy_decryption = log_time::<_, _, LOG, _>("2. Computing noisy decryption c0 + c1 * s", |[key_switches]| {
+        let noisy_decryption = log_time::<_, _, LOG, _>("2. Computing noisy decryption c0 + c1 * s", |[]| {
             let (c0, c1) = Params::mod_switch_to_plaintext(P_main, C, values_in_coefficients);
             let enc_sk = Params::enc_sk(P_main, C);
             return Params::hom_add_plain(P_main, C, &c0, Params::hom_mul_plain(P_main, C, &c1, enc_sk));

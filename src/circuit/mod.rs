@@ -337,7 +337,7 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
     ///    |
     /// ```
     /// 
-    pub fn constant_i32<S: RingStore<Type = R>>(c: i32, ring: S) -> Self {
+    pub fn constant_i32<S: RingStore<Type = R>>(c: i32, _ring: S) -> Self {
         let result = Self {
             input_count: 0,
             gates: Vec::new(),
@@ -457,7 +457,7 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
     /// This is a special case of [`PlaintextCircuit::linear_transform()`], in many cases
     /// the latter is more convenient to use.
     /// 
-    pub fn add<S: RingStore<Type = R>>(ring: S) -> Self {
+    pub fn add<S: RingStore<Type = R>>(_ring: S) -> Self {
         let result = Self {
             input_count: 2,
             gates: Vec::new(),
@@ -481,7 +481,7 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
     /// This is a special case of [`PlaintextCircuit::linear_transform()`], in many cases
     /// the latter is more convenient to use.
     /// 
-    pub fn sub<S: RingStore<Type = R>>(ring: S) -> Self {
+    pub fn sub<S: RingStore<Type = R>>(_ring: S) -> Self {
         let result = Self {
             input_count: 2,
             gates: Vec::new(),
@@ -503,7 +503,7 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
     ///    |
     /// ```
     /// 
-    pub fn mul<S: RingStore<Type = R>>(ring: S) -> Self {
+    pub fn mul<S: RingStore<Type = R>>(_ring: S) -> Self {
         let result = Self {
             input_count: 2,
             gates: vec![PlainCircuitGate::Mul(
@@ -535,7 +535,7 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
     ///    |
     /// ```
     /// 
-    pub fn gal<S: RingStore<Type = R>>(g: CyclotomicGaloisGroupEl, ring: S) -> Self {
+    pub fn gal<S: RingStore<Type = R>>(g: CyclotomicGaloisGroupEl, _ring: S) -> Self {
         let result = Self {
             input_count: 1,
             gates: vec![PlainCircuitGate::Gal(vec![g], LinearCombination {
@@ -561,7 +561,7 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
     ///    |   |  ...
     /// ```
     /// 
-    pub fn gal_many<S: RingStore<Type = R>>(gs: &[CyclotomicGaloisGroupEl], ring: S) -> Self {
+    pub fn gal_many<S: RingStore<Type = R>>(gs: &[CyclotomicGaloisGroupEl], _ring: S) -> Self {
         let result = Self {
             input_count: 1,
             gates: vec![PlainCircuitGate::Gal(
@@ -631,7 +631,7 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
     ///   |  |  |  |  ...
     /// ```
     /// 
-    pub fn identity<S: RingStore<Type = R>>(wire_count: usize, ring: S) -> Self {
+    pub fn identity<S: RingStore<Type = R>>(wire_count: usize, _ring: S) -> Self {
         let result = Self {
             input_count: wire_count,
             gates: Vec::new(),
@@ -648,7 +648,7 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
     /// Creates the circuit that outputs the input wires at the indices given in `output_wires`.
     /// An input wire can be mentioned multiple times.
     /// 
-    pub fn select<S: RingStore<Type = R>>(input_wire_count: usize, output_wires: &[usize], ring: S) -> Self {
+    pub fn select<S: RingStore<Type = R>>(input_wire_count: usize, output_wires: &[usize], _ring: S) -> Self {
         let result = Self {
             input_count: input_wire_count,
             gates: Vec::new(),
