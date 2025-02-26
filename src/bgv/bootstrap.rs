@@ -340,3 +340,49 @@ fn test_pow2_bgv_thin_bootstrapping_17() {
 
     assert_el_eq!(P, P.int_hom().map(2), Pow2BGV::dec(&P, &C_result, ct_result.data, &sk_result));
 }
+
+#[test]
+#[ignore]
+fn measure_time_pow2_bgv_thin_bootstrapping_17() {
+    let mut rng = thread_rng();
+    
+    // 8 slots of rank 16
+    let params = Pow2BGV {
+        log2_q_min: 790,
+        log2_q_max: 800,
+        log2_N: 15,
+        ciphertext_allocator: DefaultCiphertextAllocator::default(),
+        negacyclic_ntt: PhantomData::<DefaultNegacyclicNTT>
+    };
+    let t = 17;
+    let digits = 10;
+    let bootstrap_params = ThinBootstrapParams {
+        scheme_params: params.clone(),
+        v: 2,
+        t: t
+    };
+    let bootstrapper = bootstrap_params.build_pow2::<_, true>(DefaultModswitchStrategy::<_, _, true>::new(NaiveBGVNoiseEstimator));
+    
+    let P = params.create_plaintext_ring(t);
+    let C_master = params.create_initial_ciphertext_ring();
+    
+    let sk = Pow2BGV::gen_sk(&C_master, &mut rng);
+    let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, Pow2BGV::gen_gk(bootstrapper.largest_plaintext_ring(), &C_master, &mut rng, &sk, g, digits))).collect::<Vec<_>>();
+    let rk = Pow2BGV::gen_rk(bootstrapper.largest_plaintext_ring(), &C_master, &mut rng, &sk, digits);
+    
+    let m = P.int_hom().map(2);
+    let ct = Pow2BGV::enc_sym(&P, &C_master, &mut rng, &m, &sk);
+    let ct_result = bootstrapper.bootstrap_thin::<true>(
+        &C_master, 
+        &P, 
+        &RNSFactorIndexList::empty(),
+        ct, 
+        &rk, 
+        &gk,
+        Some(&sk)
+    );
+    let C_result = Pow2BGV::mod_switch_down_ciphertext_ring(&C_master, &ct_result.dropped_rns_factor_indices);
+    let sk_result = Pow2BGV::mod_switch_down_sk(&C_result, &C_master, &ct_result.dropped_rns_factor_indices, &sk);
+
+    assert_el_eq!(P, P.int_hom().map(2), Pow2BGV::dec(&P, &C_result, ct_result.data, &sk_result));
+}

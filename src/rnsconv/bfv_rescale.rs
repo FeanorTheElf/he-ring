@@ -3,15 +3,14 @@ use feanor_math::rings::zn::*;
 use feanor_math::rings::zn::zn_64::*;
 use feanor_math::integer::*;
 use feanor_math::divisibility::DivisibilityRingStore;
+use feanor_math::ordered::OrderedRingStore;
 use feanor_math::ring::*;
 use feanor_math::homomorphism::*;
 use feanor_math::seq::*;
-use feanor_math::ordered::OrderedRingStore;
 use tracing::instrument;
 
-use std::alloc::Allocator;
-use std::alloc::Global;
 use std::cmp::min;
+use std::alloc::{Allocator, Global};
 
 use super::RNSOperation;
 
