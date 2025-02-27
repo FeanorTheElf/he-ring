@@ -23,7 +23,7 @@ pub struct ThinBootstrapParams<Params: BGVParams> {
 impl<Params: BGVParams> ThinBootstrapParams<Params>
     where NumberRing<Params>: Clone
 {
-    pub fn build_pow2<M: BGVModswitchStrategy<Params>, const LOG: bool>(&self, modswitch_strategy: M) -> ThinBootstrapData<Params, M> {
+    pub fn build_pow2<M: BGVModswitchStrategy<Params>, const LOG: bool>(&self, modswitch_strategy: M, cache_dir: Option<&str>) -> ThinBootstrapData<Params, M> {
         let log2_n = ZZ.abs_log2_ceil(&(self.scheme_params.number_ring().n() as i64)).unwrap();
         assert_eq!(self.scheme_params.number_ring().n(), 1 << log2_n);
 
@@ -41,7 +41,11 @@ impl<Params: BGVParams> ThinBootstrapParams<Params>
         let digit_extract = DigitExtract::new_default(p, e, r);
 
         let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(plaintext_ring.n() as u64), p);
-        let H = HypercubeIsomorphism::new::<LOG>(&plaintext_ring, hypercube);
+        let H = if let Some(cache_dir) = cache_dir {
+            HypercubeIsomorphism::new_cache_file::<LOG>(&plaintext_ring, hypercube, cache_dir)
+        } else {
+            HypercubeIsomorphism::new::<LOG>(&plaintext_ring, hypercube)
+        };
         let original_H = H.change_modulus(&original_plaintext_ring);
         let slots_to_coeffs = log_time::<_, _, LOG, _>("Creating Slots-to-Coeffs transform", |[]| MatmulTransform::to_circuit_many(pow2::slots_to_coeffs_thin(&original_H), &original_H));
         let coeffs_to_slots = log_time::<_, _, LOG, _>("Creating Coeffs-to-Slots transform", |[]| pow2::coeffs_to_slots_thin(&H));
@@ -318,7 +322,7 @@ fn test_pow2_bgv_thin_bootstrapping_17() {
         v: 2,
         t: t
     };
-    let bootstrapper = bootstrap_params.build_pow2::<_, true>(DefaultModswitchStrategy::<_, _, true>::new(NaiveBGVNoiseEstimator));
+    let bootstrapper = bootstrap_params.build_pow2::<_, true>(DefaultModswitchStrategy::<_, _, true>::new(NaiveBGVNoiseEstimator), None);
     
     let P = params.create_plaintext_ring(t);
     let C_master = params.create_initial_ciphertext_ring();
@@ -369,7 +373,7 @@ fn measure_time_pow2_bgv_thin_bootstrapping_17() {
         v: 2,
         t: t
     };
-    let bootstrapper = bootstrap_params.build_pow2::<_, true>(DefaultModswitchStrategy::<_, _, true>::new(NaiveBGVNoiseEstimator));
+    let bootstrapper = bootstrap_params.build_pow2::<_, true>(DefaultModswitchStrategy::<_, _, true>::new(NaiveBGVNoiseEstimator), Some("."));
     
     let P = params.create_plaintext_ring(t);
     let C_master = params.create_initial_ciphertext_ring();

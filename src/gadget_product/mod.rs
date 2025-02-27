@@ -98,15 +98,20 @@ impl<R: PreparedMultiplicationRing> GadgetProductLhsOperand<R> {
         }
     }
 
-    pub fn apply_galois_action_many(&self, ring: &R, gs: &[CyclotomicGaloisGroupEl]) -> Vec<Self>
+    pub fn apply_galois_action_many(self, ring: &R, gs: &[CyclotomicGaloisGroupEl]) -> Vec<Self>
         where R: CyclotomicRing
     {
         let mut result = Vec::with_capacity(gs.len());
         result.resize_with(gs.len(), || GadgetProductLhsOperand { element_decomposition: Vec::new() });
-        for (_prepared_el, el) in &self.element_decomposition {
-            let new_els = ring.apply_galois_action_many(el, gs);
-            for (i, new_el) in new_els.into_iter().enumerate() {
-                result[i].element_decomposition.push((ring.prepare_multiplicant(&new_el), new_el));
+        for (prepared_el, el) in self.element_decomposition {
+            let mut prepared_el = Some(prepared_el);
+            let new_els = ring.apply_galois_action_many(&el, gs);
+            for (i, (new_el, g)) in new_els.into_iter().zip(gs.iter()).enumerate() {
+                if ring.galois_group().is_identity(*g) {
+                    result[i].element_decomposition.push((prepared_el.take().unwrap(), new_el));
+                } else {
+                    result[i].element_decomposition.push((ring.prepare_multiplicant(&new_el), new_el));
+                }
             }
         }
         return result;

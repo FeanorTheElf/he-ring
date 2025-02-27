@@ -1,4 +1,3 @@
-use std::marker::PhantomData;
 use std::cmp::max;
 
 use feanor_math::algorithms::discrete_log::discrete_log;
@@ -14,16 +13,11 @@ use feanor_math::homomorphism::*;
 use feanor_math::rings::zn::*;
 use feanor_math::rings::zn::zn_rns;
 use feanor_math::seq::*;
-use feanor_math::serialization::{DeserializeSeedNewtype, SerializableNewtype};
 use feanor_math::wrapper::RingElementWrapper;
 use serde::{Deserialize, Serialize};
-use serde::de::DeserializeSeed;
 
-use crate::serialization_helper::DeserializeSeedDependentTuple;
 use crate::{cyclotomic::*, ZZi64};
 use crate::euler_phi;
-
-use super::serialization::{HypercubeStructureDataDeserializer, SerializableHypercubeStructureData};
 
 ///
 /// Represents a hypercube, which is a map
@@ -51,13 +45,25 @@ pub struct HypercubeStructure {
     pub(super) choice: HypercubeTypeData
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
 pub enum HypercubeTypeData {
     Generic, 
     /// if the hypercube dimensions correspond directly to prime power factors of `n`, 
     /// we store this correspondence here, as it can be used to explicitly work with the
     /// relationship between hypercube dimensions and tensor factors of `Z[𝝵]`
     CyclotomicTensorProductHypercube(Vec<(i64, usize)>)
+}
+
+impl PartialEq for HypercubeStructure {
+    fn eq(&self, other: &Self) -> bool {
+        self.galois_group == other.galois_group && 
+            self.galois_group.eq_el(self.p, other.p) &&
+            self.d == other.d && 
+            self.ms == other.ms &&
+            self.gs.iter().zip(other.gs.iter()).all(|(l, r)| self.galois_group.eq_el(*l, *r)) &&
+
+            self.choice == other.choice
+    }
 }
 
 impl HypercubeStructure {
@@ -379,31 +385,6 @@ impl HypercubeStructure {
     /// 
     pub fn element_iter<'b>(&'b self) -> impl ExactSizeIterator<Item = CyclotomicGaloisGroupEl> + use<'b> {
         self.hypercube_iter(|idxs| self.map_usize(idxs))
-    }
-}
-
-impl Serialize for HypercubeStructure {
-
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where S: serde::Serializer
-    {
-        SerializableNewtype::new("HypercubeStructure", (&self.galois_group, SerializableHypercubeStructureData::new(self))).serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for HypercubeStructure {
-
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where D: serde::Deserializer<'de>
-    {
-        DeserializeSeedNewtype::new("HypercubeStructure", DeserializeSeedDependentTuple::new(
-            PhantomData::<CyclotomicGaloisGroup>,
-            |galois_group| HypercubeStructureDataDeserializer::new(*galois_group)
-        )).deserialize(deserializer).map(|(galois_group, data)| {
-            let mut result = HypercubeStructure::new(galois_group, data.p, data.d, data.ms, data.gs);
-            result.choice = data.choice;
-            return result;
-        })
     }
 }
 

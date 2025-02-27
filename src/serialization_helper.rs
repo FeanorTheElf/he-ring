@@ -351,7 +351,7 @@ macro_rules! impl_deserialize_seed_for_dependent_struct {
 pub struct DeserializeSeedDependentTuple<'de, T0, F, T1>
     where T0: DeserializeSeed<'de>,
         T1: DeserializeSeed<'de>,
-        F: FnOnce(&T0::Value) -> T1
+        F: FnOnce(T0::Value) -> T1
 {
     deserializer: PhantomData<&'de ()>,
     first: T0,
@@ -361,7 +361,7 @@ pub struct DeserializeSeedDependentTuple<'de, T0, F, T1>
 impl<'de, T0, F, T1> DeserializeSeedDependentTuple<'de, T0, F, T1>
     where T0: DeserializeSeed<'de>,
         T1: DeserializeSeed<'de>,
-        F: FnOnce(&T0::Value) -> T1
+        F: FnOnce(T0::Value) -> T1
 {
     pub fn new(first: T0, derive_second: F) -> Self {
         Self {
@@ -375,9 +375,9 @@ impl<'de, T0, F, T1> DeserializeSeedDependentTuple<'de, T0, F, T1>
 impl<'de, T0, F, T1> DeserializeSeed<'de> for DeserializeSeedDependentTuple<'de, T0, F, T1>
     where T0: DeserializeSeed<'de>,
         T1: DeserializeSeed<'de>,
-        F: FnOnce(&T0::Value) -> T1
+        F: FnOnce(T0::Value) -> T1
 {
-    type Value = (T0::Value, T1::Value);
+    type Value = T1::Value;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
         where D: Deserializer<'de>
@@ -385,7 +385,7 @@ impl<'de, T0, F, T1> DeserializeSeed<'de> for DeserializeSeedDependentTuple<'de,
         pub struct ResultVisitor<'de, T0, F, T1>
             where T0: DeserializeSeed<'de>,
                 T1: DeserializeSeed<'de>,
-                F: FnOnce(&T0::Value) -> T1
+                F: FnOnce(T0::Value) -> T1
         {
             deserializer: PhantomData<&'de ()>,
             first: T0,
@@ -395,9 +395,9 @@ impl<'de, T0, F, T1> DeserializeSeed<'de> for DeserializeSeedDependentTuple<'de,
         impl<'de, T0, F, T1> Visitor<'de> for ResultVisitor<'de, T0, F, T1>
             where T0: DeserializeSeed<'de>,
                 T1: DeserializeSeed<'de>,
-                F: FnOnce(&T0::Value) -> T1
+                F: FnOnce(T0::Value) -> T1
         {
-            type Value = (T0::Value, T1::Value);
+            type Value = T1::Value;
 
             fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
                 write!(f, "a tuple with 2 elements")
@@ -407,11 +407,11 @@ impl<'de, T0, F, T1> DeserializeSeed<'de> for DeserializeSeedDependentTuple<'de,
                 where A: SeqAccess<'de>
             {
                 if let Some(first) = seq.next_element_seed(self.first)? {
-                    if let Some(second) = seq.next_element_seed((self.derive_second)(&first))? {
+                    if let Some(second) = seq.next_element_seed((self.derive_second)(first))? {
                         if let Some(_) = seq.next_element::<IgnoredAny>()? {
                             return Err(<A::Error as serde::de::Error>::invalid_length(3, &"a tuple with 2 elements"));
                         } else {
-                            return Ok((first, second));
+                            return Ok(second);
                         }
                     } else {
                         return Err(<A::Error as serde::de::Error>::invalid_length(1, &"a tuple with 2 elements"));
@@ -427,5 +427,31 @@ impl<'de, T0, F, T1> DeserializeSeed<'de> for DeserializeSeedDependentTuple<'de,
             first: self.first,
             derive_second: self.derive_second
         });
+    }
+}
+
+///
+/// A [`DeserializeSeed`] that does not deserialize anything, but returns
+/// a fixed value instead.
+/// 
+pub struct NoopDeserializeSeed<T> {
+    value: T
+}
+
+impl<T> NoopDeserializeSeed<T> {
+
+    #[allow(unused)]
+    pub fn new(value: T) -> Self {
+        Self { value }
+    }
+}
+
+impl<'de, T> DeserializeSeed<'de> for NoopDeserializeSeed<T> {
+    type Value = T;
+
+    fn deserialize<D>(self, _deserializer: D) -> Result<Self::Value, D::Error>
+        where D: Deserializer<'de>
+    {
+        Ok(self.value)
     }
 }

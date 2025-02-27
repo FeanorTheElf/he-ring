@@ -497,7 +497,11 @@ impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> DefaultMo
                     }
                 }).collect::<Vec<_>>();
 
-                let result = Params::hom_galois_many(P, &Cx, x.data, gs, gks_mod_switched.as_fn());
+                let result = if gs.len() == 1 {
+                    vec![Params::hom_galois(P, &Cx, x.data, gs[0], gks_mod_switched.at(0))]
+                } else {
+                    Params::hom_galois_many(P, &Cx, x.data, gs, gks_mod_switched.as_fn())
+                };
                 let result = result.into_iter().zip(gs.into_iter()).zip(gks_mod_switched.iter()).map(|((res, g), gk)| ModulusAwareCiphertext {
                     dropped_rns_factor_indices: x.dropped_rns_factor_indices.clone(),
                     info: self.noise_estimator.hom_galois(&P, &Cx, &x.info, *g, gk.0.gadget_vector_digits()),

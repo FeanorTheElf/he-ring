@@ -355,6 +355,17 @@ pub trait BGVParams {
     }
     
     #[instrument(skip_all)]
+    fn hom_galois<'a>(_P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: Ciphertext<Self>, g: CyclotomicGaloisGroupEl, gk: &KeySwitchKey<'a, Self>) -> Ciphertext<Self>
+        where Self: 'a
+    {
+        Self::key_switch(C, Ciphertext {
+            c0: C.get_ring().apply_galois_action(&ct.c0, g),
+            c1: C.get_ring().apply_galois_action(&ct.c1, g),
+            implicit_scale: ct.implicit_scale
+        }, gk)
+    }
+
+    #[instrument(skip_all)]
     fn hom_galois_many<'a, 'b, V>(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: Ciphertext<Self>, gs: &[CyclotomicGaloisGroupEl], gks: V) -> Vec<Ciphertext<Self>>
         where V: VectorFn<&'b KeySwitchKey<'a, Self>>,
             KeySwitchKey<'a, Self>: 'b,

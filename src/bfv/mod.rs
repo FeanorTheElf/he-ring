@@ -579,7 +579,11 @@ impl<NumberRing> PlaintextCircuit<NumberRingQuotientBase<NumberRing, Zn>>
             },
             |dst, x, ct| Params::hom_add(C, dst, &Params::hom_mul_plain(P, C, &x.clone(P).to_ring_el(P), Params::clone_ct(C, ct))),
             |lhs, rhs| Params::hom_mul(P, C, Cmul.unwrap(), lhs, rhs, rk.unwrap()),
-            |gs, x| Params::hom_galois_many(C, x, gs, gs.as_fn().map_fn(|expected_g| &gks.iter().filter(|(g, _)| galois_group.eq_el(*g, *expected_g)).next().unwrap().1))
+            |gs, x| if gs.len() == 1 {
+                vec![Params::hom_galois(C, x, gs[0], &gks.iter().filter(|(g, _)| galois_group.eq_el(*g, gs[0])).next().unwrap().1)]
+            } else {
+                Params::hom_galois_many(C, x, gs, gs.as_fn().map_fn(|expected_g| &gks.iter().filter(|(g, _)| galois_group.eq_el(*g, *expected_g)).next().unwrap().1))
+            }
         );
     }
 }
@@ -610,7 +614,11 @@ impl PlaintextCircuit<StaticRingBase<i64>> {
             },
             |dst, x, ct| Params::hom_add(C, dst, &Params::hom_mul_plain(P, C, &P.int_hom().map(x.to_ring_el(ZZ) as i32), Params::clone_ct(C, ct))),
             |lhs, rhs| Params::hom_mul(P, C, Cmul.unwrap(), lhs, rhs, rk.unwrap()),
-            |gs, x| Params::hom_galois_many(C, x, gs, gs.as_fn().map_fn(|expected_g| &gks.iter().filter(|(g, _)| galois_group.eq_el(*g, *expected_g)).next().unwrap().1))
+            |gs, x| if gs.len() == 1 {
+                vec![Params::hom_galois(C, x, gs[0], &gks.iter().filter(|(g, _)| galois_group.eq_el(*g, gs[0])).next().unwrap().1)]
+            } else {
+                Params::hom_galois_many(C, x, gs, gs.as_fn().map_fn(|expected_g| &gks.iter().filter(|(g, _)| galois_group.eq_el(*g, *expected_g)).next().unwrap().1))
+            }
         );
     }
 }
