@@ -10,10 +10,13 @@ use feanor_math::seq::*;
 use feanor_math::rings::zn::{ZnRingStore, ZnRing};
 use feanor_math::rings::zn::zn_64::*;
 use feanor_math::divisibility::DivisibilityRingStore;
-use feanor_math::primitive_int::*;
 use feanor_math::ring::*;
 use feanor_math::ordered::OrderedRingStore;
 use tracing::instrument;
+
+use crate::ZZbig;
+use crate::ZZi128;
+use crate::ZZi64;
 
 use super::sort_unstable_permutation;
 use super::RNSOperation;
@@ -63,10 +66,6 @@ pub struct AlmostExactBaseConversion<A = Global>
     Q_mod_q: Vec<ZnEl>,
     allocator: A
 }
-
-const ZZbig: BigIntRing = BigIntRing::RING;
-const ZZi64: StaticRing<i64> = StaticRing::<i64>::RING;
-const ZZi128: StaticRing<i128> = StaticRing::<i128>::RING;
 
 impl<A> AlmostExactBaseConversion<A> 
     where A: Allocator + Clone
@@ -433,7 +432,7 @@ fn bench_rns_base_conversion(bencher: &mut Bencher) {
     let in_moduli_count = 20;
     let out_moduli_count = 40;
     let cols = 1000;
-    let mut primes = ((1 << 30)..).map(|k| (1 << 10) * k + 1).filter(|p| is_prime(&StaticRing::<i64>::RING, p, 10)).map(|p| Zn::new(p as u64));
+    let mut primes = ((1 << 30)..).map(|k| (1 << 10) * k + 1).filter(|p| is_prime(&ZZi64, p, 10)).map(|p| Zn::new(p as u64));
     let in_moduli = primes.by_ref().take(in_moduli_count).collect::<Vec<_>>();
     let out_moduli = primes.take(out_moduli_count).collect::<Vec<_>>();
     let conv = AlmostExactBaseConversion::new_with(in_moduli.clone(), out_moduli.clone(), Global);
@@ -499,7 +498,7 @@ fn test_base_conversion_large() {
     ];
     let in_len = 17;
     let from = &primes[..in_len];
-    let from_prod = ZZbig.prod(from.iter().map(|p| int_cast(*p, ZZbig, StaticRing::<i64>::RING)));
+    let from_prod = ZZbig.prod(from.iter().map(|p| int_cast(*p, ZZbig, ZZi64)));
     let to = &primes[in_len..];
     let number = ZZbig.get_ring().parse("156545561910861509258548850310120795193837265771491906959215072510998373539323526014165281634346450795208120921520265422129013635769405993324585707811035953253906720513250161495607960734366886366296007741500531044904559075687514262946086011957808717474666493477109586105297965072817051127737667010", 10).unwrap();
     assert!(ZZbig.is_lt(&number, &from_prod));

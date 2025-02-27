@@ -21,6 +21,7 @@
 use std::alloc::Global;
 use std::time::Instant;
 
+use feanor_math::integer::BigIntRing;
 use feanor_math::primitive_int::*;
 use feanor_math::ring::*;
 use feanor_math::rings::zn::zn_64::Zn;
@@ -137,6 +138,19 @@ pub fn log_time<F, T, const LOG: bool, const COUNTER_VAR_COUNT: usize>(descripti
     }
     return result;
 }
+
+///
+/// The ring of integers, implemented using arbitrary precision
+/// 
+const ZZbig: BigIntRing = BigIntRing::RING;
+///
+/// The ring of integers, implemented using 64-bit integers
+/// 
+const ZZi64: StaticRing<i64> = StaticRing::<i64>::RING;
+///
+/// The ring of integers, implemented using 128-bit integers
+/// 
+const ZZi128: StaticRing<i128> = StaticRing::<i128>::RING;
 
 ///
 /// Contains some macros that mimic `#[derive(Deserialize)]` but for [`serde::de::DeserializeSeed`].

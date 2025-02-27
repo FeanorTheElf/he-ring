@@ -262,11 +262,14 @@ macro_rules! impl_deserialize_seed_for_dependent_struct {
                     }
                 }
 
-                struct ResultVisitor<$($gen_args)*> {
+                struct ResultVisitor<'de, $($gen_args)*>
+                    where $($constraints)*
+                {
+                    deserializer: PhantomData<&'de ()>,
                     deserialize_seed_base: $deserialize_seed_type
                 }
 
-                impl<'de, $($gen_args)*> Visitor<'de> for ResultVisitor<$($gen_args)*>
+                impl<'de, $($gen_args)*> Visitor<'de> for ResultVisitor<'de, $($gen_args)*>
                     where $($constraints)*
                 {
                     type Value = $deserialize_result_struct_name<'de, $($deserialize_result_gen_args)*>;
@@ -334,7 +337,7 @@ macro_rules! impl_deserialize_seed_for_dependent_struct {
                 return deserializer.deserialize_struct(
                     stringify!($deserialize_result_struct_name),
                     &[$(stringify!($field)),*],
-                    ResultVisitor { deserialize_seed_base: self }
+                    ResultVisitor { deserialize_seed_base: self, deserializer: PhantomData }
                 )
             }
         }

@@ -190,7 +190,7 @@ impl<Params: BGVParams, Strategy: BGVModswitchStrategy<Params>> ThinBootstrapDat
         let noisy_decryption = log_time::<_, _, LOG, _>("2. Computing noisy decryption c0 + c1 * s", |[]| {
             // this is slightly more complicated than in BFV, since we cannot mod-switch to a ciphertext modulus that is not coprime to `t = p^r`.
             // Instead, we first multiply by `p^v`, then mod-switch to `p^e + 1`, and then reduce the shortest lift of the result modulo `p^e`.
-            //  This will introduce the overflow modulo `p^e + 1` as error in the lower bits, which we will later remove during digit extraction
+            // This will introduce the overflow modulo `p^e + 1` as error in the lower bits, which we will later remove during digit extraction
             let values_scaled = Ciphertext {
                 c0: C_input.inclusion().mul_map(values_in_coefficients.c0, C_input.base_ring().coerce(&ZZ, ZZ.pow(self.p(), self.v()))),
                 c1: C_input.inclusion().mul_map(values_in_coefficients.c1, C_input.base_ring().coerce(&ZZ, ZZ.pow(self.p(), self.v()))),
@@ -234,25 +234,27 @@ impl<Params: BGVParams, Strategy: BGVModswitchStrategy<Params>> ThinBootstrapDat
             Params::dec_println_slots(P_main, C_master, &noisy_decryption_in_slots.data, sk);
         }
 
-        if LOG {
-            println!("4. Performing digit extraction");
-        }
-        let rounding_divisor_half = P_main.base_ring().coerce(&ZZbig, ZZbig.rounded_div(ZZbig.pow(int_cast(self.p(), ZZbig, ZZ), self.v()), &ZZbig.int_hom().map(2)));
-        let digit_extraction_input = ModulusAwareCiphertext {
-            data: Params::hom_add_plain(P_main, C_master, &P_main.inclusion().map(rounding_divisor_half), noisy_decryption_in_slots.data),
-            info: noisy_decryption_in_slots.info,
-            dropped_rns_factor_indices: noisy_decryption_in_slots.dropped_rns_factor_indices
-        };
+        let final_result = log_time::<_, _, LOG, _>("4. Computing digit extraction", |[key_switches]| {
 
-        return self.digit_extract.evaluate_bgv::<Params, Strategy>(
-            &self.modswitch_strategy,
-            P_base,
-            &self.plaintext_ring_hierarchy,
-            C_master,
-            digit_extraction_input,
-            rk,
-            debug_sk
-        ).0;
+            let rounding_divisor_half = P_main.base_ring().coerce(&ZZbig, ZZbig.rounded_div(ZZbig.pow(int_cast(self.p(), ZZbig, ZZ), self.v()), &ZZbig.int_hom().map(2)));
+            let digit_extraction_input = ModulusAwareCiphertext {
+                data: Params::hom_add_plain(P_main, C_master, &P_main.inclusion().map(rounding_divisor_half), noisy_decryption_in_slots.data),
+                info: noisy_decryption_in_slots.info,
+                dropped_rns_factor_indices: noisy_decryption_in_slots.dropped_rns_factor_indices
+            };
+    
+            return self.digit_extract.evaluate_bgv::<Params, Strategy>(
+                &self.modswitch_strategy,
+                P_base,
+                &self.plaintext_ring_hierarchy,
+                C_master,
+                digit_extraction_input,
+                rk,
+                key_switches,
+                debug_sk
+            ).0;
+        });
+        return final_result;
     }
 }
 
@@ -266,6 +268,7 @@ impl DigitExtract {
         C_master: &CiphertextRing<Params>, 
         input: ModulusAwareCiphertext<Params, Strategy>, 
         rk: &RelinKey<'a, Params>,
+        key_switches: &mut usize,
         debug_sk: Option<&SecretKey<Params>>
     ) -> (ModulusAwareCiphertext<Params, Strategy>, ModulusAwareCiphertext<Params, Strategy>) {
         let (p, actual_r) = is_prime_power(StaticRing::<i64>::RING, P_base.base_ring().modulus()).unwrap();
@@ -282,7 +285,7 @@ impl DigitExtract {
         return self.evaluate_generic(
             input,
             |exp, inputs, circuit|
-                modswitch_strategy.evaluate_circuit_int(circuit, get_P(exp), C_master, inputs, Some(rk), &[], &mut 0, debug_sk),
+                modswitch_strategy.evaluate_circuit_int(circuit, get_P(exp), C_master, inputs, Some(rk), &[], key_switches, debug_sk),
             |exp_old, exp_new, input| {
                 let C_current = Params::mod_switch_down_ciphertext_ring(C_master, &input.dropped_rns_factor_indices);
                 let result = ModulusAwareCiphertext {
@@ -344,6 +347,11 @@ fn test_pow2_bgv_thin_bootstrapping_17() {
 #[test]
 #[ignore]
 fn measure_time_pow2_bgv_thin_bootstrapping_17() {
+    
+    let (chrome_layer, _guard) = tracing_chrome::ChromeLayerBuilder::new().build();
+    let filtered_chrome_layer = chrome_layer.with_filter(tracing_subscriber::filter::filter_fn(|metadata| !["small_basis_to_mult_basis", "mult_basis_to_small_basis", "small_basis_to_coeff_basis", "coeff_basis_to_small_basis"].contains(&metadata.name())));
+    tracing_subscriber::registry().with(filtered_chrome_layer).init();
+    
     let mut rng = thread_rng();
     
     // 8 slots of rank 16
@@ -379,7 +387,7 @@ fn measure_time_pow2_bgv_thin_bootstrapping_17() {
         ct, 
         &rk, 
         &gk,
-        Some(&sk)
+        None
     );
     let C_result = Pow2BGV::mod_switch_down_ciphertext_ring(&C_master, &ct_result.dropped_rns_factor_indices);
     let sk_result = Pow2BGV::mod_switch_down_sk(&C_result, &C_master, &ct_result.dropped_rns_factor_indices, &sk);

@@ -18,7 +18,7 @@ use crate::cyclotomic::*;
 use crate::lintransform::matmul::*;
 use crate::lintransform::trace::trace_circuit;
 use crate::lintransform::PowerTable;
-use crate::number_ring::hypercube::*;
+use crate::number_ring::hypercube::isomorphism::*;
 use crate::number_ring::quotient::NumberRingQuotientBase;
 use crate::number_ring::*;
 
@@ -438,9 +438,9 @@ use crate::ring_literal;
 #[cfg(test)]
 use crate::number_ring::pow2_cyclotomic::Pow2CyclotomicNumberRing;
 #[cfg(test)]
-use crate::number_ring::hypercube::HypercubeIsomorphism;
-#[cfg(test)]
 use feanor_math::algorithms::fft::cooley_tuckey::bitreverse;
+#[cfg(test)]
+use crate::number_ring::hypercube::structure::HypercubeStructure;
 
 #[test]
 fn test_slots_to_coeffs_thin() {

@@ -3,13 +3,11 @@ use feanor_math::rings::zn::*;
 use feanor_math::rings::zn::zn_64::*;
 use feanor_math::integer::*;
 use feanor_math::divisibility::DivisibilityRingStore;
-use feanor_math::ordered::OrderedRingStore;
 use feanor_math::ring::*;
 use feanor_math::homomorphism::*;
 use feanor_math::seq::*;
 use tracing::instrument;
 
-use std::cmp::min;
 use std::alloc::{Allocator, Global};
 
 use super::RNSOperation;
@@ -101,6 +99,9 @@ impl<A> RNSOperation for AlmostExactRescalingConvert<A>
     {
         assert_eq!(input.col_count(), output.col_count());
         #[cfg(debug_assertions)] {
+            use std::cmp::min;
+            use feanor_math::ordered::OrderedRingStore;
+
             let rns_ring = zn_rns::Zn::new(self.input_rings().iter().cloned().collect(), ZZbig);
             // unfortunately, checking all the inputs takes a lot of time, and even though we only do it on debug builds,
             // it is not good to extremely blow up the test times. Hence, check only some input elements 

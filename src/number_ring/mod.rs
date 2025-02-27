@@ -13,7 +13,6 @@ use crate::cyclotomic::*;
 pub mod quotient;
 pub mod pow2_cyclotomic;
 pub mod odd_cyclotomic;
-pub mod interpolate;
 pub mod hypercube;
 
 ///

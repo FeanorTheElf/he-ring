@@ -10,7 +10,7 @@ use feanor_math::rings::zn::zn_64::*;
 use feanor_math::algorithms::linsolve::LinSolveRingStore;
 
 use crate::circuit::PlaintextCircuit;
-use crate::number_ring::hypercube::SlotRingOver;
+use crate::number_ring::hypercube::isomorphism::SlotRingOver;
 use crate::cyclotomic::*;
 
 ///

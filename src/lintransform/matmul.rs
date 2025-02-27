@@ -27,7 +27,7 @@ use crate::circuit::PlaintextCircuit;
 use crate::cyclotomic::*;
 use crate::lintransform::PowerTable;
 use crate::number_ring::quotient::*;
-use crate::number_ring::hypercube::*;
+use crate::number_ring::hypercube::isomorphism::*;
 use crate::number_ring::*;
 use super::trace::extract_linear_map;
 
@@ -658,6 +658,8 @@ use crate::number_ring::pow2_cyclotomic::*;
 use crate::number_ring::odd_cyclotomic::*;
 #[cfg(test)]
 use feanor_math::assert_el_eq;
+#[cfg(test)]
+use crate::number_ring::hypercube::structure::HypercubeStructure;
 
 #[test]
 fn test_to_circuit_single() {

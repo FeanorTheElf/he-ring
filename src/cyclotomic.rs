@@ -8,7 +8,6 @@ use feanor_math::rings::extension::*;
 use feanor_math::rings::zn::zn_64::*;
 use feanor_math::rings::zn::*;
 use feanor_math::algorithms::int_factor::factor;
-use feanor_math::primitive_int::StaticRing;
 use feanor_math::serialization::*;
 use feanor_math::wrapper::RingElementWrapper;
 use feanor_math::divisibility::DivisibilityRingStore;
@@ -17,8 +16,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::euler_phi;
-
-const ZZi64: StaticRing<i64> = StaticRing::RING;
+use crate::ZZi64;
 
 ///
 /// Represents the group `(Z/nZ)^*`, which is isomorphic to the Galois

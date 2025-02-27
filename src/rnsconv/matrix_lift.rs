@@ -14,6 +14,7 @@ use tracing::instrument;
 use std::alloc::Allocator;
 use std::alloc::Global;
 
+use crate::{ZZbig, ZZi64, ZZi128};
 use super::RNSOperation;
 
 ///
@@ -56,10 +57,6 @@ const BLOCK_SIZE_LOG2: usize = 4;
 fn pad_to_block(len: usize) -> usize {
     ((len - 1) / (1 << BLOCK_SIZE_LOG2) + 1) * (1 << BLOCK_SIZE_LOG2)
 }
-
-const ZZbig: BigIntRing = BigIntRing::RING;
-const ZZi64: StaticRing<i64> = StaticRing::<i64>::RING;
-const ZZi128: StaticRing<i128> = StaticRing::<i128>::RING;
 
 impl<A> AlmostExactMatrixBaseConversion<A> 
     where A: Allocator + Clone

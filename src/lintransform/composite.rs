@@ -10,7 +10,8 @@ use feanor_math::seq::VectorFn;
 use matmul::MatmulTransform;
 use tracing::instrument;
 
-use crate::number_ring::hypercube::*;
+use crate::number_ring::hypercube::structure::HypercubeStructure;
+use crate::number_ring::hypercube::isomorphism::*;
 use crate::number_ring::*;
 use crate::cyclotomic::*;
 use crate::lintransform::*;
