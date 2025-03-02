@@ -48,7 +48,7 @@ pub type SecretKey<Params: BGVParams> = El<CiphertextRing<Params>>;
 pub type KeySwitchKey<'a, Params: BGVParams> = (GadgetProductRhsOperand<Params::CiphertextRing>, GadgetProductRhsOperand<Params::CiphertextRing>);
 pub type RelinKey<'a, Params: BGVParams> = KeySwitchKey<'a, Params>;
 
-pub mod modwitch;
+pub mod modswitch;
 pub mod bootstrap;
 
 const ZZbig: BigIntRing = BigIntRing::RING;

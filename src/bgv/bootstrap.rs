@@ -1,7 +1,7 @@
 use feanor_math::algorithms::int_factor::is_prime_power;
 use feanor_math::ring::*;
 
-use crate::bgv::modwitch::DefaultModswitchStrategy;
+use crate::bgv::modswitch::DefaultModswitchStrategy;
 use crate::circuit::*;
 use crate::lintransform::matmul::MatmulTransform;
 use crate::log_time;
@@ -10,7 +10,7 @@ use crate::digitextract::DigitExtract;
 use crate::lintransform::composite;
 use crate::lintransform::pow2;
 
-use super::modwitch::*;
+use super::modswitch::*;
 use super::*;
 
 #[derive(Clone, Debug)]

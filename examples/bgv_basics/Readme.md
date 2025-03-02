@@ -337,3 +337,78 @@ assert_eq!(41, ChosenBGVParamType::noise_budget(&P, &C_new, &enc_x_pow4, &sk_mod
 let dec_x_pow4 = ChosenBGVParamType::dec(&P, &C_new, enc_x_pow4, &sk_modswitch);
 assert_el_eq!(&P, P.pow(P.clone_el(&x), 4), &dec_x_pow4);
 ```
+
+## Automatic modulus switching
+
+Since deciding when (and how) to modulus-switch, and the manual management of ciphertext moduli, is quite a difficult task, it is extremely helpful for many applications if this is done automatically (like e.g. in HElib).
+This is also planned for HE-Ring, and a WIP implementation is available as [`crate::bgv::modswitch::BGVModswitchStrategy`] and [`crate::bgv::modswitch::DefaultModswitchStrategy`].
+The main difficulty here is that a good strategy for modulus-switching requires good estimates on the noise of ciphertexts, and the only current noise estimator [`crate::bgv::modswitch::NaiveBGVNoiseEstimator`] does not provide very high quality estimates.
+Nevertheless, I have already used this system with some success.
+For example, we could implement the above evaluation instead as follows:
+```rust
+#![feature(allocator_api)]
+# use he_ring::bgv::{BGVParams, CiphertextRing, PlaintextRing, Pow2BGV};
+# use he_ring::bgv::modswitch::*;
+# use he_ring::DefaultNegacyclicNTT;
+# use he_ring::circuit::*;
+# use he_ring::ciphertext_ring::BGFVCiphertextRing;
+# use he_ring::gadget_product::digits::*;
+# use rand::{SeedableRng, rngs::StdRng};
+# use std::alloc::Global;
+# use std::marker::PhantomData;
+# use feanor_math::integer::*;
+# use feanor_math::primitive_int::*;
+# use feanor_math::ring::*;
+# use feanor_math::rings::zn::ZnRingStore;
+# use feanor_math::ring::RingStore;
+# use feanor_math::algorithms::eea::signed_gcd;
+# use feanor_math::homomorphism::Homomorphism;
+# use feanor_math::rings::extension::FreeAlgebraStore;
+# use feanor_math::seq::VectorView;
+# use feanor_math::assert_el_eq;
+# type ChosenBGVParamType = Pow2BGV;
+# let params = ChosenBGVParamType {
+#     ciphertext_allocator: Global,
+#     log2_N: 13,
+#     log2_q_min: 210,
+#     log2_q_max: 220,
+#     negacyclic_ntt: PhantomData::<DefaultNegacyclicNTT>
+# };
+# let C_initial: CiphertextRing<ChosenBGVParamType> = params.create_initial_ciphertext_ring();
+# let plaintext_modulus = 17;
+# let P: PlaintextRing<ChosenBGVParamType> = params.create_plaintext_ring(plaintext_modulus);
+# assert!(BigIntRing::RING.is_one(&signed_gcd(BigIntRing::RING.clone_el(C_initial.base_ring().modulus()), int_cast(plaintext_modulus, BigIntRing::RING, StaticRing::<i64>::RING), BigIntRing::RING)));
+# let mut rng = StdRng::from_seed([1; 32]);
+# let sk = ChosenBGVParamType::gen_sk(&C_initial, &mut rng);
+# let digits = 2;
+# let rk = ChosenBGVParamType::gen_rk(&P, &C_initial, &mut rng, &sk, digits);
+# let x = P.from_canonical_basis((0..(1 << 13)).map(|i| 
+#     P.base_ring().int_hom().map(i)
+# ));
+let enc_x = ChosenBGVParamType::enc_sym(&P, &C_initial, &mut rng, &x, &sk);
+
+let square_circuit = PlaintextCircuit::mul(StaticRing::<i64>::RING).compose(PlaintextCircuit::select(1, &[0, 0], StaticRing::<i64>::RING), StaticRing::<i64>::RING);
+let pow4_circuit = square_circuit.clone(StaticRing::<i64>::RING).compose(square_circuit, StaticRing::<i64>::RING);
+
+let modswitch_strategy = DefaultModswitchStrategy::<_, _, /* log modswitches = */ false>::new(NaiveBGVNoiseEstimator);
+
+let enc_x_pow4 = modswitch_strategy.evaluate_circuit_int(
+    &pow4_circuit,
+    &P,
+    &C_initial,
+    &[ModulusAwareCiphertext {
+        info: modswitch_strategy.info_for_fresh_encryption(&P, &C_initial),
+        dropped_rns_factor_indices: RNSFactorIndexList::empty(),
+        data: enc_x
+    }],
+    Some(&rk),
+    &[],
+    &mut 0,
+    None
+).into_iter().next().unwrap();
+let C_new = ChosenBGVParamType::mod_switch_down_ciphertext_ring(&C_initial, &enc_x_pow4.dropped_rns_factor_indices);
+let sk_new = ChosenBGVParamType::mod_switch_down_sk(&C_new, &C_initial, &enc_x_pow4.dropped_rns_factor_indices, &sk);
+assert_eq!(41, ChosenBGVParamType::noise_budget(&P, &C_new, &enc_x_pow4.data, &sk_new));
+let dec_x_pow4 = ChosenBGVParamType::dec(&P, &C_new, enc_x_pow4.data, &sk_new);
+assert_el_eq!(&P, P.pow(P.clone_el(&x), 4), &dec_x_pow4);
+```

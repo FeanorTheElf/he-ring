@@ -181,7 +181,13 @@ impl<Params: BGVParams> BGVNoiseEstimator<Params> for AlwaysZeroNoiseEstimator {
 }
 
 ///
-/// Trait for different modulus-switching strategies in BGV, currently WIP
+/// Trait for different modulus-switching strategies in BGV, currently WIP.
+/// 
+/// Basically, a [`BGVModswitchStrategy`] should be able to determine when (and
+/// how) to modulus-switch during the evaluation of an arithmetic circuit.
+/// The most powerful way to do this is by delegating the evaluation of the 
+/// circuit completely to the [`BGVModswitchStrategy`], which is our current
+/// approach.
 /// 
 pub trait BGVModswitchStrategy<Params: BGVParams> {
 
