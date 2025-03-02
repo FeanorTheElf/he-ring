@@ -44,9 +44,9 @@ use crate::{log_time, ZZi64};
 use crate::ntt::dyn_convolution::*;
 use crate::number_ring::hypercube::interpolate::FastPolyInterpolation;
 use crate::number_ring::quotient::*;
+use crate::number_ring::hypercube::structure::*;
 
-use super::serialization::{DeserializeSeedHypercubeIsomorphismWithoutRing, SerializableHypercubeIsomorphismWithoutRing};
-use super::structure::*;
+pub use crate::number_ring::hypercube::serialization::{DeserializeSeedHypercubeIsomorphismWithoutRing, SerializableHypercubeIsomorphismWithoutRing};
 
 #[instrument(skip_all)]
 fn hensel_lift_factor<R1, R2, A1, A2, C1, C2>(from_ring: &DensePolyRing<R1, A1, C1>, to_ring: &DensePolyRing<R2, A2, C2>, f: &El<DensePolyRing<R1, A1, C1>>, g: El<DensePolyRing<R2, A2, C2>>) -> El<DensePolyRing<R1, A1, C1>>
@@ -150,9 +150,9 @@ pub type DecoratedBaseRing<R> = AsLocalPIR<RingValue<BaseRing<R>>>;
 ///    (if the latter is serializable) using the implementation of [`serde::Serialize`] and
 ///    [`serde::Deserialize`]
 ///  - alternatively, you can serialize the isomorphism without the ring implementation
-///    using [`serialization::SerializableHypercubeIsomorphismWithoutRing`] and 
-///    [`serialization::DeserializeSeedHypercubeIsomorphismWithoutRing`]; this of course
-///    requires that the ring is provided at deserialization time
+///    using [`SerializableHypercubeIsomorphismWithoutRing`] and 
+///    [`DeserializeSeedHypercubeIsomorphismWithoutRing`]; 
+///    this of course requires that the ring is provided at deserialization time
 /// 
 pub struct HypercubeIsomorphism<R>
     where R: RingStore,
