@@ -118,7 +118,7 @@ impl<R: ?Sized + RingBase> Coefficient<R> {
         }
     }
 
-    fn add<S: RingStore<Type = R> + Copy>(self, other: Self, ring: S) -> Self {
+    pub fn add<S: RingStore<Type = R> + Copy>(self, other: Self, ring: S) -> Self {
         match (self, other) {
             (Coefficient::Zero, rhs) => rhs,
             (lhs, Coefficient::Zero) => lhs,
@@ -130,7 +130,7 @@ impl<R: ?Sized + RingBase> Coefficient<R> {
         }
     }
 
-    fn mul<S: RingStore<Type = R> + Copy>(self, other: Self, ring: S) -> Self {
+    pub fn mul<S: RingStore<Type = R> + Copy>(self, other: Self, ring: S) -> Self {
         match (self, other) {
             (Coefficient::Zero, _) => Coefficient::Zero,
             (_, Coefficient::Zero) => Coefficient::Zero,
@@ -162,9 +162,10 @@ impl<R: ?Sized + RingBase> LinearCombination<R> {
         }
     }
 
-    fn evaluate_generic<T, ContantFn, AddProductFn>(&self, first_inputs: &[T], second_inputs: &[T], mut constant: ContantFn, mut add_prod: AddProductFn) -> T
-        where ContantFn: FnMut(&Coefficient<R>) -> T,
-            AddProductFn: FnMut(T, &Coefficient<R>, &T) -> T
+    fn evaluate_generic<'a, T, ContantFn, AddProductFn>(&'a self, first_inputs: &[T], second_inputs: &[T], mut constant: ContantFn, mut add_prod: AddProductFn) -> T
+        where ContantFn: FnMut(&'a Coefficient<R>) -> T,
+            AddProductFn: FnMut(T, &'a Coefficient<R>, &T) -> T,
+            R: 'a
     {
         assert_eq!(self.factors.len(), first_inputs.len() + second_inputs.len());
         let mut current = constant(&self.constant);
@@ -848,11 +849,12 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
     /// Of course, this example could have been more easily implemented using [`PlaintextCircuit::evaluate()`], since
     /// the operations used here exactly match the ones of `StaticRing::<i32>::RING`.
     /// 
-    pub fn evaluate_generic<T, ContantFn, AddProductFn, MulFn, GaloisFn>(&self, inputs: &[T], mut constant: ContantFn, mut add_prod: AddProductFn, mut mul: MulFn, mut gal: GaloisFn) -> Vec<T>
-        where ContantFn: FnMut(&Coefficient<R>) -> T,
-            AddProductFn: FnMut(T, &Coefficient<R>, &T) -> T,
+    pub fn evaluate_generic<'a, T, ContantFn, AddProductFn, MulFn, GaloisFn>(&'a self, inputs: &[T], mut constant: ContantFn, mut add_prod: AddProductFn, mut mul: MulFn, mut gal: GaloisFn) -> Vec<T>
+        where ContantFn: FnMut(&'a Coefficient<R>) -> T,
+            AddProductFn: FnMut(T, &'a Coefficient<R>, &T) -> T,
             MulFn: FnMut(T, T) -> T,
-            GaloisFn: FnMut(&[CyclotomicGaloisGroupEl], T) -> Vec<T>
+            GaloisFn: FnMut(&'a [CyclotomicGaloisGroupEl], T) -> Vec<T>,
+            R: 'a
     {
         assert_eq!(self.input_count, inputs.len());
         let mut current = Vec::new();

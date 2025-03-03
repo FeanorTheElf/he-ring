@@ -14,6 +14,7 @@ use feanor_math::serialization::{DeserializeSeedNewtype, DeserializeWithRing, Se
 use feanor_math::specialization::{FiniteRingOperation, FiniteRingSpecializable};
 use serde::{Deserialize, Serialize};
 use serde::de::DeserializeSeed;
+use tracing::instrument;
 
 use crate::cyclotomic::CyclotomicGaloisGroupEl;
 use crate::cyclotomic::CyclotomicRing;
@@ -644,6 +645,7 @@ impl<NumberRing, A> RingBase for ManagedDoubleRNSRingBase<NumberRing, A>
         )
     }
     
+    #[instrument(skip_all)]
     fn mul_int_ref(&self, lhs: &Self::Element, rhs: i32) -> Self::Element {
         self.apply_linear_operation(
             &self.zero(), 
@@ -813,39 +815,14 @@ impl<NumberRing, A> RingExtension for ManagedDoubleRNSRingBase<NumberRing, A>
     }
 
     fn mul_assign_base(&self, lhs: &mut Self::Element, rhs: &El<Self::BaseRing>) {
-        let result = if let ManagedDoubleRNSElRepresentation::Sum(sum_repr) = lhs.internal.get_repr() {
-            let mut coeff_part = self.base.clone_el_non_fft(&sum_repr.0);
-            self.base.mul_scalar_assign_non_fft(&mut coeff_part, rhs);
-            let mut doublerns_part = self.base.clone_el(&sum_repr.1);
-            self.base.mul_assign_base(&mut doublerns_part, rhs);
-            self.new_element_sum(coeff_part, doublerns_part)
-        } else {
-            let mut result_coeff = None;
-            match lhs.internal.get_repr() {
-                ManagedDoubleRNSElRepresentation::Both(small_basis_repr, _) |
-                ManagedDoubleRNSElRepresentation::SmallBasis(small_basis_repr) => {
-                    result_coeff = Some(self.base.clone_el_non_fft(small_basis_repr));
-                    self.base.mul_scalar_assign_non_fft(result_coeff.as_mut().unwrap(), rhs);
-                },
-                _ => {}
-            };
-            let mut result_doublerns = None;
-            match lhs.internal.get_repr() {
-                ManagedDoubleRNSElRepresentation::Both(_, double_rns_repr) |
-                ManagedDoubleRNSElRepresentation::DoubleRNS(double_rns_repr) => {
-                    result_doublerns = Some(self.base.clone_el(double_rns_repr));
-                    self.base.mul_assign_base(result_doublerns.as_mut().unwrap(), rhs);
-                },
-                _ => {}
-            };
-            match (result_coeff, result_doublerns) {
-                (Some(small_basis_repr), Some(double_rns_repr)) => self.new_element_both(small_basis_repr, double_rns_repr),
-                (None, Some(double_rns_repr)) => self.from_double_rns_repr(double_rns_repr),
-                (Some(small_basis_repr), None) => self.from_small_basis_repr(small_basis_repr),
-                (None, None) => self.zero(),
-            }
-        };
-        lhs.internal = result.internal;
+        *lhs = self.apply_linear_operation(
+            &self.zero(), 
+            lhs,
+            |_, _| unreachable!(),
+            |_, _| unreachable!(),
+            |a| self.base.mul_scalar_assign_non_fft(a, rhs),
+            |a| self.base.mul_assign_base(a, rhs)
+        )
     }
 }
 
@@ -861,7 +838,7 @@ impl<NumberRing, A> FreeAlgebra for ManagedDoubleRNSRingBase<NumberRing, A>
         return self.from_double_rns_repr(result);
     }
 
-    fn rank(&self) -> usize {
+    fn rank(&self) -> usize { 
         self.base.rank()
     }
 

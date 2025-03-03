@@ -233,7 +233,6 @@ impl<N, A> HECyclotomicNumberRingMod for Pow2CyclotomicDecomposedNumberRing<N, A
         assert_eq!(self.rank(), src.len());
         assert_eq!(self.rank(), dst.len());
 
-        let ring = self.base_ring();
         let galois_group = self.galois_group();
         let bitlength = StaticRing::<i64>::RING.abs_log2_ceil(&(self.rank() as i64)).unwrap();
         debug_assert_eq!(1 << bitlength, self.rank());
@@ -243,7 +242,7 @@ impl<N, A> HECyclotomicNumberRingMod for Pow2CyclotomicDecomposedNumberRing<N, A
         let galois_el_to_index = |s: CyclotomicGaloisGroupEl| bitreverse((galois_group.representative(s) as usize - 1) / 2, bitlength);
 
         for i in 0..self.rank() {
-            *dst.at_mut(i) = ring.clone_el(src.at(galois_el_to_index(galois_group.mul(galois_element, index_to_galois_el(i)))));
+            *dst.at_mut(i) = *src.at(galois_el_to_index(galois_group.mul(galois_element, index_to_galois_el(i))));
         }
     }
 }
@@ -343,4 +342,18 @@ fn test_permute_galois_automorphism() {
     let R = double_rns_ring::DoubleRNSRingBase::new_with(Pow2CyclotomicNumberRing::new(16), rns_base, Global);
     assert_el_eq!(R, R.pow(R.canonical_gen(), 3), R.get_ring().apply_galois_action(&R.canonical_gen(), R.get_ring().galois_group().from_representative(3)));
     assert_el_eq!(R, R.pow(R.canonical_gen(), 6), R.get_ring().apply_galois_action(&R.pow(R.canonical_gen(), 2), R.get_ring().galois_group().from_representative(3)));
+}
+
+#[bench]
+fn bench_permute_galois_action(bencher: &mut test::Bencher) {
+    let number_ring = Pow2CyclotomicNumberRing::new(1 << 15);
+    let Fp = Zn::new(65537);
+    let number_ring_mod_p = number_ring.mod_p(Fp);
+    let input = (0..(1 << 14)).map(|i| Fp.int_hom().map(i)).collect::<Vec<_>>();
+    let mut output = (0..(1 << 14)).map(|_| Fp.zero()).collect::<Vec<_>>();
+    bencher.iter(|| {
+        number_ring_mod_p.permute_galois_action(std::hint::black_box(&input), &mut output, number_ring.galois_group().from_representative(5));
+        assert_el_eq!(&Fp, &input[1 << 12], &output[0]);
+        assert_el_eq!(&Fp, &input[(1 << 13) + (1 << 12) + (1 << 11)], &output[1 << 13]);
+    });
 }
