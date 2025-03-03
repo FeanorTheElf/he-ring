@@ -20,6 +20,7 @@ use feanor_math::rings::zn::zn_64::Zn;
 
 use crate::cyclotomic::*;
 use crate::ntt::HERingNegacyclicNTT;
+use crate::ZZi64;
 
 use super::{HECyclotomicNumberRing, HECyclotomicNumberRingMod, HENumberRing, HENumberRingMod};
 
@@ -234,15 +235,18 @@ impl<N, A> HECyclotomicNumberRingMod for Pow2CyclotomicDecomposedNumberRing<N, A
         assert_eq!(self.rank(), dst.len());
 
         let galois_group = self.galois_group();
+        let galois_group_ring = galois_group.underlying_ring();
+        let galois_element = galois_group.to_ring_el(galois_element);
         let bitlength = StaticRing::<i64>::RING.abs_log2_ceil(&(self.rank() as i64)).unwrap();
         debug_assert_eq!(1 << bitlength, self.rank());
+        let hom = galois_group_ring.can_hom(&ZZi64).unwrap();
 
         // the elements of src resp. dst follow an order derived from the bitreversing order of the underlying FFT
-        let index_to_galois_el = |i: usize| galois_group.from_representative(2 * bitreverse(i, bitlength) as i64 + 1);
-        let galois_el_to_index = |s: CyclotomicGaloisGroupEl| bitreverse((galois_group.representative(s) as usize - 1) / 2, bitlength);
+        let index_to_galois_el = |i: usize| hom.map(2 * bitreverse(i, bitlength) as i64 + 1);
+        let galois_el_to_index = |s: El<Zn>| bitreverse((galois_group_ring.smallest_positive_lift(s) as usize - 1) / 2, bitlength);
 
         for i in 0..self.rank() {
-            *dst.at_mut(i) = *src.at(galois_el_to_index(galois_group.mul(galois_element, index_to_galois_el(i))));
+            *dst.at_mut(i) = *src.at(galois_el_to_index(galois_group_ring.mul(galois_element, index_to_galois_el(i))));
         }
     }
 }
