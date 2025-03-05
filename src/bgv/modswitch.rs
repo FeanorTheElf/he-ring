@@ -493,10 +493,10 @@ impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> DefaultMo
                 let (y_scaled_info, y_scaled_data) = match c {
                     Coefficient::Zero => unreachable!(),
                     Coefficient::One => (self.clone_info(&y.info), Params::clone_ct(P, &Cy, &y.data)),
-                    Coefficient::NegOne => (self.clone_info(&y.info), Params::hom_mul_plain_i64(P, &Cy, -1, Params::clone_ct(P, &Cy, &y.data))),
+                    Coefficient::NegOne => (self.clone_info(&y.info), Params::hom_mul_plain_i64(P, &Ctarget, -1, Params::clone_ct(P, &Cy, &y.data))),
                     Coefficient::Integer(c) => (
-                        self.noise_estimator.hom_mul_plain_i64(P, &Cy, *c as i64, &y.info, y.data.implicit_scale),
-                        Params::hom_mul_plain_i64(P, &Cy, *c as i64, Params::clone_ct(P, &Cy, &y.data))
+                        self.noise_estimator.hom_mul_plain_i64(P, &Ctarget, *c as i64, &y.info, y.data.implicit_scale),
+                        Params::hom_mul_plain_i64(P, &Ctarget, *c as i64, Params::clone_ct(P, &Cy, &y.data))
                     ),
                     Coefficient::Other(m) => (hom_mul_plain.borrow_mut())(P, &Cy, m, Params::clone_ct(P, &Cy, &y.data), &y.info)
                 };
@@ -541,10 +541,10 @@ impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> DefaultMo
                 let (y_scaled_info, y_scaled_data) = match c {
                     Coefficient::Zero => unreachable!(),
                     Coefficient::One => (y_info, y_data),
-                    Coefficient::NegOne => (y_info, Params::hom_mul_plain_i64(P, &Cy, -1, y_data)),
+                    Coefficient::NegOne => (y_info, Params::hom_mul_plain_i64(P, &Ctarget, -1, y_data)),
                     Coefficient::Integer(c) => (
-                        self.noise_estimator.hom_mul_plain_i64(P, &Cy, *c as i64, &y_info, y_data.implicit_scale),
-                        Params::hom_mul_plain_i64(P, &Cy, *c as i64, y_data)
+                        self.noise_estimator.hom_mul_plain_i64(P, &Ctarget, *c as i64, &y_info, y_data.implicit_scale),
+                        Params::hom_mul_plain_i64(P, &Ctarget, *c as i64, y_data)
                     ),
                     Coefficient::Other(m) => (hom_mul_plain.borrow_mut())(P, &Cy, m, y_data, &y_info)
                 };
