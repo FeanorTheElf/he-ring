@@ -1,3 +1,5 @@
 /target
 *.ignore.rs
 trace-*.json
+perf.data
+perf.data.*

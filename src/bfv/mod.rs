@@ -642,7 +642,7 @@ pub struct Pow2BFV<A: Allocator + Clone + Send + Sync = DefaultCiphertextAllocat
 impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingNegacyclicNTT<Zn>> Display for Pow2BFV<A, C> {
 
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "BFV(n = {}, log2(q) in {}..{})", 1 << self.log2_N, self.log2_q_min, self.log2_q_max)
+        write!(f, "BFV(n = 2^{}, log2(q) in {}..{})", self.log2_N + 1, self.log2_q_min, self.log2_q_max)
     }
 }
 
@@ -867,8 +867,6 @@ use feanor_mempool::dynsize::DynLayoutMempool;
 use feanor_mempool::AllocArc;
 #[cfg(test)]
 use feanor_math::assert_el_eq;
-#[cfg(test)]
-use std::time::Instant;
 #[cfg(test)]
 use std::ptr::Alignment;
 #[cfg(test)]
@@ -1217,98 +1215,4 @@ fn measure_time_single_rns_composite_bfv() {
         CompositeSingleRNSBFV::hom_mul(&P, &C, &Cmul, ct, ct2, &rk)
     );
     assert_el_eq!(&P, &P.int_hom().map(1), &CompositeSingleRNSBFV::dec(&P, &C, res, &sk));
-}
-
-#[cfg(test)]
-pub fn tree_mul_benchmark<Params>(params: Params, digits: usize)
-    where Params: BFVParams + Display
-{
-    let mut rng = thread_rng();
-    let t = 5;
-
-    let P = params.create_plaintext_ring(t);
-    let (C, Cmul) = params.create_ciphertext_rings();
-    println!("rns base: {:?}", C.base_ring().as_iter().map(|Zp| *Zp.modulus()).collect::<Vec<_>>());
-    let sk = Params::gen_sk(&C, &mut rng);
-    let rk = Params::gen_rk(&C, &mut rng, &sk, digits);
-
-    let log2_count = 4;
-    let mut current = (0..(1 << log2_count)).map(|i| Params::enc_sym(&P, &C, &mut rng, &P.int_hom().map(2 * i + 1), &sk)).map(Some).collect::<Vec<_>>();
-
-    let start = Instant::now();
-    for _ in 0..log2_count {
-        let mid = current.len() / 2;
-        let (left, right) = current.split_at_mut(mid);
-        assert_eq!(left.len(), right.len());
-        for j in 0..left.len() {
-            left[j] = Some(Params::hom_mul(&P, &C, &Cmul, left[j].take().unwrap(), right[j].take().unwrap(), &rk));
-        }
-        current.truncate(mid);
-    }
-    let end = Instant::now();
-
-    println!("{}", params);
-    println!("digits = {}", digits);
-    println!("Tree-wise multiplication of {} inputs took {} ms, so {} ms/mul", 1 << log2_count, (end - start).as_millis(), (end - start).as_millis() / ((1 << log2_count) - 1));
-    println!("Final noise budget: {}", Params::noise_budget(&P, &C, current[0].as_ref().unwrap(), &sk));
-    assert_el_eq!(&P, &P.int_hom().map((0..(1 << log2_count)).map(|i| 2 * i + 1).product::<i32>()), Params::dec(&P, &C, current[0].take().unwrap(), &sk));
-}
-
-#[cfg(test)]
-pub fn chain_mul_benchmark<Params>(params: Params, digits: usize)
-    where Params: BFVParams + Display
-{
-    let mut rng = thread_rng();
-    let t = 5;
-
-    let P = params.create_plaintext_ring(t);
-    let (C, Cmul) = params.create_ciphertext_rings();
-    let sk = Params::gen_sk(&C, &mut rng);
-    let rk = Params::gen_rk(&C, &mut rng, &sk, digits);
-
-    let count = 4;
-    let mut current = Params::enc_sym(&P, &C, &mut rng, &P.int_hom().map(1), &sk);
-
-    let start = Instant::now();
-    for _ in 0..count {
-        let left = Params::clone_ct(&C, &current);
-        let right = current;
-        current = Params::hom_mul(&P, &C, &Cmul, left, right, &rk);
-    }
-    let end = Instant::now();
-
-    println!("{}", params);
-    println!("digits = {}", digits);
-    println!("Repeated squaring of ciphertext {} times took {} ms, so {} ms/mul", count, (end - start).as_millis(), (end - start).as_millis() / count as u128);
-    println!("Final noise budget: {}", Params::noise_budget(&P, &C, &current, &sk));
-    assert_el_eq!(&P, &P.one(), Params::dec(&P, &C, current, &sk));
-}
-
-#[ignore]
-#[test]
-fn bfv_mul_benchmark() {
-    let (chrome_layer, _guard) = tracing_chrome::ChromeLayerBuilder::new().build();
-    tracing_subscriber::registry().with(chrome_layer).init();
-
-    let params = Pow2BFV {
-        log2_q_min: 420,
-        log2_q_max: 430,
-        log2_N: 14,
-        ciphertext_allocator: AllocArc(Arc::new(DynLayoutMempool::<Global>::new(Alignment::of::<u64>()))),
-        negacyclic_ntt: PhantomData::<DefaultNegacyclicNTT>
-    };
-    let digits = 3;
-    tree_mul_benchmark(params.clone(), digits);
-    chain_mul_benchmark(params, digits);
-
-    let params = Pow2BFV {
-        log2_q_min: 850,
-        log2_q_max: 865,
-        log2_N: 15,
-        ciphertext_allocator: AllocArc(Arc::new(DynLayoutMempool::<Global>::new(Alignment::of::<u64>()))),
-        negacyclic_ntt: PhantomData::<DefaultNegacyclicNTT>
-    };
-    let digits = 3;
-    tree_mul_benchmark(params.clone(), digits);
-    chain_mul_benchmark(params, digits);
 }

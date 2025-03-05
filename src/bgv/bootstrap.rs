@@ -61,7 +61,7 @@ impl<Params: BGVParams> ThinBootstrapParams<Params>
         };
     }
 
-    pub fn build_odd<M: BGVModswitchStrategy<Params>, const LOG: bool>(&self, modswitch_strategy: M) -> ThinBootstrapData<Params, M> {
+    pub fn build_odd<M: BGVModswitchStrategy<Params>, const LOG: bool>(&self, modswitch_strategy: M, cache_dir: Option<&str>) -> ThinBootstrapData<Params, M> {
         assert!(self.scheme_params.number_ring().n() % 2 != 0);
 
         let (p, r) = is_prime_power(&ZZ, &self.t).unwrap();
@@ -82,7 +82,11 @@ impl<Params: BGVParams> ThinBootstrapParams<Params>
         };
 
         let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(plaintext_ring.n() as u64), p);
-        let H = HypercubeIsomorphism::new::<LOG>(&plaintext_ring, hypercube);
+        let H = if let Some(cache_dir) = cache_dir {
+            HypercubeIsomorphism::new_cache_file::<LOG>(&plaintext_ring, hypercube, cache_dir)
+        } else {
+            HypercubeIsomorphism::new::<LOG>(&plaintext_ring, hypercube)
+        };
         let original_H = H.change_modulus(&original_plaintext_ring);
         let slots_to_coeffs = log_time::<_, _, LOG, _>("Creating Slots-to-Coeffs transform", |[]| MatmulTransform::to_circuit_many(composite::slots_to_powcoeffs_thin(&original_H), &original_H));
         let coeffs_to_slots = log_time::<_, _, LOG, _>("Creating Coeffs-to-Slots transform", |[]| MatmulTransform::to_circuit_many(composite::powcoeffs_to_slots_thin(&H), &H));
@@ -341,57 +345,6 @@ fn test_pow2_bgv_thin_bootstrapping_17() {
         &rk, 
         &gk,
         Some(&sk)
-    );
-    let C_result = Pow2BGV::mod_switch_down_ciphertext_ring(&C_master, &ct_result.dropped_rns_factor_indices);
-    let sk_result = Pow2BGV::mod_switch_down_sk(&C_result, &C_master, &ct_result.dropped_rns_factor_indices, &sk);
-
-    assert_el_eq!(P, P.int_hom().map(2), Pow2BGV::dec(&P, &C_result, ct_result.data, &sk_result));
-}
-
-#[test]
-#[ignore]
-fn measure_time_pow2_bgv_thin_bootstrapping_17() {
-    
-    let (chrome_layer, _guard) = tracing_chrome::ChromeLayerBuilder::new().build();
-    let filtered_chrome_layer = chrome_layer.with_filter(tracing_subscriber::filter::filter_fn(|metadata| !["small_basis_to_mult_basis", "mult_basis_to_small_basis", "small_basis_to_coeff_basis", "coeff_basis_to_small_basis"].contains(&metadata.name())));
-    tracing_subscriber::registry().with(filtered_chrome_layer).init();
-    
-    let mut rng = thread_rng();
-    
-    // 8 slots of rank 16
-    let params = Pow2BGV {
-        log2_q_min: 790,
-        log2_q_max: 800,
-        log2_N: 15,
-        ciphertext_allocator: DefaultCiphertextAllocator::default(),
-        negacyclic_ntt: PhantomData::<DefaultNegacyclicNTT>
-    };
-    let t = 17;
-    let digits = 10;
-    let bootstrap_params = ThinBootstrapParams {
-        scheme_params: params.clone(),
-        v: 2,
-        t: t
-    };
-    let bootstrapper = bootstrap_params.build_pow2::<_, true>(DefaultModswitchStrategy::<_, _, true>::new(NaiveBGVNoiseEstimator), Some("."));
-    
-    let P = params.create_plaintext_ring(t);
-    let C_master = params.create_initial_ciphertext_ring();
-    
-    let sk = Pow2BGV::gen_sk(&C_master, &mut rng);
-    let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, Pow2BGV::gen_gk(bootstrapper.largest_plaintext_ring(), &C_master, &mut rng, &sk, g, digits))).collect::<Vec<_>>();
-    let rk = Pow2BGV::gen_rk(bootstrapper.largest_plaintext_ring(), &C_master, &mut rng, &sk, digits);
-    
-    let m = P.int_hom().map(2);
-    let ct = Pow2BGV::enc_sym(&P, &C_master, &mut rng, &m, &sk);
-    let ct_result = bootstrapper.bootstrap_thin::<true>(
-        &C_master, 
-        &P, 
-        &RNSFactorIndexList::empty(),
-        ct, 
-        &rk, 
-        &gk,
-        None
     );
     let C_result = Pow2BGV::mod_switch_down_ciphertext_ring(&C_master, &ct_result.dropped_rns_factor_indices);
     let sk_result = Pow2BGV::mod_switch_down_sk(&C_result, &C_master, &ct_result.dropped_rns_factor_indices, &sk);
