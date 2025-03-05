@@ -11,6 +11,7 @@ use feanor_math::rings::field::AsFieldBase;
 use feanor_math::rings::local::AsLocalPIR;
 use feanor_math::rings::poly::PolyRing;
 use feanor_math::rings::zn::{FromModulusCreateableZnRing, ZnReductionMap, ZnRing};
+use feanor_math::seq::{VectorFn, VectorView};
 use feanor_math::serialization::*;
 use feanor_math::rings::extension::FreeAlgebraStore;
 use feanor_math::rings::poly::dense_poly::*;
@@ -26,35 +27,31 @@ use super::structure::{HypercubeStructure, HypercubeTypeData};
 
 #[derive(Serialize)]
 #[serde(rename = "HypercubeStructureData")]
-pub(super) struct SerializableHypercubeStructureData<'a> {
+struct SerializableHypercubeStructureData<'a, G: Serialize> {
     p: SerializableCyclotomicGaloisGroupEl<'a>,
     d: usize,
     ms: &'a [usize],
-    gs: Vec<SerializableCyclotomicGaloisGroupEl<'a>>,
+    gs: G,
     choice: &'a HypercubeTypeData
 }
 
-impl<'a> SerializableHypercubeStructureData<'a> {
+impl Serialize for HypercubeStructure {
 
-    pub(super) fn new(hypercube_structure: &'a HypercubeStructure) -> Self {
-        Self {
-            p: SerializableCyclotomicGaloisGroupEl::new(&hypercube_structure.galois_group, hypercube_structure.p),
-            d: hypercube_structure.d,
-            ms: &hypercube_structure.ms,
-            gs: hypercube_structure.gs.iter().map(|g| SerializableCyclotomicGaloisGroupEl::new(&hypercube_structure.galois_group, *g)).collect(),
-            choice: &hypercube_structure.choice
-        }
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where S: serde::Serializer
+    {
+        SerializableNewtype::new("HypercubeStructure", (&self.galois_group, SerializableHypercubeStructureData {
+            choice: &self.choice,
+            d: self.d,
+            p: SerializableCyclotomicGaloisGroupEl::new(&self.galois_group, self.p),
+            ms: &self.ms,
+            gs: SerializableSeq::new(self.gs.as_fn().map_fn(|g| SerializableCyclotomicGaloisGroupEl::new(&self.galois_group, *g)))
+        })).serialize(serializer)
     }
 }
 
-pub(super) struct DeserializeSeedHypercubeStructureData {
+struct DeserializeSeedHypercubeStructureData {
     galois_group: CyclotomicGaloisGroup
-}
-
-impl<'a> DeserializeSeedHypercubeStructureData {
-    pub(super) fn new(galois_group: CyclotomicGaloisGroup) -> Self {
-        Self { galois_group }
-    }
 }
 
 fn derive_single_galois_group_deserializer<'a>(deserializer: &'a DeserializeSeedHypercubeStructureData) -> DeserializeSeedCyclotomicGaloisGroupEl<'a> {
@@ -70,21 +67,12 @@ fn derive_multiple_galois_group_deserializer<'de, 'a>(deserializer: &'a Deserial
 }
 
 impl_deserialize_seed_for_dependent_struct!{
-    struct HypercubeStructureData<'de> using DeserializeSeedHypercubeStructureData {
+    pub struct HypercubeStructureData<'de> using DeserializeSeedHypercubeStructureData {
         p: CyclotomicGaloisGroupEl: derive_single_galois_group_deserializer,
         d: usize: |_| PhantomData,
         ms: Vec<usize>: |_| PhantomData,
         gs: Vec<CyclotomicGaloisGroupEl>: derive_multiple_galois_group_deserializer,
         choice: HypercubeTypeData: |_| PhantomData
-    }
-}
-
-impl Serialize for HypercubeStructure {
-
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where S: serde::Serializer
-    {
-        SerializableNewtype::new("HypercubeStructure", (&self.galois_group, SerializableHypercubeStructureData::new(self))).serialize(serializer)
     }
 }
 
@@ -98,7 +86,7 @@ impl<'de> Deserialize<'de> for HypercubeStructure {
             PhantomData::<CyclotomicGaloisGroup>,
             |galois_group| {
                 deserialized_galois_group = Some(galois_group);
-                DeserializeSeedHypercubeStructureData::new(galois_group)
+                DeserializeSeedHypercubeStructureData { galois_group }
             }
         )).deserialize(deserializer).map(|data| {
             let mut result = HypercubeStructure::new(deserialized_galois_group.take().unwrap(), data.p, data.d, data.ms, data.gs);
@@ -119,34 +107,6 @@ struct SerializableHypercubeIsomorphismData<'a, R>
     n: usize,
     hypercube_structure: &'a HypercubeStructure,
     slot_ring_moduli: Vec<SerializeOwnedWithRing<R>>
-}
-
-struct DeserializeSeedHypercubeIsomorphismData<R>
-    where R: RingStore,
-        R::Type: PolyRing + SerializableElementRing
-{
-    poly_ring: R
-}
-
-fn derive_multiple_poly_deserializer<'de, 'a, R>(deserializer: &'a DeserializeSeedHypercubeIsomorphismData<R>) -> impl use <'a, 'de, R> + DeserializeSeed<'de, Value = Vec<El<R>>>
-    where R: RingStore,
-        R::Type: PolyRing + SerializableElementRing
-{
-    DeserializeSeedSeq::new(
-        std::iter::repeat(DeserializeWithRing::new(&deserializer.poly_ring)),
-        Vec::new(),
-        |mut current, next| { current.push(next); current }
-    )
-}
-
-impl_deserialize_seed_for_dependent_struct!{
-    <{'de, R}> struct HypercubeIsomorphismData<{'de, R}> using DeserializeSeedHypercubeIsomorphismData<R> {
-        p: i64: |_| PhantomData,
-        e: usize: |_| PhantomData,
-        n: usize: |_| PhantomData,
-        hypercube_structure: HypercubeStructure: |_| PhantomData,
-        slot_ring_moduli: Vec<El<R>>: derive_multiple_poly_deserializer
-    } where R: RingStore, R::Type: PolyRing + SerializableElementRing
 }
 
 ///
@@ -198,6 +158,33 @@ impl<'a, R> Serialize for SerializableHypercubeIsomorphismWithoutRing<'a, R>
             ).collect()
         }.serialize(serializer)
     }
+}
+struct DeserializeSeedHypercubeIsomorphismData<R>
+    where R: RingStore,
+        R::Type: PolyRing + SerializableElementRing
+{
+    poly_ring: R
+}
+
+fn derive_multiple_poly_deserializer<'de, 'a, R>(deserializer: &'a DeserializeSeedHypercubeIsomorphismData<R>) -> impl use <'a, 'de, R> + DeserializeSeed<'de, Value = Vec<El<R>>>
+    where R: RingStore,
+        R::Type: PolyRing + SerializableElementRing
+{
+    DeserializeSeedSeq::new(
+        std::iter::repeat(DeserializeWithRing::new(&deserializer.poly_ring)),
+        Vec::new(),
+        |mut current, next| { current.push(next); current }
+    )
+}
+
+impl_deserialize_seed_for_dependent_struct!{
+    <{'de, R}> pub struct HypercubeIsomorphismData<{'de, R}> using DeserializeSeedHypercubeIsomorphismData<R> {
+        p: i64: |_| PhantomData,
+        e: usize: |_| PhantomData,
+        n: usize: |_| PhantomData,
+        hypercube_structure: HypercubeStructure: |_| PhantomData,
+        slot_ring_moduli: Vec<El<R>>: derive_multiple_poly_deserializer
+    } where R: RingStore, R::Type: PolyRing + SerializableElementRing
 }
 
 ///

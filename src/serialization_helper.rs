@@ -24,7 +24,7 @@ use serde::Deserializer;
 /// # use std::marker::PhantomData;
 /// struct FooDeserializeSeed;
 /// impl_deserialize_seed_for_dependent_struct!{
-///     struct Foo<'de> using FooDeserializeSeed {
+///     pub struct Foo<'de> using FooDeserializeSeed {
 ///         a: i64: |_| PhantomData::<i64>,
 ///         b: String: |_| PhantomData::<String>
 ///     }
@@ -79,7 +79,7 @@ use serde::Deserializer;
 /// };
 /// 
 /// impl_deserialize_seed_for_dependent_struct!{
-///     struct Foo<'de> using FooDeserializeSeed {
+///     pub struct Foo<'de> using FooDeserializeSeed {
 ///         a: i64: |seed: &FooDeserializeSeed| seed.deserialize_a,
 ///         b: i64: |seed: &FooDeserializeSeed| seed.deserialize_b
 ///     }
@@ -108,7 +108,7 @@ use serde::Deserializer;
 /// struct FooDeserializeSeed<S>(S);
 /// 
 /// impl_deserialize_seed_for_dependent_struct!{
-///     <{'de, S}> struct Foo<{'de, S}> using FooDeserializeSeed<S> {
+///     <{'de, S}> pub struct Foo<{'de, S}> using FooDeserializeSeed<S> {
 ///         a: S::Value: |seed: &FooDeserializeSeed<S>| seed.0.clone()
 ///     } where S: DeserializeSeed<'de> + Clone
 /// }
@@ -130,7 +130,7 @@ use serde::Deserializer;
 /// struct FooDeserializeSeed;
 /// 
 /// impl_deserialize_seed_for_dependent_struct!{
-///     struct Foo<'de> using FooDeserializeSeed {
+///     pub struct Foo<'de> using FooDeserializeSeed {
 ///         a: String: |_| PhantomData::<String>
 ///     }
 /// }
@@ -150,7 +150,7 @@ use serde::Deserializer;
 /// # use std::marker::PhantomData;
 /// # struct FooDeserializeSeed;
 /// # impl_deserialize_seed_for_dependent_struct!{
-/// #     struct Foo<'de> using FooDeserializeSeed {
+/// #     pub struct Foo<'de> using FooDeserializeSeed {
 /// #         a: String: |_| PhantomData::<String>
 /// #     }
 /// # }
@@ -167,16 +167,16 @@ use serde::Deserializer;
 #[macro_export]
 macro_rules! impl_deserialize_seed_for_dependent_struct {
     (
-        struct $deserialize_result_struct_name:ident<'de> using $deserialize_seed_type:ty {
+        pub struct $deserialize_result_struct_name:ident<'de> using $deserialize_seed_type:ty {
             $($field:ident: $type:ty: $local_deserialize_seed:expr),*
         }
     ) => {
-        impl_deserialize_seed_for_dependent_struct!{ <{'de,}> struct $deserialize_result_struct_name<{'de,}> using $deserialize_seed_type {
+        impl_deserialize_seed_for_dependent_struct!{ <{'de,}> pub struct $deserialize_result_struct_name<{'de,}> using $deserialize_seed_type {
             $($field: $type: $local_deserialize_seed),*
         } where }
     };
     (
-        <{'de, $($gen_args:tt)*}> struct $deserialize_result_struct_name:ident<{'de, $($deserialize_result_gen_args:tt)*}> using $deserialize_seed_type:ty {
+        <{'de, $($gen_args:tt)*}> pub struct $deserialize_result_struct_name:ident<{'de, $($deserialize_result_gen_args:tt)*}> using $deserialize_seed_type:ty {
             $($field:ident: $type:ty: $local_deserialize_seed:expr),*
         } where $($constraints:tt)*
     ) => {
@@ -345,6 +345,152 @@ macro_rules! impl_deserialize_seed_for_dependent_struct {
 }
 
 ///
+/// Same as [`impl_deserialize_seed_for_dependent_struct!`] but for enums.
+/// 
+#[macro_export]
+macro_rules! impl_deserialize_seed_for_dependent_enum {
+    (
+        pub enum $deserialize_result_enum_name:ident<'de> using $deserialize_seed_type:ty {
+            $($variant:ident($type:ty): $local_deserialize_seed:expr),*
+        }
+    ) => {
+        impl_deserialize_seed_for_dependent_enum!{ <{'de,}> pub enum $deserialize_result_enum_name<{'de,}> using $deserialize_seed_type {
+            ($variant($type): $local_deserialize_seed),*
+        } where }
+    };
+    (
+        <{'de, $($gen_args:tt)*}> pub enum $deserialize_result_enum_name:ident<{'de, $($deserialize_result_gen_args:tt)*}> using $deserialize_seed_type:ty {
+            $($variant:ident($type:ty): $local_deserialize_seed:expr),*
+        } where $($constraints:tt)*
+    ) => {
+        pub enum $deserialize_result_enum_name<'de, $($deserialize_result_gen_args)*> 
+            where $($constraints)*
+        {
+            $($variant(($type, std::marker::PhantomData<&'de ()>))),*
+        }
+        impl<'de, $($gen_args)*> serde::de::DeserializeSeed<'de> for $deserialize_seed_type
+            where $($constraints)*
+        {
+            type Value = $deserialize_result_enum_name<'de, $($deserialize_result_gen_args)*>;
+
+            fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+                where D: serde::Deserializer<'de> 
+            {
+                use serde::de::*;
+
+                type Field = u32;
+
+                const fn get_const_len<const N: usize>(_: [&'static str; N]) -> usize {
+                    N
+                }
+                const FIELDS: &[&'static str] = &[$(stringify!($variant)),*];
+                const FIELD_COUNT: usize = get_const_len([$(stringify!($variant)),*]);
+
+                struct FieldVisitor;
+                impl<'de> Visitor<'de> for FieldVisitor {
+
+                    type Value = Field;
+
+                    fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                        std::fmt::Formatter::write_str(f, "variant identifier")
+                    }
+
+                    fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+                        where E: Error
+                    {
+                        if value >= FIELD_COUNT as u64 {Err(serde::de::Error::invalid_value(serde::de::Unexpected::Unsigned(value), &format!("variant index should be < {}", FIELD_COUNT).as_str()))
+                        } else {
+                            Ok(value as u32)
+                        }
+                    }
+
+                    #[allow(unused_assignments)]
+                    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+                        where E: Error
+                    {
+                        let mut current = 0;
+                        $(
+                            if value == stringify!($variant) {
+                                return Ok(current);
+                            }
+                            current += 1;
+                        )*
+                        return Err(serde::de::Error::unknown_variant(value, FIELDS));
+                    }
+
+                    #[allow(unused_assignments)]
+                    fn visit_bytes<E>(self, value: &[u8]) -> Result<Self::Value, E>
+                        where E: Error
+                    {
+                        let mut current = 0;
+                        $(
+                            if value == stringify!($variant).as_bytes() {
+                                return Ok(current);
+                            }
+                            current += 1;
+                        )*
+                        let value = &String::from_utf8_lossy(value);
+                        return Err(serde::de::Error::unknown_variant(value, FIELDS));
+                    }
+                }
+
+                struct FieldDeserializer;
+                impl<'de> DeserializeSeed<'de> for FieldDeserializer {
+                    type Value = Field;
+
+                    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+                        where D: serde::Deserializer<'de> 
+                    {
+                        deserializer.deserialize_identifier(FieldVisitor)
+                    }
+                }
+
+                struct ResultVisitor<'de, $($gen_args)*>
+                    where $($constraints)*
+                {
+                    deserializer: std::marker::PhantomData<&'de ()>,
+                    deserialize_seed_base: $deserialize_seed_type
+                }
+
+                impl<'de, $($gen_args)*> Visitor<'de> for ResultVisitor<'de, $($gen_args)*>
+                    where $($constraints)*
+                {
+                    type Value = $deserialize_result_enum_name<'de, $($deserialize_result_gen_args)*>;
+
+                    fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                        std::fmt::Formatter::write_str(f, concat!("enum ", stringify!($deserialize_result_enum_name)))
+                    }
+
+                    #[allow(unused_assignments)]
+                    fn visit_enum<A>(self, data: A) -> Result<Self::Value, A::Error>
+                        where A: serde::de::EnumAccess<'de>
+                    {
+                        let variant = serde::de::EnumAccess::variant_seed(data, FieldDeserializer)?;
+                        let mut current = 0;
+                        $(
+                            if variant.0 == current {
+                                return Ok($deserialize_result_enum_name::$variant((
+                                    serde::de::VariantAccess::newtype_variant_seed(variant.1, ($local_deserialize_seed)(self.deserialize_seed_base))?,
+                                    std::marker::PhantomData
+                                )));
+                            }
+                            current += 1;
+                        )*
+                        unreachable!()
+                    }
+                }
+
+                return deserializer.deserialize_enum(
+                    stringify!($deserialize_result_enum_name),
+                    &[$(stringify!($variant)),*],
+                    ResultVisitor { deserialize_seed_base: self, deserializer: std::marker::PhantomData }
+                )
+            }
+        }
+    };
+}
+
+///
 /// Helper to deserialize a tuple `(a, b)`, where deserializing `b` requires a
 /// [`DeserializeSeed`] depending on the already deserialized `a`.
 /// 
@@ -453,5 +599,51 @@ impl<'de, T> DeserializeSeed<'de> for NoopDeserializeSeed<T> {
         where D: Deserializer<'de>
     {
         Ok(self.value)
+    }
+}
+
+pub struct DeserializeSeedTuple<A, B>(pub A, pub B);
+
+impl<'de, A: DeserializeSeed<'de>, B: DeserializeSeed<'de>> DeserializeSeed<'de> for DeserializeSeedTuple<A, B> {
+
+    type Value = (A::Value, B::Value);
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+        where D: Deserializer<'de>
+    {
+        struct ResultVisitor<A, B> {
+            a: A,
+            b: B
+        }
+        impl<'de, A: DeserializeSeed<'de>, B: DeserializeSeed<'de>> Visitor<'de> for ResultVisitor<A, B> {
+            type Value = (A::Value, B::Value);
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(f, "a tuple with 2 elements")
+            }
+
+            fn visit_seq<S>(self, mut seq: S) -> Result<Self::Value, S::Error>
+                where S: SeqAccess<'de>
+            {
+                if let Some(a) = seq.next_element_seed(self.a)? {
+                    if let Some(b) = seq.next_element_seed(self.b)? {
+                        if let Some(_) = seq.next_element::<IgnoredAny>()? {
+                            return Err(<S::Error as serde::de::Error>::invalid_length(3, &"a tuple with 2 elements"));
+                        } else {
+                            return Ok((a, b));
+                        }
+                    } else {
+                        return Err(<S::Error as serde::de::Error>::invalid_length(1, &"a tuple with 2 elements"));
+                    }
+                } else {
+                    return Err(<S::Error as serde::de::Error>::invalid_length(0, &"a tuple with 2 elements"));
+                }
+            }
+        }
+
+        return deserializer.deserialize_tuple(2, ResultVisitor {
+            a: self.0,
+            b: self.1
+        });
     }
 }

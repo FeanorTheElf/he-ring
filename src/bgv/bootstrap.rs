@@ -1,7 +1,13 @@
+use std::fs::File;
+use std::io::BufReader;
+use std::io::BufWriter;
+
 use feanor_math::algorithms::int_factor::is_prime_power;
 use feanor_math::ring::*;
 
 use crate::bgv::modswitch::DefaultModswitchStrategy;
+use crate::circuit::serialization::DeserializeSeedPlaintextCircuit;
+use crate::circuit::serialization::SerializablePlaintextCircuit;
 use crate::circuit::*;
 use crate::lintransform::matmul::MatmulTransform;
 use crate::log_time;
@@ -9,6 +15,9 @@ use crate::digitextract::DigitExtract;
 
 use crate::lintransform::composite;
 use crate::lintransform::pow2;
+
+use serde::de::DeserializeSeed;
+use serde::Serialize;
 
 use super::modswitch::*;
 use super::*;
@@ -23,6 +32,31 @@ pub struct ThinBootstrapParams<Params: BGVParams> {
 impl<Params: BGVParams> ThinBootstrapParams<Params>
     where NumberRing<Params>: Clone
 {
+    fn read_or_create_circuit<F, const LOG: bool>(H: &DefaultHypercube<NumberRing<Params>>, base_name: &str, cache_dir: Option<&str>, create: F) -> PlaintextCircuit<NumberRingQuotientBase<NumberRing<Params>, Zn, Global>>
+        where F: FnOnce() -> PlaintextCircuit<NumberRingQuotientBase<NumberRing<Params>, Zn, Global>>
+    {
+        if let Some(cache_dir) = cache_dir {
+            let filename = format!("{}/{}_n{}_p{}_e{}.json", cache_dir, base_name, H.hypercube().n(), H.p(), H.e());
+            if let Ok(file) = File::open(filename.as_str()) {
+                if LOG {
+                    println!("Reading {} from file {}", base_name, filename);
+                }
+                let reader = serde_json::de::IoRead::new(BufReader::new(file));
+                let mut deserializer = serde_json::Deserializer::new(reader);
+                let deserialized = DeserializeSeedPlaintextCircuit::new(H.ring(), H.galois_group()).deserialize(&mut deserializer).unwrap();
+                return deserialized;
+            }
+            let result = log_time::<_, _, LOG, _>(format!("Creating circuit {}", base_name).as_str(), |[]| create());
+            let file = File::create(filename.as_str()).unwrap();
+            let writer = BufWriter::new(file);
+            let mut serializer = serde_json::Serializer::new(writer);
+            SerializablePlaintextCircuit::new(H.ring(), H.galois_group(), &result).serialize(&mut serializer).unwrap();
+            return result;
+        } else {
+            return create();
+        }
+    }
+
     pub fn build_pow2<M: BGVModswitchStrategy<Params>, const LOG: bool>(&self, modswitch_strategy: M, cache_dir: Option<&str>) -> ThinBootstrapData<Params, M> {
         let log2_n = ZZ.abs_log2_ceil(&(self.scheme_params.number_ring().n() as i64)).unwrap();
         assert_eq!(self.scheme_params.number_ring().n(), 1 << log2_n);
@@ -47,8 +81,9 @@ impl<Params: BGVParams> ThinBootstrapParams<Params>
             HypercubeIsomorphism::new::<LOG>(&plaintext_ring, hypercube)
         };
         let original_H = H.change_modulus(&original_plaintext_ring);
-        let slots_to_coeffs = log_time::<_, _, LOG, _>("Creating Slots-to-Coeffs transform", |[]| MatmulTransform::to_circuit_many(pow2::slots_to_coeffs_thin(&original_H), &original_H));
-        let coeffs_to_slots = log_time::<_, _, LOG, _>("Creating Coeffs-to-Slots transform", |[]| pow2::coeffs_to_slots_thin(&H));
+
+        let slots_to_coeffs = Self::read_or_create_circuit::<_, LOG>(&original_H, "slots_to_coeffs", cache_dir, || MatmulTransform::to_circuit_many(pow2::slots_to_coeffs_thin(&original_H), &original_H));
+        let coeffs_to_slots = Self::read_or_create_circuit::<_, LOG>(&H, "coeffs_to_slots", cache_dir, || pow2::coeffs_to_slots_thin(&H));
         let plaintext_ring_hierarchy = ((r + 1)..=e).map(|k| self.scheme_params.create_plaintext_ring(ZZ.pow(p, k))).collect();
 
         return ThinBootstrapData {
@@ -88,8 +123,8 @@ impl<Params: BGVParams> ThinBootstrapParams<Params>
             HypercubeIsomorphism::new::<LOG>(&plaintext_ring, hypercube)
         };
         let original_H = H.change_modulus(&original_plaintext_ring);
-        let slots_to_coeffs = log_time::<_, _, LOG, _>("Creating Slots-to-Coeffs transform", |[]| MatmulTransform::to_circuit_many(composite::slots_to_powcoeffs_thin(&original_H), &original_H));
-        let coeffs_to_slots = log_time::<_, _, LOG, _>("Creating Coeffs-to-Slots transform", |[]| MatmulTransform::to_circuit_many(composite::powcoeffs_to_slots_thin(&H), &H));
+        let slots_to_coeffs =  Self::read_or_create_circuit::<_, LOG>(&original_H, "slots_to_coeffs", cache_dir, ||MatmulTransform::to_circuit_many(composite::slots_to_powcoeffs_thin(&original_H), &original_H));
+        let coeffs_to_slots = Self::read_or_create_circuit::<_, LOG>(&H, "coeffs_to_slots", cache_dir, || MatmulTransform::to_circuit_many(composite::powcoeffs_to_slots_thin(&H), &H));
         let plaintext_ring_hierarchy = ((r + 1)..=e).map(|k| self.scheme_params.create_plaintext_ring(ZZ.pow(p, k))).collect();
 
         return ThinBootstrapData {
