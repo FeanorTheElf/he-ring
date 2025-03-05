@@ -440,7 +440,7 @@ impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> DefaultMo
         res_info: &N::CriticalQuantityLevel,
         debug_sk: Option<&SecretKey<Params>>
     ) {
-        if LOG {
+        if LOG && drop_x.len() > 0 || drop_y.len() > 0 {
             println!("{}: Dropping {} from LHS with estimated noise {} and {} from RHS with estimated noise {}, estimated output noise is {}",
                 context,
                 drop_x,
@@ -526,7 +526,9 @@ impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> DefaultMo
             (Ok((Cx, x)), c, Ok(y)) => PlainOrCiphertext::Ciphertext({
                 let total_drop = x.dropped_rns_factor_indices.union(&y.dropped_rns_factor_indices);
                 let Ctarget = Params::mod_switch_down_ciphertext_ring(C_master, &total_drop);
-                
+                debug_assert!(total_drop.len() >= x.dropped_rns_factor_indices.len());
+                debug_assert!(total_drop.len() >= y.dropped_rns_factor_indices.len());
+
                 let x_data_copy = if debug_sk.is_some() { Some(Params::clone_ct(&P, &Cx, &x.data)) } else { None };
                 let drop_x = total_drop.pushforward(&x.dropped_rns_factor_indices);
                 let x_info = self.noise_estimator.mod_switch_down(&P, &Ctarget, &Cx, &drop_x, &x.info);
@@ -609,35 +611,24 @@ impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> DefaultMo
                 debug_assert!(total_drop.len() >= x.dropped_rns_factor_indices.len());
                 debug_assert!(total_drop.len() >= y.dropped_rns_factor_indices.len());
 
-                if total_drop.len() == x.dropped_rns_factor_indices.len() && total_drop.len() == y.dropped_rns_factor_indices.len() {
-                    if LOG {
-                        println!("HomMul without modulus drop");
-                    }
-                    ModulusAwareCiphertext {
-                        dropped_rns_factor_indices: total_drop,
-                        info: self.noise_estimator.hom_mul(P, &Ctarget, &x.info, &y.info, rk_modswitch.0.gadget_vector_digits()),
-                        data: Params::hom_mul(P, &Ctarget, x.data, y.data, &rk_modswitch)
-                    }
-                } else {
-                    let x_data_copy = if debug_sk.is_some() { Some(Params::clone_ct(&P, &Cx, &x.data)) } else { None };
-                    let drop_x = total_drop.pushforward(&x.dropped_rns_factor_indices);
-                    let x_info = self.noise_estimator.mod_switch_down(P, &Ctarget, &Cx, &drop_x, &x.info);
-                    let x_data = Params::mod_switch_down(P, &Ctarget, &Cx, &drop_x, x.data);
+                let x_data_copy = if debug_sk.is_some() { Some(Params::clone_ct(&P, &Cx, &x.data)) } else { None };
+                let drop_x = total_drop.pushforward(&x.dropped_rns_factor_indices);
+                let x_info = self.noise_estimator.mod_switch_down(P, &Ctarget, &Cx, &drop_x, &x.info);
+                let x_data = Params::mod_switch_down(P, &Ctarget, &Cx, &drop_x, x.data);
 
-                    let y_data_copy = if debug_sk.is_some() { Some(Params::clone_ct(&P, &Cy, &y.data)) } else { None };
-                    let drop_y = total_drop.pushforward(&y.dropped_rns_factor_indices);
-                    let y_info = self.noise_estimator.mod_switch_down(P, &Ctarget, &Cy, &drop_y, &y.info);
-                    let y_data = Params::mod_switch_down(P, &Ctarget, &Cy, &drop_y, y.data);
+                let y_data_copy = if debug_sk.is_some() { Some(Params::clone_ct(&P, &Cy, &y.data)) } else { None };
+                let drop_y = total_drop.pushforward(&y.dropped_rns_factor_indices);
+                let y_info = self.noise_estimator.mod_switch_down(P, &Ctarget, &Cy, &drop_y, &y.info);
+                let y_data = Params::mod_switch_down(P, &Ctarget, &Cy, &drop_y, y.data);
 
-                    let res_data = Params::hom_mul(P, &Ctarget, x_data, y_data, &rk_modswitch);
-                    let res_info = self.noise_estimator.hom_mul(P, &Ctarget, &x_info, &y_info, rk_modswitch.0.gadget_vector_digits());
+                let res_data = Params::hom_mul(P, &Ctarget, x_data, y_data, &rk_modswitch);
+                let res_info = self.noise_estimator.hom_mul(P, &Ctarget, &x_info, &y_info, rk_modswitch.0.gadget_vector_digits());
 
-                    self.log_modulus_switch("HomMul", P, C_master, &Cx, &Cy, &Ctarget, &x.dropped_rns_factor_indices, &y.dropped_rns_factor_indices, &drop_x, &drop_y, &total_drop, &x_data_copy, &y_data_copy, &res_data, &x.info, &y.info, &res_info, debug_sk);
-                    ModulusAwareCiphertext {
-                        dropped_rns_factor_indices: total_drop,
-                        info: res_info,
-                        data: res_data
-                    }
+                self.log_modulus_switch("HomMul", P, C_master, &Cx, &Cy, &Ctarget, &x.dropped_rns_factor_indices, &y.dropped_rns_factor_indices, &drop_x, &drop_y, &total_drop, &x_data_copy, &y_data_copy, &res_data, &x.info, &y.info, &res_info, debug_sk);
+                ModulusAwareCiphertext {
+                    dropped_rns_factor_indices: total_drop,
+                    info: res_info,
+                    data: res_data
                 }
             })
         }
