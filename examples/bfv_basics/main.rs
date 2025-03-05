@@ -42,7 +42,7 @@ fn main() {
     
     let mut rng = thread_rng();
 
-    let sk = ChosenBFVParamType::gen_sk(&C, &mut rng);
+    let sk = ChosenBFVParamType::gen_sk(&C, &mut rng, None);
     let digits = 2;
     let rk = ChosenBFVParamType::gen_rk(&C, &mut rng, &sk, digits);
 

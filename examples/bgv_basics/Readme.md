@@ -118,7 +118,7 @@ While it would be preferable for the BFV implementation not to be tied to any sp
 # let P: PlaintextRing<ChosenBGVParamType> = params.create_plaintext_ring(plaintext_modulus);
 # assert!(BigIntRing::RING.is_one(&signed_gcd(BigIntRing::RING.clone_el(C_initial.base_ring().modulus()), int_cast(plaintext_modulus, BigIntRing::RING, StaticRing::<i64>::RING), BigIntRing::RING)));
 let mut rng = StdRng::from_seed([1; 32]);
-let sk = ChosenBGVParamType::gen_sk(&C_initial, &mut rng);
+let sk = ChosenBGVParamType::gen_sk(&C_initial, &mut rng, None);
 let digits = 2;
 let rk = ChosenBGVParamType::gen_rk(&P, &C_initial, &mut rng, &sk, digits);
 ```
@@ -167,7 +167,7 @@ To encrypt, we now need to encode whatever data we have as an element of this ri
 # let P: PlaintextRing<ChosenBGVParamType> = params.create_plaintext_ring(plaintext_modulus);
 # assert!(BigIntRing::RING.is_one(&signed_gcd(BigIntRing::RING.clone_el(C_initial.base_ring().modulus()), int_cast(plaintext_modulus, BigIntRing::RING, StaticRing::<i64>::RING), BigIntRing::RING)));
 # let mut rng = StdRng::from_seed([1; 32]);
-# let sk = ChosenBGVParamType::gen_sk(&C_initial, &mut rng);
+# let sk = ChosenBGVParamType::gen_sk(&C_initial, &mut rng, None);
 # let digits = 2;
 # let rk = ChosenBGVParamType::gen_rk(&P, &C_initial, &mut rng, &sk, digits);
 let x = P.from_canonical_basis((0..(1 << 13)).map(|i| 
@@ -216,7 +216,7 @@ Since we already have a relinearization key, we can perform a homomorphic multip
 # let P: PlaintextRing<ChosenBGVParamType> = params.create_plaintext_ring(plaintext_modulus);
 # assert!(BigIntRing::RING.is_one(&signed_gcd(BigIntRing::RING.clone_el(C_initial.base_ring().modulus()), int_cast(plaintext_modulus, BigIntRing::RING, StaticRing::<i64>::RING), BigIntRing::RING)));
 # let mut rng = StdRng::from_seed([1; 32]);
-# let sk = ChosenBGVParamType::gen_sk(&C_initial, &mut rng);
+# let sk = ChosenBGVParamType::gen_sk(&C_initial, &mut rng, None);
 # let digits = 2;
 # let rk = ChosenBGVParamType::gen_rk(&P, &C_initial, &mut rng, &sk, digits);
 # let x = P.from_canonical_basis((0..(1 << 13)).map(|i| 
@@ -261,7 +261,7 @@ The naive way would be to compute
 # let P: PlaintextRing<ChosenBGVParamType> = params.create_plaintext_ring(plaintext_modulus);
 # assert!(BigIntRing::RING.is_one(&signed_gcd(BigIntRing::RING.clone_el(C_initial.base_ring().modulus()), int_cast(plaintext_modulus, BigIntRing::RING, StaticRing::<i64>::RING), BigIntRing::RING)));
 # let mut rng = StdRng::from_seed([1; 32]);
-# let sk = ChosenBGVParamType::gen_sk(&C_initial, &mut rng);
+# let sk = ChosenBGVParamType::gen_sk(&C_initial, &mut rng, None);
 # let digits = 2;
 # let rk = ChosenBGVParamType::gen_rk(&P, &C_initial, &mut rng, &sk, digits);
 # let x = P.from_canonical_basis((0..(1 << 13)).map(|i| 
@@ -315,7 +315,7 @@ Alternatively, these can also determined manually: [`crate::bgv::BGVParams::mod_
 # let P: PlaintextRing<ChosenBGVParamType> = params.create_plaintext_ring(plaintext_modulus);
 # assert!(BigIntRing::RING.is_one(&signed_gcd(BigIntRing::RING.clone_el(C_initial.base_ring().modulus()), int_cast(plaintext_modulus, BigIntRing::RING, StaticRing::<i64>::RING), BigIntRing::RING)));
 # let mut rng = StdRng::from_seed([1; 32]);
-# let sk = ChosenBGVParamType::gen_sk(&C_initial, &mut rng);
+# let sk = ChosenBGVParamType::gen_sk(&C_initial, &mut rng, None);
 # let digits = 2;
 # let rk = ChosenBGVParamType::gen_rk(&P, &C_initial, &mut rng, &sk, digits);
 # let x = P.from_canonical_basis((0..(1 << 13)).map(|i| 
@@ -379,7 +379,7 @@ For example, we could implement the above evaluation instead as follows:
 # let P: PlaintextRing<ChosenBGVParamType> = params.create_plaintext_ring(plaintext_modulus);
 # assert!(BigIntRing::RING.is_one(&signed_gcd(BigIntRing::RING.clone_el(C_initial.base_ring().modulus()), int_cast(plaintext_modulus, BigIntRing::RING, StaticRing::<i64>::RING), BigIntRing::RING)));
 # let mut rng = StdRng::from_seed([1; 32]);
-# let sk = ChosenBGVParamType::gen_sk(&C_initial, &mut rng);
+# let sk = ChosenBGVParamType::gen_sk(&C_initial, &mut rng, None);
 # let digits = 2;
 # let rk = ChosenBGVParamType::gen_rk(&P, &C_initial, &mut rng, &sk, digits);
 # let x = P.from_canonical_basis((0..(1 << 13)).map(|i| 

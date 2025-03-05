@@ -840,7 +840,7 @@ fn test_default_modswitch_strategy() {
     let P = params.create_plaintext_ring(t);
     let C = params.create_initial_ciphertext_ring();
 
-    let sk = Pow2BGV::gen_sk(&C, &mut rng);
+    let sk = Pow2BGV::gen_sk(&C, &mut rng, None);
     let rk = Pow2BGV::gen_rk(&P, &C, &mut rng, &sk, digits);
 
     let input = P.int_hom().map(2);
@@ -892,7 +892,7 @@ fn test_never_modswitch_strategy() {
     let P = params.create_plaintext_ring(t);
     let C = params.create_initial_ciphertext_ring();
 
-    let sk = Pow2BGV::gen_sk(&C, &mut rng);
+    let sk = Pow2BGV::gen_sk(&C, &mut rng, None);
     let rk = Pow2BGV::gen_rk(&P, &C, &mut rng, &sk, digits);
 
     let input = P.int_hom().map(2);

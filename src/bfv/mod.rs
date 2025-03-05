@@ -139,11 +139,33 @@ pub trait BFVParams {
     ///
     /// Generates a secret key, using the randomness of the given rng.
     /// 
+    /// If `hwt` is set, the secret will be a random ring element with
+    /// exactly `hwt` entries (w.r.t. coefficient basis) in `{-1, 1}`, 
+    /// and the others as `0`. If `hwt` is not set, the secret will be
+    /// a ring element whose coefficient basis coefficients are drawn
+    /// uniformly at random from `{-1, 0, 1}`.
+    /// 
+    /// If you need another kind of secret, consider creating the ring
+    /// element yourself using `C.from_canonical_basis()`.
+    /// 
     #[instrument(skip_all)]
-    fn gen_sk<R: Rng + CryptoRng>(C: &CiphertextRing<Self>, mut rng: R) -> SecretKey<Self> {
-        // we sample uniform ternary secrets 
-        let result = C.from_canonical_basis((0..C.rank()).map(|_| C.base_ring().int_hom().map((rng.next_u32() % 3) as i32 - 1)));
-        return result;
+    fn gen_sk<R: Rng + CryptoRng>(C: &CiphertextRing<Self>, mut rng: R, hwt: Option<usize>) -> SecretKey<Self> {
+        assert!(hwt.is_none() || hwt.unwrap() * 3 <= C.rank() * 2, "it does not make sense to take more than 2/3 of secret key entries in {{-1, 1}}");
+        if let Some(hwt) = hwt {
+            let mut result_data = (0..C.rank()).map(|_| 0).collect::<Vec<_>>();
+            for _ in 0..hwt {
+                let mut i = rng.next_u32() as usize % C.rank();
+                while result_data[i] != 0 {
+                    i = rng.next_u32() as usize % C.rank();
+                }
+                result_data[i] = (rng.next_u32() % 2) as i32 * 2 - 1;
+            }
+            let result = C.from_canonical_basis(result_data.into_iter().map(|c| C.base_ring().int_hom().map(c)));
+            return result;
+        } else {
+            let result = C.from_canonical_basis((0..C.rank()).map(|_| C.base_ring().int_hom().map((rng.next_u32() % 3) as i32 - 1)));
+            return result;
+        }
     }
     
     ///
@@ -892,7 +914,7 @@ fn test_pow2_bfv_enc_dec() {
     let P = params.create_plaintext_ring(t);
     let (C, _Cmul) = params.create_ciphertext_rings();
 
-    let sk = Pow2BFV::gen_sk(&C, &mut rng);
+    let sk = Pow2BFV::gen_sk(&C, &mut rng, None);
 
     let input = P.int_hom().map(2);
     let ctxt = Pow2BFV::enc_sym(&P, &C, &mut rng, &input, &sk);
@@ -916,7 +938,7 @@ fn test_pow2_bfv_hom_galois() {
     
     let P = params.create_plaintext_ring(t);
     let (C, _Cmul) = params.create_ciphertext_rings();    
-    let sk = Pow2BFV::gen_sk(&C, &mut rng);
+    let sk = Pow2BFV::gen_sk(&C, &mut rng, None);
     let gk = Pow2BFV::gen_gk(&C, &mut rng, &sk, P.galois_group().from_representative(3), digits);
     
     let input = P.canonical_gen();
@@ -943,7 +965,7 @@ fn test_pow2_bfv_mul() {
     
     let P = params.create_plaintext_ring(t);
     let (C, Cmul) = params.create_ciphertext_rings();
-    let sk = Pow2BFV::gen_sk(&C, &mut rng);
+    let sk = Pow2BFV::gen_sk(&C, &mut rng, None);
     let rk = Pow2BFV::gen_rk(&C, &mut rng, &sk, digits);
 
     let input = P.int_hom().map(2);
@@ -970,7 +992,7 @@ fn test_composite_bfv_mul() {
     
     let P = params.create_plaintext_ring(t);
     let (C, Cmul) = params.create_ciphertext_rings();
-    let sk = CompositeBFV::gen_sk(&C, &mut rng);
+    let sk = CompositeBFV::gen_sk(&C, &mut rng, None);
     let rk = CompositeBFV::gen_rk(&C, &mut rng, &sk, digits);
 
     let input = P.int_hom().map(2);
@@ -998,7 +1020,7 @@ fn test_composite_bfv_hom_galois() {
     
     let P = params.create_plaintext_ring(t);
     let (C, _Cmul) = params.create_ciphertext_rings();    
-    let sk = CompositeSingleRNSBFV::gen_sk(&C, &mut rng);
+    let sk = CompositeSingleRNSBFV::gen_sk(&C, &mut rng, None);
     let gk = CompositeSingleRNSBFV::gen_gk(&C, &mut rng, &sk, P.galois_group().from_representative(3), digits);
     
     let input = P.canonical_gen();
@@ -1027,7 +1049,7 @@ fn test_single_rns_composite_bfv_mul() {
     let P = params.create_plaintext_ring(t);
     let (C, Cmul) = params.create_ciphertext_rings();
 
-    let sk = CompositeSingleRNSBFV::gen_sk(&C, &mut rng);
+    let sk = CompositeSingleRNSBFV::gen_sk(&C, &mut rng, None);
     let rk = CompositeSingleRNSBFV::gen_rk(&C, &mut rng, &sk, digits);
 
     let input = P.int_hom().map(2);
@@ -1064,7 +1086,7 @@ fn measure_time_pow2_bfv() {
     );
 
     let sk = log_time::<_, _, true, _>("GenSK", |[]| 
-        Pow2BFV::gen_sk(&C, &mut rng)
+        Pow2BFV::gen_sk(&C, &mut rng, None)
     );
 
     let m = P.int_hom().map(2);
@@ -1123,7 +1145,7 @@ fn measure_time_double_rns_composite_bfv() {
     );
 
     let sk = log_time::<_, _, true, _>("GenSK", |[]| 
-        CompositeBFV::gen_sk(&C, &mut rng)
+        CompositeBFV::gen_sk(&C, &mut rng, None)
     );
     
     let m = P.int_hom().map(3);
@@ -1184,7 +1206,7 @@ fn measure_time_single_rns_composite_bfv() {
     );
 
     let sk = log_time::<_, _, true, _>("GenSK", |[]| 
-        CompositeSingleRNSBFV::gen_sk(&C, &mut rng)
+        CompositeSingleRNSBFV::gen_sk(&C, &mut rng, None)
     );
 
     let m = P.int_hom().map(3);

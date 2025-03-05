@@ -106,7 +106,7 @@ While it would be preferable for the BFV implementation not to be tied to any sp
 # let P: PlaintextRing<ChosenBFVParamType> = params.create_plaintext_ring(plaintext_modulus);
 # drop(params);
 let mut rng = thread_rng();
-let sk = ChosenBFVParamType::gen_sk(&C, &mut rng);
+let sk = ChosenBFVParamType::gen_sk(&C, &mut rng, None);
 let digits = 2;
 let rk = ChosenBFVParamType::gen_rk(&C, &mut rng, &sk, digits);
 ```
@@ -150,7 +150,7 @@ To encrypt, we now need to encode whatever data we have as an element of this ri
 # let P: PlaintextRing<ChosenBFVParamType> = params.create_plaintext_ring(plaintext_modulus);
 # drop(params);
 # let mut rng = thread_rng();
-# let sk = ChosenBFVParamType::gen_sk(&C, &mut rng);
+# let sk = ChosenBFVParamType::gen_sk(&C, &mut rng, None);
 # let digits = 2;
 # let rk = ChosenBFVParamType::gen_rk(&C, &mut rng, &sk, digits);
 let x = P.from_canonical_basis((0..(1 << 12)).map(|i| 
@@ -195,7 +195,7 @@ Since we already have a relinearization key, we can perform a homomorphic multip
 # let P: PlaintextRing<ChosenBFVParamType> = params.create_plaintext_ring(plaintext_modulus);
 # drop(params);
 # let mut rng = thread_rng();
-# let sk = ChosenBFVParamType::gen_sk(&C, &mut rng);
+# let sk = ChosenBFVParamType::gen_sk(&C, &mut rng, None);
 # let digits = 2;
 # let rk = ChosenBFVParamType::gen_rk(&C, &mut rng, &sk, digits);
 # let x = P.from_canonical_basis((0..(1 << 12)).map(|i| 
@@ -233,7 +233,7 @@ Note that the plaintext ring is actually quite large - we chose `N = 4096` - so 
 # let P: PlaintextRing<ChosenBFVParamType> = params.create_plaintext_ring(plaintext_modulus);
 # drop(params);
 # let mut rng = thread_rng();
-# let sk = ChosenBFVParamType::gen_sk(&C, &mut rng);
+# let sk = ChosenBFVParamType::gen_sk(&C, &mut rng, None);
 # let digits = 2;
 # let rk = ChosenBFVParamType::gen_rk(&C, &mut rng, &sk, digits);
 # let x = P.from_canonical_basis((0..(1 << 12)).map(|i| 

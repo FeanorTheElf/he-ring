@@ -334,7 +334,7 @@ fn test_digit_extract_homomorphic() {
     let P2 = params.create_plaintext_ring(17 * 17 * 17);
     let (C, Cmul) = params.create_ciphertext_rings();
 
-    let sk = Pow2BFV::gen_sk(&C, &mut rng);
+    let sk = Pow2BFV::gen_sk(&C, &mut rng, None);
     let rk = Pow2BFV::gen_rk(&C, &mut rng, &sk, digits);
 
     let m = P2.int_hom().map(17 * 17 + 2 * 17 + 5);

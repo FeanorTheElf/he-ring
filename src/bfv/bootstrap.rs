@@ -261,7 +261,7 @@ fn test_pow2_bfv_thin_bootstrapping_17() {
     let P = params.create_plaintext_ring(t);
     let (C, Cmul) = params.create_ciphertext_rings();
     
-    let sk = Pow2BFV::gen_sk(&C, &mut rng);
+    let sk = Pow2BFV::gen_sk(&C, &mut rng, None);
     let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, Pow2BFV::gen_gk(&C, &mut rng, &sk, g, digits))).collect::<Vec<_>>();
     let rk = Pow2BFV::gen_rk(&C, &mut rng, &sk, digits);
     
@@ -304,7 +304,7 @@ fn test_pow2_bfv_thin_bootstrapping_23() {
     let P = params.create_plaintext_ring(t);
     let (C, Cmul) = params.create_ciphertext_rings();
     
-    let sk = Pow2BFV::gen_sk(&C, &mut rng);
+    let sk = Pow2BFV::gen_sk(&C, &mut rng, None);
     let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, Pow2BFV::gen_gk(&C, &mut rng, &sk, g, digits))).collect::<Vec<_>>();
     let rk = Pow2BFV::gen_rk(&C, &mut rng, &sk, digits);
     
@@ -350,7 +350,7 @@ fn test_composite_bfv_thin_bootstrapping_2() {
     let P = params.create_plaintext_ring(t);
     let (C, Cmul) = params.create_ciphertext_rings();
     
-    let sk = CompositeBFV::gen_sk(&C, &mut rng);
+    let sk = CompositeBFV::gen_sk(&C, &mut rng, None);
     let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, CompositeBFV::gen_gk(&C, &mut rng, &sk, g, digits))).collect::<Vec<_>>();
     let rk = CompositeBFV::gen_rk(&C, &mut rng, &sk, digits);
     

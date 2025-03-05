@@ -120,10 +120,23 @@ pub trait BGVParams {
     }
 
     #[instrument(skip_all)]
-    fn gen_sk<R: Rng + CryptoRng>(C: &CiphertextRing<Self>, mut rng: R) -> SecretKey<Self> {
-        // we sample uniform ternary secrets 
-        let result = C.from_canonical_basis((0..C.rank()).map(|_| C.base_ring().int_hom().map((rng.next_u32() % 3) as i32 - 1)));
-        return result;
+    fn gen_sk<R: Rng + CryptoRng>(C: &CiphertextRing<Self>, mut rng: R, hwt: Option<usize>) -> SecretKey<Self> {
+        assert!(hwt.is_none() || hwt.unwrap() * 3 <= C.rank() * 2, "it does not make sense to take more than 2/3 of secret key entries in {{-1, 1}}");
+        if let Some(hwt) = hwt {
+            let mut result_data = (0..C.rank()).map(|_| 0).collect::<Vec<_>>();
+            for _ in 0..hwt {
+                let mut i = rng.next_u32() as usize % C.rank();
+                while result_data[i] != 0 {
+                    i = rng.next_u32() as usize % C.rank();
+                }
+                result_data[i] = (rng.next_u32() % 2) as i32 * 2 - 1;
+            }
+            let result = C.from_canonical_basis(result_data.into_iter().map(|c| C.base_ring().int_hom().map(c)));
+            return result;
+        } else {
+            let result = C.from_canonical_basis((0..C.rank()).map(|_| C.base_ring().int_hom().map((rng.next_u32() % 3) as i32 - 1)));
+            return result;
+        }
     }
 
     #[instrument(skip_all)]
@@ -794,7 +807,7 @@ fn test_pow2_bgv_enc_dec() {
     
     let P = params.create_plaintext_ring(t);
     let C = params.create_initial_ciphertext_ring();
-    let sk = Pow2BGV::gen_sk(&C, &mut rng);
+    let sk = Pow2BGV::gen_sk(&C, &mut rng, Some(16));
 
     let input = P.int_hom().map(2);
     let ctxt = Pow2BGV::enc_sym(&P, &C, &mut rng, &input, &sk);
@@ -818,7 +831,7 @@ fn test_pow2_bgv_mul() {
     
     let P = params.create_plaintext_ring(t);
     let C = params.create_initial_ciphertext_ring();
-    let sk = Pow2BGV::gen_sk(&C, &mut rng);
+    let sk = Pow2BGV::gen_sk(&C, &mut rng, None);
     let rk = Pow2BGV::gen_rk(&P, &C, &mut rng, &sk, digits);
 
     let input = P.int_hom().map(2);
@@ -845,7 +858,7 @@ fn test_pow2_bgv_modulus_switch() {
     let C0 = params.create_initial_ciphertext_ring();
     assert_eq!(9, C0.base_ring().len());
 
-    let sk = Pow2BGV::gen_sk(&C0, &mut rng);
+    let sk = Pow2BGV::gen_sk(&C0, &mut rng, None);
 
     let input = P.int_hom().map(2);
     let ctxt = Pow2BGV::enc_sym(&P, &C0, &mut rng, &input, &sk);
@@ -875,7 +888,7 @@ fn test_pow2_change_plaintext_modulus() {
     let P1 = params.create_plaintext_ring(17);
     let C = params.create_initial_ciphertext_ring();
 
-    let sk = Pow2BGV::gen_sk(&C, &mut rng);
+    let sk = Pow2BGV::gen_sk(&C, &mut rng, None);
 
     let input = P0.int_hom().map(2 * 17);
     let ctxt = Pow2BGV::enc_sym(&P0, &C, &mut rng, &input, &sk);
@@ -901,7 +914,7 @@ fn test_pow2_modulus_switch_hom_add() {
     let C0 = params.create_initial_ciphertext_ring();
     assert_eq!(9, C0.base_ring().len());
 
-    let sk = Pow2BGV::gen_sk(&C0, &mut rng);
+    let sk = Pow2BGV::gen_sk(&C0, &mut rng, None);
 
     let input = P.int_hom().map(2);
     let ctxt = Pow2BGV::enc_sym(&P, &C0, &mut rng, &input, &sk);
@@ -938,7 +951,7 @@ fn test_pow2_bgv_modulus_switch_rk() {
     let C0 = params.create_initial_ciphertext_ring();
     assert_eq!(9, C0.base_ring().len());
 
-    let sk = Pow2BGV::gen_sk(&C0, &mut rng);
+    let sk = Pow2BGV::gen_sk(&C0, &mut rng, None);
     let rk = Pow2BGV::gen_rk(&P, &C0, &mut rng, &sk, digits);
 
     let input = P.int_hom().map(2);
@@ -988,7 +1001,7 @@ fn measure_time_pow2_bgv() {
     );
 
     let sk = log_time::<_, _, true, _>("GenSK", |[]| 
-        Pow2BGV::gen_sk(&C, &mut rng)
+        Pow2BGV::gen_sk(&C, &mut rng, None)
     );
 
     let m = P.int_hom().map(2);
@@ -1050,7 +1063,7 @@ fn measure_time_double_rns_composite_bgv() {
     );
 
     let sk = log_time::<_, _, true, _>("GenSK", |[]| 
-        CompositeBGV::gen_sk(&C, &mut rng)
+        CompositeBGV::gen_sk(&C, &mut rng, None)
     );
     
     let m = P.int_hom().map(3);
@@ -1114,7 +1127,7 @@ fn measure_time_single_rns_composite_bgv() {
     );
 
     let sk = log_time::<_, _, true, _>("GenSK", |[]| 
-        SingleRNSCompositeBGV::gen_sk(&C, &mut rng)
+        SingleRNSCompositeBGV::gen_sk(&C, &mut rng, None)
     );
     
     let m = P.int_hom().map(3);

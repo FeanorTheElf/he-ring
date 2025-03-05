@@ -44,7 +44,7 @@ fn main() {
     println!("log2(q)  = {}", BigIntRing::RING.abs_log2_ceil(C_initial.base_ring().modulus()).unwrap());
 
     let mut rng = StdRng::from_seed([1; 32]);
-    let sk = ChosenBGVParamType::gen_sk(&C_initial, &mut rng);
+    let sk = ChosenBGVParamType::gen_sk(&C_initial, &mut rng, None);
 
     let digits = 2;
     let rk = ChosenBGVParamType::gen_rk(&P, &C_initial, &mut rng, &sk, digits);
