@@ -7,7 +7,6 @@ use serde::de::DeserializeSeed;
 use serde::Serialize;
 
 use crate::cyclotomic::{CyclotomicGaloisGroup, CyclotomicGaloisGroupEl, DeserializeSeedCyclotomicGaloisGroupEl, SerializableCyclotomicGaloisGroupEl};
-use crate::serialization_helper::DeserializeSeedTuple;
 use crate::{impl_deserialize_seed_for_dependent_enum, impl_deserialize_seed_for_dependent_struct};
 
 use super::{Coefficient, LinearCombination, PlaintextCircuit, PlaintextCircuitGate};
@@ -29,10 +28,24 @@ struct SerializableLinearCombination<C: Serialize, S: Serialize> {
 }
 
 #[derive(Serialize)]
+#[serde(rename = "MulGateData", bound = "")]
+struct SerializablePlaintextCircuitMulGate<L: Serialize> {
+    lhs: L,
+    rhs: L
+}
+
+#[derive(Serialize)]
+#[serde(rename = "GalGateData", bound = "")]
+struct SerializablePlaintextCircuitGalGate<L: Serialize, G: Serialize> {
+    automorphisms: G,
+    input: L
+}
+
+#[derive(Serialize)]
 #[serde(rename = "GateData", bound = "")]
 enum SerializablePlaintextCircuitGate<L: Serialize, G: Serialize> {
-    Mul((L, L)),
-    Gal((G, L))
+    Mul(SerializablePlaintextCircuitMulGate<L>),
+    Gal(SerializablePlaintextCircuitGalGate<L, G>)
 }
 
 #[derive(Serialize)]
@@ -91,8 +104,14 @@ impl<'a, R: RingStore + Copy> Serialize for SerializablePlaintextCircuit<'a, R>
         SerializablePlaintextCircuitData {
             input_count: self.circuit.input_count,
             gates: SerializableSeq::new(self.circuit.gates.as_fn().map_fn(|gate| match gate {
-                PlaintextCircuitGate::Mul(lhs, rhs) => SerializablePlaintextCircuitGate::Mul((serialize_lin_transform(lhs, self.ring), serialize_lin_transform(rhs, self.ring))),
-                PlaintextCircuitGate::Gal(gs, val) => SerializablePlaintextCircuitGate::Gal((SerializableSeq::new(gs.as_fn().map_fn(|g| SerializableCyclotomicGaloisGroupEl::new(self.galois_group.unwrap(), *g))), serialize_lin_transform(val, self.ring)))
+                PlaintextCircuitGate::Mul(lhs, rhs) => SerializablePlaintextCircuitGate::Mul(SerializablePlaintextCircuitMulGate {
+                    lhs: serialize_lin_transform(lhs, self.ring), 
+                    rhs: serialize_lin_transform(rhs, self.ring)
+                }),
+                PlaintextCircuitGate::Gal(gs, val) => SerializablePlaintextCircuitGate::Gal(SerializablePlaintextCircuitGalGate {
+                    automorphisms: SerializableSeq::new(gs.as_fn().map_fn(|g| SerializableCyclotomicGaloisGroupEl::new(self.galois_group.unwrap(), *g))), 
+                    input: serialize_lin_transform(val, self.ring)
+                })
             })),
             output_transforms: SerializableSeq::new(self.circuit.output_transforms.as_fn().map_fn(|t| serialize_lin_transform(t, self.ring)))
         }.serialize(serializer)
@@ -132,6 +151,46 @@ impl_deserialize_seed_for_dependent_struct!{
 }
 
 #[derive(Clone)]
+struct DeserializeSeedPlaintextCircuitMulGate<R: RingStore + Copy>
+    where R::Type: SerializableElementRing
+{
+    deserializer: DeserializeWithRing<R>
+}
+
+impl_deserialize_seed_for_dependent_struct!{
+    <{'de, R}> pub struct MulGateData<{'de, R}> using DeserializeSeedPlaintextCircuitMulGate<R> {
+        lhs: LinearCombinationData<'de, R>: |d: &DeserializeSeedPlaintextCircuitMulGate<R>| DeserializeSeedLinearCombination { deserializer: d.deserializer.clone() },
+        rhs: LinearCombinationData<'de, R>: |d: &DeserializeSeedPlaintextCircuitMulGate<R>| DeserializeSeedLinearCombination { deserializer: d.deserializer.clone() }
+    } where R: RingStore + Copy, R::Type: SerializableElementRing
+}
+
+#[derive(Clone)]
+struct DeserializeSeedPlaintextCircuitGalGate<'a, R: RingStore + Copy>
+    where R::Type: SerializableElementRing
+{
+    galois_group: Option<&'a CyclotomicGaloisGroup>,
+    deserializer: DeserializeWithRing<R>
+}
+
+fn derive_gal_gate_deserializer<'de, 'a, R>(d: &DeserializeSeedPlaintextCircuitGalGate<'a, R>) -> impl use<'a, 'de, R> + DeserializeSeed<'de, Value = Vec<CyclotomicGaloisGroupEl>>
+    where R: RingStore + Copy, R::Type: SerializableElementRing
+{
+    let galois_group: &'a CyclotomicGaloisGroup = d.galois_group.expect("cannot deserialize a circuit with galois gates if no galois group was specified");
+    DeserializeSeedSeq::new(
+        std::iter::repeat(DeserializeSeedCyclotomicGaloisGroupEl::new(galois_group)),
+        Vec::new(),
+        |mut current, next| { current.push(next); current }
+    )
+}
+
+impl_deserialize_seed_for_dependent_struct!{
+    <{'de, 'a, R}> pub struct GalGateData<{'de, R}> using DeserializeSeedPlaintextCircuitGalGate<'a, R> {
+        automorphisms: Vec<CyclotomicGaloisGroupEl>: derive_gal_gate_deserializer,
+        input: LinearCombinationData<'de, R>: |d: &DeserializeSeedPlaintextCircuitGalGate<R>| DeserializeSeedLinearCombination { deserializer: d.deserializer.clone() }
+    } where R: RingStore + Copy, R::Type: SerializableElementRing
+}
+
+#[derive(Clone)]
 struct DeserializeSeedPlaintextCircuitGate<'a, R: RingStore + Copy>
     where R::Type: SerializableElementRing
 {
@@ -141,18 +200,8 @@ struct DeserializeSeedPlaintextCircuitGate<'a, R: RingStore + Copy>
 
 impl_deserialize_seed_for_dependent_enum!{
     <{'de, 'a, R}> pub enum GateData<{'de, R}> using DeserializeSeedPlaintextCircuitGate<'a, R> {
-        Mul((LinearCombinationData<'de, R>, LinearCombinationData<'de, R>)): |d: DeserializeSeedPlaintextCircuitGate<'a, R>| DeserializeSeedTuple(
-            DeserializeSeedLinearCombination { deserializer: d.deserializer.clone() },
-            DeserializeSeedLinearCombination { deserializer: d.deserializer.clone() }
-        ),
-        Gal((Vec<CyclotomicGaloisGroupEl>, LinearCombinationData<'de, R>)): |d: DeserializeSeedPlaintextCircuitGate<'a, R>| DeserializeSeedTuple(
-            DeserializeSeedSeq::new(
-                std::iter::repeat(DeserializeSeedCyclotomicGaloisGroupEl::new(d.galois_group.expect("cannot deserialize a circuit containing galois gates when no galois group is specified"))),
-                Vec::new(),
-                |mut current, next| { current.push(next); current }
-            ),
-            DeserializeSeedLinearCombination { deserializer: d.deserializer.clone() }
-        )
+        Mul(MulGateData<'de, R>): |d: DeserializeSeedPlaintextCircuitGate<'a, R>| DeserializeSeedPlaintextCircuitMulGate { deserializer: d.deserializer },
+        Gal(GalGateData<'de, R>): |d: DeserializeSeedPlaintextCircuitGate<'a, R>| DeserializeSeedPlaintextCircuitGalGate { deserializer: d.deserializer, galois_group: d.galois_group }
     } where R: RingStore + Copy, R::Type: SerializableElementRing
 }
 
@@ -223,8 +272,8 @@ impl<'de, 'a, R: RingStore + Copy> DeserializeSeed<'de> for DeserializeSeedPlain
         }.deserialize(deserializer)?;
         let result = PlaintextCircuit {
             gates: res.gates.into_iter().map(|gate| match gate {
-                GateData::Gal(((gs, val), _)) => PlaintextCircuitGate::Gal(gs, convert_transform(val)),
-                GateData::Mul(((lhs, rhs), _)) => PlaintextCircuitGate::Mul(convert_transform(lhs), convert_transform(rhs))
+                GateData::Gal((gate, _)) => PlaintextCircuitGate::Gal(gate.automorphisms, convert_transform(gate.input)),
+                GateData::Mul((gate, _)) => PlaintextCircuitGate::Mul(convert_transform(gate.lhs), convert_transform(gate.rhs))
             }).collect(),
             input_count: res.input_count,
             output_transforms: res.output_transforms.into_iter().map(convert_transform).collect()
