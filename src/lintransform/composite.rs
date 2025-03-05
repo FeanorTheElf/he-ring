@@ -42,34 +42,39 @@ fn dwt1d_matrix(H: &HypercubeStructure, slot_ring: &SlotRingOver<Zn>, dim_index:
 fn dwt1d<'a, NumberRing>(H: &DefaultHypercube<NumberRing>, dim_index: usize, zeta_powertable: &PowerTable<&SlotRingOver<Zn>>) -> Vec<MatmulTransform<NumberRing>>
     where NumberRing: HECyclotomicNumberRing + Clone
 {
-    // multiplication with the matrix `A(i, j) = 𝝵^(j * shift_element(-i))` if we consider an element as multiple vectors along the `dim_index`-th dimension
-    let A = dwt1d_matrix(H.hypercube(), H.slot_ring(), dim_index, zeta_powertable);
-
-    vec![MatmulTransform::matmul1d(
-        H, 
-        dim_index, 
-        |i, j, _idxs| H.slot_ring().clone_el(A.at(i, j))
-    )]
+    if H.hypercube().m(dim_index) == 1{
+        Vec::new()
+    } else {
+        // multiplication with the matrix `A(i, j) = 𝝵^(j * shift_element(-i))` if we consider an element as multiple vectors along the `dim_index`-th dimension
+        let A = dwt1d_matrix(H.hypercube(), H.slot_ring(), dim_index, zeta_powertable);
+    
+        vec![MatmulTransform::matmul1d(
+            H, 
+            dim_index, 
+            |i, j, _idxs| H.slot_ring().clone_el(A.at(i, j))
+        )]
+    }
 }
 
 #[instrument(skip_all)]
 fn dwt1d_inv<'a, NumberRing>(H: &DefaultHypercube<NumberRing>, dim_index: usize, zeta_powertable: &PowerTable<&SlotRingOver<Zn>>) -> Vec<MatmulTransform<NumberRing>>
     where NumberRing: HECyclotomicNumberRing + Clone
 {
-    assert!(H.hypercube().is_tensor_product_compatible());
+    if H.hypercube().m(dim_index) == 1{
+        Vec::new()
+    } else {
+        let mut A = dwt1d_matrix(H.hypercube(), H.slot_ring(), dim_index, zeta_powertable);
+        let mut rhs = OwnedMatrix::identity(H.hypercube().m(dim_index), H.hypercube().m(dim_index), H.slot_ring());
+        let mut sol = OwnedMatrix::zero(H.hypercube().m(dim_index), H.hypercube().m(dim_index), H.slot_ring());
+        <_ as LinSolveRingStore>::solve_right(H.slot_ring(), A.data_mut(), rhs.data_mut(), sol.data_mut()).assert_solved();
 
-    let mut A = dwt1d_matrix(H.hypercube(), H.slot_ring(), dim_index, zeta_powertable);
-    let mut rhs = OwnedMatrix::identity(H.hypercube().m(dim_index), H.hypercube().m(dim_index), H.slot_ring());
-    let mut sol = OwnedMatrix::zero(H.hypercube().m(dim_index), H.hypercube().m(dim_index), H.slot_ring());
-    <_ as LinSolveRingStore>::solve_right(H.slot_ring(), A.data_mut(), rhs.data_mut(), sol.data_mut()).assert_solved();
-
-    // multiplication with the matrix `A(i, j) = 𝝵^(j * shift_element(-i))` if we consider an element as multiple vectors along the `dim_index`-th dimension
-    vec![MatmulTransform::matmul1d(
-        H, 
-        dim_index, 
-        |i, j, _idxs| H.slot_ring().clone_el(sol.at(i, j))
-    )]
-    
+        // multiplication with the matrix `A(i, j) = 𝝵^(j * shift_element(-i))` if we consider an element as multiple vectors along the `dim_index`-th dimension
+        vec![MatmulTransform::matmul1d(
+            H, 
+            dim_index, 
+            |i, j, _idxs| H.slot_ring().clone_el(sol.at(i, j))
+        )]
+    }
 }
 
 /// 
