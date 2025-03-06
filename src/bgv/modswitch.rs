@@ -138,14 +138,14 @@ impl<Params: BGVParams> BGVNoiseEstimator<Params> for NaiveBGVNoiseEstimator {
         return result;
     }
 
-    fn hom_mul_plain(&self, P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, m: &El<PlaintextRing<Params>>, ct: &Self::CriticalQuantityLevel, _implicit_scale: El<Zn>) -> Self::CriticalQuantityLevel {
-        let result = *ct + (P.wrt_canonical_basis(m).iter().map(|c| P.base_ring().smallest_lift(c).abs()).max().unwrap() as f64 * C.rank() as f64).log2();
+    fn hom_mul_plain(&self, P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, _m: &El<PlaintextRing<Params>>, ct: &Self::CriticalQuantityLevel, _implicit_scale: El<Zn>) -> Self::CriticalQuantityLevel {
+        let result = *ct + (*P.base_ring().modulus() as f64).log2() + (C.rank() as f64).log2();
         assert!(!result.is_nan());
         return result;
     }
 
-    fn hom_mul_plain_encoded(&self, _P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, m: &El<CiphertextRing<Params>>, ct: &Self::CriticalQuantityLevel, _implicit_scale: El<Zn>) -> Self::CriticalQuantityLevel {
-        let result = *ct + C.wrt_canonical_basis(m).iter().map(|c| C.base_ring().integer_ring().abs_log2_ceil(&C.base_ring().smallest_lift(c)).unwrap_or(0)).max().unwrap() as f64 + (C.rank() as f64).log2();
+    fn hom_mul_plain_encoded(&self, P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, _m: &El<CiphertextRing<Params>>, ct: &Self::CriticalQuantityLevel, _implicit_scale: El<Zn>) -> Self::CriticalQuantityLevel {
+        let result = *ct + (*P.base_ring().modulus() as f64).log2() + (C.rank() as f64).log2();
         assert!(!result.is_nan());
         return result;
     }
