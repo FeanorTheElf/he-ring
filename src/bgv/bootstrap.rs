@@ -32,8 +32,8 @@ pub struct ThinBootstrapParams<Params: BGVParams> {
 impl<Params: BGVParams> ThinBootstrapParams<Params>
     where NumberRing<Params>: Clone
 {
-    fn read_or_create_circuit<F, const LOG: bool>(H: &DefaultHypercube<NumberRing<Params>>, base_name: &str, cache_dir: Option<&str>, create: F) -> PlaintextCircuit<NumberRingQuotientBase<NumberRing<Params>, Zn, Global>>
-        where F: FnOnce() -> PlaintextCircuit<NumberRingQuotientBase<NumberRing<Params>, Zn, Global>>
+    fn read_or_create_circuit<F, const LOG: bool>(H: &DefaultHypercube<NumberRing<Params>>, base_name: &str, cache_dir: Option<&str>, create: F) -> PlaintextCircuit<<PlaintextRing<Params> as RingStore>::Type>
+        where F: FnOnce() -> PlaintextCircuit<<PlaintextRing<Params> as RingStore>::Type>
     {
         if let Some(cache_dir) = cache_dir {
             let filename = format!("{}/{}_n{}_p{}_e{}.json", cache_dir, base_name, H.hypercube().n(), H.p(), H.e());
