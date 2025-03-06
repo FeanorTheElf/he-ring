@@ -190,17 +190,21 @@ pub trait BGVParams {
     }
 
     #[instrument(skip_all)]
-    fn hom_add_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
+    fn hom_add_plain_encoded(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<CiphertextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
         assert!(P.base_ring().is_unit(&ct.implicit_scale));
-        let ZZ_to_Zq = C.base_ring().can_hom(P.base_ring().integer_ring()).unwrap();
-        let m = C.from_canonical_basis(P.wrt_canonical_basis(&P.inclusion().mul_ref_map(m, &ct.implicit_scale)).iter().map(|c| ZZ_to_Zq.map(P.base_ring().smallest_lift(c))));
+        let implicit_scale = C.base_ring().coerce(&ZZ, P.base_ring().smallest_lift(ct.implicit_scale));
         let result = Ciphertext {
-            c0: C.add(ct.c0, m),
+            c0: C.add(ct.c0, C.inclusion().mul_ref_map(m, &implicit_scale)),
             c1: ct.c1,
             implicit_scale: ct.implicit_scale
         };
         assert!(P.base_ring().is_unit(&result.implicit_scale));
         return result;
+    }
+
+    #[instrument(skip_all)]
+    fn hom_add_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
+        Self::hom_add_plain_encoded(P, C, &Self::encode_plaintext(P, C, m), ct)
     }
 
     #[instrument(skip_all)]
@@ -219,17 +223,26 @@ pub trait BGVParams {
     }
 
     #[instrument(skip_all)]
-    fn hom_mul_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
+    fn hom_mul_plain_encoded(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<CiphertextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
         assert!(P.base_ring().is_unit(&ct.implicit_scale));
-        let ZZ_to_Zq = C.base_ring().can_hom(P.base_ring().integer_ring()).unwrap();
-        let m = C.from_canonical_basis(P.wrt_canonical_basis(m).iter().map(|c| ZZ_to_Zq.map(P.base_ring().smallest_lift(c))));
         let result = Ciphertext {
-            c0: C.mul_ref_snd(ct.c0, &m), 
-            c1: C.mul(ct.c1, m),
+            c0: C.mul_ref_snd(ct.c0, m), 
+            c1: C.mul_ref_snd(ct.c1, m),
             implicit_scale: ct.implicit_scale
         };
         assert!(P.base_ring().is_unit(&result.implicit_scale));
         return result;
+    }
+
+    #[instrument(skip_all)]
+    fn encode_plaintext(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>) -> El<CiphertextRing<Self>> {
+        let ZZ_to_Zq = C.base_ring().can_hom(P.base_ring().integer_ring()).unwrap();
+        return C.from_canonical_basis(P.wrt_canonical_basis(m).iter().map(|c| ZZ_to_Zq.map(P.base_ring().smallest_lift(c))));
+    }
+
+    #[instrument(skip_all)]
+    fn hom_mul_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
+        Self::hom_mul_plain_encoded(P, C, &Self::encode_plaintext(P, C, m), ct)
     }
 
     #[instrument(skip_all)]

@@ -141,6 +141,24 @@ impl<R: ?Sized + RingBase> Coefficient<R> {
             (lhs, rhs) => Coefficient::Other(ring.mul(lhs.to_ring_el(ring), rhs.to_ring_el(ring)))
         }
     }
+
+    ///
+    /// Preserves integer coefficients, and maps ring elements as specified
+    /// by the given function.
+    /// 
+    pub fn change_ring<S, F>(self, mut f: F) -> Coefficient<S>
+        where F: FnMut(R::Element) -> S::Element,
+            S: ?Sized + RingBase
+    {
+        match self {
+            Coefficient::Integer(x) => Coefficient::Integer(x),
+            Coefficient::NegOne => Coefficient::NegOne,
+            Coefficient::Zero => Coefficient::Zero,
+            Coefficient::One => Coefficient::One,
+            Coefficient::Other(x) => Coefficient::Other(f(x))
+        }
+    }
+
 }
 
 ///
