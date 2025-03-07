@@ -60,6 +60,11 @@ impl RNSGadgetVectorDigitIndices {
         unsafe { std::mem::transmute(digit_boundaries) }
     }
 
+    ///
+    /// Creates the list of digits, each containing the RNS factors whose indices are within the corresponding 
+    /// range. This requires the ranges to exactly cover a contiguous interval `{ 0, 1, ..., k - 1 }`, otherwise
+    /// the function will panic. 
+    /// 
     pub fn from<V>(digits: V) -> Box<Self>
         where V: VectorFn<Range<usize>>
     {
@@ -78,6 +83,11 @@ impl RNSGadgetVectorDigitIndices {
         return Self::from_unchecked(result.into_boxed_slice());
     }
 
+    ///
+    /// Returns the number of RNS factors in the RNS basis that these digits refer
+    /// to. In other words, returns `k` such that the indices `{ 0, 1, ..., k - 1 }`
+    /// are each part of exactly one of the digits.
+    /// 
     pub fn rns_base_len(&self) -> usize {
         *self.digit_boundaries.last().unwrap_or(&0)
     }

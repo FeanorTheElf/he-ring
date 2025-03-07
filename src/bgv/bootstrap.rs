@@ -1,6 +1,6 @@
 use std::fs::File;
-use std::io::BufReader;
-use std::io::BufWriter;
+use std::io::{BufReader, BufWriter};
+use std::cmp::max;
 
 use feanor_math::algorithms::int_factor::is_prime_power;
 use feanor_math::ring::*;
@@ -9,6 +9,7 @@ use crate::bgv::modswitch::DefaultModswitchStrategy;
 use crate::circuit::serialization::DeserializeSeedPlaintextCircuit;
 use crate::circuit::serialization::SerializablePlaintextCircuit;
 use crate::circuit::*;
+use crate::gadget_product::digits::recommended_rns_factors_to_drop;
 use crate::lintransform::matmul::MatmulTransform;
 use crate::log_time;
 use crate::digitextract::DigitExtract;
@@ -179,6 +180,26 @@ impl<Params: BGVParams, Strategy: BGVModswitchStrategy<Params>> ThinBootstrapDat
         return result;
     }
 
+    ///
+    /// Performs bootstrapping on thinly packed ciphertexts.
+    /// 
+    /// Parameters are as follows:
+    ///  - `C_master` is the ciphertext ring over the largest RNS base, both relinearization and
+    ///    Galois keys must be defined w.r.t. `C_master`
+    ///  - `P_base` is the current plaintext ring; `ct` must be a valid BGV ciphertext encrypting
+    ///    a message from `P_base`
+    ///  - `ct_dropped_moduli` contains all RNS factor indices of `C_master` that aren't used by `ct`
+    ///    (anymore); More concrete, `ct` lives over the ciphertext ring one obtains by dropping the
+    ///    RNS factors with these indices from the RNS base of `C_master`
+    ///  - `ct` is the ciphertext to bootstrap; It must be thinly packed (i.e. each slot may only
+    ///    contain an element of `Z/(t)`), otherwise this function will cause immediate noise overflow.
+    ///  - `rk` is a relinearization key, to be used for computing products
+    ///  - `gks` is a list of Galois keys, to be used for applying Galois automorphisms. This list
+    ///    must contain a Galois key for each Galois automorphism listed in [`ThinBootstrapData::required_galois_keys()`],
+    ///    but may contain additional Galois keys
+    ///  - `debug_sk` can be a reference to a secret key, which is used to print out decryptions
+    ///    of intermediate results for debugging purposes. May only be set if `LOG == true`.
+    /// 
     pub fn bootstrap_thin<'a, const LOG: bool>(
         &self,
         C_master: &CiphertextRing<Params>, 
@@ -196,11 +217,16 @@ impl<Params: BGVParams, Strategy: BGVModswitchStrategy<Params>> ThinBootstrapDat
         if LOG {
             println!("Starting Bootstrapping")
         }
-        
-        let C_input = Params::mod_switch_down_ciphertext_ring(C_master, ct_dropped_moduli);
-        let sk_input = debug_sk.map(|sk| Params::mod_switch_down_sk(&C_input, &C_master, ct_dropped_moduli, sk));
+
+        let drop_additional_moduli_count = max(2, C_master.base_ring().len() - ct_dropped_moduli.len()) - 2;
+        let drop_additional_moduli = recommended_rns_factors_to_drop(&rk.0.gadget_vector_digits().remove_indices(&ct_dropped_moduli), drop_additional_moduli_count);
+        let ct_dropped_moduli_new = drop_additional_moduli.pullback(&ct_dropped_moduli);
+        let C_input = Params::mod_switch_down_ciphertext_ring(C_master, &ct_dropped_moduli_new);
+        let ct_input = Params::mod_switch_down(P_base, &C_input, &Params::mod_switch_down_ciphertext_ring(C_master, ct_dropped_moduli), &drop_additional_moduli, ct);
+
+        let sk_input = debug_sk.map(|sk| Params::mod_switch_down_sk(&C_input, &C_master, &ct_dropped_moduli_new, sk));
         if let Some(sk) = &sk_input {
-            Params::dec_println_slots(P_base, &C_input, &ct, sk);
+            Params::dec_println_slots(P_base, &C_input, &ct_input, sk);
         }
 
         let P_main = self.plaintext_ring_hierarchy.last().unwrap();
@@ -212,9 +238,9 @@ impl<Params: BGVParams, Strategy: BGVModswitchStrategy<Params>> ThinBootstrapDat
                 P_base, 
                 C_master, 
                 &[ModulusAwareCiphertext {
-                    data: ct, 
+                    data: ct_input, 
                     info: (), 
-                    dropped_rns_factor_indices: ct_dropped_moduli.to_owned()
+                    dropped_rns_factor_indices: ct_dropped_moduli_new.clone()
                 }], 
                 None, 
                 gks,
@@ -223,7 +249,7 @@ impl<Params: BGVParams, Strategy: BGVModswitchStrategy<Params>> ThinBootstrapDat
             );
             assert_eq!(1, result.len());
             let result = result.into_iter().next().unwrap();
-            debug_assert_eq!(*result.dropped_rns_factor_indices, *ct_dropped_moduli);
+            debug_assert_eq!(result.dropped_rns_factor_indices, ct_dropped_moduli_new);
             return result.data;
         });
         if let Some(sk) = &sk_input {
