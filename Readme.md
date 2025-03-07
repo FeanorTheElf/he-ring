@@ -13,8 +13,11 @@ In short, he-ring contains the following:
  - an implementation of the isomorphism `R/(p^e) = GR(p, e, d) x ... x GR(p, e, d)` via "hypercube structures" (compare "Bootstrapping for HElib" by Halevi and Shoup, <https://ia.cr/2014/873>)
  - an implementation of "gadget products", i.e. the certain kind of inner product that is used in HE schemes to multiply ciphertexts with lower noise growth
  - implementations of the BFV and BGV encryption schemes
- - bootstrapping for BFV
+ - bootstrapping for BFV and BGV
  - tools for arithmetization, including modelling of arithmetic circuits, polynomial-to-circuit conversion via Paterson-Stockmeyer and HElib-style linear transforms
+
+The following features are available partially, and/or WIP:
+ - Noise estimation and optional automated modulus-switching for BGV
 
 ## Examples
 
