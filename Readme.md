@@ -20,6 +20,21 @@ In short, he-ring contains the following:
 
 In addition to the API documentation, detailed guides and examples to some parts of HE-Ring can be found in [`crate::examples`].
 
+## Notation (comparison with HElib)
+
+We sometimes use notation differently from the way it is used in HElib, and follow instead most modern HE literature.
+In particular, we use the following letters:
+
+| HE-Ring   | HElib     | Meaning                                                   |
+| --------- | --------- | --------------------------------------------------------- |
+| `n`       | `m`       | Index (sometimes conductor) of the cyclotomic number ring |
+| `digits`  | `c`       | Number of parts to decompose into during gadget products  |
+| `log2(q)` | `bits`    | Size of the ciphertext modulus                            |
+| `p`       | `p`       | Prime factor of the plaintext modulus                     |
+| `r`       | `r`       | Exponent of the plaintext modulus                         |
+| `t`       | none      | Plaintext modulus `p^r`                                   |
+| `m[i]`    | `ords[i]` | Length of the `i`-th hypercube dimension                  |
+
 ## Performance
 
 When optimizing for performance, please use the Intel HEXL library (by enabling the feature `use_hexl` and providing a build of HEXL, as described in more detail in the documentation of [`feanor-math-hexl`](https://github.com/FeanorTheElf/feanor-math-hexl)), since the default NTT does not provide SOTA performance. Also note that `he-ring` is currently single-threaded.
