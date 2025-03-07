@@ -351,6 +351,26 @@ pub trait BGVParams {
     }
     
     #[instrument(skip_all)]
+    fn hom_square<'a>(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, val: Ciphertext<Self>, rk: &RelinKey<'a, Self>) -> Ciphertext<Self>
+        where Self: 'a
+    {
+        assert!(P.base_ring().is_unit(&val.implicit_scale));
+
+        let [res0, res1, res2] = C.get_ring().two_by_two_convolution([&val.c0, &val.c1], [&val.c0, &val.c1]);
+        
+        let op = GadgetProductLhsOperand::from_element_with(C.get_ring(), &res2, rk.0.gadget_vector_digits());
+        let (s0, s1) = &rk;
+        
+        let result = Ciphertext {
+            c0: C.add(res0, op.gadget_product(s0, C.get_ring())), 
+            c1: C.add(res1, op.gadget_product(s1, C.get_ring())),
+            implicit_scale: P.base_ring().pow(val.implicit_scale, 2)
+        };
+        assert!(P.base_ring().is_unit(&result.implicit_scale));
+        return result;
+    }
+    
+    #[instrument(skip_all)]
     fn hom_add(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, mut lhs: Ciphertext<Self>, mut rhs: Ciphertext<Self>) -> Ciphertext<Self> {
         assert!(P.base_ring().is_unit(&lhs.implicit_scale));
         assert!(P.base_ring().is_unit(&rhs.implicit_scale));

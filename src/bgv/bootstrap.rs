@@ -89,8 +89,8 @@ impl<Params: BGVParams> ThinBootstrapParams<Params>
 
         return ThinBootstrapData {
             digit_extract,
-            slots_to_coeffs_thin: slots_to_coeffs.change_ring(|x| x.change_ring(|x| Params::encode_plaintext(&original_plaintext_ring, C, &x))),
-            coeffs_to_slots_thin: coeffs_to_slots.change_ring(|x| x.change_ring(|x| Params::encode_plaintext(&plaintext_ring, C, &x))),
+            slots_to_coeffs_thin: slots_to_coeffs.change_ring_uniform(|x| x.change_ring(|x| Params::encode_plaintext(&original_plaintext_ring, C, &x))),
+            coeffs_to_slots_thin: coeffs_to_slots.change_ring_uniform(|x| x.change_ring(|x| Params::encode_plaintext(&plaintext_ring, C, &x))),
             plaintext_ring_hierarchy: plaintext_ring_hierarchy,
             modswitch_strategy: modswitch_strategy,
             tmp_coprime_modulus_plaintext: self.scheme_params.create_plaintext_ring(ZZ.pow(p, e) + 1)
@@ -130,8 +130,8 @@ impl<Params: BGVParams> ThinBootstrapParams<Params>
 
         return ThinBootstrapData {
             digit_extract,
-            slots_to_coeffs_thin: slots_to_coeffs.change_ring(|x| x.change_ring(|x| Params::encode_plaintext(&original_plaintext_ring, C, &x))),
-            coeffs_to_slots_thin: coeffs_to_slots.change_ring(|x| x.change_ring(|x| Params::encode_plaintext(&plaintext_ring, C, &x))),
+            slots_to_coeffs_thin: slots_to_coeffs.change_ring_uniform(|x| x.change_ring(|x| Params::encode_plaintext(&original_plaintext_ring, C, &x))),
+            coeffs_to_slots_thin: coeffs_to_slots.change_ring_uniform(|x| x.change_ring(|x| Params::encode_plaintext(&plaintext_ring, C, &x))),
             plaintext_ring_hierarchy: plaintext_ring_hierarchy,
             modswitch_strategy: modswitch_strategy,
             tmp_coprime_modulus_plaintext: self.scheme_params.create_plaintext_ring(ZZ.pow(p, e) + 1)

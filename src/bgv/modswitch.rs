@@ -609,7 +609,7 @@ impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> DefaultMo
             F2: FnMut(&PlaintextRing<Params>, &CiphertextRing<Params>, &RNSFactorIndexList, &R::Element, Ciphertext<Params>, &<Self as BGVModswitchStrategy<Params>>::CiphertextInfo) -> (<Self as BGVModswitchStrategy<Params>>::CiphertextInfo, Ciphertext<Params>),
     {
         match (x.as_ciphertext(P, C_master, ring, self), y.as_ciphertext(P, C_master, ring, self)) {
-            (Err(x), Err(y)) => PlainOrCiphertext::Plaintext(x.add(y, ring)),
+            (Err(x), Err(y)) => PlainOrCiphertext::Plaintext(x.mul(y, ring)),
             // possibly swap `x` and `y` here so that we can handle both asymmetric cases in one statement
             (Ok((Cx, x)), Err(y)) | (Err(y), Ok((Cx, x))) => PlainOrCiphertext::Ciphertext({
                 let total_drop = x.dropped_rns_factor_indices.clone();
@@ -655,6 +655,48 @@ impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> DefaultMo
                 let res_info = self.noise_estimator.hom_mul(P, &Ctarget, &x_info, &y_info, rk_modswitch.0.gadget_vector_digits());
 
                 self.log_modulus_switch("HomMul", P, C_master, &Cx, &Cy, &Ctarget, &x.dropped_rns_factor_indices, &y.dropped_rns_factor_indices, &drop_x, &drop_y, &total_drop, &x_data_copy, &y_data_copy, &res_data, &x.info, &y.info, &res_info, debug_sk);
+                ModulusAwareCiphertext {
+                    dropped_rns_factor_indices: total_drop,
+                    info: res_info,
+                    data: res_data
+                }
+            })
+        }
+    }
+
+    fn square<'a, R, F2>(
+        &self,
+        P: &PlaintextRing<Params>,
+        C_master: &CiphertextRing<Params>,
+        x: PlainOrCiphertext<'a, Params, Self, R>,
+        ring: RingRef<R>,
+        _hom_mul_plain: &RefCell<F2>,
+        rk: Option<&RelinKey<Params>>,
+        key_switches: &RefCell<&mut usize>,
+        debug_sk: Option<&SecretKey<Params>>
+    ) -> PlainOrCiphertext<'a, Params, Self, R>
+        where R: ?Sized + RingBase,
+            F2: FnMut(&PlaintextRing<Params>, &CiphertextRing<Params>, &RNSFactorIndexList, &R::Element, Ciphertext<Params>, &<Self as BGVModswitchStrategy<Params>>::CiphertextInfo) -> (<Self as BGVModswitchStrategy<Params>>::CiphertextInfo, Ciphertext<Params>),
+    {
+        match x.as_ciphertext(P, C_master, ring, self) {
+            Err(x) => PlainOrCiphertext::Plaintext(x.clone(ring).mul(x, ring)),
+            Ok((Cx, x)) => PlainOrCiphertext::Ciphertext({
+                **key_switches.borrow_mut() += 1;
+
+                let total_drop = self.compute_optimal_mul_modswitch(P, C_master, &x.info, &x.dropped_rns_factor_indices, &x.info, &x.dropped_rns_factor_indices, rk.unwrap().0.gadget_vector_digits());
+                let Ctarget = Params::mod_switch_down_ciphertext_ring(C_master, &total_drop);
+                let rk_modswitch = Params::mod_switch_down_rk(&Ctarget, C_master, &total_drop, rk.unwrap());
+                debug_assert!(total_drop.len() >= x.dropped_rns_factor_indices.len());
+
+                let x_data_copy = if debug_sk.is_some() { Some(Params::clone_ct(&P, &Cx, &x.data)) } else { None };
+                let drop_x = total_drop.pushforward(&x.dropped_rns_factor_indices);
+                let x_info = self.noise_estimator.mod_switch_down(P, &Ctarget, &Cx, &drop_x, &x.info);
+                let x_data = Params::mod_switch_down(P, &Ctarget, &Cx, &drop_x, x.data);
+
+                let res_data = Params::hom_square(P, &Ctarget, x_data, &rk_modswitch);
+                let res_info = self.noise_estimator.hom_mul(P, &Ctarget, &x_info, &x_info, rk_modswitch.0.gadget_vector_digits());
+
+                self.log_modulus_switch("HomMul", P, C_master, &Cx, &Cx, &Ctarget, &x.dropped_rns_factor_indices, &x.dropped_rns_factor_indices, &drop_x, &drop_x, &total_drop, &x_data_copy, &x_data_copy, &res_data, &x.info, &x.info, &res_info, debug_sk);
                 ModulusAwareCiphertext {
                     dropped_rns_factor_indices: total_drop,
                     info: res_info,
@@ -739,6 +781,7 @@ impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> DefaultMo
             &inputs.iter().map(PlainOrCiphertext::CiphertextRef).collect::<Vec<_>>(),
             |m| PlainOrCiphertext::PlaintextRef(m),
             |x, c, y| self.add_prod(P, C_master, x, c, y, ring, &mut hom_add_plain, &hom_mul_plain_refcell, debug_sk),
+            |x| self.square(P, C_master, x, ring, &hom_mul_plain_refcell, rk, &key_switches_refcell, debug_sk),
             |x, y| self.mul(P, C_master, x, y, ring, &hom_mul_plain_refcell, rk, &key_switches_refcell, debug_sk),
             |gs, x| self.gal_many(P, C_master, x, ring, gs, gks, &mut apply_galois_action_plaintext, &key_switches_refcell, debug_sk)
         );
@@ -971,8 +1014,7 @@ fn test_never_modswitch_strategy() {
     {
         let modswitch_strategy = DefaultModswitchStrategy::never_modswitch();
         let pow4_circuit = PlaintextCircuit::mul(ZZ)
-            .compose(PlaintextCircuit::mul(ZZ).output_twice(ZZ), ZZ)
-            .compose(PlaintextCircuit::identity(1, ZZ).output_twice(ZZ), ZZ);
+            .compose(PlaintextCircuit::square(ZZ).output_twice(ZZ), ZZ);
 
         let res = modswitch_strategy.evaluate_circuit_int(
             &pow4_circuit,

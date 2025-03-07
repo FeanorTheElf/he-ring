@@ -1,5 +1,6 @@
 use std::alloc::{Allocator, Global};
 use std::marker::PhantomData;
+use std::ops::Deref;
 use std::sync::Arc;
 
 use feanor_math::algorithms::convolution::*;
@@ -393,6 +394,50 @@ impl<NumberRing, A, C> BGFVCiphertextRing for SingleRNSRingBase<NumberRing, A, C
             }
         }
         return result;
+    }
+
+    #[instrument(skip_all)]
+    fn two_by_two_convolution(&self, lhs: [&Self::Element; 2], rhs: [&Self::Element; 2]) -> [Self::Element; 3] {
+        enum OwnedOrBorrowed<'a, T> {
+            Owned(T),
+            Borrowed(&'a T)
+        }
+        impl<'a, T> Deref for OwnedOrBorrowed<'a, T> {
+            type Target = T;
+            fn deref(&self) -> &Self::Target {
+                match self {
+                    Self::Owned(x) => x,
+                    Self::Borrowed(x) => *x
+                }
+            }
+        }
+        let lhs0_prepared = self.prepare_multiplicant(lhs[0]);
+        let lhs1_prepared = if std::ptr::eq(lhs[0], lhs[1]) {
+            OwnedOrBorrowed::Borrowed(&lhs0_prepared)
+        } else {
+            OwnedOrBorrowed::Owned(self.prepare_multiplicant(lhs[1]))
+        };
+        let rhs0_prepared = if std::ptr::eq(lhs[0], rhs[0]) {
+            OwnedOrBorrowed::Borrowed(&lhs0_prepared)
+        } else if std::ptr::eq(lhs[1], rhs[0]) {
+            OwnedOrBorrowed::Borrowed(&*lhs1_prepared)
+        } else {
+            OwnedOrBorrowed::Owned(self.prepare_multiplicant(rhs[0]))
+        };
+        let rhs1_prepared = if std::ptr::eq(lhs[0], rhs[1]) {
+            OwnedOrBorrowed::Borrowed(&lhs0_prepared)
+        } else if std::ptr::eq(lhs[1], rhs[1]) {
+            OwnedOrBorrowed::Borrowed(&*lhs1_prepared)
+        } else if std::ptr::eq(rhs[0], rhs[1]) {
+            OwnedOrBorrowed::Borrowed(&*rhs0_prepared)
+        } else {
+            OwnedOrBorrowed::Owned(self.prepare_multiplicant(rhs[1]))
+        };
+        return [
+            self.mul_prepared(&lhs0_prepared, &*rhs0_prepared),
+            self.inner_product_prepared([(&lhs0_prepared, &*rhs1_prepared), (&*lhs1_prepared, &*rhs0_prepared)]),
+            self.mul_prepared(&*lhs1_prepared, &*rhs1_prepared)
+        ];
     }
 }
 
@@ -1042,5 +1087,29 @@ fn test_multiple_representations() {
     for (red, unred) in &elements {
         assert_el_eq!(&doublerns_ring, iso.inv().map_ref(red), iso.inv().map_ref(unred));
         assert_el_eq!(&ring, iso.map(iso.inv().map_ref(red)), iso.map(iso.inv().map_ref(unred)));
+    }
+}
+
+#[test]
+fn test_two_by_two_convolution() {
+    let rns_base = zn_rns::Zn::new(vec![Zn::new(2113), Zn::new(2689)], BigIntRing::RING);
+    let ring: SingleRNSRing<_> = SingleRNSRingBase::new(OddCyclotomicNumberRing::new(3), rns_base.clone());
+
+    let a = ring.from_canonical_basis([1, 2].into_iter().map(|c| ring.base_ring().int_hom().map(c)));
+    let b = ring.from_canonical_basis([3, 5].into_iter().map(|c| ring.base_ring().int_hom().map(c)));
+    let c = ring.from_canonical_basis([7, 2].into_iter().map(|c| ring.base_ring().int_hom().map(c)));
+    let d = ring.from_canonical_basis([9, 8].into_iter().map(|c| ring.base_ring().int_hom().map(c)));
+
+    for lhs0 in [&a, &b, &c, &d] {
+        for lhs1 in [&a, &b, &c, &d] {
+            for rhs0 in [&a, &b, &c, &d] {
+                for rhs1 in [&a, &b, &c, &d] {
+                    let [res0, res1, res2] = ring.get_ring().two_by_two_convolution([lhs0, lhs1], [rhs0, rhs1]);
+                    assert_el_eq!(&ring, ring.mul_ref(lhs0, rhs0), res0);
+                    assert_el_eq!(&ring, ring.add(ring.mul_ref(lhs0, rhs1), ring.mul_ref(lhs1, rhs0)), res1);
+                    assert_el_eq!(&ring, ring.mul_ref(lhs1, rhs1), res2);
+                }
+            }
+        }
     }
 }

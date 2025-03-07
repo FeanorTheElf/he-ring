@@ -35,6 +35,12 @@ struct SerializablePlaintextCircuitMulGate<L: Serialize> {
 }
 
 #[derive(Serialize)]
+#[serde(rename = "SquareGateData", bound = "")]
+struct SerializablePlaintextCircuitSquareGate<L: Serialize> {
+    val: L
+}
+
+#[derive(Serialize)]
 #[serde(rename = "GalGateData", bound = "")]
 struct SerializablePlaintextCircuitGalGate<L: Serialize, G: Serialize> {
     automorphisms: G,
@@ -45,7 +51,8 @@ struct SerializablePlaintextCircuitGalGate<L: Serialize, G: Serialize> {
 #[serde(rename = "GateData", bound = "")]
 enum SerializablePlaintextCircuitGate<L: Serialize, G: Serialize> {
     Mul(SerializablePlaintextCircuitMulGate<L>),
-    Gal(SerializablePlaintextCircuitGalGate<L, G>)
+    Gal(SerializablePlaintextCircuitGalGate<L, G>),
+    Square(SerializablePlaintextCircuitSquareGate<L>)
 }
 
 #[derive(Serialize)]
@@ -111,6 +118,9 @@ impl<'a, R: RingStore + Copy> Serialize for SerializablePlaintextCircuit<'a, R>
                 PlaintextCircuitGate::Gal(gs, val) => SerializablePlaintextCircuitGate::Gal(SerializablePlaintextCircuitGalGate {
                     automorphisms: SerializableSeq::new(gs.as_fn().map_fn(|g| SerializableCyclotomicGaloisGroupEl::new(self.galois_group.unwrap(), *g))), 
                     input: serialize_lin_transform(val, self.ring)
+                }),
+                PlaintextCircuitGate::Square(val) => SerializablePlaintextCircuitGate::Square(SerializablePlaintextCircuitSquareGate { 
+                    val: serialize_lin_transform(val, self.ring) 
                 })
             })),
             output_transforms: SerializableSeq::new(self.circuit.output_transforms.as_fn().map_fn(|t| serialize_lin_transform(t, self.ring)))
@@ -165,6 +175,19 @@ impl_deserialize_seed_for_dependent_struct!{
 }
 
 #[derive(Clone)]
+struct DeserializeSeedPlaintextCircuitSquareGate<R: RingStore + Copy>
+    where R::Type: SerializableElementRing
+{
+    deserializer: DeserializeWithRing<R>
+}
+
+impl_deserialize_seed_for_dependent_struct!{
+    <{'de, R}> pub struct SquareGateData<{'de, R}> using DeserializeSeedPlaintextCircuitSquareGate<R> {
+        val: LinearCombinationData<'de, R>: |d: &DeserializeSeedPlaintextCircuitSquareGate<R>| DeserializeSeedLinearCombination { deserializer: d.deserializer.clone() }
+    } where R: RingStore + Copy, R::Type: SerializableElementRing
+}
+
+#[derive(Clone)]
 struct DeserializeSeedPlaintextCircuitGalGate<'a, R: RingStore + Copy>
     where R::Type: SerializableElementRing
 {
@@ -201,7 +224,8 @@ struct DeserializeSeedPlaintextCircuitGate<'a, R: RingStore + Copy>
 impl_deserialize_seed_for_dependent_enum!{
     <{'de, 'a, R}> pub enum GateData<{'de, R}> using DeserializeSeedPlaintextCircuitGate<'a, R> {
         Mul(MulGateData<'de, R>): |d: DeserializeSeedPlaintextCircuitGate<'a, R>| DeserializeSeedPlaintextCircuitMulGate { deserializer: d.deserializer },
-        Gal(GalGateData<'de, R>): |d: DeserializeSeedPlaintextCircuitGate<'a, R>| DeserializeSeedPlaintextCircuitGalGate { deserializer: d.deserializer, galois_group: d.galois_group }
+        Gal(GalGateData<'de, R>): |d: DeserializeSeedPlaintextCircuitGate<'a, R>| DeserializeSeedPlaintextCircuitGalGate { deserializer: d.deserializer, galois_group: d.galois_group },
+        Square(SquareGateData<'de, R>): |d: DeserializeSeedPlaintextCircuitGate<'a, R>| DeserializeSeedPlaintextCircuitSquareGate { deserializer: d.deserializer }
     } where R: RingStore + Copy, R::Type: SerializableElementRing
 }
 
@@ -273,7 +297,8 @@ impl<'de, 'a, R: RingStore + Copy> DeserializeSeed<'de> for DeserializeSeedPlain
         let result = PlaintextCircuit {
             gates: res.gates.into_iter().map(|gate| match gate {
                 GateData::Gal((gate, _)) => PlaintextCircuitGate::Gal(gate.automorphisms, convert_transform(gate.input)),
-                GateData::Mul((gate, _)) => PlaintextCircuitGate::Mul(convert_transform(gate.lhs), convert_transform(gate.rhs))
+                GateData::Mul((gate, _)) => PlaintextCircuitGate::Mul(convert_transform(gate.lhs), convert_transform(gate.rhs)),
+                GateData::Square((gate, _)) => PlaintextCircuitGate::Square(convert_transform(gate.val))
             }).collect(),
             input_count: res.input_count,
             output_transforms: res.output_transforms.into_iter().map(convert_transform).collect()

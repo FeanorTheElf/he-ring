@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::cmp::max;
 
 use feanor_math::homomorphism::Homomorphism;
@@ -216,13 +217,14 @@ impl<R: ?Sized + RingBase> LinearCombination<R> {
         };
     }
     
-    fn change_ring<S, F>(self, f: &mut F) -> LinearCombination<S>
-        where F: FnMut(Coefficient<R>) -> Coefficient<S>,
+    fn change_ring<S, F1, F2>(self, change_summand: &mut F1, change_factor: &mut F2) -> LinearCombination<S>
+        where F1: FnMut(Coefficient<R>) -> Coefficient<S>,
+            F2: FnMut(Coefficient<R>) -> Coefficient<S>,
             S: ?Sized + RingBase
     {
         LinearCombination {
-            constant: f(self.constant),
-            factors: self.factors.into_iter().map(|c| f(c)).collect()
+            constant: change_summand(self.constant),
+            factors: self.factors.into_iter().map(|c| change_factor(c)).collect()
         }
     }
 }
@@ -242,6 +244,7 @@ impl<R: RingBase + Default> PartialEq for LinearCombination<R> {
 /// 
 enum PlaintextCircuitGate<R: ?Sized + RingBase> {
     Mul(LinearCombination<R>, LinearCombination<R>),
+    Square(LinearCombination<R>),
     Gal(Vec<CyclotomicGaloisGroupEl>, LinearCombination<R>)
 }
 
@@ -250,7 +253,8 @@ impl<R: ?Sized + RingBase> PlaintextCircuitGate<R> {
     fn clone<S: RingStore<Type = R> + Copy>(&self, ring: S) -> Self {
         match self {
             PlaintextCircuitGate::Mul(lhs, rhs) => PlaintextCircuitGate::Mul(lhs.clone(ring), rhs.clone(ring)),
-            PlaintextCircuitGate::Gal(gs, t) => PlaintextCircuitGate::Gal(gs.clone(), t.clone(ring))
+            PlaintextCircuitGate::Gal(gs, t) => PlaintextCircuitGate::Gal(gs.clone(), t.clone(ring)),
+            PlaintextCircuitGate::Square(t) => PlaintextCircuitGate::Square(t.clone(ring))
         }
     }
 }
@@ -260,6 +264,7 @@ impl<R: RingBase + Default> PartialEq for PlaintextCircuitGate<R> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (PlaintextCircuitGate::Mul(self_lhs, self_rhs), PlaintextCircuitGate::Mul(other_lhs, other_rhs)) => self_lhs == other_lhs && self_rhs == other_rhs,
+            (PlaintextCircuitGate::Square(self_t), PlaintextCircuitGate::Square(other_t)) => self_t == other_t,
             _ => false
         }
     }
@@ -314,6 +319,10 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
                 PlaintextCircuitGate::Gal(gs, t) => {
                     assert_eq!(current_count, t.factors.len());
                     current_count += gs.len();
+                },
+                PlaintextCircuitGate::Square(t) => {
+                    assert_eq!(current_count, t.factors.len());
+                    current_count += 1;
                 }
             }
         }
@@ -333,6 +342,7 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
     fn computed_wire_count(&self) -> usize {
         self.gates.iter().map(|gate| match gate {
             PlaintextCircuitGate::Mul(_, _) => 1,
+            PlaintextCircuitGate::Square(_) => 1,
             PlaintextCircuitGate::Gal(gs, _) => gs.len()
         }).sum()
     }
@@ -400,18 +410,32 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
     /// Computes a new circuit, which has the same graph structure as this circuit,
     /// and its constants are derived from this circuit's constants by the given function.
     /// 
-    pub fn change_ring<S, F>(self, mut f: F) -> PlaintextCircuit<S>
-        where F: FnMut(Coefficient<R>) -> Coefficient<S>,
+    pub fn change_ring<S, F1, F2>(self, mut change_summand: F1, mut change_factor: F2) -> PlaintextCircuit<S>
+        where F1: FnMut(Coefficient<R>) -> Coefficient<S>,
+            F2: FnMut(Coefficient<R>) -> Coefficient<S>,
             S: ?Sized + RingBase
     {
         PlaintextCircuit {
             input_count: self.input_count,
             gates: self.gates.into_iter().map(|gate| match gate {
-                PlaintextCircuitGate::Gal(gs, t) => PlaintextCircuitGate::Gal(gs, t.change_ring(&mut f)),
-                PlaintextCircuitGate::Mul(l, r) => PlaintextCircuitGate::Mul(l.change_ring(&mut f), r.change_ring(&mut f))
+                PlaintextCircuitGate::Gal(gs, t) => PlaintextCircuitGate::Gal(gs, t.change_ring(&mut change_summand, &mut change_factor)),
+                PlaintextCircuitGate::Mul(l, r) => PlaintextCircuitGate::Mul(l.change_ring(&mut change_summand, &mut change_factor), r.change_ring(&mut change_summand, &mut change_factor)),
+                PlaintextCircuitGate::Square(t) => PlaintextCircuitGate::Square(t.change_ring(&mut change_summand, &mut change_factor))
             }).collect(),
-            output_transforms: self.output_transforms.into_iter().map(|t| t.change_ring(&mut f)).collect()
+            output_transforms: self.output_transforms.into_iter().map(|t| t.change_ring(&mut change_summand, &mut change_factor)).collect()
         }
+    }
+
+    ///
+    /// Computes a new circuit, which has the same graph structure as this circuit,
+    /// and its constants are derived from this circuit's constants by the given function.
+    /// 
+    pub fn change_ring_uniform<S, F>(self, f: F) -> PlaintextCircuit<S>
+        where F: FnMut(Coefficient<R>) -> Coefficient<S>,
+            S: ?Sized + RingBase
+    {
+        let f_refcell = RefCell::new(f);
+        return self.change_ring(|x| (f_refcell.borrow_mut())(x), |x| (f_refcell.borrow_mut())(x));
     }
 
     /// 
@@ -483,6 +507,43 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
             output_transforms: vec![LinearCombination {
                 constant: Coefficient::Zero,
                 factors: vec![Coefficient::One, Coefficient::One]
+            }]
+        };
+        return result;
+    }
+
+    ///
+    /// Creates the circuit consisting of a single squaring gate
+    /// ```text
+    ///     |
+    ///  |‾‾‾‾‾|
+    ///  |  ^2 |
+    ///  |_____|
+    ///     |
+    /// ```
+    /// which is for most purposes equivalent to
+    /// 
+    /// ```text
+    ///    |
+    ///   |‾|
+    ///  |‾‾‾|
+    ///  | * |
+    ///  |___|
+    ///    |
+    /// ```
+    /// However, a square gate is stored separately, and may be evaluated
+    /// more efficiently during circuit evaluation.
+    /// 
+    pub fn square<S: RingStore<Type = R>>(_ring: S) -> Self {
+        let result = Self {
+            input_count: 1,
+            gates: vec![PlaintextCircuitGate::Square(LinearCombination {
+                constant: Coefficient::Zero,
+                factors: vec![Coefficient::One]
+            })],
+            output_transforms: vec![LinearCombination {
+                constant: Coefficient::Zero,
+                factors: vec![Coefficient::Zero, Coefficient::One]
             }]
         };
         return result;
@@ -736,6 +797,9 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
                 PlaintextCircuitGate::Gal(gs, t) => PlaintextCircuitGate::Gal(
                     gs.clone(), 
                     map_self_transform(t)
+                ),
+                PlaintextCircuitGate::Square(t) => PlaintextCircuitGate::Square(
+                    map_self_transform(t)
                 )
             }).chain(
                 rhs.gates.iter().map(|gate| match gate {
@@ -745,6 +809,9 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
                     ),
                     PlaintextCircuitGate::Gal(gs, t) => PlaintextCircuitGate::Gal(
                         gs.clone(), 
+                        map_rhs_transform(t)
+                    ),
+                    PlaintextCircuitGate::Square(t) => PlaintextCircuitGate::Square(
                         map_rhs_transform(t)
                     )
                 })
@@ -813,6 +880,9 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
                     PlaintextCircuitGate::Gal(gs, t) => PlaintextCircuitGate::Gal(
                         gs.clone(),
                         map_transform(t)
+                    ),
+                    PlaintextCircuitGate::Square(t) => PlaintextCircuitGate::Square(
+                        map_transform(t)
                     )
                 })
             ).collect(),
@@ -859,7 +929,8 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
     /// assert_eq!(vec![3], circuit.evaluate_generic(
     ///     &[1 as i32, 2 as i32], 
     ///     |x| x.to_ring_el(StaticRing::<i64>::RING) as i32, 
-    ///     |x, c, y| x + c.mul_to(*y as i64, StaticRing::<i64>::RING) as i32, 
+    ///     |x, c, y| x + c.mul_to(*y as i64, StaticRing::<i64>::RING) as i32,
+    ///     |_| unreachable!("circuit should have no squaring gates"), 
     ///     |_, _| unreachable!("circuit should have no multiplication gates"), 
     ///     |_, _| unreachable!("circuit should have no Galois gates")
     /// ));
@@ -867,9 +938,10 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
     /// Of course, this example could have been more easily implemented using [`PlaintextCircuit::evaluate()`], since
     /// the operations used here exactly match the ones of `StaticRing::<i32>::RING`.
     /// 
-    pub fn evaluate_generic<'a, T, ContantFn, AddProductFn, MulFn, GaloisFn>(&'a self, inputs: &[T], mut constant: ContantFn, mut add_prod: AddProductFn, mut mul: MulFn, mut gal: GaloisFn) -> Vec<T>
+    pub fn evaluate_generic<'a, T, ContantFn, AddProductFn, SquareFn, MulFn, GaloisFn>(&'a self, inputs: &[T], mut constant: ContantFn, mut add_prod: AddProductFn, mut square: SquareFn, mut mul: MulFn, mut gal: GaloisFn) -> Vec<T>
         where ContantFn: FnMut(&'a Coefficient<R>) -> T,
             AddProductFn: FnMut(T, &'a Coefficient<R>, &T) -> T,
+            SquareFn: FnMut(T) -> T,
             MulFn: FnMut(T, T) -> T,
             GaloisFn: FnMut(&'a [CyclotomicGaloisGroupEl], T) -> Vec<T>,
             R: 'a
@@ -884,6 +956,9 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
                 )),
                 PlaintextCircuitGate::Gal(gs, t) => current.extend(gal(
                     &gs,
+                    t.evaluate_generic(inputs, &current, &mut constant, &mut add_prod)
+                )),
+                PlaintextCircuitGate::Square(t) => current.push(square(
                     t.evaluate_generic(inputs, &current, &mut constant, &mut add_prod)
                 ))
             }
@@ -906,6 +981,7 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
             inputs,
             |c| hom.map(c.clone(hom.domain()).to_ring_el(hom.domain())),
             |x, lhs, rhs| hom.codomain().add(x, hom.mul_ref_fst_map(rhs, lhs.clone(hom.domain()).to_ring_el(hom.domain()))),
+            |mut x| { hom.codomain().square(&mut x); x },
             |lhs, rhs| hom.codomain().mul(lhs, rhs),
             |_, _| unreachable!()
         )
@@ -927,6 +1003,7 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
             inputs,
             |c| hom.map(c.clone(hom.domain()).to_ring_el(hom.domain())),
             |x, lhs, rhs| hom.codomain().add(x, hom.mul_ref_fst_map(rhs, lhs.clone(hom.domain()).to_ring_el(hom.domain()))),
+            |mut x| { hom.codomain().square(&mut x); x },
             |lhs, rhs| hom.codomain().mul(lhs, rhs),
             |gs, x: S::Element| hom.codomain().apply_galois_action_many(&x, gs)
         )
@@ -935,21 +1012,24 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
     pub fn has_galois_gates(&self) -> bool {
         self.gates.iter().any(|gate| match gate {
             PlaintextCircuitGate::Gal(_, _) => true,
-            PlaintextCircuitGate::Mul(_, _) => false
+            PlaintextCircuitGate::Mul(_, _) => false,
+            PlaintextCircuitGate::Square(_) => false
         })
     }
 
     pub fn has_multiplication_gates(&self) -> bool {
         self.gates.iter().any(|gate| match gate {
             PlaintextCircuitGate::Gal(_, _) => false,
-            PlaintextCircuitGate::Mul(_, _) => true
+            PlaintextCircuitGate::Mul(_, _) => true,
+            PlaintextCircuitGate::Square(_) => true
         })
     }
 
     pub fn multiplication_gate_count(&self) -> usize {
         self.gates.iter().filter(|gate| match gate {
             PlaintextCircuitGate::Gal(_, _) => false,
-            PlaintextCircuitGate::Mul(_, _) => true
+            PlaintextCircuitGate::Mul(_, _) => true,
+            PlaintextCircuitGate::Square(_) => true
         }).count()
     }
 
@@ -964,7 +1044,8 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
     pub fn required_galois_keys(&self, galois_group: &CyclotomicGaloisGroup) -> Vec<CyclotomicGaloisGroupEl> {
         let mut result = self.gates.iter().flat_map(|gate| match gate {
             PlaintextCircuitGate::Gal(gs, _) => gs.iter().copied(),
-            PlaintextCircuitGate::Mul(_, _) => [].iter().copied()
+            PlaintextCircuitGate::Mul(_, _) => [].iter().copied(),
+            PlaintextCircuitGate::Square(_) => [].iter().copied()
         }).collect::<Vec<_>>();
         result.sort_unstable_by_key(|g| galois_group.representative(*g));
         result.dedup_by_key(|g| galois_group.representative(*g));
@@ -995,7 +1076,8 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
         for gate in &self.gates {
             let (new_depth, count) = match gate {
                 PlaintextCircuitGate::Mul(lhs, rhs) => (max(mult_depth_of_linear_combination(lhs, &multiplicative_depths), mult_depth_of_linear_combination(rhs, &multiplicative_depths)) + 1, 1),
-                PlaintextCircuitGate::Gal(gs, input) => (mult_depth_of_linear_combination(input, &multiplicative_depths), gs.len())
+                PlaintextCircuitGate::Gal(gs, t) => (mult_depth_of_linear_combination(t, &multiplicative_depths), gs.len()),
+                PlaintextCircuitGate::Square(t) => (mult_depth_of_linear_combination(t, &multiplicative_depths) + 1, 1)
             };
             multiplicative_depths.extend((0..count).map(|_| new_depth));
         }
@@ -1140,10 +1222,11 @@ fn test_serialization() {
     let x = PlaintextCircuit::linear_transform_ring(&[1], ring);
     let neg_x = PlaintextCircuit::linear_transform_ring(&[-1], ring);
     let x_neg_x = PlaintextCircuit::mul(ring).compose(x.clone(ring).tensor(neg_x, ring), ring).compose(x.output_twice(ring), ring);
-    let circuit = PlaintextCircuit::add(ring).compose(x_neg_x.tensor(PlaintextCircuit::constant(2, ring), ring), ring);
+    let two_minus_x_neg_x = PlaintextCircuit::add(ring).compose(x_neg_x.tensor(PlaintextCircuit::constant(2, ring), ring), ring);
+    let circuit = PlaintextCircuit::square(ring).compose(two_minus_x_neg_x, ring);
 
     for x in -100..100 {
-        assert_eq!(2 - x * x, circuit.evaluate_no_galois(&[x], ring.identity()).into_iter().next().unwrap());
+        assert_eq!((2 - x * x) * (2 - x * x), circuit.evaluate_no_galois(&[x], ring.identity()).into_iter().next().unwrap());
     }
 
     let serializer = serde_assert::Serializer::builder().is_human_readable(true).build();

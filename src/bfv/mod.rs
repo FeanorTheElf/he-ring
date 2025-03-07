@@ -427,6 +427,38 @@ pub trait BFVParams {
     }
     
     ///
+    /// Computes an encryption of the square of an encrypted messages.
+    /// 
+    /// This function does perform any semantic checks. In particular, it is up to the
+    /// caller to ensure that the ciphertexts are defined over the given ring, and are
+    /// BFV encryptions w.r.t. the given plaintext modulus.
+    /// 
+    #[instrument(skip_all)]
+    fn hom_square<'a>(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, Cmul: &CiphertextRing<Self>, val: Ciphertext<Self>, rk: &RelinKey<'a, Self>) -> Ciphertext<Self>
+        where Self: 'a
+    {
+        let (c0, c1) = val;
+
+        let lift_to_Cmul = Self::create_lift_to_Cmul(C, Cmul);
+        let lift = |c| perform_rns_op(Cmul.get_ring(), C.get_ring(), &c, &lift_to_Cmul);
+        let c0_lifted = lift(c0);
+        let c1_lifted = lift(c1);
+
+        let [lifted0, lifted1, lifted2] = Cmul.get_ring().two_by_two_convolution([&c0_lifted, &c1_lifted], [&c0_lifted, &c1_lifted]);
+
+        let scale_down_to_C = Self::create_scale_down_to_C(P, C, Cmul);
+        let scale_down = |c: El<CiphertextRing<Self>>| perform_rns_op(C.get_ring(), Cmul.get_ring(), &c, &scale_down_to_C);
+        let res0 = scale_down(lifted0);
+        let res1 = scale_down(lifted1);
+        let res2 = scale_down(lifted2);
+
+        let op = GadgetProductLhsOperand::from_element_with(C.get_ring(), &res2, rk.0.gadget_vector_digits());
+        let (s0, s1) = rk;
+        return (C.add_ref(&res0, &op.gadget_product(s0, C.get_ring())), C.add_ref(&res1, &op.gadget_product(s1, C.get_ring())));
+        
+    }
+    
+    ///
     /// Generates a key-switch key. 
     /// 
     /// In particular, this is used to generate relinearization keys (via [`BFVParams::gen_rk()`])
@@ -600,6 +632,7 @@ impl<NumberRing> PlaintextCircuit<NumberRingQuotientBase<NumberRing, Zn>>
                 x => Params::hom_add_plain(P, C, &x.clone(P).to_ring_el(P), Params::transparent_zero(C))
             },
             |dst, x, ct| Params::hom_add(C, dst, &Params::hom_mul_plain(P, C, &x.clone(P).to_ring_el(P), Params::clone_ct(C, ct))),
+            |x| Params::hom_square(P, C, Cmul.unwrap(), x, rk.unwrap()),
             |lhs, rhs| Params::hom_mul(P, C, Cmul.unwrap(), lhs, rhs, rk.unwrap()),
             |gs, x| if gs.len() == 1 {
                 vec![Params::hom_galois(C, x, gs[0], &gks.iter().filter(|(g, _)| galois_group.eq_el(*g, gs[0])).next().unwrap().1)]
@@ -635,6 +668,7 @@ impl PlaintextCircuit<StaticRingBase<i64>> {
                 x => Params::hom_add_plain(P, C, &P.int_hom().map(x.to_ring_el(ZZ) as i32), Params::transparent_zero(C))
             },
             |dst, x, ct| Params::hom_add(C, dst, &Params::hom_mul_plain(P, C, &P.int_hom().map(x.to_ring_el(ZZ) as i32), Params::clone_ct(C, ct))),
+            |x| Params::hom_square(P, C, Cmul.unwrap(), x, rk.unwrap()),
             |lhs, rhs| Params::hom_mul(P, C, Cmul.unwrap(), lhs, rhs, rk.unwrap()),
             |gs, x| if gs.len() == 1 {
                 vec![Params::hom_galois(C, x, gs[0], &gks.iter().filter(|(g, _)| galois_group.eq_el(*g, gs[0])).next().unwrap().1)]

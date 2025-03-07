@@ -38,19 +38,19 @@ pub fn precomputed_p_2(e: usize) -> IntegerCircuit {
         return f0;
     }
 
-    let f1 = id().tensor(IntegerCircuit::mul(ZZ), ZZ).compose(IntegerCircuit::select(1, &[0, 0, 0], ZZ).compose(f0, ZZ), ZZ);
+    let f1 = id().tensor(IntegerCircuit::square(ZZ), ZZ).compose(IntegerCircuit::select(1, &[0, 0], ZZ).compose(f0, ZZ), ZZ);
     if log2_e_ceil == 1 {
         return f1;
     }
 
-    let f2 = id().tensor(id(), ZZ).tensor(IntegerCircuit::mul(ZZ), ZZ).compose(IntegerCircuit::select(2, &[0, 1, 1, 1], ZZ).compose(f1, ZZ), ZZ);
+    let f2 = id().tensor(id(), ZZ).tensor(IntegerCircuit::square(ZZ), ZZ).compose(IntegerCircuit::select(2, &[0, 1, 1], ZZ).compose(f1, ZZ), ZZ);
     if log2_e_ceil == 2 {
         return f2;
     }
     
     let f3_comp = IntegerCircuit::add(ZZ).compose(
-        IntegerCircuit::linear_transform_ring(&[112], ZZ).tensor(IntegerCircuit::mul(ZZ).compose(
-            IntegerCircuit::linear_transform_ring(&[94, 121], ZZ).output_twice(ZZ), ZZ
+        IntegerCircuit::linear_transform_ring(&[112], ZZ).tensor(IntegerCircuit::square(ZZ).compose(
+            IntegerCircuit::linear_transform_ring(&[94, 121], ZZ), ZZ
         ), ZZ), ZZ
     ).compose(
         IntegerCircuit::select(2, &[0, 0, 1], ZZ), ZZ
@@ -170,17 +170,20 @@ pub fn low_depth_paterson_stockmeyer<P>(poly_ring: P, polys: &[El<P>], baby_step
         let mut result = IntegerCircuit::constant(1, ZZ).tensor(IntegerCircuit::identity(1, ZZ), ZZ);
         while result.output_count() < deg_exclusive {
             let n = result.output_count();
-            let mut next_circuit = IntegerCircuit::identity(n, ZZ);
-            for i in 1..=min(deg_exclusive - n, n - 1) {
-                next_circuit = next_circuit.tensor(
-                    IntegerCircuit::mul(ZZ).compose(
-                        IntegerCircuit::select(n, &[n - 1, i], ZZ), ZZ
-                    ), ZZ
+            if n % 2 == 0 {
+                result = IntegerCircuit::identity(n, ZZ).tensor(
+                    IntegerCircuit::square(ZZ).compose(IntegerCircuit::select(n, &[n / 2], ZZ), ZZ), ZZ
+                ).compose(
+                    result.output_twice(ZZ), ZZ
+                );
+            } else {
+                result = IntegerCircuit::identity(n, ZZ).tensor(
+                    IntegerCircuit::mul(ZZ).compose(IntegerCircuit::select(n, &[n / 2, n - (n / 2)], ZZ), ZZ), ZZ
+                ).compose(
+                    result.output_twice(ZZ), ZZ
                 );
             }
-            assert_eq!(next_circuit.input_count(), (min(deg_exclusive - n, n - 1) + 1) * n);
-            assert_eq!(next_circuit.output_count(), min(deg_exclusive - n, n - 1) + n);
-            result = next_circuit.compose(result.output_times(min(deg_exclusive - n, n - 1) + 1, ZZ), ZZ);
+            assert_eq!(n + 1, result.output_count());
         }
         assert!(result.output_count() == deg_exclusive);
         return result;
