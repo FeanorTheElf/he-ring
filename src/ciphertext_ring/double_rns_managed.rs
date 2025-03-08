@@ -2,6 +2,7 @@ use std::alloc::{Allocator, Global};
 use std::sync::*;
 
 use feanor_math::algorithms::convolution::*;
+use feanor_math::algorithms::matmul::ComputeInnerProduct;
 use feanor_math::homomorphism::*;
 use feanor_math::integer::*;
 use feanor_math::matrix::*;
@@ -795,6 +796,34 @@ impl<NumberRing, A> RingBase for ManagedDoubleRNSRingBase<NumberRing, A>
 
     fn mul(&self, lhs: Self::Element, rhs: Self::Element) -> Self::Element {
         self.mul_ref(&lhs, &rhs)
+    }
+}
+
+impl<NumberRing, A> ComputeInnerProduct for ManagedDoubleRNSRingBase<NumberRing, A> 
+    where NumberRing: HENumberRing,
+        A: Allocator + Clone
+{
+    default fn inner_product<I: Iterator<Item = (Self::Element, Self::Element)>>(&self, els: I) -> Self::Element {
+        let data = els.collect::<Vec<_>>();
+        return self.inner_product_ref(data.iter().map(|(l, r)| (l, r)));
+    }
+
+    default fn inner_product_ref<'a, I: Iterator<Item = (&'a Self::Element, &'a Self::Element)>>(&self, els: I) -> Self::Element
+        where Self: 'a
+    {
+        self.from_double_rns_repr(<_ as ComputeInnerProduct>::inner_product_ref(
+            &self.base, 
+            els.map(|(l, r)| (self.to_doublerns(l), self.to_doublerns(r)))
+                .filter_map(|(l, r)| l.and_then(|l| r.map(|r| (l, r))))
+        ))
+    }
+
+    default fn inner_product_ref_fst<'a, I: Iterator<Item = (&'a Self::Element, Self::Element)>>(&self, els: I) -> Self::Element
+        where Self::Element: 'a,
+            Self: 'a
+    {
+        let data = els.collect::<Vec<_>>();
+        return self.inner_product_ref(data.iter().map(|(l, r)| (*l, r)));
     }
 }
 

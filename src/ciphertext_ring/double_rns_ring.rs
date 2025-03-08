@@ -4,6 +4,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use feanor_math::algorithms::convolution::PreparedConvolutionAlgorithm;
+use feanor_math::algorithms::matmul::ComputeInnerProduct;
 use feanor_math::divisibility::*;
 use feanor_math::integer::*;
 use feanor_math::iters::multi_cartesian_product;
@@ -494,6 +495,22 @@ impl<NumberRing, A> DoubleRNSRingBase<NumberRing, A>
 
         return result;
     }
+
+    fn inner_product_base<'a, I: Clone + Iterator<Item = (&'a DoubleRNSEl<NumberRing, A>, &'a DoubleRNSEl<NumberRing, A>)>>(&self, els: I) -> DoubleRNSEl<NumberRing, A>
+        where Self: 'a
+    {
+        let mut result = self.zero();
+        for i in 0..self.rns_base().len() {
+            for j in 0..self.rank() {
+                let idx = i * self.rank() + j;
+                result.el_wrt_mult_basis[idx] = <_ as ComputeInnerProduct>::inner_product(
+                    self.rns_base().at(i).get_ring(), 
+                    els.clone().map(|(l, r)| (l.el_wrt_mult_basis[idx], r.el_wrt_mult_basis[idx]))
+                )
+            }
+        }
+        return result;
+    } 
 }
 
 impl<NumberRing, A> PartialEq for DoubleRNSRingBase<NumberRing, A> 
@@ -661,6 +678,31 @@ impl<NumberRing, A> CyclotomicRing for DoubleRNSRingBase<NumberRing, A>
             );
         }
         return result;
+    }
+}
+
+impl<NumberRing, A> ComputeInnerProduct for DoubleRNSRingBase<NumberRing, A> 
+    where NumberRing: HENumberRing,
+        A: Allocator + Clone
+{
+    default fn inner_product<I: Iterator<Item = (Self::Element, Self::Element)>>(&self, els: I) -> Self::Element {
+        let data = els.collect::<Vec<_>>();
+        return self.inner_product_base(data.iter().map(|(l, r)| (l, r)));
+    }
+
+    default fn inner_product_ref<'a, I: Iterator<Item = (&'a Self::Element, &'a Self::Element)>>(&self, els: I) -> Self::Element
+        where Self: 'a
+    {
+        let data = els.collect::<Vec<_>>();
+        return self.inner_product_base(data.iter().map(|(l, r)| (*l, *r)));
+    }
+
+    default fn inner_product_ref_fst<'a, I: Iterator<Item = (&'a Self::Element, Self::Element)>>(&self, els: I) -> Self::Element
+        where Self::Element: 'a,
+            Self: 'a
+    {
+        let data = els.collect::<Vec<_>>();
+        return self.inner_product_base(data.iter().map(|(l, r)| (*l, r)));
     }
 }
 

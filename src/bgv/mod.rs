@@ -177,10 +177,14 @@ pub trait BGVParams {
     }
     
     #[instrument(skip_all)]
-    fn dec_println_slots(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: &Ciphertext<Self>, sk: &SecretKey<Self>) {
+    fn dec_println_slots(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: &Ciphertext<Self>, sk: &SecretKey<Self>, cache_dir: Option<&str>) {
         let (p, _e) = is_prime_power(ZZ, P.base_ring().modulus()).unwrap();
         let hypercube = HypercubeStructure::halevi_shoup_hypercube(CyclotomicGaloisGroup::new(P.n() as u64), p);
-        let H = HypercubeIsomorphism::new::<false>(P, hypercube);
+        let H = if let Some(dir) = cache_dir {
+            HypercubeIsomorphism::new_cache_file::<false>(P, hypercube, dir)
+        } else {
+            HypercubeIsomorphism::new::<false>(P, hypercube)
+        };
         let m = Self::dec(P, C, Self::clone_ct(P, C, ct), sk);
         println!("ciphertext (noise budget: {} / {}):", Self::noise_budget(P, C, ct, sk), ZZbig.abs_log2_ceil(C.base_ring().modulus()).unwrap());
         for a in H.get_slot_values(&m) {

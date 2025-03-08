@@ -226,7 +226,7 @@ impl<Params: BGVParams, Strategy: BGVModswitchStrategy<Params>> ThinBootstrapDat
 
         let sk_input = debug_sk.map(|sk| Params::mod_switch_down_sk(&C_input, &C_master, &ct_dropped_moduli_new, sk));
         if let Some(sk) = &sk_input {
-            Params::dec_println_slots(P_base, &C_input, &ct_input, sk);
+            Params::dec_println_slots(P_base, &C_input, &ct_input, sk, Some("."));
         }
 
         let P_main = self.plaintext_ring_hierarchy.last().unwrap();
@@ -300,7 +300,7 @@ impl<Params: BGVParams, Strategy: BGVModswitchStrategy<Params>> ThinBootstrapDat
             return result.into_iter().next().unwrap();
         });
         if let Some(sk) = debug_sk {
-            Params::dec_println_slots(P_main, C_master, &noisy_decryption_in_slots.data, sk);
+            Params::dec_println_slots(P_main, C_master, &noisy_decryption_in_slots.data, sk, Some("."));
         }
 
         let final_result = log_time::<_, _, LOG, _>("4. Computing digit extraction", |[key_switches]| {
@@ -411,4 +411,51 @@ fn test_pow2_bgv_thin_bootstrapping_17() {
     let sk_result = Pow2BGV::mod_switch_down_sk(&C_result, &C_master, &ct_result.dropped_rns_factor_indices, &sk);
 
     assert_el_eq!(P, P.int_hom().map(2), Pow2BGV::dec(&P, &C_result, ct_result.data, &sk_result));
+}
+
+#[ignore]
+#[test]
+fn test_bootstrap_large() {
+    let mut rng = thread_rng();
+
+    let t = 4;
+    let digits = 10;
+    let v = 7;
+    let hwt = 256;
+    let params = CompositeBGV {
+        log2_q_min: 805,
+        log2_q_max: 820,
+        n1: 37,
+        n2: 949,
+        ciphertext_allocator: Global
+    };
+    let bootstrap_params = ThinBootstrapParams {
+        scheme_params: params.clone(),
+        v: v,
+        t: t
+    };
+    let P = params.create_plaintext_ring(t);
+    let C_master = params.create_initial_ciphertext_ring();
+        
+    let bootstrapper = bootstrap_params.build_odd::<_, true>(&C_master, DefaultModswitchStrategy::<_, _, true>::new(NaiveBGVNoiseEstimator), Some("."));
+    
+    let sk = CompositeBGV::gen_sk(&C_master, &mut rng, Some(hwt));
+    let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, CompositeBGV::gen_gk(bootstrapper.largest_plaintext_ring(), &C_master, &mut rng, &sk, g, digits))).collect::<Vec<_>>();
+    let rk = CompositeBGV::gen_rk(bootstrapper.largest_plaintext_ring(), &C_master, &mut rng, &sk, digits);
+    
+    let m = P.int_hom().map(2);
+    let ct = CompositeBGV::enc_sym(&P, &C_master, &mut rng, &m, &sk);
+    let ct_result = bootstrapper.bootstrap_thin::<true>(
+        &C_master, 
+        &P, 
+        &RNSFactorIndexList::empty(),
+        ct, 
+        &rk, 
+        &gk,
+        None // Some(&sk)
+    );
+    let C_result = CompositeBGV::mod_switch_down_ciphertext_ring(&C_master, &ct_result.dropped_rns_factor_indices);
+    let sk_result = CompositeBGV::mod_switch_down_sk(&C_result, &C_master, &ct_result.dropped_rns_factor_indices, &sk);
+    let result = CompositeBGV::dec(&P, &C_result, ct_result.data, &sk_result);
+    assert_el_eq!(P, P.int_hom().map(2), result);
 }
