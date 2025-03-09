@@ -27,6 +27,7 @@ use tracing::instrument;
 use crate::ciphertext_ring::perform_rns_op;
 use crate::ciphertext_ring::perform_rns_op_to_plaintext_ring;
 use crate::ciphertext_ring::BGFVCiphertextRing;
+use crate::circuit::evaluator::DefaultCircuitEvaluator;
 use crate::circuit::Coefficient;
 use crate::circuit::PlaintextCircuit;
 use crate::cyclotomic::*;
@@ -627,18 +628,22 @@ impl<NumberRing> PlaintextCircuit<NumberRingQuotientBase<NumberRing, Zn>>
         let galois_group = C.galois_group();
         return self.evaluate_generic(
             inputs,
-            |x| match x {
-                Coefficient::Zero => Params::transparent_zero(C),
-                x => Params::hom_add_plain(P, C, &x.clone(P).to_ring_el(P), Params::transparent_zero(C))
-            },
-            |dst, x, ct| Params::hom_add(C, dst, &Params::hom_mul_plain(P, C, &x.clone(P).to_ring_el(P), Params::clone_ct(C, ct))),
-            |x| Params::hom_square(P, C, Cmul.unwrap(), x, rk.unwrap()),
-            |lhs, rhs| Params::hom_mul(P, C, Cmul.unwrap(), lhs, rhs, rk.unwrap()),
-            |gs, x| if gs.len() == 1 {
-                vec![Params::hom_galois(C, x, gs[0], &gks.iter().filter(|(g, _)| galois_group.eq_el(*g, gs[0])).next().unwrap().1)]
-            } else {
-                Params::hom_galois_many(C, x, gs, gs.as_fn().map_fn(|expected_g| &gks.iter().filter(|(g, _)| galois_group.eq_el(*g, *expected_g)).next().unwrap().1))
-            }
+            DefaultCircuitEvaluator::new(
+                |lhs, rhs| Params::hom_mul(P, C, Cmul.unwrap(), lhs, rhs, rk.unwrap()),
+                |x| match x {
+                    Coefficient::Zero => Params::transparent_zero(C),
+                    x => Params::hom_add_plain(P, C, &x.clone(P).to_ring_el(P), Params::transparent_zero(C))
+                },
+                |dst, x, ct| Params::hom_add(C, dst, &Params::hom_mul_plain(P, C, &x.clone(P).to_ring_el(P), Params::clone_ct(C, ct))),
+            ).with_square(
+                |x| Params::hom_square(P, C, Cmul.unwrap(), x, rk.unwrap()),
+            ).with_gal(
+                |x, gs| if gs.len() == 1 {
+                    vec![Params::hom_galois(C, x, gs[0], &gks.iter().filter(|(g, _)| galois_group.eq_el(*g, gs[0])).next().unwrap().1)]
+                } else {
+                    Params::hom_galois_many(C, x, gs, gs.as_fn().map_fn(|expected_g| &gks.iter().filter(|(g, _)| galois_group.eq_el(*g, *expected_g)).next().unwrap().1))
+                }
+            )
         );
     }
 }
@@ -663,18 +668,22 @@ impl PlaintextCircuit<StaticRingBase<i64>> {
         let galois_group = C.galois_group();
         return self.evaluate_generic(
             inputs,
-            |x| match x {
-                Coefficient::Zero => Params::transparent_zero(C),
-                x => Params::hom_add_plain(P, C, &P.int_hom().map(x.to_ring_el(ZZ) as i32), Params::transparent_zero(C))
-            },
-            |dst, x, ct| Params::hom_add(C, dst, &Params::hom_mul_plain(P, C, &P.int_hom().map(x.to_ring_el(ZZ) as i32), Params::clone_ct(C, ct))),
-            |x| Params::hom_square(P, C, Cmul.unwrap(), x, rk.unwrap()),
-            |lhs, rhs| Params::hom_mul(P, C, Cmul.unwrap(), lhs, rhs, rk.unwrap()),
-            |gs, x| if gs.len() == 1 {
-                vec![Params::hom_galois(C, x, gs[0], &gks.iter().filter(|(g, _)| galois_group.eq_el(*g, gs[0])).next().unwrap().1)]
-            } else {
-                Params::hom_galois_many(C, x, gs, gs.as_fn().map_fn(|expected_g| &gks.iter().filter(|(g, _)| galois_group.eq_el(*g, *expected_g)).next().unwrap().1))
-            }
+            DefaultCircuitEvaluator::new(
+                |lhs, rhs| Params::hom_mul(P, C, Cmul.unwrap(), lhs, rhs, rk.unwrap()),
+                |x| match x {
+                    Coefficient::Zero => Params::transparent_zero(C),
+                    x => Params::hom_add_plain(P, C, &P.int_hom().map(x.clone(ZZ).to_ring_el(ZZ) as i32), Params::transparent_zero(C))
+                },
+                |dst, x, ct| Params::hom_add(C, dst, &Params::hom_mul_plain_i64(P, C, x.to_ring_el(ZZ), Params::clone_ct(C, ct))),
+            ).with_square(
+                |x| Params::hom_square(P, C, Cmul.unwrap(), x, rk.unwrap()),
+            ).with_gal(
+                |x, gs| if gs.len() == 1 {
+                    vec![Params::hom_galois(C, x, gs[0], &gks.iter().filter(|(g, _)| galois_group.eq_el(*g, gs[0])).next().unwrap().1)]
+                } else {
+                    Params::hom_galois_many(C, x, gs, gs.as_fn().map_fn(|expected_g| &gks.iter().filter(|(g, _)| galois_group.eq_el(*g, *expected_g)).next().unwrap().1))
+                }
+            )
         );
     }
 }

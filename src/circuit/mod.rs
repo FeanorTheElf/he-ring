@@ -1,12 +1,16 @@
 use std::cell::RefCell;
 use std::cmp::max;
 
+use evaluator::CircuitEvaluator;
+use evaluator::HomEvaluator;
+use evaluator::HomEvaluatorGal;
 use feanor_math::homomorphism::Homomorphism;
 use feanor_math::ring::*;
 
 use crate::cyclotomic::*;
 
 pub mod serialization;
+pub mod evaluator;
 
 ///
 /// A coefficient used in a [`PlaintextCircuit`].
@@ -181,17 +185,21 @@ impl<R: ?Sized + RingBase> LinearCombination<R> {
         }
     }
 
-    fn evaluate_generic<'a, T, ContantFn, AddProductFn>(&'a self, first_inputs: &[T], second_inputs: &[T], mut constant: ContantFn, mut add_prod: AddProductFn) -> T
-        where ContantFn: FnMut(&'a Coefficient<R>) -> T,
-            AddProductFn: FnMut(T, &'a Coefficient<R>, &T) -> T,
-            R: 'a
+    fn evaluate_generic<'a, T, E>(&'a self, first_inputs: &[T], second_inputs: &[T], evaluator: &mut E) -> T
+        where E: CircuitEvaluator<'a, T, R>
     {
         assert_eq!(self.factors.len(), first_inputs.len() + second_inputs.len());
-        let mut current = constant(&self.constant);
-        for (factor, input) in self.factors.iter().zip(first_inputs.iter().chain(second_inputs.iter())) {
-            current = add_prod(current, factor, input);
-        }
-        return current;
+        let current = evaluator.constant(&self.constant);
+        let current = evaluator.add_inner_prod(
+            current, 
+            &self.factors[..first_inputs.len()],
+            first_inputs
+        );
+        evaluator.add_inner_prod(
+            current,
+            &self.factors[first_inputs.len()..],
+            second_inputs
+        )
     }
 
     fn compose<S>(self, input_transforms: &[LinearCombination<R>], ring: S) -> LinearCombination<R>
@@ -923,47 +931,46 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
     /// 
     /// ```
     /// # use he_ring::circuit::*;
+    /// # use he_ring::circuit::evaluator::*;
     /// # use feanor_math::ring::*;
     /// # use feanor_math::primitive_int::*;
     /// let circuit = PlaintextCircuit::add(StaticRing::<i64>::RING);
     /// assert_eq!(vec![3], circuit.evaluate_generic(
     ///     &[1 as i32, 2 as i32], 
-    ///     |x| x.to_ring_el(StaticRing::<i64>::RING) as i32, 
-    ///     |x, c, y| x + c.mul_to(*y as i64, StaticRing::<i64>::RING) as i32,
-    ///     |_| unreachable!("circuit should have no squaring gates"), 
-    ///     |_, _| unreachable!("circuit should have no multiplication gates"), 
-    ///     |_, _| unreachable!("circuit should have no Galois gates")
+    ///     DefaultCircuitEvaluator::new(
+    ///         |_, _| unreachable!("circuit should have no multiplication gates"), 
+    ///         |x| x.to_ring_el(StaticRing::<i64>::RING) as i32, 
+    ///         |x, c, y| x + c.mul_to(*y as i64, StaticRing::<i64>::RING) as i32,
+    ///     )
     /// ));
     /// ```
     /// Of course, this example could have been more easily implemented using [`PlaintextCircuit::evaluate()`], since
     /// the operations used here exactly match the ones of `StaticRing::<i32>::RING`.
     /// 
-    pub fn evaluate_generic<'a, T, ContantFn, AddProductFn, SquareFn, MulFn, GaloisFn>(&'a self, inputs: &[T], mut constant: ContantFn, mut add_prod: AddProductFn, mut square: SquareFn, mut mul: MulFn, mut gal: GaloisFn) -> Vec<T>
-        where ContantFn: FnMut(&'a Coefficient<R>) -> T,
-            AddProductFn: FnMut(T, &'a Coefficient<R>, &T) -> T,
-            SquareFn: FnMut(T) -> T,
-            MulFn: FnMut(T, T) -> T,
-            GaloisFn: FnMut(&'a [CyclotomicGaloisGroupEl], T) -> Vec<T>,
-            R: 'a
+    pub fn evaluate_generic<'a, T, E>(&'a self, inputs: &[T], mut evaluator: E) -> Vec<T>
+        where E: CircuitEvaluator<'a, T, R>
     {
         assert_eq!(self.input_count, inputs.len());
+        assert!(evaluator.supports_gal() || !self.has_galois_gates());
         let mut current = Vec::new();
         for gate in &self.gates {
             match gate {
-                PlaintextCircuitGate::Mul(lhs, rhs) => current.push(mul(
-                    lhs.evaluate_generic(inputs, &current, &mut constant, &mut add_prod),
-                    rhs.evaluate_generic(inputs, &current, &mut constant, &mut add_prod)
-                )),
-                PlaintextCircuitGate::Gal(gs, t) => current.extend(gal(
-                    &gs,
-                    t.evaluate_generic(inputs, &current, &mut constant, &mut add_prod)
-                )),
-                PlaintextCircuitGate::Square(t) => current.push(square(
-                    t.evaluate_generic(inputs, &current, &mut constant, &mut add_prod)
-                ))
+                PlaintextCircuitGate::Mul(lhs, rhs) => {
+                    let lhs = lhs.evaluate_generic(inputs, &current, &mut evaluator);
+                    let rhs = rhs.evaluate_generic(inputs, &current, &mut evaluator);
+                    current.push(evaluator.mul(lhs, rhs));
+                },
+                PlaintextCircuitGate::Gal(gs, t) => {
+                    let val = t.evaluate_generic(inputs, &current, &mut evaluator);
+                    current.extend(evaluator.gal(val, gs));
+                },
+                PlaintextCircuitGate::Square(t) => {
+                    let val = t.evaluate_generic(inputs, &current, &mut evaluator);
+                    current.push(evaluator.square(val));
+                }
             }
         }
-        return self.output_transforms.iter().map(|t| t.evaluate_generic(inputs, &current, &mut constant, &mut add_prod)).collect()
+        return self.output_transforms.iter().map(|t| t.evaluate_generic(inputs, &current, &mut evaluator)).collect()
     }
 
     ///
@@ -977,14 +984,7 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
             H: Homomorphism<R, S>
     {
         assert!(!self.has_galois_gates());
-        self.evaluate_generic(
-            inputs,
-            |c| hom.map(c.clone(hom.domain()).to_ring_el(hom.domain())),
-            |x, lhs, rhs| hom.codomain().add(x, hom.mul_ref_fst_map(rhs, lhs.clone(hom.domain()).to_ring_el(hom.domain()))),
-            |mut x| { hom.codomain().square(&mut x); x },
-            |lhs, rhs| hom.codomain().mul(lhs, rhs),
-            |_, _| unreachable!()
-        )
+        return self.evaluate_generic(inputs, HomEvaluator::new(hom));
     }
 
     ///
@@ -999,14 +999,7 @@ impl<R: ?Sized + RingBase> PlaintextCircuit<R> {
         where S: ?Sized + RingBase + CyclotomicRing,
             H: Homomorphism<R, S>
     {
-        self.evaluate_generic(
-            inputs,
-            |c| hom.map(c.clone(hom.domain()).to_ring_el(hom.domain())),
-            |x, lhs, rhs| hom.codomain().add(x, hom.mul_ref_fst_map(rhs, lhs.clone(hom.domain()).to_ring_el(hom.domain()))),
-            |mut x| { hom.codomain().square(&mut x); x },
-            |lhs, rhs| hom.codomain().mul(lhs, rhs),
-            |gs, x: S::Element| hom.codomain().apply_galois_action_many(&x, gs)
-        )
+        return self.evaluate_generic(inputs, HomEvaluatorGal::new(hom));
     }
 
     pub fn has_galois_gates(&self) -> bool {

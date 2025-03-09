@@ -5,6 +5,7 @@ use feanor_math::homomorphism::Homomorphism;
 use feanor_math::primitive_int::*;
 use feanor_math::ring::*;
 
+use crate::circuit::evaluator::DefaultCircuitEvaluator;
 use crate::circuit::Coefficient;
 use crate::circuit::PlaintextCircuit;
 use crate::cyclotomic::CyclotomicGaloisGroupEl;
@@ -779,11 +780,15 @@ impl<Params: BGVParams, N: BGVNoiseEstimator<Params>, const LOG: bool> DefaultMo
 
         let result = circuit.evaluate_generic(
             &inputs.iter().map(PlainOrCiphertext::CiphertextRef).collect::<Vec<_>>(),
-            |m| PlainOrCiphertext::PlaintextRef(m),
-            |x, c, y| self.add_prod(P, C_master, x, c, y, ring, &mut hom_add_plain, &hom_mul_plain_refcell, debug_sk),
-            |x| self.square(P, C_master, x, ring, &hom_mul_plain_refcell, rk, &key_switches_refcell, debug_sk),
-            |x, y| self.mul(P, C_master, x, y, ring, &hom_mul_plain_refcell, rk, &key_switches_refcell, debug_sk),
-            |gs, x| self.gal_many(P, C_master, x, ring, gs, gks, &mut apply_galois_action_plaintext, &key_switches_refcell, debug_sk)
+            DefaultCircuitEvaluator::new(
+                |x, y| self.mul(P, C_master, x, y, ring, &hom_mul_plain_refcell, rk, &key_switches_refcell, debug_sk),
+                |m| PlainOrCiphertext::PlaintextRef(m),
+                |x, c, y| self.add_prod(P, C_master, x, c, y, ring, &mut hom_add_plain, &hom_mul_plain_refcell, debug_sk),
+            ).with_square(
+                |x| self.square(P, C_master, x, ring, &hom_mul_plain_refcell, rk, &key_switches_refcell, debug_sk),
+            ).with_gal(
+                |x, gs| self.gal_many(P, C_master, x, ring, gs, gks, &mut apply_galois_action_plaintext, &key_switches_refcell, debug_sk)
+            )
         );
         return result.into_iter().map(|res| match res {
             PlainOrCiphertext::Ciphertext(x) => x,
