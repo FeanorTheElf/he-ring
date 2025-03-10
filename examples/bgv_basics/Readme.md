@@ -342,7 +342,7 @@ assert_el_eq!(&P, P.pow(P.clone_el(&x), 4), &dec_x_pow4);
 
 Since deciding when (and how) to modulus-switch, and the manual management of ciphertext moduli, is quite a difficult task, it is extremely helpful for many applications if this is done automatically (like e.g. in HElib).
 This is also planned for HE-Ring, and a WIP implementation is available as [`crate::bgv::modswitch::BGVModswitchStrategy`] and [`crate::bgv::modswitch::DefaultModswitchStrategy`].
-The main difficulty here is that a good strategy for modulus-switching requires good estimates on the noise of ciphertexts, and the only current noise estimator [`crate::bgv::modswitch::NaiveBGVNoiseEstimator`] does not provide very high quality estimates.
+The main difficulty here is that a good strategy for modulus-switching requires good estimates on the noise of ciphertexts, and the only current noise estimator [`crate::bgv::noise_estimator::NaiveBGVNoiseEstimator`] does not provide very high quality estimates.
 Nevertheless, I have already used this system with some success.
 For example, we could implement the above evaluation instead as follows:
 ```rust
@@ -391,7 +391,7 @@ let enc_x = ChosenBGVParamType::enc_sym(&P, &C_initial, &mut rng, &x, &sk);
 let square_circuit = PlaintextCircuit::mul(StaticRing::<i64>::RING).compose(PlaintextCircuit::select(1, &[0, 0], StaticRing::<i64>::RING), StaticRing::<i64>::RING);
 let pow4_circuit = square_circuit.clone(StaticRing::<i64>::RING).compose(square_circuit, StaticRing::<i64>::RING);
 
-let modswitch_strategy = DefaultModswitchStrategy::<_, _, /* log modswitches = */ false>::new(NaiveBGVNoiseEstimator);
+let modswitch_strategy = DefaultModswitchStrategy::<_, _, /* debug output = */ false>::new(NaiveBGVNoiseEstimator);
 
 let enc_x_pow4 = modswitch_strategy.evaluate_circuit(
     &pow4_circuit,

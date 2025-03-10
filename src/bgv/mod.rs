@@ -56,7 +56,7 @@ const ZZbig: BigIntRing = BigIntRing::RING;
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
 
 ///
-/// A BGV ciphertext w.r.t. some [`BGVParams`]. Note that this implementation
+/// A BGV ciphertext w.r.t. some [`BGVCiphertextParams`]. Note that this implementation
 /// does not include an automatic management of the ciphertext modulus chain,
 /// it is up to the user to keep track of the RNS base used for each 
 /// ciphertext.
@@ -589,7 +589,7 @@ pub trait BGVCiphertextParams {
 
     ///
     /// Homomorphically applies multiple Galois automorphisms at once.
-    /// Functionally, this is equivalent to calling [`BFVParams::hom_galois()`]
+    /// Functionally, this is equivalent to calling [`BGVCiphertextParams::hom_galois()`]
     /// multiple times, but can be faster.
     /// 
     #[instrument(skip_all)]

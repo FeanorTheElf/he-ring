@@ -714,6 +714,7 @@ impl<Params: BGVCiphertextParams, N: BGVNoiseEstimator<Params>, const LOG: bool>
     ///  - using inner product functionality of the underlying ring can give us better
     ///    performance than many isolated additions/multiplications
     /// 
+    #[instrument(skip_all)]
     fn add_inner_prod<'a, R>(
         &self,
         P: &PlaintextRing<Params>,
@@ -839,6 +840,7 @@ impl<Params: BGVCiphertextParams, N: BGVNoiseEstimator<Params>, const LOG: bool>
         });
     }
 
+    #[instrument(skip_all)]
     fn mul<'a, R>(
         &self,
         P: &PlaintextRing<Params>,
@@ -914,6 +916,7 @@ impl<Params: BGVCiphertextParams, N: BGVNoiseEstimator<Params>, const LOG: bool>
         }
     }
 
+    #[instrument(skip_all)]
     fn square<'a, R>(
         &self,
         P: &PlaintextRing<Params>,
@@ -962,6 +965,7 @@ impl<Params: BGVCiphertextParams, N: BGVNoiseEstimator<Params>, const LOG: bool>
         }
     }
 
+    #[instrument(skip_all)]
     fn gal_many<'a, R>(
         &self,
         P: &PlaintextRing<Params>,

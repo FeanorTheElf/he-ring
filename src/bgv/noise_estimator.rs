@@ -213,7 +213,7 @@ impl<Params: BGVCiphertextParams> BGVNoiseEstimator<Params> for NaiveBGVNoiseEst
 ///
 /// Its only use is probably to have a default value in places where a
 /// noise estimator is required but never used, as well as to implement
-/// [`DefaultModswitchStrategy::never_modswitch()`].
+/// [`super::modswitch::DefaultModswitchStrategy::never_modswitch()`].
 ///
 pub struct AlwaysZeroNoiseEstimator;
 
