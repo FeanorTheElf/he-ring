@@ -5,7 +5,7 @@
 // For a guided explanation of this example, see the doc
 #![doc = include_str!("Readme.md")]
 
-use he_ring::bgv::{BGVParams, CiphertextRing, PlaintextRing, Pow2BGV};
+use he_ring::bgv::{BGVCiphertextParams, CiphertextRing, PlaintextRing, Pow2BGV};
 use he_ring::cyclotomic::CyclotomicRingStore;
 use he_ring::gadget_product::digits::recommended_rns_factors_to_drop;
 use he_ring::DefaultNegacyclicNTT;

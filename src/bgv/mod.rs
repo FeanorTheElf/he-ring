@@ -24,7 +24,7 @@ use tracing::instrument;
 use crate::ciphertext_ring::double_rns_managed::ManagedDoubleRNSRingBase;
 use crate::ciphertext_ring::{perform_rns_op_to_plaintext_ring, single_rns_ring::*};
 use crate::ciphertext_ring::BGFVCiphertextRing;
-use crate::cyclotomic::*;
+use crate::{cyclotomic::*, ZZi64};
 use crate::gadget_product::digits::RNSFactorIndexList;
 use crate::gadget_product::{GadgetProductLhsOperand, GadgetProductRhsOperand};
 use crate::ntt::{HERingConvolution, HERingNegacyclicNTT};
@@ -41,13 +41,14 @@ use crate::{DefaultCiphertextAllocator, DefaultConvolution, DefaultNegacyclicNTT
 use rand_distr::StandardNormal;
 use rand::*;
 
-pub type NumberRing<Params: BGVParams> = <Params::CiphertextRing as BGFVCiphertextRing>::NumberRing;
-pub type CiphertextRing<Params: BGVParams> = RingValue<Params::CiphertextRing>;
-pub type PlaintextRing<Params: BGVParams> = NumberRingQuotient<NumberRing<Params>, Zn>;
-pub type SecretKey<Params: BGVParams> = El<CiphertextRing<Params>>;
-pub type KeySwitchKey<'a, Params: BGVParams> = (GadgetProductRhsOperand<Params::CiphertextRing>, GadgetProductRhsOperand<Params::CiphertextRing>);
-pub type RelinKey<'a, Params: BGVParams> = KeySwitchKey<'a, Params>;
+pub type NumberRing<Params: BGVCiphertextParams> = <Params::CiphertextRing as BGFVCiphertextRing>::NumberRing;
+pub type CiphertextRing<Params: BGVCiphertextParams> = RingValue<Params::CiphertextRing>;
+pub type PlaintextRing<Params: BGVCiphertextParams> = NumberRingQuotient<NumberRing<Params>, Zn>;
+pub type SecretKey<Params: BGVCiphertextParams> = El<CiphertextRing<Params>>;
+pub type KeySwitchKey<'a, Params: BGVCiphertextParams> = (GadgetProductRhsOperand<Params::CiphertextRing>, GadgetProductRhsOperand<Params::CiphertextRing>);
+pub type RelinKey<'a, Params: BGVCiphertextParams> = KeySwitchKey<'a, Params>;
 
+pub mod noise_estimator;
 pub mod modswitch;
 pub mod bootstrap;
 
@@ -60,7 +61,7 @@ const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
 /// it is up to the user to keep track of the RNS base used for each 
 /// ciphertext.
 /// 
-pub struct Ciphertext<Params: ?Sized + BGVParams> {
+pub struct Ciphertext<Params: ?Sized + BGVCiphertextParams> {
     /// the ciphertext represents the value `implicit_scale^-1 lift(c0 + c1 s) mod t`, 
     /// i.e. `implicit_scale` stores the factor in `Z/tZ` that is introduced by modulus-switching;
     /// Hence, `implicit_scale` is set to `1` when encrypting a value, and only changes when
@@ -100,25 +101,57 @@ pub fn equalize_implicit_scale(Zt: &Zn, implicit_scale_quotient: El<Zn>) -> (i64
 /// 
 /// For a few more details on how this works, see [`crate::examples::bgv_basics`].
 /// 
-pub trait BGVParams {
+pub trait BGVCiphertextParams {
     
     type CiphertextRing: BGFVCiphertextRing + CyclotomicRing + FiniteRing;
 
+    ///
+    /// Creates the maximal/initial RNS base, which we use to construct
+    /// the ciphertext ring that is used for relinearization and Galois keys,
+    /// and fresh encryptions.
+    /// 
+    /// For more details on the modulus chain, see [`crate::examples::bgv_basics`].
+    /// 
     fn max_rns_base(&self) -> zn_rns::Zn<Zn, BigIntRing>;
 
+    ///
+    /// Creates the ciphertext ring corresponding to the given RNS base.
+    /// 
+    /// In many cases, you might already have access to a ciphertext ring
+    /// with larger RNS base, in these cases it is more efficient to use
+    /// [`BGVCiphertextParams::mod_switch_down_ciphertext_ring()`].
+    /// 
     fn create_ciphertext_ring(&self, rns_base: zn_rns::Zn<Zn, BigIntRing>) -> CiphertextRing<Self>;
 
+    ///
+    /// Creates the maximal/initial ciphertext ring, which is used for relinearization
+    /// and Galois keys, and fresh encryptions. This should use the maximal RNS base.
+    /// 
+    /// For more details on the modulus chain, see [`crate::examples::bgv_basics`].
+    /// 
     fn create_initial_ciphertext_ring(&self) -> CiphertextRing<Self> {
         self.create_ciphertext_ring(self.max_rns_base())
     }
 
+    ///
+    /// The number ring `R` from which we derive the ciphertext rings `R/qR` and the
+    /// plaintext ring `R/tR`.
+    /// 
     fn number_ring(&self) -> NumberRing<Self>;
 
+    ///
+    /// Creates a plaintext ring `R/tR` for the given plaintext modulus `t`.
+    /// 
     #[instrument(skip_all)]
     fn create_plaintext_ring(&self, modulus: i64) -> PlaintextRing<Self> {
         NumberRingQuotientBase::new(self.number_ring(), Zn::new(modulus as u64))
     }
 
+    ///
+    /// Generates a secret key, which is either a sparse ternary element of the
+    /// ciphertext ring (with hamming weight `hwt`), or a uniform ternary element
+    /// of the ciphertext ring (if `hwt == None`).
+    /// 
     #[instrument(skip_all)]
     fn gen_sk<R: Rng + CryptoRng>(C: &CiphertextRing<Self>, mut rng: R, hwt: Option<usize>) -> SecretKey<Self> {
         assert!(hwt.is_none() || hwt.unwrap() * 3 <= C.rank() * 2, "it does not make sense to take more than 2/3 of secret key entries in {{-1, 1}}");
@@ -208,7 +241,7 @@ pub trait BGVParams {
 
     #[instrument(skip_all)]
     fn hom_add_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
-        Self::hom_add_plain_encoded(P, C, &Self::encode_plaintext(P, C, m), ct)
+        Self::hom_add_plain_encoded(P, C, &Self::encode_plain(P, C, m), ct)
     }
 
     #[instrument(skip_all)]
@@ -239,25 +272,33 @@ pub trait BGVParams {
     }
 
     #[instrument(skip_all)]
-    fn encode_plaintext(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>) -> El<CiphertextRing<Self>> {
+    fn encode_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>) -> El<CiphertextRing<Self>> {
         let ZZ_to_Zq = C.base_ring().can_hom(P.base_ring().integer_ring()).unwrap();
         return C.from_canonical_basis(P.wrt_canonical_basis(m).iter().map(|c| ZZ_to_Zq.map(P.base_ring().smallest_lift(c))));
     }
 
     #[instrument(skip_all)]
     fn hom_mul_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
-        Self::hom_mul_plain_encoded(P, C, &Self::encode_plaintext(P, C, m), ct)
+        Self::hom_mul_plain_encoded(P, C, &Self::encode_plain(P, C, m), ct)
     }
 
     #[instrument(skip_all)]
     fn hom_mul_plain_i64(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: i64, ct: Ciphertext<Self>) -> Ciphertext<Self> {
         assert!(P.base_ring().is_unit(&ct.implicit_scale));
+        let inv_implicit_scale = P.base_ring().invert(&ct.implicit_scale).unwrap();
+        let factor = P.base_ring().smallest_lift(P.base_ring().mul(inv_implicit_scale, P.base_ring().coerce(&ZZi64, m))) as i32;
         let result = Ciphertext {
-            c0: C.int_hom().mul_map(ct.c0, m as i32), 
-            c1: C.int_hom().mul_map(ct.c1, m as i32),
-            implicit_scale: ct.implicit_scale
+            c0: C.int_hom().mul_map(ct.c0, factor), 
+            c1: C.int_hom().mul_map(ct.c1, factor),
+            implicit_scale: P.base_ring().one()
         };
-        assert!(P.base_ring().is_unit(&result.implicit_scale));
+        assert!(P.base_ring().is_one(&result.implicit_scale));
+        return result;
+    }
+
+    fn merge_implicit_scale(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
+        let result = Self::hom_mul_plain_i64(P, C, 1, ct);
+        assert!(P.base_ring().is_one(&result.implicit_scale));
         return result;
     }
 
@@ -638,7 +679,7 @@ impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingNegacyclicNTT<Zn
     }
 }
 
-impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingNegacyclicNTT<Zn>> BGVParams for Pow2BGV<A, C> {
+impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingNegacyclicNTT<Zn>> BGVCiphertextParams for Pow2BGV<A, C> {
 
     type CiphertextRing = ManagedDoubleRNSRingBase<Pow2CyclotomicNumberRing<C>, A>;
 
@@ -679,7 +720,7 @@ impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingNegacyclicNTT<Zn
     }
 
     #[instrument(skip_all)]
-    fn encode_plaintext(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>) -> El<CiphertextRing<Self>> {
+    fn encode_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>) -> El<CiphertextRing<Self>> {
         let ZZ_to_Zq = C.base_ring().can_hom(P.base_ring().integer_ring()).unwrap();
         let result = C.from_canonical_basis(P.wrt_canonical_basis(m).iter().map(|c| ZZ_to_Zq.map(P.base_ring().smallest_lift(c))));
         return C.get_ring().to_doublerns(&result).map(|x| C.get_ring().from_double_rns_repr(C.get_ring().unmanaged_ring().clone_el(x))).unwrap_or(C.zero());
@@ -702,7 +743,7 @@ impl<A: Allocator + Clone + Send + Sync> Display for CompositeBGV<A> {
     }
 }
 
-impl<A: Allocator + Clone + Send + Sync> BGVParams for CompositeBGV<A> {
+impl<A: Allocator + Clone + Send + Sync> BGVCiphertextParams for CompositeBGV<A> {
 
     type CiphertextRing = ManagedDoubleRNSRingBase<CompositeCyclotomicNumberRing, A>;
 
@@ -742,7 +783,7 @@ impl<A: Allocator + Clone + Send + Sync> BGVParams for CompositeBGV<A> {
     }
 
     #[instrument(skip_all)]
-    fn encode_plaintext(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>) -> El<CiphertextRing<Self>> {
+    fn encode_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>) -> El<CiphertextRing<Self>> {
         let ZZ_to_Zq = C.base_ring().can_hom(P.base_ring().integer_ring()).unwrap();
         let result = C.from_canonical_basis(P.wrt_canonical_basis(m).iter().map(|c| ZZ_to_Zq.map(P.base_ring().smallest_lift(c))));
         return C.get_ring().to_doublerns(&result).map(|x| C.get_ring().from_double_rns_repr(C.get_ring().unmanaged_ring().clone_el(x))).unwrap_or(C.zero());
@@ -750,7 +791,7 @@ impl<A: Allocator + Clone + Send + Sync> BGVParams for CompositeBGV<A> {
 }
 
 fn assert_rns_factor_drop_correct<Params>(Cnew: &CiphertextRing<Params>, Cold: &CiphertextRing<Params>, drop_moduli: &RNSFactorIndexList)
-    where Params: ?Sized + BGVParams
+    where Params: ?Sized + BGVCiphertextParams
 {
     assert_eq!(Cold.base_ring().len(), Cnew.base_ring().len() + drop_moduli.len());
     let mut i_new = 0;
@@ -764,7 +805,7 @@ fn assert_rns_factor_drop_correct<Params>(Cnew: &CiphertextRing<Params>, Cold: &
 }
 
 pub fn small_basis_repr<Params, NumberRing, A>(_P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, ct: Ciphertext<Params>) -> Ciphertext<Params>
-    where Params: BGVParams<CiphertextRing = ManagedDoubleRNSRingBase<NumberRing, A>>,
+    where Params: BGVCiphertextParams<CiphertextRing = ManagedDoubleRNSRingBase<NumberRing, A>>,
         NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone
 {
@@ -776,7 +817,7 @@ pub fn small_basis_repr<Params, NumberRing, A>(_P: &PlaintextRing<Params>, C: &C
 }
 
 pub fn double_rns_repr<Params, NumberRing, A>(_P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, ct: Ciphertext<Params>) -> Ciphertext<Params>
-    where Params: BGVParams<CiphertextRing = ManagedDoubleRNSRingBase<NumberRing, A>>,
+    where Params: BGVCiphertextParams<CiphertextRing = ManagedDoubleRNSRingBase<NumberRing, A>>,
         NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone
 {
@@ -797,7 +838,7 @@ pub struct SingleRNSCompositeBGV<A: Allocator + Clone + Send + Sync = DefaultCip
     pub convolution: PhantomData<C>
 }
 
-impl<A: Allocator + Clone + Send + Sync, C: HERingConvolution<Zn>> BGVParams for SingleRNSCompositeBGV<A, C> {
+impl<A: Allocator + Clone + Send + Sync, C: HERingConvolution<Zn>> BGVCiphertextParams for SingleRNSCompositeBGV<A, C> {
 
     type CiphertextRing = SingleRNSRingBase<CompositeCyclotomicNumberRing, A, C>;
 
@@ -842,6 +883,8 @@ use std::ptr::Alignment;
 use std::fmt::Debug;
 #[cfg(test)]
 use crate::log_time;
+#[cfg(test)]
+use rand::rngs::StdRng;
 
 #[test]
 fn test_pow2_bgv_enc_dec() {
@@ -864,6 +907,31 @@ fn test_pow2_bgv_enc_dec() {
     let ctxt = Pow2BGV::enc_sym(&P, &C, &mut rng, &input, &sk);
     let output = Pow2BGV::dec(&P, &C, Pow2BGV::clone_ct(&P, &C, &ctxt), &sk);
     assert_el_eq!(&P, input, output);
+}
+
+#[test]
+fn test_pow2_bgv_gen_sk() {
+    let mut rng = StdRng::from_seed([0; 32]);
+    
+    let params = Pow2BGV {
+        log2_q_min: 500,
+        log2_q_max: 520,
+        log2_N: 7,
+        ciphertext_allocator: DefaultCiphertextAllocator::default(),
+        negacyclic_ntt: PhantomData::<DefaultNegacyclicNTT>
+    };
+    
+    let C = params.create_initial_ciphertext_ring();
+
+    let sk = Pow2BGV::gen_sk(&C, &mut rng, Some(0));
+    assert_el_eq!(&C, C.zero(), &sk);
+    
+    let sk = Pow2BGV::gen_sk(&C, &mut rng, Some(1));
+    assert!(C.wrt_canonical_basis(&sk).iter().filter(|c| C.base_ring().is_one(&c) || C.base_ring().is_neg_one(&c)).count() == 1);
+
+    let sk = Pow2BGV::gen_sk(&C, &mut rng, None);
+    assert!(C.wrt_canonical_basis(&sk).iter().filter(|c| C.base_ring().is_one(&c)).count() > 32);
+    
 }
 
 #[test]

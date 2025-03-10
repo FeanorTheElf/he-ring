@@ -38,7 +38,7 @@ There are multiple structs that represent a set of parameters for BGV each, sinc
 For example, to setup BGV in a power-of-two cyclotomic number ring `Z[X]/(X^N + 1)`, we could proceed as follows:
 ```rust
 #![feature(allocator_api)]
-# use he_ring::bgv::{BGVParams, CiphertextRing, PlaintextRing, Pow2BGV};
+# use he_ring::bgv::{BGVCiphertextParams, CiphertextRing, PlaintextRing, Pow2BGV};
 # use he_ring::DefaultNegacyclicNTT;
 # use std::alloc::Global;
 # use std::marker::PhantomData;
@@ -61,7 +61,7 @@ This works, since `q` is chosen as a product of many approximately 57 bit long p
 Using this, we can now create the plaintext ring and initial ciphertext ring via
 ```rust
 #![feature(allocator_api)]
-# use he_ring::bgv::{BGVParams, CiphertextRing, PlaintextRing, Pow2BGV};
+# use he_ring::bgv::{BGVCiphertextParams, CiphertextRing, PlaintextRing, Pow2BGV};
 # use he_ring::DefaultNegacyclicNTT;
 # use rand::{SeedableRng, rngs::StdRng};
 # use std::alloc::Global;
@@ -94,7 +94,7 @@ Since the type of the ciphertext ring depends on the type of the chosen paramete
 While it would be preferable for the BFV implementation not to be tied to any specific parameter object, not doing this would cause problems, see the doc of [`crate::bfv::BFVParams`].
 ```rust
 #![feature(allocator_api)]
-# use he_ring::bgv::{BGVParams, CiphertextRing, PlaintextRing, Pow2BGV};
+# use he_ring::bgv::{BGVCiphertextParams, CiphertextRing, PlaintextRing, Pow2BGV};
 # use he_ring::DefaultNegacyclicNTT;
 # use rand::{SeedableRng, rngs::StdRng};
 # use std::alloc::Global;
@@ -140,7 +140,7 @@ The plaintext space of BGV is the ring `R_t = Z[X]/(Phi_n(X), t)`, which we alre
 To encrypt, we now need to encode whatever data we have as an element of this ring (e.g. via [`feanor_math::rings::extension::FreeAlgebra::from_canonical_basis()`] ), and can then encrypt it as follows:
 ```rust
 #![feature(allocator_api)]
-# use he_ring::bgv::{BGVParams, CiphertextRing, PlaintextRing, Pow2BGV};
+# use he_ring::bgv::{BGVCiphertextParams, CiphertextRing, PlaintextRing, Pow2BGV};
 # use he_ring::DefaultNegacyclicNTT;
 # use rand::{SeedableRng, rngs::StdRng};
 # use std::alloc::Global;
@@ -189,7 +189,7 @@ BGV supports three types of homomorphic operations on ciphertexts:
 Since we already have a relinearization key, we can perform a homomorphic multiplication.
 ```rust
 #![feature(allocator_api)]
-# use he_ring::bgv::{BGVParams, CiphertextRing, PlaintextRing, Pow2BGV};
+# use he_ring::bgv::{BGVCiphertextParams, CiphertextRing, PlaintextRing, Pow2BGV};
 # use he_ring::DefaultNegacyclicNTT;
 # use rand::{SeedableRng, rngs::StdRng};
 # use std::alloc::Global;
@@ -234,7 +234,7 @@ Let's assume we want to compute a fourth power, i.e. square `enc_x_sqr` again.
 The naive way would be to compute
 ```rust
 #![feature(allocator_api)]
-# use he_ring::bgv::{BGVParams, CiphertextRing, PlaintextRing, Pow2BGV};
+# use he_ring::bgv::{BGVCiphertextParams, CiphertextRing, PlaintextRing, Pow2BGV};
 # use he_ring::DefaultNegacyclicNTT;
 # use rand::{SeedableRng, rngs::StdRng};
 # use std::alloc::Global;
@@ -282,10 +282,10 @@ Note that finding the right size of `q'` is, in general, not so easy, since it r
 In particular, this depends on the size of the ring we work in, and also on the number of digits chosen for relinearization.
 
 Once we decided on the number of factors to drop, we can use the convenience function [`crate::gadget_product::digits::recommended_rns_factors_to_drop()`] to choose the exact factors to drop in such a way as to preserve the quality of the relinearization key.
-Alternatively, these can also determined manually: [`crate::bgv::BGVParams::mod_switch_down()`] takes a list of indices, which refer to the indices of the factors of `q` that will be dropped.
+Alternatively, these can also determined manually: [`crate::bgv::BGVCiphertextParams::mod_switch_down()`] takes a list of indices, which refer to the indices of the factors of `q` that will be dropped.
 ```rust
 #![feature(allocator_api)]
-# use he_ring::bgv::{BGVParams, CiphertextRing, PlaintextRing, Pow2BGV};
+# use he_ring::bgv::{BGVCiphertextParams, CiphertextRing, PlaintextRing, Pow2BGV};
 # use he_ring::DefaultNegacyclicNTT;
 # use he_ring::ciphertext_ring::BGFVCiphertextRing;
 # use he_ring::gadget_product::digits::*;
@@ -347,8 +347,9 @@ Nevertheless, I have already used this system with some success.
 For example, we could implement the above evaluation instead as follows:
 ```rust
 #![feature(allocator_api)]
-# use he_ring::bgv::{BGVParams, CiphertextRing, PlaintextRing, Pow2BGV};
+# use he_ring::bgv::{BGVCiphertextParams, CiphertextRing, PlaintextRing, Pow2BGV};
 # use he_ring::bgv::modswitch::*;
+# use he_ring::bgv::noise_estimator::NaiveBGVNoiseEstimator;
 # use he_ring::DefaultNegacyclicNTT;
 # use he_ring::circuit::*;
 # use he_ring::ciphertext_ring::BGFVCiphertextRing;
@@ -392,12 +393,13 @@ let pow4_circuit = square_circuit.clone(StaticRing::<i64>::RING).compose(square_
 
 let modswitch_strategy = DefaultModswitchStrategy::<_, _, /* log modswitches = */ false>::new(NaiveBGVNoiseEstimator);
 
-let enc_x_pow4 = modswitch_strategy.evaluate_circuit_int(
+let enc_x_pow4 = modswitch_strategy.evaluate_circuit(
     &pow4_circuit,
+    StaticRing::<i64>::RING,
     &P,
     &C_initial,
     &[ModulusAwareCiphertext {
-        info: modswitch_strategy.info_for_fresh_encryption(&P, &C_initial),
+        info: modswitch_strategy.info_for_fresh_encryption(&P, &C_initial, None),
         dropped_rns_factor_indices: RNSFactorIndexList::empty(),
         data: enc_x
     }],

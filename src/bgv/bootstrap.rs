@@ -24,14 +24,16 @@ use super::modswitch::*;
 use super::*;
 
 #[derive(Clone, Debug)]
-pub struct ThinBootstrapParams<Params: BGVParams> {
+pub struct ThinBootstrapParams<Params: BGVCiphertextParams> {
     pub scheme_params: Params,
     pub v: usize,
     pub t: i64
 }
 
-impl<Params: BGVParams> ThinBootstrapParams<Params>
-    where NumberRing<Params>: Clone
+impl<Params> ThinBootstrapParams<Params>
+    where Params: BGVCiphertextParams,
+        NumberRing<Params>: Clone,
+        <CiphertextRing<Params> as RingStore>::Type: AsBGVPlaintext<Params>
 {
     fn read_or_create_circuit<F, const LOG: bool>(H: &DefaultHypercube<NumberRing<Params>>, base_name: &str, cache_dir: Option<&str>, create: F) -> PlaintextCircuit<<PlaintextRing<Params> as RingStore>::Type>
         where F: FnOnce() -> PlaintextCircuit<<PlaintextRing<Params> as RingStore>::Type>
@@ -89,8 +91,8 @@ impl<Params: BGVParams> ThinBootstrapParams<Params>
 
         return ThinBootstrapData {
             digit_extract,
-            slots_to_coeffs_thin: slots_to_coeffs.change_ring_uniform(|x| x.change_ring(|x| Params::encode_plaintext(&original_plaintext_ring, C, &x))),
-            coeffs_to_slots_thin: coeffs_to_slots.change_ring_uniform(|x| x.change_ring(|x| Params::encode_plaintext(&plaintext_ring, C, &x))),
+            slots_to_coeffs_thin: slots_to_coeffs.change_ring_uniform(|x| x.change_ring(|x| Params::encode_plain(&original_plaintext_ring, C, &x))),
+            coeffs_to_slots_thin: coeffs_to_slots.change_ring_uniform(|x| x.change_ring(|x| Params::encode_plain(&plaintext_ring, C, &x))),
             plaintext_ring_hierarchy: plaintext_ring_hierarchy,
             modswitch_strategy: modswitch_strategy,
             tmp_coprime_modulus_plaintext: self.scheme_params.create_plaintext_ring(ZZ.pow(p, e) + 1)
@@ -130,8 +132,8 @@ impl<Params: BGVParams> ThinBootstrapParams<Params>
 
         return ThinBootstrapData {
             digit_extract,
-            slots_to_coeffs_thin: slots_to_coeffs.change_ring_uniform(|x| x.change_ring(|x| Params::encode_plaintext(&original_plaintext_ring, C, &x))),
-            coeffs_to_slots_thin: coeffs_to_slots.change_ring_uniform(|x| x.change_ring(|x| Params::encode_plaintext(&plaintext_ring, C, &x))),
+            slots_to_coeffs_thin: slots_to_coeffs.change_ring_uniform(|x| x.change_ring(|x| Params::encode_plain(&original_plaintext_ring, C, &x))),
+            coeffs_to_slots_thin: coeffs_to_slots.change_ring_uniform(|x| x.change_ring(|x| Params::encode_plain(&plaintext_ring, C, &x))),
             plaintext_ring_hierarchy: plaintext_ring_hierarchy,
             modswitch_strategy: modswitch_strategy,
             tmp_coprime_modulus_plaintext: self.scheme_params.create_plaintext_ring(ZZ.pow(p, e) + 1)
@@ -139,8 +141,12 @@ impl<Params: BGVParams> ThinBootstrapParams<Params>
     }
 }
 
-pub struct ThinBootstrapData<Params: BGVParams, M: BGVModswitchStrategy<Params>> {
-    modswitch_strategy: M,
+pub struct ThinBootstrapData<Params, Strategy>
+    where Params: BGVCiphertextParams, 
+        Strategy: BGVModswitchStrategy<Params>,
+        <CiphertextRing<Params> as RingStore>::Type: AsBGVPlaintext<Params>
+{
+    modswitch_strategy: Strategy,
     digit_extract: DigitExtract,
     slots_to_coeffs_thin: PlaintextCircuit<<CiphertextRing<Params> as RingStore>::Type>,
     coeffs_to_slots_thin: PlaintextCircuit<<CiphertextRing<Params> as RingStore>::Type>,
@@ -149,8 +155,11 @@ pub struct ThinBootstrapData<Params: BGVParams, M: BGVModswitchStrategy<Params>>
 }
 
 
-impl<Params: BGVParams, Strategy: BGVModswitchStrategy<Params>> ThinBootstrapData<Params, Strategy> {
-
+impl<Params, Strategy> ThinBootstrapData<Params, Strategy>
+    where Params: BGVCiphertextParams, 
+        Strategy: BGVModswitchStrategy<Params>,
+        <CiphertextRing<Params> as RingStore>::Type: AsBGVPlaintext<Params>
+{
     fn r(&self) -> usize {
         self.digit_extract.e() - self.digit_extract.v()
     }
@@ -208,6 +217,7 @@ impl<Params: BGVParams, Strategy: BGVModswitchStrategy<Params>> ThinBootstrapDat
         ct: Ciphertext<Params>,
         rk: &RelinKey<'a, Params>,
         gks: &[(CyclotomicGaloisGroupEl, KeySwitchKey<'a, Params>)],
+        sk_hwt: Option<usize>,
         debug_sk: Option<&SecretKey<Params>>
     ) -> ModulusAwareCiphertext<Params, Strategy>
         where Params: 'a
@@ -233,8 +243,9 @@ impl<Params: BGVParams, Strategy: BGVModswitchStrategy<Params>> ThinBootstrapDat
         debug_assert_eq!(ZZ.pow(self.p(), self.e()), *P_main.base_ring().modulus());
 
         let values_in_coefficients = log_time::<_, _, LOG, _>("1. Computing Slots-to-Coeffs transform", |[key_switches]| {
-            let result = DefaultModswitchStrategy::never_modswitch().evaluate_circuit_encoded_plaintext(
+            let result = DefaultModswitchStrategy::never_modswitch().evaluate_circuit(
                 &self.slots_to_coeffs_thin, 
+                C_master,
                 P_base, 
                 C_master, 
                 &[ModulusAwareCiphertext {
@@ -277,7 +288,7 @@ impl<Params: BGVParams, Strategy: BGVModswitchStrategy<Params>> ThinBootstrapDat
             let enc_sk = Params::enc_sk(P_main, C_master);
             return ModulusAwareCiphertext {
                 data: Params::hom_add_plain(P_main, C_master, &c0, Params::hom_mul_plain(P_main, C_master, &c1, enc_sk)),
-                info: self.modswitch_strategy.info_for_fresh_encryption(P_main, C_master),
+                info: self.modswitch_strategy.info_for_fresh_encryption(P_main, C_master, sk_hwt),
                 dropped_rns_factor_indices: RNSFactorIndexList::empty()
             };
         });
@@ -286,8 +297,9 @@ impl<Params: BGVParams, Strategy: BGVModswitchStrategy<Params>> ThinBootstrapDat
         }
 
         let noisy_decryption_in_slots = log_time::<_, _, LOG, _>("3. Computing Coeffs-to-Slots transform", |[key_switches]| {
-            let result = self.modswitch_strategy.evaluate_circuit_encoded_plaintext(
+            let result = self.modswitch_strategy.evaluate_circuit(
                 &self.coeffs_to_slots_thin, 
+                C_master,
                 P_main, 
                 C_master, 
                 &[noisy_decryption], 
@@ -312,7 +324,12 @@ impl<Params: BGVParams, Strategy: BGVModswitchStrategy<Params>> ThinBootstrapDat
                 dropped_rns_factor_indices: noisy_decryption_in_slots.dropped_rns_factor_indices
             };
     
-            return self.digit_extract.evaluate_bgv::<Params, Strategy>(
+            if let Some(sk) = debug_sk {
+                self.modswitch_strategy.print_info(P_main, C_master, &digit_extraction_input);
+                Params::dec_println_slots(P_main, C_master, &digit_extraction_input.data, sk, Some("."));
+            }
+
+            return self.digit_extract.evaluate_bgv::<Params, Strategy, LOG>(
                 &self.modswitch_strategy,
                 P_base,
                 &self.plaintext_ring_hierarchy,
@@ -329,7 +346,7 @@ impl<Params: BGVParams, Strategy: BGVModswitchStrategy<Params>> ThinBootstrapDat
 
 impl DigitExtract {
 
-    pub fn evaluate_bgv<'a, Params: BGVParams, Strategy: BGVModswitchStrategy<Params>>(
+    pub fn evaluate_bgv<'a, Params: BGVCiphertextParams, Strategy: BGVModswitchStrategy<Params>, const LOG: bool>(
         &self,
         modswitch_strategy: &Strategy, 
         P_base: &PlaintextRing<Params>, 
@@ -340,6 +357,8 @@ impl DigitExtract {
         key_switches: &mut usize,
         debug_sk: Option<&SecretKey<Params>>
     ) -> (ModulusAwareCiphertext<Params, Strategy>, ModulusAwareCiphertext<Params, Strategy>) {
+        assert!(LOG || debug_sk.is_none());
+
         let (p, actual_r) = is_prime_power(StaticRing::<i64>::RING, P_base.base_ring().modulus()).unwrap();
         assert_eq!(self.p(), p);
         assert!(actual_r >= self.r());
@@ -353,8 +372,22 @@ impl DigitExtract {
         };
         return self.evaluate_generic(
             input,
-            |exp, inputs, circuit|
-                modswitch_strategy.evaluate_circuit_int(circuit, get_P(exp), C_master, inputs, Some(rk), &[], key_switches, debug_sk),
+            |exp, inputs, circuit| {
+                let digit_extracted = modswitch_strategy.evaluate_circuit(circuit, ZZi64, get_P(exp), C_master, inputs, Some(rk), &[], key_switches, debug_sk);
+                if LOG && /* don't log if the circuit is just adding/cloning elements */ circuit.has_multiplication_gates() {
+                    println!("Digit extraction modulo p^{} done", exp);
+                    if let Some(sk) = debug_sk {
+                        for ct in &digit_extracted {
+                            modswitch_strategy.print_info(get_P(exp), C_master, ct);
+                            let Clocal = Params::mod_switch_down_ciphertext_ring(C_master, &ct.dropped_rns_factor_indices);
+                            let sk_local = Params::mod_switch_down_sk(&Clocal, C_master, &ct.dropped_rns_factor_indices, sk);
+                            Params::dec_println_slots(get_P(exp), &Clocal, &ct.data, &sk_local, Some("."));
+                            println!();
+                        }
+                    }
+                }
+                return digit_extracted;
+            },
             |exp_old, exp_new, input| {
                 let C_current = Params::mod_switch_down_ciphertext_ring(C_master, &input.dropped_rns_factor_indices);
                 let result = ModulusAwareCiphertext {
@@ -368,20 +401,23 @@ impl DigitExtract {
     }
 }
 
+#[cfg(test)]
+use crate::bgv::noise_estimator::NaiveBGVNoiseEstimator;
+
 #[test]
 fn test_pow2_bgv_thin_bootstrapping_17() {
     let mut rng = thread_rng();
     
     // 8 slots of rank 16
     let params = Pow2BGV {
-        log2_q_min: 790,
-        log2_q_max: 800,
+        log2_q_min: 890,
+        log2_q_max: 900,
         log2_N: 7,
         ciphertext_allocator: DefaultCiphertextAllocator::default(),
         negacyclic_ntt: PhantomData::<DefaultNegacyclicNTT>
     };
     let t = 17;
-    let digits = 6;
+    let digits = 8;
     let bootstrap_params = ThinBootstrapParams {
         scheme_params: params.clone(),
         v: 2,
@@ -405,6 +441,7 @@ fn test_pow2_bgv_thin_bootstrapping_17() {
         ct, 
         &rk, 
         &gk,
+        None,
         Some(&sk)
     );
     let C_result = Pow2BGV::mod_switch_down_ciphertext_ring(&C_master, &ct_result.dropped_rns_factor_indices);
@@ -416,6 +453,10 @@ fn test_pow2_bgv_thin_bootstrapping_17() {
 #[ignore]
 #[test]
 fn test_bootstrap_large() {
+    let (chrome_layer, _guard) = tracing_chrome::ChromeLayerBuilder::new().build();
+    let filtered_chrome_layer = chrome_layer.with_filter(tracing_subscriber::filter::filter_fn(|metadata| !["small_basis_to_mult_basis", "mult_basis_to_small_basis", "small_basis_to_coeff_basis", "coeff_basis_to_small_basis"].contains(&metadata.name())));
+    tracing_subscriber::registry().with(filtered_chrome_layer).init();
+
     let mut rng = thread_rng();
 
     let t = 4;
@@ -437,7 +478,7 @@ fn test_bootstrap_large() {
     let P = params.create_plaintext_ring(t);
     let C_master = params.create_initial_ciphertext_ring();
         
-    let bootstrapper = bootstrap_params.build_odd::<_, true>(&C_master, DefaultModswitchStrategy::<_, _, true>::new(NaiveBGVNoiseEstimator), Some("."));
+    let bootstrapper = bootstrap_params.build_odd::<_, true>(&C_master, DefaultModswitchStrategy::<_, _, false>::new(NaiveBGVNoiseEstimator), Some("."));
     
     let sk = CompositeBGV::gen_sk(&C_master, &mut rng, Some(hwt));
     let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, CompositeBGV::gen_gk(bootstrapper.largest_plaintext_ring(), &C_master, &mut rng, &sk, g, digits))).collect::<Vec<_>>();
@@ -452,6 +493,7 @@ fn test_bootstrap_large() {
         ct, 
         &rk, 
         &gk,
+        Some(hwt),
         None // Some(&sk)
     );
     let C_result = CompositeBGV::mod_switch_down_ciphertext_ring(&C_master, &ct_result.dropped_rns_factor_indices);

@@ -86,7 +86,7 @@ impl<R: ?Sized + RingBase> Coefficient<R> {
         }
     }
 
-    fn is_zero(&self) -> bool {
+    pub fn is_zero(&self) -> bool {
         match self {
             Coefficient::Zero => true,
             _ => false
