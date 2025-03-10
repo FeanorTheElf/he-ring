@@ -828,12 +828,19 @@ impl<Params: BGVCiphertextParams, N: BGVNoiseEstimator<Params>, const LOG: bool>
             },
             Err(x) => {
                 constant = constant.add(x, ring);
+                // ignore the last plaintext addition for noise analysis, its gonna be fine
+                let res_info = self.noise_estimator.hom_add(P, &Ctarget, &int_product_noise, P.base_ring().one(), &main_product_noise, P.base_ring().one());
+                let product_data = Params::hom_add(P, &Ctarget, int_product_part, main_product_part);
+                let res_data = match constant {
+                    Coefficient::Zero => product_data,
+                    Coefficient::One => Params::hom_add_plain_encoded(P, &Ctarget, &Ctarget.one(), product_data),
+                    Coefficient::NegOne => Params::hom_add_plain_encoded(P, &Ctarget, &Ctarget.neg_one(), product_data),
+                    Coefficient::Integer(c) => Params::hom_add_plain_encoded(P, &Ctarget, &Ctarget.int_hom().map(c), product_data),
+                    Coefficient::Other(m) => ring.get_ring().hom_add_to(P, &Ctarget, &total_drop, &m, product_data),
+                };
                 ModulusAwareCiphertext {
-                    data: ring.get_ring().hom_add_to(P, &Ctarget, &total_drop, 
-                        &constant.to_ring_el(&ring),
-                        Params::hom_add(P, &Ctarget, int_product_part, main_product_part)
-                    ),
-                    info: self.noise_estimator.hom_add(P, &Ctarget, &int_product_noise, P.base_ring().one(), &main_product_noise, P.base_ring().one()),
+                    data: res_data,
+                    info: res_info,
                     dropped_rns_factor_indices: total_drop
                 }
             }
