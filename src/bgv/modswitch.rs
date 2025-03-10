@@ -298,7 +298,7 @@ impl<Params: BGVCiphertextParams> AsBGVPlaintext<Params> for StaticRingBase<i64>
         m: &Self::Element, 
         ct: Ciphertext<Params>
     ) -> Ciphertext<Params> {
-        Params::hom_add_plain(P, C, &P.inclusion().map(P.base_ring().coerce(&ZZi64, *m)), ct)
+        Params::hom_add_plain_encoded(P, C, &C.inclusion().map(C.base_ring().coerce(&ZZi64, *m)), ct)
     }
 
     fn hom_add_to_noise<N: BGVNoiseEstimator<Params>>(
@@ -311,7 +311,7 @@ impl<Params: BGVCiphertextParams> AsBGVPlaintext<Params> for StaticRingBase<i64>
         ct_info: &N::CriticalQuantityLevel, 
         implicit_scale: &ZnEl
     ) -> N::CriticalQuantityLevel {
-        estimator.hom_add_plain(P, C, &P.inclusion().map(P.base_ring().coerce(&ZZi64, *m)), ct_info, *implicit_scale)
+        estimator.hom_add_plain_encoded(P, C, &C.inclusion().map(C.base_ring().coerce(&ZZi64, *m)), ct_info, *implicit_scale)
     }
 
     fn hom_mul_to(
@@ -358,7 +358,7 @@ impl<Params: BGVCiphertextParams> AsBGVPlaintext<Params> for StaticRingBase<i32>
         m: &Self::Element, 
         ct: Ciphertext<Params>
     ) -> Ciphertext<Params> {
-        Params::hom_add_plain(P, C, &P.inclusion().map(P.base_ring().coerce(&StaticRing::<i32>::RING, *m)), ct)
+        Params::hom_add_plain_encoded(P, C, &C.inclusion().map(C.base_ring().coerce(&StaticRing::<i32>::RING, *m)), ct)
     }
 
     fn hom_add_to_noise<N: BGVNoiseEstimator<Params>>(
@@ -371,7 +371,7 @@ impl<Params: BGVCiphertextParams> AsBGVPlaintext<Params> for StaticRingBase<i32>
         ct_info: &N::CriticalQuantityLevel, 
         implicit_scale: &ZnEl
     ) -> N::CriticalQuantityLevel {
-        estimator.hom_add_plain(P, C, &P.inclusion().map(P.base_ring().coerce(&StaticRing::<i32>::RING, *m)), ct_info, *implicit_scale)
+        estimator.hom_add_plain_encoded(P, C, &C.inclusion().map(C.base_ring().coerce(&StaticRing::<i32>::RING, *m)), ct_info, *implicit_scale)
     }
 
     fn hom_mul_to(

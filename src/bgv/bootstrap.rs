@@ -317,9 +317,9 @@ impl<Params, Strategy> ThinBootstrapData<Params, Strategy>
 
         let final_result = log_time::<_, _, LOG, _>("4. Computing digit extraction", |[key_switches]| {
 
-            let rounding_divisor_half = P_main.base_ring().coerce(&ZZbig, ZZbig.rounded_div(ZZbig.pow(int_cast(self.p(), ZZbig, ZZ), self.v()), &ZZbig.int_hom().map(2)));
+            let rounding_divisor_half = C_master.base_ring().coerce(&ZZbig, ZZbig.rounded_div(ZZbig.pow(int_cast(self.p(), ZZbig, ZZ), self.v()), &ZZbig.int_hom().map(2)));
             let digit_extraction_input = ModulusAwareCiphertext {
-                data: Params::hom_add_plain(P_main, C_master, &P_main.inclusion().map(rounding_divisor_half), noisy_decryption_in_slots.data),
+                data: Params::hom_add_plain_encoded(P_main, C_master, &C_master.inclusion().map(rounding_divisor_half), noisy_decryption_in_slots.data),
                 info: noisy_decryption_in_slots.info,
                 dropped_rns_factor_indices: noisy_decryption_in_slots.dropped_rns_factor_indices
             };
