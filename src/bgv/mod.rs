@@ -172,6 +172,11 @@ pub trait BGVCiphertextParams {
         }
     }
 
+    ///
+    /// Creates an RLWE sample `(a, -as + e)`, where `s = sk` is the secret key and `a, e`
+    /// are sampled using randomness from `rng`. Currently, the standard deviation of the
+    /// error is fixed to `3.2`.
+    /// 
     #[instrument(skip_all)]
     fn rlwe_sample<R: Rng + CryptoRng>(C: &CiphertextRing<Self>, mut rng: R, sk: &SecretKey<Self>) -> (El<CiphertextRing<Self>>, El<CiphertextRing<Self>>) {
         let a = C.random_element(|| rng.next_u64());
@@ -181,6 +186,11 @@ pub trait BGVCiphertextParams {
         return (a, b);
     }
 
+    ///
+    /// Creates a fresh encryption of zero, i.e. a ciphertext `(c0, c1) = (-as + te, a)`
+    /// where `s = sk` is the given secret key. `a` and `e` are sampled using the randomness
+    /// of `rng`. Currently, the standard deviation of the error is fixed to `3.2`.
+    /// 
     #[instrument(skip_all)]
     fn enc_sym_zero<R: Rng + CryptoRng>(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, rng: R, sk: &SecretKey<Self>) -> Ciphertext<Self> {
         let t = C.base_ring().coerce(&ZZ, *P.base_ring().modulus());
@@ -192,6 +202,13 @@ pub trait BGVCiphertextParams {
         };
     }
 
+    ///
+    /// Creates a "transparent" encryption of zero, i.e. a ciphertext that represents zero,
+    /// but does not actually hide the value - everyone can see that it is zero, without the
+    /// secret key.
+    /// 
+    /// Mathematically, this is just the ciphertext `(c0, c1) = (0, 0)`.
+    /// 
     #[instrument(skip_all)]
     fn transparent_zero(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>) -> Ciphertext<Self> {
         return Ciphertext {
@@ -201,6 +218,9 @@ pub trait BGVCiphertextParams {
         };
     }
 
+    ///
+    /// Decrypts the given ciphertext and prints it to stdout. Designed for debugging.
+    /// 
     #[instrument(skip_all)]
     fn dec_println(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: &Ciphertext<Self>, sk: &SecretKey<Self>) {
         let m = Self::dec(P, C, Self::clone_ct(P, C, ct), sk);
@@ -209,6 +229,10 @@ pub trait BGVCiphertextParams {
         println!();
     }
     
+    ///
+    /// Decrypts the given ciphertext and prints the values of its slots to stdout. 
+    /// Designed for debugging.
+    /// 
     #[instrument(skip_all)]
     fn dec_println_slots(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: &Ciphertext<Self>, sk: &SecretKey<Self>, cache_dir: Option<&str>) {
         let (p, _e) = is_prime_power(ZZ, P.base_ring().modulus()).unwrap();
@@ -226,6 +250,15 @@ pub trait BGVCiphertextParams {
         println!();
     }
 
+    ///
+    /// Returns an encryption of the sum of the encrypted input and the given plaintext,
+    /// which has already been lifted/encoded into the ciphertext ring.
+    /// 
+    /// When the plaintext is given as an element of `P`, use [`BGVCiphertextParams::hom_add_plain()`]
+    /// instead. However, internally, the plaintext will be lifted into the ciphertext ring during
+    /// the addition, and if this is performed in advance (via [`BGVCiphertextParams::encode_plain()`]),
+    /// addition will be faster.
+    /// 
     #[instrument(skip_all)]
     fn hom_add_plain_encoded(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<CiphertextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
         assert!(P.base_ring().is_unit(&ct.implicit_scale));
@@ -239,16 +272,27 @@ pub trait BGVCiphertextParams {
         return result;
     }
 
+    ///
+    /// Returns an encryption of the sum of the encrypted input and the given plaintext.
+    /// 
     #[instrument(skip_all)]
     fn hom_add_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
         Self::hom_add_plain_encoded(P, C, &Self::encode_plain(P, C, m), ct)
     }
 
+    ///
+    /// Returns a fresh encryption of the given element, i.e. a ciphertext `(c0, c1) = (-as + te + m, a)`
+    /// where `s = sk` is the given secret key. `a` and `e` are sampled using the randomness of `rng`. 
+    /// Currently, the standard deviation of the error is fixed to `3.2`.
+    /// 
     #[instrument(skip_all)]
     fn enc_sym<R: Rng + CryptoRng>(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, rng: R, m: &El<PlaintextRing<Self>>, sk: &SecretKey<Self>) -> Ciphertext<Self> {
         Self::hom_add_plain(P, C, m, Self::enc_sym_zero(P, C, rng, sk))
     }
 
+    ///
+    /// Decrypts the given ciphertext using the given secret key.
+    /// 
     #[instrument(skip_all)]
     fn dec(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: Ciphertext<Self>, sk: &SecretKey<Self>) -> El<PlaintextRing<Self>> {
         let noisy_m = C.add(ct.c0, C.mul_ref_snd(ct.c1, sk));
@@ -259,6 +303,15 @@ pub trait BGVCiphertextParams {
         );
     }
 
+    ///
+    /// Returns an encryption of the product of the encrypted input and the given plaintext,
+    /// which has already been lifted/encoded into the ciphertext ring.
+    /// 
+    /// When the plaintext is given as an element of `P`, use [`BGVCiphertextParams::hom_mul_plain()`]
+    /// instead. However, internally, the plaintext will be lifted into the ciphertext ring during
+    /// the multiplication, and if this is performed in advance (via [`BGVCiphertextParams::encode_plain()`]),
+    /// multiplication will be faster.
+    /// 
     #[instrument(skip_all)]
     fn hom_mul_plain_encoded(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<CiphertextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
         assert!(P.base_ring().is_unit(&ct.implicit_scale));
@@ -271,37 +324,61 @@ pub trait BGVCiphertextParams {
         return result;
     }
 
+    ///
+    /// Computes the smallest lift of the plaintext ring element to the ciphertext
+    /// ring. The result can be used in [`BGVCiphertextParams::hom_add_plain_encoded()`]
+    /// or [`BGVCiphertextParams::hom_mul_plain_encoded()`] to compute plaintext-ciphertext
+    /// addition resp. multiplication faster.
+    /// 
     #[instrument(skip_all)]
     fn encode_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>) -> El<CiphertextRing<Self>> {
         let ZZ_to_Zq = C.base_ring().can_hom(P.base_ring().integer_ring()).unwrap();
         return C.from_canonical_basis(P.wrt_canonical_basis(m).iter().map(|c| ZZ_to_Zq.map(P.base_ring().smallest_lift(c))));
     }
 
+    ///
+    /// Returns an encryption of the product of the encrypted input and the given plaintext.
+    /// 
     #[instrument(skip_all)]
     fn hom_mul_plain(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: &El<PlaintextRing<Self>>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
         Self::hom_mul_plain_encoded(P, C, &Self::encode_plain(P, C, m), ct)
     }
 
+    ///
+    /// Returns an encryption of the product of the encrypted input and the given plaintext.
+    /// 
     #[instrument(skip_all)]
-    fn hom_mul_plain_i64(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: i64, ct: Ciphertext<Self>) -> Ciphertext<Self> {
+    fn hom_mul_plain_i64(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, m: i64, mut ct: Ciphertext<Self>) -> Ciphertext<Self> {
         assert!(P.base_ring().is_unit(&ct.implicit_scale));
-        let inv_implicit_scale = P.base_ring().invert(&ct.implicit_scale).unwrap();
-        let factor = P.base_ring().smallest_lift(P.base_ring().mul(inv_implicit_scale, P.base_ring().coerce(&ZZi64, m))) as i32;
-        let result = Ciphertext {
-            c0: C.int_hom().mul_map(ct.c0, factor), 
-            c1: C.int_hom().mul_map(ct.c1, factor),
-            implicit_scale: P.base_ring().one()
-        };
-        assert!(P.base_ring().is_one(&result.implicit_scale));
-        return result;
+        // we could try to do tricks involving `implicit_scale` here
+        //  - if `m mod t` is a unit, we could just multiply `m^-1` to implicit scale;
+        //    however, this makes handling the non-unit case ugly
+        //  - otherwise, we could also use this opportunity to multiply `implicit_scale^-1`
+        //    to the ciphertext as well, and reset the implicit scale to 1; however, this
+        //    might not be helpful in all circumstances
+        // In the end, I think there is no default behavior for this that makes sense
+        // in most situations and is not to unintuitive. Hence, we leave any `implicit_scale`
+        // tricks to the modswitching strategy, which has higher-level information and might
+        // be able to do something with that
+        C.int_hom().mul_assign_map(&mut ct.c0, m as i32);
+        C.int_hom().mul_assign_map(&mut ct.c1, m as i32);
+        assert!(P.base_ring().is_unit(&ct.implicit_scale));
+        return ct;
     }
 
+    ///
+    /// Converts a ciphertext into a ciphertext with `implicit_scale = 1`, but slightly
+    /// larger noise. Mainly used for internal purposes.
+    /// 
     fn merge_implicit_scale(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: Ciphertext<Self>) -> Ciphertext<Self> {
-        let result = Self::hom_mul_plain_i64(P, C, 1, ct);
-        assert!(P.base_ring().is_one(&result.implicit_scale));
+        let mut result = Self::hom_mul_plain_i64(P, C, P.base_ring().smallest_lift(P.base_ring().invert(&ct.implicit_scale).unwrap()), ct);
+        result.implicit_scale = P.base_ring().one();
         return result;
     }
 
+    ///
+    /// Copies a ciphertext.
+    /// 
     #[instrument(skip_all)]
     fn clone_ct(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: &Ciphertext<Self>) -> Ciphertext<Self> {
         assert!(P.base_ring().is_unit(&ct.implicit_scale));
@@ -332,6 +409,16 @@ pub trait BGVCiphertextParams {
         return ZZbig.abs_log2_ceil(C.base_ring().modulus()).unwrap().saturating_sub(size_of_critical_quantity + 1);
     }
 
+    ///
+    /// Generates a key-switch key, which can be used (by [`BGVCiphertextParams::key_switch()`]) to
+    /// convert a ciphertext w.r.t. `old_sk` into a ciphertext w.r.t. `new_sk`.
+    /// 
+    /// The parameter `digits` refers to the number of "digits" to use for the gadget product
+    /// during key-switching. More concretely, when performing key-switching, the ciphertext
+    /// will be decomposed into multiple small parts, which are then multiplied with the components
+    /// of the key-switching key. Thus, a larger value for `digits` will result in lower (additive)
+    /// noise growth during key-switching, at the cost of higher performance.
+    /// 
     #[instrument(skip_all)]
     fn gen_switch_key<'a, R: Rng + CryptoRng>(P: &PlaintextRing<Self>, C: &'a CiphertextRing<Self>, mut rng: R, old_sk: &SecretKey<Self>, new_sk: &SecretKey<Self>, digits: usize) -> KeySwitchKey<'a, Self>
         where Self: 'a
@@ -354,6 +441,11 @@ pub trait BGVCiphertextParams {
         return (res0, res1);
     }
 
+    ///
+    /// Converts a ciphertext w.r.t. a secret key `old_sk` to a ciphertext w.r.t. a
+    /// secret key `new_sk`, where `switch_key` is a key-switching key for `old_sk` and
+    /// `new_sk` (which can be generated using [`BGVCiphertextParams::gen_switch_key()`]).
+    /// 
     #[instrument(skip_all)]
     fn key_switch<'a>(C: &CiphertextRing<Self>, ct: Ciphertext<Self>, switch_key: &KeySwitchKey<'a, Self>) -> Ciphertext<Self>
         where Self: 'a
@@ -367,6 +459,15 @@ pub trait BGVCiphertextParams {
         };
     }
 
+    ///
+    /// Generates a relinearization key, necessary to compute homomorphic multiplications.
+    /// 
+    /// The parameter `digits` refers to the number of "digits" to use for the gadget product
+    /// during relinearization. More concretely, when performing relinearization, the ciphertext
+    /// will be decomposed into multiple small parts, which are then multiplied with the components
+    /// of the relinearization key. Thus, a larger value for `digits` will result in lower (additive)
+    /// noise growth during relinearization, at the cost of higher performance.
+    /// 
     #[instrument(skip_all)]
     fn gen_rk<'a, R: Rng + CryptoRng>(P: &PlaintextRing<Self>, C: &'a CiphertextRing<Self>, rng: R, sk: &SecretKey<Self>, digits: usize) -> RelinKey<'a, Self>
         where Self: 'a
@@ -374,6 +475,14 @@ pub trait BGVCiphertextParams {
         Self::gen_switch_key(P, C, rng, &C.pow(C.clone_el(sk), 2), sk, digits)
     }
 
+    ///
+    /// Computes an encryption of the product of two encrypted inputs.
+    /// 
+    /// Since HE-Ring does not (at least not implicitly) perform automatic modulus management,
+    /// it is necessary to modulus-switch between calls to `hom_mul()` in order to prevent
+    /// `hom_mul()` from causing exponential noise growth. For more info on modulus-switching
+    /// and the modulus chain, see [`crate::examples::bgv_basics`].
+    /// 
     #[instrument(skip_all)]
     fn hom_mul<'a>(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, lhs: Ciphertext<Self>, rhs: Ciphertext<Self>, rk: &RelinKey<'a, Self>) -> Ciphertext<Self>
         where Self: 'a
@@ -395,6 +504,14 @@ pub trait BGVCiphertextParams {
         return result;
     }
     
+    ///
+    /// Computes an encryption of the square of an encrypted input.
+    /// 
+    /// Since HE-Ring does not (at least not implicitly) perform automatic modulus management,
+    /// it is necessary to modulus-switch between calls to `hom_square()` in order to prevent
+    /// `hom_square()` from causing exponential noise growth. For more info on modulus-switching
+    /// and the modulus chain, see [`crate::examples::bgv_basics`].
+    /// 
     #[instrument(skip_all)]
     fn hom_square<'a>(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, val: Ciphertext<Self>, rk: &RelinKey<'a, Self>) -> Ciphertext<Self>
         where Self: 'a
@@ -415,6 +532,9 @@ pub trait BGVCiphertextParams {
         return result;
     }
     
+    ///
+    /// Computes an encryption of the sum of two encrypted inputs.
+    /// 
     #[instrument(skip_all)]
     fn hom_add(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, mut lhs: Ciphertext<Self>, mut rhs: Ciphertext<Self>) -> Ciphertext<Self> {
         assert!(P.base_ring().is_unit(&lhs.implicit_scale));
@@ -423,13 +543,17 @@ pub trait BGVCiphertextParams {
         let Zt = P.base_ring();
         let (a, b) = equalize_implicit_scale(Zt, Zt.checked_div(&lhs.implicit_scale, &rhs.implicit_scale).unwrap());
 
-        C.int_hom().mul_assign_map(&mut rhs.c0, a as i32);
-        C.int_hom().mul_assign_map(&mut rhs.c1, a as i32);
-        P.base_ring().int_hom().mul_assign_map(&mut rhs.implicit_scale, a as i32);
-
-        C.int_hom().mul_assign_map(&mut lhs.c0, b as i32);
-        C.int_hom().mul_assign_map(&mut lhs.c1, b as i32);
-        P.base_ring().int_hom().mul_assign_map(&mut lhs.implicit_scale, b as i32);
+        debug_assert!(!Zt.eq_el(&lhs.implicit_scale, &rhs.implicit_scale) || (a == 1 && b == 1));
+        if a != 1 {
+            C.int_hom().mul_assign_map(&mut rhs.c0, a as i32);
+            C.int_hom().mul_assign_map(&mut rhs.c1, a as i32);
+            P.base_ring().int_hom().mul_assign_map(&mut rhs.implicit_scale, a as i32);
+        }
+        if b != 1 {
+            C.int_hom().mul_assign_map(&mut lhs.c0, b as i32);
+            C.int_hom().mul_assign_map(&mut lhs.c1, b as i32);
+            P.base_ring().int_hom().mul_assign_map(&mut lhs.implicit_scale, b as i32);
+        }
 
         assert!(Zt.eq_el(&lhs.implicit_scale, &rhs.implicit_scale));
         let result = Ciphertext {
@@ -441,10 +565,17 @@ pub trait BGVCiphertextParams {
         return result;
     }
 
+    ///
+    /// Computes an encryption of the difference of two encrypted inputs.
+    /// 
     fn hom_sub(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, lhs: Ciphertext<Self>, rhs: Ciphertext<Self>) -> Ciphertext<Self> {
         Self::hom_add(P, C, lhs, Ciphertext { c0: rhs.c0, c1: rhs.c1, implicit_scale: P.base_ring().negate(rhs.implicit_scale) })
     }
     
+    ///
+    /// Computes an encryption of `sigma(x)`, where `x` is the message encrypted by the given ciphertext
+    /// and `sigma` is the given Galois automorphism.
+    /// 
     #[instrument(skip_all)]
     fn hom_galois<'a>(_P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: Ciphertext<Self>, g: CyclotomicGaloisGroupEl, gk: &KeySwitchKey<'a, Self>) -> Ciphertext<Self>
         where Self: 'a
@@ -456,6 +587,11 @@ pub trait BGVCiphertextParams {
         }, gk)
     }
 
+    ///
+    /// Homomorphically applies multiple Galois automorphisms at once.
+    /// Functionally, this is equivalent to calling [`BFVParams::hom_galois()`]
+    /// multiple times, but can be faster.
+    /// 
     #[instrument(skip_all)]
     fn hom_galois_many<'a, 'b, V>(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: Ciphertext<Self>, gs: &[CyclotomicGaloisGroupEl], gks: V) -> Vec<Ciphertext<Self>>
         where V: VectorFn<&'b KeySwitchKey<'a, Self>>,
@@ -487,11 +623,29 @@ pub trait BGVCiphertextParams {
         }).collect();
     }
 
+    ///
+    /// Given `R/qR` this creates the ciphertext ring `R/q'R`, where the RNS base for `q'`
+    /// is derived from the RNS base of `q` by removing the RNS factors whose indices are mentioned
+    /// in `drop_moduli`.
+    /// 
+    /// Note that for the implementation in HE-Ring at least, the underlying rings will share
+    /// most of their data, which means that this function is actually very cheap, in particular
+    /// much cheaper than creating a new ciphertext ring (e.g. using [`BGVCiphertextParams::create_ciphertext_ring()`]).
+    /// 
     #[instrument(skip_all)]
     fn mod_switch_down_ciphertext_ring(C: &CiphertextRing<Self>, drop_moduli: &RNSFactorIndexList) -> CiphertextRing<Self> {
         RingValue::from(C.get_ring().drop_rns_factor(&drop_moduli))
     }
 
+    ///
+    /// Modulus-switches a secret key in a way compatible with modulus-switching ciphertexts.
+    /// 
+    /// In more detail, given `R/q'R` and `R/qR` where the RNS base for `q'`is derived from the RNS
+    /// base of `q` by removing the RNS factors whose indices are mentioned in `drop_moduli`, this
+    /// computes the secret key `sk mod q'`. Note that, if `ct` is an encryption w.r.t. `sk` over `R/qR`
+    /// and is modulus-switched to `ct'` over the ring `R/q'R`, then `sk mod q'` can be used to decrypt
+    /// `ct'`.
+    /// 
     #[instrument(skip_all)]
     fn mod_switch_down_sk(Cnew: &CiphertextRing<Self>, Cold: &CiphertextRing<Self>, drop_moduli: &RNSFactorIndexList, sk: &SecretKey<Self>) -> SecretKey<Self> {
         assert_rns_factor_drop_correct::<Self>(Cnew, Cold, drop_moduli);
@@ -502,6 +656,13 @@ pub trait BGVCiphertextParams {
         }
     }
 
+    ///
+    /// Modulus-switches a relinearization key in a way compatible with modulus-switching ciphertexts.
+    /// 
+    /// This is equivalent to creating a new relinearization key (using [`BGVCiphertextParams::gen_rk()`])
+    /// over `Cnew` for the secret key `mod_switch_down_sk(Cnew, Cold, drop_moduli, sk)`, but does not require
+    /// access to `sk`.
+    /// 
     #[instrument(skip_all)]
     fn mod_switch_down_rk<'a, 'b>(Cnew: &'b CiphertextRing<Self>, Cold: &CiphertextRing<Self>, drop_moduli: &RNSFactorIndexList, rk: &RelinKey<'a, Self>) -> RelinKey<'b, Self> {
         assert_rns_factor_drop_correct::<Self>(Cnew, Cold, drop_moduli);
@@ -515,6 +676,13 @@ pub trait BGVCiphertextParams {
         }
     }
 
+    ///
+    /// Modulus-switches a Galois key in a way compatible with modulus-switching ciphertexts.
+    /// 
+    /// This is equivalent to creating a new Galois key (using [`BGVCiphertextParams::gen_gk()`])
+    /// over `Cnew` for the secret key `mod_switch_down_sk(Cnew, Cold, drop_moduli, sk)`, but does not require
+    /// access to `sk`.
+    /// 
     #[instrument(skip_all)]
     fn mod_switch_down_gk<'a, 'b>(Cnew: &'b CiphertextRing<Self>, Cold: &CiphertextRing<Self>, drop_moduli: &RNSFactorIndexList, gk: &KeySwitchKey<'a, Self>) -> KeySwitchKey<'b, Self> {
         assert_rns_factor_drop_correct::<Self>(Cnew, Cold, drop_moduli);
@@ -528,6 +696,10 @@ pub trait BGVCiphertextParams {
         }
     }
 
+    ///
+    /// Internal function to compute how the implicit scale of a ciphertext changes
+    /// once we modulus-switch it.
+    /// 
     fn mod_switch_down_compute_implicit_scale_factor(P: &PlaintextRing<Self>, q_new: &El<BigIntRing>, q_old: &El<BigIntRing>) -> El<Zn> {
         let ZZbig_to_Zt = P.base_ring().can_hom(&ZZbig).unwrap();
         let result = P.base_ring().checked_div(
@@ -538,6 +710,15 @@ pub trait BGVCiphertextParams {
         return result;
     }
 
+    ///
+    /// Modulus-switches a ciphertext.
+    /// 
+    /// More concretely, we require that `Cold` is the ring `R/qR` and `Cnew` is the ring `R/q'R`,
+    /// where the RNS base for `q'`is derived from the RNS base of `q` by removing the RNS factors
+    /// whose indices are mentioned in `drop_moduli`. Given a ciphertext `ct` over `R/qR`, this function
+    /// then computes a ciphertext encrypting the same message over `R/q'R` (w.r.t. the secret key
+    /// `sk mod q'`, which can be accessed via [`BGVCiphertextParams::mod_switch_down_sk()`]).
+    /// 
     #[instrument(skip_all)]
     fn mod_switch_down(P: &PlaintextRing<Self>, Cnew: &CiphertextRing<Self>, Cold: &CiphertextRing<Self>, drop_moduli: &RNSFactorIndexList, ct: Ciphertext<Self>) -> Ciphertext<Self> {
         assert_rns_factor_drop_correct::<Self>(Cnew, Cold, drop_moduli);
@@ -584,6 +765,15 @@ pub trait BGVCiphertextParams {
         }
     }
 
+    ///
+    /// Generates a Galois key, usable for homomorphically applying Galois automorphisms.
+    /// 
+    /// The parameter `digits` refers to the number of "digits" to use for the gadget product
+    /// during key-switching. More concretely, when performing key-switching, the ciphertext
+    /// will be decomposed into multiple small parts, which are then multiplied with the components
+    /// of the key-switching key. Thus, a larger value for `digits` will result in lower (additive)
+    /// noise growth during key-switching, at the cost of higher performance.
+    /// 
     #[instrument(skip_all)]
     fn gen_gk<'a, R: Rng + CryptoRng>(P: &PlaintextRing<Self>, C: &'a CiphertextRing<Self>, rng: R, sk: &SecretKey<Self>, g: CyclotomicGaloisGroupEl, digits: usize) -> KeySwitchKey<'a, Self>
         where Self: 'a
@@ -614,6 +804,11 @@ pub trait BGVCiphertextParams {
         return result;
     }
 
+    ///
+    /// Creates an encryption of the secret key.
+    /// 
+    /// Note that this does not require access to the secret key.
+    /// 
     #[instrument(skip_all)]
     fn enc_sk(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>) -> Ciphertext<Self> {
         Ciphertext {
@@ -623,6 +818,13 @@ pub trait BGVCiphertextParams {
         }
     }
 
+    ///
+    /// Modulus-switches from `R/qR` to `R/t'R`, where the latter one is given as a plaintext ring `target`.
+    /// In particular, this is necessary during bootstrapping.
+    /// 
+    /// As opposed to BFV however, the modulus `t'` of `target` must be coprime with the
+    /// current plaintext modulus `t`.
+    /// 
     #[instrument(skip_all)]
     fn mod_switch_to_plaintext(P: &PlaintextRing<Self>, target: &PlaintextRing<Self>, C: &CiphertextRing<Self>, ct: Ciphertext<Self>) -> (El<PlaintextRing<Self>>, El<PlaintextRing<Self>>) {
         assert!(signed_gcd(*P.base_ring().modulus(), *target.base_ring().modulus(), ZZ) == 1, "can only mod-switch to ciphertext moduli that are coprime to t");

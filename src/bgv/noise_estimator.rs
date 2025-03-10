@@ -65,7 +65,7 @@ pub trait BGVNoiseEstimator<Params: BGVCiphertextParams> {
     fn hom_mul_plain_i64(&self, P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, m: i64, ct: &Self::CriticalQuantityLevel, implicit_scale: El<Zn>) -> Self::CriticalQuantityLevel;
 
     fn merge_implicit_scale(&self, P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, ct: &Self::CriticalQuantityLevel, implicit_scale: El<Zn>) -> Self::CriticalQuantityLevel {
-        self.hom_mul_plain_i64(P, C, 1, ct, implicit_scale)
+        self.hom_mul_plain_i64(P, C, P.base_ring().smallest_lift(P.base_ring().invert(&implicit_scale).unwrap()), ct, implicit_scale)
     }
 
     fn key_switch(&self, P: &PlaintextRing<Params>, C: &CiphertextRing<Params>, ct: &Self::CriticalQuantityLevel, switch_key: &RNSGadgetVectorDigitIndices) -> Self::CriticalQuantityLevel;
@@ -157,10 +157,8 @@ impl<Params: BGVCiphertextParams> BGVNoiseEstimator<Params> for NaiveBGVNoiseEst
         return result;
     }
 
-    fn hom_mul_plain_i64(&self, P: &PlaintextRing<Params>, _C: &CiphertextRing<Params>, m: i64, ct: &Self::CriticalQuantityLevel, implicit_scale: El<Zn>) -> Self::CriticalQuantityLevel {
-        let inv_implicit_scale = P.base_ring().invert(&implicit_scale).unwrap();
-        let factor = P.base_ring().smallest_lift(P.base_ring().mul(inv_implicit_scale, P.base_ring().coerce(&ZZi64, m)));
-        let result = *ct + (factor as f64).abs().log2();
+    fn hom_mul_plain_i64(&self, _P: &PlaintextRing<Params>, _C: &CiphertextRing<Params>, m: i64, ct: &Self::CriticalQuantityLevel, _implicit_scale: El<Zn>) -> Self::CriticalQuantityLevel {
+        let result = *ct + (m as f64).abs().log2();
         assert!(!result.is_nan());
         return result;
     }

@@ -410,14 +410,14 @@ fn test_pow2_bgv_thin_bootstrapping_17() {
     
     // 8 slots of rank 16
     let params = Pow2BGV {
-        log2_q_min: 890,
-        log2_q_max: 900,
+        log2_q_min: 790,
+        log2_q_max: 800,
         log2_N: 7,
         ciphertext_allocator: DefaultCiphertextAllocator::default(),
         negacyclic_ntt: PhantomData::<DefaultNegacyclicNTT>
     };
     let t = 17;
-    let digits = 8;
+    let digits = 7;
     let bootstrap_params = ThinBootstrapParams {
         scheme_params: params.clone(),
         v: 2,
@@ -426,7 +426,7 @@ fn test_pow2_bgv_thin_bootstrapping_17() {
     let P = params.create_plaintext_ring(t);
     let C_master = params.create_initial_ciphertext_ring();
 
-    let bootstrapper = bootstrap_params.build_pow2::<_, true>(&C_master, DefaultModswitchStrategy::<_, _, true>::new(NaiveBGVNoiseEstimator), None);
+    let bootstrapper = bootstrap_params.build_pow2::<_, true>(&C_master, DefaultModswitchStrategy::<_, _, false>::new(NaiveBGVNoiseEstimator), None);
     
     let sk = Pow2BGV::gen_sk(&C_master, &mut rng, None);
     let gk = bootstrapper.required_galois_keys(&P).into_iter().map(|g| (g, Pow2BGV::gen_gk(bootstrapper.largest_plaintext_ring(), &C_master, &mut rng, &sk, g, digits))).collect::<Vec<_>>();

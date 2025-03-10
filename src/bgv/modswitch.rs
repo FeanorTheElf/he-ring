@@ -171,8 +171,13 @@ pub trait AsBGVPlaintext<Params: BGVCiphertextParams>: RingBase {
     ) -> Ciphertext<Params>
         where I: Iterator<Item = (Self::Element, Ciphertext<Params>)>
     {
+        let mut first_implicit_scale = None;
         data.fold(Params::transparent_zero(P, C), |current, (lhs, rhs)| {
-            assert!(P.base_ring().is_one(&rhs.implicit_scale));
+            if first_implicit_scale.is_none() {
+                first_implicit_scale = Some(rhs.implicit_scale);
+            } else {
+                assert!(P.base_ring().eq_el(&first_implicit_scale.unwrap(), &rhs.implicit_scale));
+            }
             Params::hom_add(P, C, current, self.hom_mul_to(P, C, dropped_factors, &lhs, rhs))
         })
     }
@@ -343,6 +348,66 @@ impl<Params: BGVCiphertextParams> AsBGVPlaintext<Params> for StaticRingBase<i64>
     }
 }
 
+impl<Params: BGVCiphertextParams> AsBGVPlaintext<Params> for StaticRingBase<i32> {
+
+    fn hom_add_to(
+        &self, 
+        P: &PlaintextRing<Params>, 
+        C: &CiphertextRing<Params>, 
+        _dropped_factors: &RNSFactorIndexList, 
+        m: &Self::Element, 
+        ct: Ciphertext<Params>
+    ) -> Ciphertext<Params> {
+        Params::hom_add_plain(P, C, &P.inclusion().map(P.base_ring().coerce(&StaticRing::<i32>::RING, *m)), ct)
+    }
+
+    fn hom_add_to_noise<N: BGVNoiseEstimator<Params>>(
+        &self, 
+        estimator: &N, 
+        P: &PlaintextRing<Params>, 
+        C: &CiphertextRing<Params>, 
+        _dropped_factors: &RNSFactorIndexList, 
+        m: &Self::Element, 
+        ct_info: &N::CriticalQuantityLevel, 
+        implicit_scale: &ZnEl
+    ) -> N::CriticalQuantityLevel {
+        estimator.hom_add_plain(P, C, &P.inclusion().map(P.base_ring().coerce(&StaticRing::<i32>::RING, *m)), ct_info, *implicit_scale)
+    }
+
+    fn hom_mul_to(
+        &self, 
+        P: &PlaintextRing<Params>, 
+        C: &CiphertextRing<Params>, 
+        _dropped_factors: &RNSFactorIndexList, 
+        m: &Self::Element, 
+        ct: Ciphertext<Params>
+    ) -> Ciphertext<Params> {
+        Params::hom_mul_plain_i64(P, C, *m as i64, ct)
+    }
+
+    fn hom_mul_to_noise<N: BGVNoiseEstimator<Params>>(
+        &self, 
+        estimator: &N, 
+        P: &PlaintextRing<Params>, 
+        C: &CiphertextRing<Params>, 
+        _dropped_factors: &RNSFactorIndexList, 
+        m: &Self::Element, 
+        ct_info: &N::CriticalQuantityLevel, 
+        implicit_scale: &ZnEl
+    ) -> N::CriticalQuantityLevel {
+        estimator.hom_mul_plain_i64(P, C, *m as i64, ct_info, *implicit_scale)
+    }
+
+    fn apply_galois_action_plain(
+        &self,
+        _P: &PlaintextRing<Params>, 
+        x: &Self::Element,
+        gs: &[CyclotomicGaloisGroupEl]
+    ) -> Vec<Self::Element> {
+        gs.iter().map(|_| self.clone_el(x)).collect()
+    }
+}
+
 impl<Params: BGVCiphertextParams> AsBGVPlaintext<Params> for NumberRingQuotientBase<NumberRing<Params>, Zn> {
 
     fn hom_add_to(
@@ -467,14 +532,19 @@ impl<Params: BGVCiphertextParams, A: Allocator + Clone> AsBGVPlaintext<Params> f
         let mut lhs = Vec::new();
         let mut rhs_c0 = Vec::new();
         let mut rhs_c1 = Vec::new();
+        let mut first_implicit_scale = None;
         for (l, r) in data {
-            assert!(P.base_ring().is_one(&r.implicit_scale));
+            if first_implicit_scale.is_none() {
+                first_implicit_scale = Some(r.implicit_scale);
+            } else {
+                assert!(P.base_ring().eq_el(&first_implicit_scale.unwrap(), &r.implicit_scale));
+            }
             lhs.push(l);
             rhs_c0.push(r.c0);
             rhs_c1.push(r.c1);
         }
         return Ciphertext {
-            implicit_scale: P.base_ring().one(),
+            implicit_scale: first_implicit_scale.unwrap_or(P.base_ring().one()),
             c0: <_ as ComputeInnerProduct>::inner_product(C.get_ring(), lhs.iter().zip(rhs_c0.into_iter()).map(|(lhs, rhs)| (C.get_ring().drop_rns_factor_element(self, dropped_factors, self.clone_el(lhs)), rhs))),
             c1: <_ as ComputeInnerProduct>::inner_product(C.get_ring(), lhs.into_iter().zip(rhs_c1.into_iter()).map(|(lhs, rhs)| (C.get_ring().drop_rns_factor_element(self, dropped_factors, lhs), rhs))),
         };
@@ -503,6 +573,10 @@ impl<Params: BGVCiphertextParams, N: BGVNoiseEstimator<Params>, const LOG: bool>
         noise_level
     }
 
+    ///
+    /// Mod-switches the given ciphertext from its current ciphertext ring
+    /// to `Ctarget`, and adjusts the noise information.
+    /// 
     fn mod_switch_down(
         &self, 
         P: &PlaintextRing<Params>, 
@@ -541,6 +615,10 @@ impl<Params: BGVCiphertextParams, N: BGVNoiseEstimator<Params>, const LOG: bool>
         return result;
     }
 
+    ///
+    /// Mod-switches the given ciphertext from its current ciphertext ring
+    /// to `Ctarget`, and adjusts the noise information.
+    /// 
     fn mod_switch_down_ref(
         &self, 
         P: &PlaintextRing<Params>, 
@@ -576,6 +654,11 @@ impl<Params: BGVCiphertextParams, N: BGVNoiseEstimator<Params>, const LOG: bool>
         return result;
     }
 
+    ///
+    /// Computes the RNS base we should switch to before multiplication to
+    /// minimize the result noise. The result is returned as the list of RNS
+    /// factors of `C_master` that we want to drop.
+    /// 
     #[instrument(skip_all)]
     fn compute_optimal_mul_modswitch(
         &self,
@@ -613,6 +696,24 @@ impl<Params: BGVCiphertextParams, N: BGVNoiseEstimator<Params>, const LOG: bool>
         return (0..(C_master.base_ring().len() - outer_drop.len())).map(compute_result_noise).min_by(|(_, l), (_, r)| f64::total_cmp(l, r)).unwrap().0;
     }
 
+    ///
+    /// Computes the value `x + sum_i cs[i] * y[i]`, by mod-switching all involved
+    /// ciphertexts to the RNS base of all shared RNS factors. In particular, if the
+    /// input ciphertexts are all defined w.r.t. the same RNS base, no modulus-switching
+    /// is performed at all.
+    /// 
+    /// This function is quite complicated, as there are many things to consider:
+    ///  - We have to handle both constants and ciphertexts
+    ///  - Special coefficients (e.g. `0, 1, -1`) should be handled without a full
+    ///    plaintext-ciphertext multiplication
+    ///  - We decide not to perform intermediate modulus-switches, but only modulus-switch
+    ///    at the very beginning. Note however that it might be possible to group
+    ///    summands depending on their RNS base, and reduce the number of modulus-switches
+    ///  - We have to decide on the `implicit_scale` of the result, its choice may
+    ///    affect noise growth 
+    ///  - using inner product functionality of the underlying ring can give us better
+    ///    performance than many isolated additions/multiplications
+    /// 
     fn add_inner_prod<'a, R>(
         &self,
         P: &PlaintextRing<Params>,
@@ -636,16 +737,19 @@ impl<Params: BGVCiphertextParams, N: BGVNoiseEstimator<Params>, const LOG: bool>
         let mut int_products: Vec<(i32, &ModulusAwareCiphertext<Params, Self>)> = Vec::new();
         let mut main_products:  Vec<(&El<R>, &ModulusAwareCiphertext<Params, Self>)> = Vec::new();
 
-        // while separating this, we also keep track of which will be the result modulus
+        // while separating the different summands, we also keep track of which will be the result modulus
         let mut total_drop = RNSFactorIndexList::empty();
         let mut min_dropped_len = usize::MAX;
+        let mut update_total_drop = |ct: &ModulusAwareCiphertext<Params, Self>| {
+            total_drop = total_drop.union(&ct.dropped_rns_factor_indices);
+            min_dropped_len = min(min_dropped_len, ct.dropped_rns_factor_indices.len());
+        };
 
         for (c, y) in cs.iter().zip(ys.iter()) {
             match y.as_ciphertext_ref() {
                 Err(y) => constant = constant.add(c.clone(ring).mul(y.clone(ring), ring), ring),
                 Ok(y) => if !c.is_zero() {
-                    total_drop = total_drop.union(&y.dropped_rns_factor_indices);
-                    min_dropped_len = min(min_dropped_len, y.dropped_rns_factor_indices.len());
+                    update_total_drop(y);
                     match c {
                         Coefficient::Zero => unreachable!(),
                         Coefficient::One => int_products.push((1, y)),
@@ -658,11 +762,10 @@ impl<Params: BGVCiphertextParams, N: BGVNoiseEstimator<Params>, const LOG: bool>
         }
         match x.as_ciphertext_ref() {
             Ok(x) => {
-                total_drop = total_drop.union(&x.dropped_rns_factor_indices);
-                min_dropped_len = min(min_dropped_len, x.dropped_rns_factor_indices.len());
+                update_total_drop(x);
             },
             Err(x) => if int_products.len() == 0 && main_products.len() == 0 {
-                // no ciphertexts are involved at all
+                // if `x` is a constant and we have no products involving ciphertexts, everything is just a constant
                 return PlainOrCiphertext::Plaintext(x.clone(ring).add(constant, ring));
             }
         }
@@ -671,28 +774,38 @@ impl<Params: BGVCiphertextParams, N: BGVNoiseEstimator<Params>, const LOG: bool>
         let Ctarget = Params::mod_switch_down_ciphertext_ring(C_master, &total_drop);
 
         // now perform modulus-switches when necessary
-        let int_products: Vec<(i64, ModulusAwareCiphertext<Params, Self>)> = int_products.into_iter().map(|(c, y)| {
-            let mut y_modswitch = self.mod_switch_down_ref(P, &Ctarget, C_master, &total_drop, y, "HomInnerProduct", debug_sk);
-            let factor = P.base_ring().mul(P.base_ring().int_hom().map(c), P.base_ring().invert(&y_modswitch.data.implicit_scale).unwrap());
-            y_modswitch.data.implicit_scale = P.base_ring().one();
-            return (
-                P.base_ring().smallest_lift(factor),
-                y_modswitch
-            );
-        }).collect();
+        let mut int_products: Vec<(i32, ModulusAwareCiphertext<Params, Self>)> = int_products.into_iter().map(|(c, y)| (
+            c,
+            self.mod_switch_down_ref(P, &Ctarget, C_master, &total_drop, y, "HomInnerProduct", debug_sk)
+        )).collect();
 
-        let int_product_noise = StaticRing::<i64>::RING.get_ring().hom_inner_product_noise(&self.noise_estimator, P, &Ctarget, &total_drop, int_products.iter().map(|(lhs, rhs)| (lhs, &rhs.info)));
-        let int_product_part = StaticRing::<i64>::RING.get_ring().hom_inner_product(P, &Ctarget, &total_drop, int_products.into_iter().map(|(lhs, rhs)| (lhs, rhs.data)));
+        let mut main_products: Vec<(El<R>, ModulusAwareCiphertext<Params, Self>)> = main_products.into_iter().map(|(c, y)| (
+            ring.clone_el(c),
+            self.mod_switch_down_ref(P, &Ctarget, C_master, &total_drop, y, "HomInnerProduct", debug_sk)
+        )).collect();
 
-        let main_products: Vec<(El<R>, ModulusAwareCiphertext<Params, Self>)> = main_products.into_iter().map(|(c, y)| {
-            let mut y_modswitch = self.mod_switch_down_ref(P, &Ctarget, C_master, &total_drop, y, "HomInnerProduct", debug_sk);
-            let inv_implicit_scale = P.base_ring().invert(&y_modswitch.data.implicit_scale).unwrap();
-            y_modswitch.data.implicit_scale = P.base_ring().one();
-            return (
-                ring.int_hom().mul_ref_fst_map(c, P.base_ring().smallest_lift(inv_implicit_scale) as i32),
-                y_modswitch
-            );
-        }).collect();
+        // finally, we do another noise optimization technique: the implicit scale of the output is
+        // chosen as total scale (implicit scale + coefficient) of the highest-noise ciphertext; this way
+        // we avoid multiplying its size up further
+        let Zt = P.base_ring();
+        let output_implicit_scale: ZnEl = int_products.iter().filter_map(|(c, ct)| Zt.invert(&Zt.int_hom().map(*c)).map(|c| (c, ct)))
+            .map(|(c, ct)| (self.noise_estimator.estimate_log2_relative_noise_level(P, &Ctarget, &ct.info), Zt.mul(ct.data.implicit_scale, c))
+        ).max_by(|(l, _), (r, _)| f64::total_cmp(l, r)).map(|(_, scale)| scale).unwrap_or(P.base_ring().one());
+
+        for (c, ct) in &mut int_products {
+            *c = Zt.smallest_lift(Zt.mul(Zt.int_hom().map(*c), Zt.checked_div(&output_implicit_scale, &ct.data.implicit_scale).unwrap())) as i32;
+            ct.data.implicit_scale = output_implicit_scale;
+        }
+        for (c, ct) in &mut main_products {
+            let factor = Zt.smallest_lift(Zt.checked_div(&output_implicit_scale, &ct.data.implicit_scale).unwrap()) as i32;
+            if factor != 1 {
+                ring.int_hom().mul_assign_map(c, factor);
+            }
+            ct.data.implicit_scale = output_implicit_scale;
+        }
+
+        let int_product_noise = StaticRing::<i32>::RING.get_ring().hom_inner_product_noise(&self.noise_estimator, P, &Ctarget, &total_drop, int_products.iter().map(|(lhs, rhs)| (lhs, &rhs.info)));
+        let int_product_part = StaticRing::<i32>::RING.get_ring().hom_inner_product(P, &Ctarget, &total_drop, int_products.into_iter().map(|(lhs, rhs)| (lhs, rhs.data)));
 
         let main_product_noise = ring.get_ring().hom_inner_product_noise(&self.noise_estimator, P, &Ctarget, &total_drop, main_products.iter().map(|(lhs, rhs)| (lhs, &rhs.info)));
         let main_product_part = ring.get_ring().hom_inner_product(P, &Ctarget, &total_drop, main_products.into_iter().map(|(lhs, rhs)| (lhs, rhs.data)));
