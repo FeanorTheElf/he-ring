@@ -455,6 +455,13 @@ impl<NumberRing, A> PreparedMultiplicationRing for ManagedDoubleRNSRingBase<Numb
         _ = self.to_doublerns(x);
         return self.clone_el(x);
     }
+
+    fn inner_product_prepared<'a, I>(&self, parts: I) -> Self::Element
+        where I: IntoIterator<Item = (&'a Self::PreparedMultiplicant, &'a Self::PreparedMultiplicant)>,
+            Self: 'a
+    {
+        <_ as ComputeInnerProduct>::inner_product_ref(self, parts.into_iter())
+    }
 }
 
 impl<NumberRing, A> BGFVCiphertextRing for ManagedDoubleRNSRingBase<NumberRing, A> 

@@ -685,19 +685,22 @@ impl<NumberRing, A> ComputeInnerProduct for DoubleRNSRingBase<NumberRing, A>
     where NumberRing: HENumberRing,
         A: Allocator + Clone
 {
-    default fn inner_product<I: Iterator<Item = (Self::Element, Self::Element)>>(&self, els: I) -> Self::Element {
+    #[instrument(skip_all)]
+    fn inner_product<I: Iterator<Item = (Self::Element, Self::Element)>>(&self, els: I) -> Self::Element {
         let data = els.collect::<Vec<_>>();
         return self.inner_product_base(data.iter().map(|(l, r)| (l, r)));
     }
 
-    default fn inner_product_ref<'a, I: Iterator<Item = (&'a Self::Element, &'a Self::Element)>>(&self, els: I) -> Self::Element
+    #[instrument(skip_all)]
+    fn inner_product_ref<'a, I: Iterator<Item = (&'a Self::Element, &'a Self::Element)>>(&self, els: I) -> Self::Element
         where Self: 'a
     {
         let data = els.collect::<Vec<_>>();
         return self.inner_product_base(data.iter().map(|(l, r)| (*l, *r)));
     }
 
-    default fn inner_product_ref_fst<'a, I: Iterator<Item = (&'a Self::Element, Self::Element)>>(&self, els: I) -> Self::Element
+    #[instrument(skip_all)]
+    fn inner_product_ref_fst<'a, I: Iterator<Item = (&'a Self::Element, Self::Element)>>(&self, els: I) -> Self::Element
         where Self::Element: 'a,
             Self: 'a
     {
