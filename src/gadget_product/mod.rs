@@ -389,6 +389,14 @@ impl<R: PreparedMultiplicationRing> GadgetProductRhsOperand<R> {
         self.scaled_element[i] = Some((ring.prepare_multiplicant(&el), el));
     }
     
+    ///
+    /// Returns the noisy approximation to `g[i] * x`, if it was previously set
+    /// via [`GadgetProductRhsOperand::set_rns_factor()`].
+    /// 
+    pub fn get_rns_factor<'a>(&'a self, _ring: &R, i: usize) -> Option<&'a R::Element> {
+        self.scaled_element[i].as_ref().map(|(_, x)| x)
+    }
+
     /// 
     /// Creates a [`GadgetProductRhsOperand`] representing `0` w.r.t. the RNS-based gadget vector that has `digits` digits.
     /// 
