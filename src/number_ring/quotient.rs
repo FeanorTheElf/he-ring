@@ -1,11 +1,14 @@
 use std::alloc::{Allocator, Global};
 use std::marker::PhantomData;
 
+use feanor_math::divisibility::DivisibilityRing;
 use feanor_math::homomorphism::{CanHomFrom, CanIsoFromTo, Homomorphism};
+use feanor_math::algorithms::linsolve::LinSolveRing;
 use feanor_math::integer::{int_cast, BigIntRing, BigIntRingBase, IntegerRing, IntegerRingStore};
 use feanor_math::iters::{multi_cartesian_product, MultiProduct};
+use feanor_math::matrix::OwnedMatrix;
 use feanor_math::primitive_int::StaticRing;
-use feanor_math::rings::extension::{FreeAlgebra, FreeAlgebraStore};
+use feanor_math::rings::extension::{create_multiplication_matrix, FreeAlgebra, FreeAlgebraStore};
 use feanor_math::rings::finite::FiniteRing;
 use feanor_math::rings::poly::dense_poly::DensePolyRing;
 use feanor_math::rings::zn::*;
@@ -574,6 +577,27 @@ impl<NumberRing, ZnTy, A> FiniteRing for NumberRingQuotientBase<NumberRing, ZnTy
             Some(ZZ.pow(characteristic, self.rank()))
         } else {
             None
+        }
+    }
+}
+
+impl<NumberRing, ZnTy, A> DivisibilityRing for NumberRingQuotientBase<NumberRing, ZnTy, A>
+    where NumberRing: HENumberRing,
+        ZnTy: RingStore,
+        ZnTy::Type: ZnRing + CanHomFrom<BigIntRingBase>,
+        A: Allocator + Clone
+{
+    fn checked_left_div(&self, lhs: &Self::Element, rhs: &Self::Element) -> Option<Self::Element> {
+        let mut mul_matrix: OwnedMatrix<_> = create_multiplication_matrix(RingRef::new(self), rhs);
+        let data = self.wrt_canonical_basis(&lhs);
+        let mut lhs_matrix: OwnedMatrix<_> = OwnedMatrix::from_fn(self.rank(), 1, |i, _| data.at(i));
+
+        let mut solution: OwnedMatrix<_> = OwnedMatrix::zero(self.rank(), 1, self.base_ring());
+        let has_sol = self.base_ring().get_ring().solve_right(mul_matrix.data_mut(), lhs_matrix.data_mut(), solution.data_mut(), Global);
+        if has_sol.is_solved() {
+            return Some(self.from_canonical_basis((0..self.rank()).map(|i| self.base_ring().clone_el(solution.at(i, 0)))));
+        } else {
+            return None;
         }
     }
 }
