@@ -55,14 +55,14 @@ use rand_distr::StandardNormal;
 /// 
 pub mod bootstrap;
 
-pub type NumberRing<Params: BFVParams> = <Params::CiphertextRing as BGFVCiphertextRing>::NumberRing;
-pub type PlaintextRing<Params: BFVParams> = NumberRingQuotient<NumberRing<Params>, Zn, Global>;
-pub type SecretKey<Params: BFVParams> = El<CiphertextRing<Params>>;
-pub type KeySwitchKey<'a, Params: BFVParams> = (GadgetProductOperand<'a, Params>, GadgetProductOperand<'a, Params>);
-pub type RelinKey<'a, Params: BFVParams> = KeySwitchKey<'a, Params>;
-pub type CiphertextRing<Params: BFVParams> = RingValue<Params::CiphertextRing>;
-pub type Ciphertext<Params: BFVParams> = (El<CiphertextRing<Params>>, El<CiphertextRing<Params>>);
-pub type GadgetProductOperand<'a, Params: BFVParams> = GadgetProductRhsOperand<Params::CiphertextRing>;
+pub type NumberRing<Params: BFVCiphertextParams> = <Params::CiphertextRing as BGFVCiphertextRing>::NumberRing;
+pub type PlaintextRing<Params: BFVCiphertextParams> = NumberRingQuotient<NumberRing<Params>, Zn, Global>;
+pub type SecretKey<Params: BFVCiphertextParams> = El<CiphertextRing<Params>>;
+pub type KeySwitchKey<'a, Params: BFVCiphertextParams> = (GadgetProductOperand<'a, Params>, GadgetProductOperand<'a, Params>);
+pub type RelinKey<'a, Params: BFVCiphertextParams> = KeySwitchKey<'a, Params>;
+pub type CiphertextRing<Params: BFVCiphertextParams> = RingValue<Params::CiphertextRing>;
+pub type Ciphertext<Params: BFVCiphertextParams> = (El<CiphertextRing<Params>>, El<CiphertextRing<Params>>);
+pub type GadgetProductOperand<'a, Params: BFVCiphertextParams> = GadgetProductRhsOperand<Params::CiphertextRing>;
 
 const ZZbig: BigIntRing = BigIntRing::RING;
 const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
@@ -77,35 +77,36 @@ const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
 ///    [`Pow2CyclotomicNumberRing`]
 /// 
 /// In particular, we consider the parameters for the ciphertext ring to be part
-/// of the instantiation of BFV, but not the plaintext modulus.
+/// of the instantiation of BFV, but not other information (like plaintext modulus).
 /// The reason is that some applications (most notably bootstrapping)
-/// consider the "same" BFV instantiation with different plaintext
-/// moduli - since a BFV encryption of an element of `R/tR` is always
-/// also a valid BFV encryption of the derived element in `R/t'R`, for
-/// every `t'` with `t | t'`. 
+/// consider the "same" BFV instantiation with different plaintext moduli - 
+/// since a BFV encryption of an element of `R/tR` is always also a valid BFV
+/// encryption of the derived element in `R/t'R`, for every `t'` with `t | t'`. 
+/// Similarly, it might make sense to consider situations with multiple secret
+/// keys or ciphertexts that are generated according to different parameters.
 /// 
-/// Most functionality of BFV is provided using default functions,
-/// but can be overloaded in case a specific instantiation allows for
-/// a more efficient implementation.
+/// Most functionality of BFV is provided using default functions, but can be
+/// overloaded in case a specific ciphertext ring type allows for a more efficient
+/// implementation.
 /// 
 /// ## Combining different ring implementations, or why all BFV functions are associated
 /// 
 /// I'm not yet completely sure what is the best way to handle this.
 /// 
-/// Currently, each implementor of [`BFVParams`] fixes the type of the
+/// Currently, each implementor of [`BFVCiphertextParams`] fixes the type of the
 /// rings to be used, and defines all BFV functions (in terms of these ring
 /// types) as associated functions. The advantage is obviously that certain
-/// BFV parameters can overwrite the default implementations, and perform
+/// [`BFVCiphertextParams`] can overwrite the default implementations, and perform
 /// BFV operations in a way that uses the rings in the most efficient way.
 /// 
 /// The disadvantage is also clear: We cannot (easily) mix rings or BFV
-/// objects created w.r.t. different [`BFVParams`] implementations. For example,
+/// objects created w.r.t. different [`BFVCiphertextParams`] implementations. For example,
 /// if we want to use a ciphertext w.r.t. (say) [`CompositeBFV`] in a function
 /// of [`CompositeSingleRNSBFV`], an explicit conversion is necessary. In this
 /// case, this could for example be achieved by using the isomorphism between
 /// these rings, as given by [`feanor_math::ring::RingStore::can_iso()`];
 ///  
-pub trait BFVParams {
+pub trait BFVCiphertextParams {
     
     ///
     /// Implementation of the ciphertext ring to use.
@@ -214,7 +215,7 @@ pub trait BFVParams {
     
     ///
     /// Given `q/t m + e`, removes the noise term `e`, thus returns `q/t m`.
-    /// Used during [`BFVParams::dec()`] and [`BFVParams::noise_budget()`].
+    /// Used during [`BFVCiphertextParams::dec()`] and [`BFVCiphertextParams::noise_budget()`].
     /// 
     #[instrument(skip_all)]
     fn remove_noise(P: &PlaintextRing<Self>, C: &CiphertextRing<Self>, c: &El<CiphertextRing<Self>>) -> El<PlaintextRing<Self>> {
@@ -462,8 +463,8 @@ pub trait BFVParams {
     ///
     /// Generates a key-switch key. 
     /// 
-    /// In particular, this is used to generate relinearization keys (via [`BFVParams::gen_rk()`])
-    /// or Galois keys (via [`BFVParams::gen_gk()`]).
+    /// In particular, this is used to generate relinearization keys (via [`BFVCiphertextParams::gen_rk()`])
+    /// or Galois keys (via [`BFVCiphertextParams::gen_gk()`]).
     /// 
     /// The parameter `digits` refers to the number of "digits" to use for the gadget product
     /// during key-switching. More concretely, when performing key-switching, the ciphertext
@@ -561,7 +562,7 @@ pub trait BFVParams {
     
     ///
     /// Homomorphically applies multiple Galois automorphisms at once.
-    /// Functionally, this is equivalent to calling [`BFVParams::hom_galois()`]
+    /// Functionally, this is equivalent to calling [`BFVCiphertextParams::hom_galois()`]
     /// multiple times, but can be faster.
     /// 
     #[instrument(skip_all)]
@@ -620,7 +621,7 @@ impl<NumberRing> PlaintextCircuit<NumberRingQuotientBase<NumberRing, Zn>>
         gks: &[(CyclotomicGaloisGroupEl, KeySwitchKey<Params>)], 
         _key_switches: &mut usize
     ) -> Vec<Ciphertext<Params>> 
-        where Params: BFVParams,
+        where Params: BFVCiphertextParams,
             Params::CiphertextRing: BGFVCiphertextRing<NumberRing = NumberRing>
     {
         assert!(!self.has_multiplication_gates() || Cmul.is_some());
@@ -660,7 +661,7 @@ impl PlaintextCircuit<StaticRingBase<i64>> {
         gks: &[(CyclotomicGaloisGroupEl, KeySwitchKey<Params>)], 
         _key_switches: &mut usize
     ) -> Vec<Ciphertext<Params>> 
-        where Params: BFVParams
+        where Params: BFVCiphertextParams
     {
         assert!(!self.has_multiplication_gates() || Cmul.is_some());
         assert_eq!(Cmul.is_some(), rk.is_some());
@@ -724,7 +725,7 @@ impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingNegacyclicNTT<Zn
     }
 }
 
-impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingNegacyclicNTT<Zn>> BFVParams for Pow2BFV<A, C> {
+impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingNegacyclicNTT<Zn>> BFVCiphertextParams for Pow2BFV<A, C> {
 
     type CiphertextRing = ManagedDoubleRNSRingBase<Pow2CyclotomicNumberRing<C>, A>;
 
@@ -789,7 +790,7 @@ pub struct CompositeBFV<A: Allocator + Clone + Send + Sync = DefaultCiphertextAl
     pub ciphertext_allocator: A
 }
 
-impl<A: Allocator + Clone + Send + Sync> BFVParams for CompositeBFV<A> {
+impl<A: Allocator + Clone + Send + Sync> BFVCiphertextParams for CompositeBFV<A> {
 
     type CiphertextRing = ManagedDoubleRNSRingBase<CompositeCyclotomicNumberRing, A>;
 
@@ -858,7 +859,7 @@ pub struct CompositeSingleRNSBFV<A: Allocator + Clone + Send + Sync = DefaultCip
     pub convolution: PhantomData<C>
 }
 
-impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingConvolution<Zn>> BFVParams for CompositeSingleRNSBFV<A, C> {
+impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingConvolution<Zn>> BFVCiphertextParams for CompositeSingleRNSBFV<A, C> {
 
     type CiphertextRing = SingleRNSRingBase<CompositeCyclotomicNumberRing, A, C>;
 
@@ -914,7 +915,7 @@ impl<A: Allocator + Clone + Send + Sync, C: Send + Sync + HERingConvolution<Zn>>
 }
 
 pub fn small_basis_repr<Params, NumberRing, A>(C: &CiphertextRing<Params>, ct: Ciphertext<Params>) -> Ciphertext<Params>
-    where Params: BFVParams<CiphertextRing = ManagedDoubleRNSRingBase<NumberRing, A>>,
+    where Params: BFVCiphertextParams<CiphertextRing = ManagedDoubleRNSRingBase<NumberRing, A>>,
         NumberRing: HECyclotomicNumberRing,
         A: Allocator + Clone
 {

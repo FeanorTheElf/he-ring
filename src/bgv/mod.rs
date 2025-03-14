@@ -48,8 +48,22 @@ pub type SecretKey<Params: BGVCiphertextParams> = El<CiphertextRing<Params>>;
 pub type KeySwitchKey<'a, Params: BGVCiphertextParams> = (GadgetProductRhsOperand<Params::CiphertextRing>, GadgetProductRhsOperand<Params::CiphertextRing>);
 pub type RelinKey<'a, Params: BGVCiphertextParams> = KeySwitchKey<'a, Params>;
 
+///
+/// Contains the trait [`noise_estimator::BGVNoiseEstimator`] for objects that provide
+/// estimates of the noise level of ciphertexts after BGV homomorphic operations.
+/// Currently, the only provided implementation is the somewhat imprecise and not rigorously
+/// justified [`noise_estimator::NaiveBGVNoiseEstimator`], which is based on simple asymptotic
+/// formulas.
+/// 
 pub mod noise_estimator;
+///
+/// Contains the trait [`modswitch::BGVModswitchStrategy`] and the implementation
+/// [`modswitch::DefaultModswitchStrategy`] for automatic modulus management in BGV.
+/// 
 pub mod modswitch;
+///
+/// Contains the implementation of BGV thin bootstrapping.
+/// 
 pub mod bootstrap;
 
 const ZZbig: BigIntRing = BigIntRing::RING;
@@ -58,8 +72,7 @@ const ZZ: StaticRing<i64> = StaticRing::<i64>::RING;
 ///
 /// A BGV ciphertext w.r.t. some [`BGVCiphertextParams`]. Note that this implementation
 /// does not include an automatic management of the ciphertext modulus chain,
-/// it is up to the user to keep track of the RNS base used for each 
-/// ciphertext.
+/// it is up to the user to keep track of the RNS base used for each ciphertext.
 /// 
 pub struct Ciphertext<Params: ?Sized + BGVCiphertextParams> {
     /// the ciphertext represents the value `implicit_scale^-1 lift(c0 + c1 s) mod t`, 
@@ -88,21 +101,24 @@ pub fn equalize_implicit_scale(Zt: &Zn, implicit_scale_quotient: El<Zn>) -> (i64
 ///
 /// Trait for types that represent an instantiation of BGV.
 /// 
-/// The design is very similar to [`super::bfv::BFVParams`], for details
+/// The design is very similar to [`super::bfv::BFVCiphertextParams`], for details
 /// have a look at that. In particular, the plaintext modulus is not a part
-/// of the [`super::bfv::BFVParams`], but the (initial) ciphertext modulus size
+/// of the [`super::bfv::BFVCiphertextParams`], but the (initial) ciphertext modulus size
 /// is. Note however that BGV requires many ciphertext rings, with progressively
-/// smaller ciphertext moduli.
-/// 
-/// Also, we note that as opposed to other HE libraries (like HElib), this BGV
-/// implementation  does currently not perform automatic modulus management.
-/// In particular, it is up to the user to perform modulus-switches at the correct
-/// places to prevent multiplicative noise growth.
+/// smaller ciphertext moduli. You can either manage these manually, or have a look
+/// on [`super::modswitch::BGVModswitchStrategy`], which is built on top of this
+/// trait and (partially at least) manages ciphertext moduli automatically.
+/// In particular, this is different to how other libraries handle BGV ciphertexts, for
+/// example HElib by default manages the moduli of all BGV ciphertexts.
 /// 
 /// For a few more details on how this works, see [`crate::examples::bgv_basics`].
 /// 
 pub trait BGVCiphertextParams {
     
+    ///
+    /// Type of the ciphertext ring that is used when creating a ciphertext
+    /// ring with these parameters.
+    /// 
     type CiphertextRing: BGFVCiphertextRing + CyclotomicRing + FiniteRing;
 
     ///

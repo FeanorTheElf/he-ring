@@ -19,7 +19,7 @@ There are multiple structs that represent a set of parameters for BFV each, sinc
 For example, to setup BFV in a power-of-two cyclotomic number ring `Z[X]/(X^N + 1)`, we could proceed as follows:
 ```rust
 #![feature(allocator_api)]
-# use he_ring::bfv::{BFVParams, CiphertextRing, PlaintextRing, Pow2BFV};
+# use he_ring::bfv::{BFVCiphertextParams, CiphertextRing, PlaintextRing, Pow2BFV};
 # use he_ring::DefaultNegacyclicNTT;
 # use std::alloc::Global;
 # use std::marker::PhantomData;
@@ -39,7 +39,7 @@ Here, we choose [`crate::DefaultNegacyclicNTT`], which will point either to the 
 Once we setup the parameters, we can create plaintext and ciphertext rings:
 ```rust
 #![feature(allocator_api)]
-# use he_ring::bfv::{BFVParams, CiphertextRing, PlaintextRing, Pow2BFV};
+# use he_ring::bfv::{BFVCiphertextParams, CiphertextRing, PlaintextRing, Pow2BFV};
 # use he_ring::DefaultNegacyclicNTT;
 # use std::alloc::Global;
 # use std::marker::PhantomData;
@@ -66,7 +66,7 @@ Note here that the plaintext modulus `t` was not part of the BFV parameters - th
 After we set this up, we actually won't need the parameter object anymore - to demonstrate this, we delete it here.
 ```rust
 #![feature(allocator_api)]
-# use he_ring::bfv::{BFVParams, CiphertextRing, PlaintextRing, Pow2BFV};
+# use he_ring::bfv::{BFVCiphertextParams, CiphertextRing, PlaintextRing, Pow2BFV};
 # use he_ring::DefaultNegacyclicNTT;
 # use std::alloc::Global;
 # use std::marker::PhantomData;
@@ -85,10 +85,10 @@ drop(params);
 ```
 Next, let's generate the keys we will require later.
 Since the type of the ciphertext ring depends on the type of the chosen parameters, all further functions are associated functions of `ChosenBFVParamType`.
-While it would be preferable for the BFV implementation not to be tied to any specific parameter object, not doing this would cause problems, see the doc of [`crate::bfv::BFVParams`].
+While it would be preferable for the BFV implementation not to be tied to any specific parameter object, not doing this would cause problems, see the doc of [`crate::bfv::BFVCiphertextParams`].
 ```rust
 #![feature(allocator_api)]
-# use he_ring::bfv::{BFVParams, CiphertextRing, PlaintextRing, Pow2BFV};
+# use he_ring::bfv::{BFVCiphertextParams, CiphertextRing, PlaintextRing, Pow2BFV};
 # use he_ring::DefaultNegacyclicNTT;
 # use std::alloc::Global;
 # use std::marker::PhantomData;
@@ -132,7 +132,7 @@ To encrypt, we now need to encode whatever data we have as an element of this ri
 # use feanor_math::homomorphism::*;
 # use feanor_math::assert_el_eq;
 # use feanor_math::ring::*;
-# use he_ring::bfv::{BFVParams, CiphertextRing, PlaintextRing, Pow2BFV};
+# use he_ring::bfv::{BFVCiphertextParams, CiphertextRing, PlaintextRing, Pow2BFV};
 # use he_ring::DefaultNegacyclicNTT;
 # use std::alloc::Global;
 # use std::marker::PhantomData;
@@ -177,7 +177,7 @@ Since we already have a relinearization key, we can perform a homomorphic multip
 # use feanor_math::homomorphism::*;
 # use feanor_math::assert_el_eq;
 # use feanor_math::ring::*;
-# use he_ring::bfv::{BFVParams, CiphertextRing, PlaintextRing, Pow2BFV};
+# use he_ring::bfv::{BFVCiphertextParams, CiphertextRing, PlaintextRing, Pow2BFV};
 # use he_ring::DefaultNegacyclicNTT;
 # use std::alloc::Global;
 # use std::marker::PhantomData;
@@ -215,7 +215,7 @@ Note that the plaintext ring is actually quite large - we chose `N = 4096` - so 
 # use feanor_math::homomorphism::*;
 # use feanor_math::assert_el_eq;
 # use feanor_math::ring::*;
-# use he_ring::bfv::{BFVParams, CiphertextRing, PlaintextRing, Pow2BFV};
+# use he_ring::bfv::{BFVCiphertextParams, CiphertextRing, PlaintextRing, Pow2BFV};
 # use he_ring::DefaultNegacyclicNTT;
 # use std::alloc::Global;
 # use std::marker::PhantomData;

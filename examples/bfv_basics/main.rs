@@ -13,7 +13,7 @@ use feanor_math::integer::{BigIntRing, IntegerRingStore};
 use feanor_math::ring::{RingExtensionStore, RingStore};
 use feanor_math::rings::extension::FreeAlgebraStore;
 use feanor_math::rings::zn::ZnRingStore;
-use he_ring::bfv::{BFVParams, CiphertextRing, PlaintextRing, Pow2BFV};
+use he_ring::bfv::{BFVCiphertextParams, CiphertextRing, PlaintextRing, Pow2BFV};
 use he_ring::cyclotomic::CyclotomicRingStore;
 use he_ring::DefaultNegacyclicNTT;
 use rand::thread_rng;

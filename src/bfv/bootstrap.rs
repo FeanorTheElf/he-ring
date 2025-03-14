@@ -14,7 +14,7 @@ use crate::lintransform::composite;
 use super::*;
 
 #[derive(Clone, Debug)]
-pub struct ThinBootstrapParams<Params: BFVParams> {
+pub struct ThinBootstrapParams<Params: BFVCiphertextParams> {
     pub scheme_params: Params,
     pub v: usize,
     pub t: i64
@@ -26,14 +26,14 @@ pub struct ThinBootstrapParams<Params: BFVParams> {
 /// The standard way to create this data is to use [`ThinBootstrapParams::build_pow2()`]
 /// or [`ThinBootstrapParams::build_odd()`], but note that this computation is very expensive.
 /// 
-pub struct ThinBootstrapData<Params: BFVParams> {
+pub struct ThinBootstrapData<Params: BFVCiphertextParams> {
     digit_extract: DigitExtract,
     slots_to_coeffs_thin: PlaintextCircuit<<PlaintextRing<Params> as RingStore>::Type>,
     coeffs_to_slots_thin: PlaintextCircuit<<PlaintextRing<Params> as RingStore>::Type>,
     plaintext_ring_hierarchy: Vec<PlaintextRing<Params>>
 }
 
-impl<Params: BFVParams> ThinBootstrapParams<Params>
+impl<Params: BFVCiphertextParams> ThinBootstrapParams<Params>
     where NumberRing<Params>: Clone
 {
     pub fn build_pow2<const LOG: bool>(&self) -> ThinBootstrapData<Params> {
@@ -104,7 +104,7 @@ impl<Params: BFVParams> ThinBootstrapParams<Params>
     }
 }
 
-impl<Params: BFVParams> ThinBootstrapData<Params> {
+impl<Params: BFVCiphertextParams> ThinBootstrapData<Params> {
 
     fn r(&self) -> usize {
         self.digit_extract.e() - self.digit_extract.v()
@@ -131,6 +131,7 @@ impl<Params: BFVParams> ThinBootstrapData<Params> {
         return result;
     }
 
+    #[instrument(skip_all)]
     pub fn bootstrap_thin<'a, const LOG: bool>(
         &self,
         C: &CiphertextRing<Params>, 
@@ -201,7 +202,7 @@ impl DigitExtract {
     /// For details on how the digit extraction function looks like, see
     /// [`DigitExtract`] and [`DigitExtract::evaluate_generic()`].
     /// 
-    pub fn evaluate_bfv<'a, Params: BFVParams>(&self, 
+    pub fn evaluate_bfv<'a, Params: BFVCiphertextParams>(&self, 
         P_base: &PlaintextRing<Params>, 
         P: &[PlaintextRing<Params>], 
         C: &CiphertextRing<Params>, 

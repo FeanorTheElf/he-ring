@@ -209,7 +209,7 @@ pub trait AsBGVPlaintext<Params: BGVCiphertextParams>: RingBase {
 
 ///
 /// Default modulus-switch strategy for BGV, which performs a certain number of modulus-switches
-/// before each multiplication. Currently WIP.
+/// before each multiplication.
 ///
 /// The general strategy is as follows:
 ///  - only mod-switch before multiplications

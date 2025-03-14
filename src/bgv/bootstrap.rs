@@ -209,6 +209,7 @@ impl<Params, Strategy> ThinBootstrapData<Params, Strategy>
     ///  - `debug_sk` can be a reference to a secret key, which is used to print out decryptions
     ///    of intermediate results for debugging purposes. May only be set if `LOG == true`.
     /// 
+    #[instrument(skip_all)]
     pub fn bootstrap_thin<'a, const LOG: bool>(
         &self,
         C_master: &CiphertextRing<Params>, 
