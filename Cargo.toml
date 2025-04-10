@@ -1,6 +1,6 @@
 [package]
 name = "he-ring"
-version = "0.5.5"
+version = "0.5.6"
 edition = "2021"
 
 repository = "https://github.com/FeanorTheElf/he-ring"
@@ -54,6 +54,3 @@ panic = "abort"
 # to allow running two different tests at the same time (i.e. cargo uses different directory for output executable)
 [profile.test2]
 inherits = "test"
-
-[package.metadata.docs.rs]
-all-features = true
